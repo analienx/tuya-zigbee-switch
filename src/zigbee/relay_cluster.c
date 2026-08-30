@@ -320,8 +320,8 @@ void relay_cluster_load_physical_mode_from_nv(
     zigbee_relay_cluster *cluster) {
     cluster->physical_relay_mode = ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED;
 
-    uint8_t mode = ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED;
-    hal_nvm_status_t st = hal_nvm_read(
+    uint8_t          mode = ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED;
+    hal_nvm_status_t st   = hal_nvm_read(
         NV_ITEM_RELAY_PHYSICAL_MODE(cluster->relay_idx), sizeof(mode), &mode);
 
     if (st == HAL_NVM_SUCCESS &&
