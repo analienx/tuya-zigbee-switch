@@ -66,7 +66,14 @@ void relay_cluster_add_to_endpoint(zigbee_relay_cluster *cluster,
     cluster->relay->on_change      = (relay_callback_t)relay_cluster_on_relay_change;
 
     relay_cluster_handle_startup_mode(cluster);
-    relay_cluster_apply_physical_mode(cluster);
+    if (cluster->physical_relay_mode != ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED) {
+        // In the default attached mode the startup-mode handler above has
+        // already driven the contact to cluster->relay->on. Driving it a second
+        // time here would issue an extra latching pulse on every boot, and
+        // because relay.c serialises pulses through a single global pulse slot,
+        // that extra pulse defers the pulses of every other latching relay.
+        relay_cluster_apply_physical_mode(cluster);
+    }
     sync_indicator_led(cluster);
 
     SETUP_ATTR(0, ZCL_ATTR_ONOFF, ZCL_DATA_TYPE_BOOLEAN, ATTR_READONLY,
