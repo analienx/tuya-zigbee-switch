@@ -3,6 +3,7 @@
 
 #include "base_components/led.h"
 #include "base_components/relay.h"
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "hal/zigbee.h"
@@ -27,6 +28,13 @@ void relay_cluster_off(zigbee_relay_cluster *cluster);
 void relay_cluster_toggle(zigbee_relay_cluster *cluster);
 
 void relay_cluster_report(zigbee_relay_cluster *cluster);
+
+// Verified NVM helpers for device-specific migrations. They run before
+// parse_config(), i.e. before the clusters exist, and operate purely on the
+// stored NVM records. Every write is read back and verified.
+bool relay_cluster_nv_set_indicator_safety(uint8_t relay_idx);
+bool relay_cluster_nv_ensure_physical_mode(uint8_t relay_idx, uint8_t mode);
+bool relay_cluster_nv_delete_physical_mode(uint8_t relay_idx);
 
 void update_relay_clusters();
 

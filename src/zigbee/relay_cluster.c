@@ -5,6 +5,9 @@
 #include "hal/nvm.h"
 #include "hal/printf_selector.h"
 
+#include <stdbool.h>
+#include <string.h>
+
 hal_zigbee_cmd_result_t relay_cluster_callback(zigbee_relay_cluster *cluster,
                                                uint8_t command_id,
                                                void *cmd_payload,
@@ -335,6 +338,77 @@ void relay_cluster_load_physical_mode_from_nv(
         mode <= ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_OFF) {
         cluster->physical_relay_mode = mode;
     }
+}
+
+static bool relay_cluster_nv_write_and_verify(uint8_t item_id, uint16_t size,
+                                              const uint8_t *data) {
+    if (size > 32) {
+        return false;
+    }
+
+    if (hal_nvm_write(item_id, size, (uint8_t *)data) != HAL_NVM_SUCCESS) {
+        return false;
+    }
+
+    uint8_t readback[32];
+    if (hal_nvm_read(item_id, size, readback) != HAL_NVM_SUCCESS) {
+        return false;
+    }
+
+    return memcmp(readback, data, size) == 0;
+}
+
+bool relay_cluster_nv_set_indicator_safety(uint8_t relay_idx) {
+    // Zeroed fields match the defaults the cluster uses when the NVM record
+    // is absent, so writing a fresh record below preserves stock semantics.
+    zigbee_relay_cluster_config cfg;
+
+    memset(&cfg, 0, sizeof(cfg));
+
+    hal_nvm_status_t st = hal_nvm_read(NV_ITEM_RELAY_CLUSTER_DATA(relay_idx),
+                                       sizeof(cfg), (uint8_t *)&cfg);
+    if (st != HAL_NVM_SUCCESS && st != HAL_NVM_NOT_FOUND) {
+        return false;
+    }
+
+    if (cfg.indicator_led_mode == ZCL_ONOFF_INDICATOR_MODE_MANUAL &&
+        cfg.indicator_led_on == 1) {
+        return true; // already safe
+    }
+
+    cfg.indicator_led_mode = ZCL_ONOFF_INDICATOR_MODE_MANUAL;
+    cfg.indicator_led_on   = 1;
+
+    return relay_cluster_nv_write_and_verify(
+        NV_ITEM_RELAY_CLUSTER_DATA(relay_idx), sizeof(cfg),
+        (const uint8_t *)&cfg);
+}
+
+bool relay_cluster_nv_ensure_physical_mode(uint8_t relay_idx, uint8_t mode) {
+    uint8_t stored = 0;
+
+    hal_nvm_status_t st = hal_nvm_read(NV_ITEM_RELAY_PHYSICAL_MODE(relay_idx),
+                                       sizeof(stored), &stored);
+
+    if (st == HAL_NVM_SUCCESS) {
+        return true; // a stored mode (any) is never clobbered
+    }
+    if (st != HAL_NVM_NOT_FOUND) {
+        return false;
+    }
+
+    return relay_cluster_nv_write_and_verify(
+        NV_ITEM_RELAY_PHYSICAL_MODE(relay_idx), sizeof(mode), &mode);
+}
+
+bool relay_cluster_nv_delete_physical_mode(uint8_t relay_idx) {
+    // Ignore the delete result: absence is the target state and is verified
+    // below regardless of whether the item was there.
+    hal_nvm_delete(NV_ITEM_RELAY_PHYSICAL_MODE(relay_idx));
+
+    uint8_t probe = 0;
+    return hal_nvm_read(NV_ITEM_RELAY_PHYSICAL_MODE(relay_idx), sizeof(probe),
+                        &probe) == HAL_NVM_NOT_FOUND;
 }
 
 void relay_cluster_handle_startup_mode(zigbee_relay_cluster *cluster) {
