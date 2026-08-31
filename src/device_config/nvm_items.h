@@ -33,4 +33,9 @@
 // reserved for relay indexes 0..4.
 #define NV_ITEM_RELAY_PHYSICAL_MODE(relay_idx)    (35 + (relay_idx))
 
+// Device-specific one-shot migration marker (device_migration.c). Written
+// only after every other change the migration makes is complete, so a crash
+// mid-migration simply re-runs it on the next boot.
+#define NV_ITEM_MIGRATION_MARKER    40
+
 #endif /* DEVICE_CONFIG_NVM_ITEMS_H_ */
