@@ -46,7 +46,15 @@ void process_device_type_change() {
 
 void app_init(void) {
     handle_version_changes();
-    handle_device_specific_migrations();
+    if (handle_device_specific_migrations() == DEVICE_MIGRATION_BLOCK_INIT) {
+        // The pin-map / NVM combination is not proven safe: never parse a
+        // config in this state. Reboot and let the transaction resume from
+        // its marker; the contacts stay at power-on defaults until then.
+        printf("Device migration: blocking init, scheduling recovery "
+               "reboot\r\n");
+        schedule_reboot(DEFAULT_RESET_DELAY_MS);
+        return;
+    }
     parse_config(); // Does most of the setup, including all callbacks
                     // registration
     hal_zigbee_init_ota();
