@@ -57,6 +57,7 @@ SOURCES := \
 	$(SRC_DIR)/device_config/device_params_nv.c \
 	$(SRC_DIR)/device_config/reset.c \
 	$(SRC_DIR)/device_config/nvm_migrations.c \
+	$(SRC_DIR)/device_config/device_migration.c \
 	$(SRC_DIR)/zigbee/basic_cluster.c \
 	$(SRC_DIR)/zigbee/relay_cluster.c \
 	$(SRC_DIR)/zigbee/switch_cluster.c \
@@ -74,6 +75,23 @@ CFLAGS := -Wall -Wno-unused-parameter -Wno-unused-variable -g -O0 \
     -DHAL_STUB -DSTACK_BUILD=1001 -D_DEFAULT_SOURCE -DVERSION_STR="0.0.0" \
 	-DNVM_MIGRATIONS_VERSION=1 \
 	-std=c99
+
+# Optional device-specific one-shot config migration (device_migration.c).
+# MIGRATION_FROM_CONFIG enables it; the migration fires only when the stored
+# config matches that string exactly and no marker is present. Values are
+# taken from the environment or the command line (quote semicolons in shells).
+MIGRATION_FROM_CONFIG ?=
+MIGRATION_TO_CONFIG   ?=
+MIGRATION_REVERT      ?=
+
+ifneq ($(strip $(MIGRATION_FROM_CONFIG)),)
+CFLAGS += \
+	-DDEVICE_MIGRATION_FROM_CONFIG="$(MIGRATION_FROM_CONFIG)" \
+	-DDEVICE_MIGRATION_TO_CONFIG="$(MIGRATION_TO_CONFIG)"
+ifeq ($(strip $(MIGRATION_REVERT)), 1)
+CFLAGS += -DDEVICE_MIGRATION_REVERT
+endif
+endif
 
 LDFLAGS := -lpthread
 

@@ -95,6 +95,25 @@ ifeq ($(DEBUG), 1)
 	DEVICE_DEFS := $(DEVICE_DEFS) -DUART_PRINTF_MODE=1
 endif
 
+# Optional device-specific one-shot config migration (device_migration.c).
+# MIGRATION_FROM_CONFIG enables it for devices whose stored config may still
+# hold the known-swapped form; it fires only on an exact stored-config match
+# with no migration marker present. The canonical target is CONFIG_STR.
+# MIGRATION_REVERT=1 builds the recovery image that undoes the migration
+# instead of applying it. Both variables come from the environment or the
+# command line.
+MIGRATION_DEFINES :=
+ifneq ($(strip $(MIGRATION_FROM_CONFIG)),)
+MIGRATION_DEFINES += \
+	-DDEVICE_MIGRATION_FROM_CONFIG="$(MIGRATION_FROM_CONFIG)" \
+	-DDEVICE_MIGRATION_TO_CONFIG="$(CONFIG_STR)"
+ifeq ($(strip $(MIGRATION_REVERT)), 1)
+MIGRATION_DEFINES += -DDEVICE_MIGRATION_REVERT
+endif
+endif
+
+DEVICE_DEFS := $(DEVICE_DEFS) $(MIGRATION_DEFINES)
+
 # Include paths (SDK paths first to avoid conflicts)
 INCLUDE_PATHS := \
 	-I. \
@@ -156,6 +175,7 @@ COMMON_SOURCES := \
 	$(SRC_DIR)/device_config/reset.c \
 	$(SRC_DIR)/device_config/config_parser.c \
 	$(SRC_DIR)/device_config/nvm_migrations.c \
+	$(SRC_DIR)/device_config/device_migration.c \
 	$(SRC_DIR)/zigbee/basic_cluster.c \
 	$(SRC_DIR)/zigbee/general_commands.c \
 	$(SRC_DIR)/zigbee/group_cluster.c \

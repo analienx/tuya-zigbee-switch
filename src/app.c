@@ -1,4 +1,5 @@
 #include "device_config/config_parser.h"
+#include "device_config/device_migration.h"
 #include "device_config/device_type.h"
 #include "device_config/nvm_items.h"
 #include "device_config/reset.h"
@@ -45,6 +46,7 @@ void process_device_type_change() {
 
 void app_init(void) {
     handle_version_changes();
+    handle_device_specific_migrations();
     parse_config(); // Does most of the setup, including all callbacks
                     // registration
     hal_zigbee_init_ota();
