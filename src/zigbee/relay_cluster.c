@@ -385,16 +385,20 @@ bool relay_cluster_nv_set_indicator_safety(uint8_t relay_idx) {
 }
 
 bool relay_cluster_nv_ensure_physical_mode(uint8_t relay_idx, uint8_t mode) {
+    // The migration is the explicit authorization to establish this
+    // invariant, so ANY other stored value (ATTACHED, DETACHED_OFF or an
+    // invalid byte) is overwritten - never silently preserved.
     uint8_t stored = 0;
 
     hal_nvm_status_t st = hal_nvm_read(NV_ITEM_RELAY_PHYSICAL_MODE(relay_idx),
                                        sizeof(stored), &stored);
 
-    if (st == HAL_NVM_SUCCESS) {
-        return true; // a stored mode (any) is never clobbered
-    }
-    if (st != HAL_NVM_NOT_FOUND) {
+    if (st != HAL_NVM_SUCCESS && st != HAL_NVM_NOT_FOUND) {
         return false;
+    }
+
+    if (st == HAL_NVM_SUCCESS && stored == mode) {
+        return true; // already exactly the required invariant
     }
 
     return relay_cluster_nv_write_and_verify(

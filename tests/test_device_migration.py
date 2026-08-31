@@ -35,6 +35,7 @@ from tests.zcl_consts import (
     ZCL_CLUSTER_BASIC,
     ZCL_CLUSTER_ON_OFF,
     ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED,
+    ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_OFF,
     ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON,
 )
 
@@ -195,6 +196,23 @@ def assert_forward_complete(device: Device) -> None:
     assert read_marker() == MIG_FORWARD_COMPLETE
 
 
+def assert_blocked_no_parse(device: Device) -> None:
+    """BLOCK_INIT: parse_config() must not have run at all."""
+    res = device.p.exec("zcl_read 1 0x0000 0xFF00")
+    assert not res.ok, "parse_config() ran despite BLOCK_INIT"
+    # Mains contacts stay at power-on defaults: no unsafe initialization.
+    assert not device.get_gpio(MAINS_LEFT_PIN, refresh=True)
+    assert not device.get_gpio(MAINS_MIDDLE_PIN, refresh=True)
+
+
+def read_config_file() -> str:
+    raw = read_nv(NV_CONFIG_ITEM)
+    assert raw is not None
+    size = struct.unpack("<H", raw[:2])[0]
+    return raw[2 : 2 + size].decode()
+
+
+
 def test_forward_migration_full_transaction(forward_stub: None) -> None:
     with booted(SWAPPED_CONFIG) as device:
         assert_forward_complete(device)
@@ -275,15 +293,99 @@ def test_forward_resumes_after_crash_after_config_write(forward_stub: None) -> N
         assert_forward_complete(device)
 
 
-def test_forward_does_not_complete_for_foreign_config(forward_stub: None) -> None:
+def test_forward_blocks_on_foreign_config_under_in_progress(
+    forward_stub: None,
+) -> None:
     seed_config(UNRELATED_CONFIG)
     seed_marker(MIG_FORWARD_IN_PROGRESS)
+    before = {item: read_nv(item) for item in (NV_CONFIG_ITEM, NV_MARKER_ITEM)}
 
     with booted() as device:
-        # Protected invariant failure: never silently mark complete.
-        assert read_config(device) == UNRELATED_CONFIG
-        assert read_marker() == MIG_FORWARD_IN_PROGRESS
-        assert read_nv(NV_PHYSICAL_MODE_BASE) is None
+        # Protected invariant failure: BLOCK_INIT, never parse, never mutate.
+        assert_blocked_no_parse(device)
+
+    assert {item: read_nv(item) for item in (NV_CONFIG_ITEM, NV_MARKER_ITEM)} == before
+
+
+def test_forward_blocks_on_corrupt_marker(forward_stub: None) -> None:
+    seed_config(SWAPPED_CONFIG)
+    seed_marker(0xDEADBEEF)
+    before = {item: read_nv(item) for item in (NV_CONFIG_ITEM, NV_MARKER_ITEM)}
+
+    with booted() as device:
+        # Corruption must fail closed, never be treated as "absent".
+        assert_blocked_no_parse(device)
+
+    assert {item: read_nv(item) for item in (NV_CONFIG_ITEM, NV_MARKER_ITEM)} == before
+
+
+def test_forward_blocks_when_indicator_safety_write_fails(
+    forward_stub: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed_config(SWAPPED_CONFIG)
+    seed_relay_record(0, indicator_mode=INDICATOR_MODE_SAME)
+    seed_relay_record(1, indicator_mode=INDICATOR_MODE_SAME)
+    monkeypatch.setenv("STUB_NVM_FAIL_WRITE", "9@1")
+
+    with booted() as device:
+        # Swapped map active with unproven (unsafe SAME) indicator NVM and a
+        # failed safety write: parse_config() must not run.
+        assert_blocked_no_parse(device)
+
+    monkeypatch.delenv("STUB_NVM_FAIL_WRITE")
+
+    with booted() as device:
+        assert_forward_complete(device)
+        assert device.get_gpio(MAINS_LEFT_PIN, refresh=True)
+
+
+def test_forward_forces_preexisting_mode_to_detached_on(
+    forward_stub: None,
+) -> None:
+    # ATTACHED, DETACHED_OFF and an invalid byte must all be overwritten -
+    # the migration is the authorization to establish DETACHED_ON exactly.
+    for pre_mode in (
+        ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED,
+        ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_OFF,
+        0xAB,
+    ):
+        seed_config(SWAPPED_CONFIG)
+        seed_physical_mode(0, pre_mode)
+        seed_physical_mode(1, pre_mode)
+        # Each loop iteration simulates a fresh device: drop the marker the
+        # previous iteration's completed transaction left behind.
+        nv_path(NV_MARKER_ITEM).unlink(missing_ok=True)
+
+        with booted() as device:
+            assert_forward_complete(device)
+
+
+def test_revert_blocks_on_foreign_config_byte_identical(forward_stub: None) -> None:
+    seed_config(UNRELATED_CONFIG)
+    seed_marker(MIG_FORWARD_COMPLETE)
+    seed_relay_record(0, indicator_mode=INDICATOR_MODE_SAME)
+    seed_physical_mode(0, ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON)
+    watched = (NV_CONFIG_ITEM, NV_RELAY_RECORD_BASE, NV_PHYSICAL_MODE_BASE, NV_MARKER_ITEM)
+    before = {item: read_nv(item) for item in watched}
+
+    build_revert_image()
+    with booted() as device:
+        assert_blocked_no_parse(device)
+
+    assert {item: read_nv(item) for item in watched} == before
+
+
+def test_revert_blocks_on_corrupt_marker(forward_stub: None) -> None:
+    seed_config(CANONICAL_CONFIG)
+    seed_marker(0x7FFFFFFF)
+    before = {item: read_nv(item) for item in (NV_CONFIG_ITEM, NV_MARKER_ITEM)}
+
+    build_revert_image()
+    with booted() as device:
+        assert_blocked_no_parse(device)
+
+    assert {item: read_nv(item) for item in (NV_CONFIG_ITEM, NV_MARKER_ITEM)} == before
+
 
 
 def test_forward_skips_fresh_canonical_device(forward_stub: None) -> None:
@@ -299,17 +401,20 @@ def test_forward_skips_fresh_canonical_device(forward_stub: None) -> None:
 def test_forward_retries_when_config_write_fails(
     forward_stub: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    build_forward_image()  # a preceding revert test may have swapped the binary
     # Write #1 to item 0x02 is the stub's own config seed; #2 is the
     # migration's canonical write.
     monkeypatch.setenv("STUB_NVM_FAIL_WRITE", "2@2")
 
     with booted(SWAPPED_CONFIG) as device:
+        # Safe partial: parse runs on swapped + verified MANUAL/ON.
         assert read_config(device) == SWAPPED_CONFIG
         assert read_marker() == MIG_FORWARD_IN_PROGRESS
         assert (
             read_physical_mode(device, RELAY_LEFT_ENDPOINT)
             == ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON
         )
+        assert device.get_gpio(MAINS_LEFT_PIN, refresh=True)
 
     monkeypatch.delenv("STUB_NVM_FAIL_WRITE")
 
@@ -320,6 +425,7 @@ def test_forward_retries_when_config_write_fails(
 def test_forward_retries_when_physical_mode_write_fails(
     forward_stub: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    build_forward_image()
     monkeypatch.setenv("STUB_NVM_FAIL_WRITE", "0x23@1")
 
     with booted(SWAPPED_CONFIG) as device:
@@ -336,6 +442,7 @@ def test_forward_retries_when_physical_mode_write_fails(
 def test_forward_retries_when_complete_marker_write_fails(
     forward_stub: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    build_forward_image()
     # Marker writes: #1 = FORWARD_IN_PROGRESS, #2 = FORWARD_COMPLETE.
     monkeypatch.setenv("STUB_NVM_FAIL_WRITE", "40@2")
 
@@ -544,27 +651,4 @@ def test_revert_retries_when_marker_delete_fails(
     with booted() as device:
         assert read_config(device) == SWAPPED_CONFIG
         assert read_marker() is None
-
-
-
-    with StubProc(device_config=UNRELATED_CONFIG) as proc:
-        device = Device(proc)
-
-        assert read_config(device) == UNRELATED_CONFIG
-        assert (
-            read_physical_mode(device, 2) == ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED
-        )
-
-
-def test_plain_build_does_not_migrate() -> None:
-    build_stub()
-
-    with StubProc(device_config=SWAPPED_CONFIG) as proc:
-        device = Device(proc)
-
-        assert read_config(device) == SWAPPED_CONFIG
-        assert (
-            read_physical_mode(device, RELAY_LEFT_ENDPOINT)
-            == ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED
-        )
 
