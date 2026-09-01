@@ -4588,6 +4588,10 @@ SWITCH_BSEED_TS0726_2GANG:
   - https://www.bseed.com/products/bseed-scale-series-smart-zigbee-light-switch-2-gang-with-neutral
 SWITCH_BSEED_TS0726_3GANG:
   human_name: BSEED Echo Click / Scale 3-gang
+  # Capability/deployment flags for the BSEED canary overlay. Older Romasku
+  # firmware does not implement genOnOff 0xff03, so this must never default on.
+  physical_relay_policy: true
+  preserve_legacy_action: true
   category: switch
   power: mains
   neutral: required
