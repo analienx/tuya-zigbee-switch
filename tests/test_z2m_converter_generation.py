@@ -125,6 +125,30 @@ def test_identical_tuple_and_contract_is_merged(tmp_path: Path) -> None:
     assert "Merged byte-identical definition" in err
 
 
+def test_mixed_unique_current_and_colliding_old_alias_keeps_both_match_surfaces(
+    tmp_path: Path,
+) -> None:
+    db = _device("a", "mfg_a", "MODEL-CURRENT", "SB1u;RC2;M;", "conv_a").replace(
+        "config_str: mfg_a;MODEL-CURRENT;SB1u;RC2;M;",
+        "config_str: mfg_a;MODEL-CURRENT;SB1u;RC2;M;\n  old_zb_models: [MODEL-OLD]",
+    ) + _device(
+        "b", "mfg_b", "MODEL-OTHER", "SB1u;RC2;M;", "conv_b"
+    ).replace(
+        "config_str: mfg_b;MODEL-OTHER;SB1u;RC2;M;",
+        "config_str: mfg_b;MODEL-OTHER;SB1u;RC2;M;\n  old_zb_models: [MODEL-OLD]",
+    )
+    js, _ = run_generator(db)
+
+    # MODEL-OLD is resolvable only by manufacturer fingerprint, while the
+    # current MODEL-CURRENT remains a normal model-only alias on the SAME
+    # definition. This is the real TS0002-GIR/TS0002-custom regression shape.
+    assert '{ manufacturerName: "mfg_a", modelID: "MODEL-OLD" }' in js
+    assert '"MODEL-CURRENT"' in js
+    block = js.split('model: "conv_a"')[0].rsplit("    {", 1)[-1]
+    assert "fingerprint:" in block
+    assert "zigbeeModel:" in block
+
+
 def test_old_zb_models_participates_in_collision(tmp_path: Path) -> None:
     db = _device("a", "mfg_a", "MODEL-NEW", "SB1u;RC2;M;", "conv_a") + _device(
         "b", "mfg_b", "MODEL-OTHER", "SB1u;RC2;M;", "conv_b"
@@ -180,13 +204,51 @@ def test_generation_is_reproducible(tmp_path: Path) -> None:
     assert run_generator(db)[0] == run_generator(db)[0]
 
 
-def test_regenerated_files_match_committed_files() -> None:
-    """Regeneration consistency: the maintained converter files are clean."""
+def test_real_db_preserves_mixed_alias_and_target_ux() -> None:
+    """Real DB regression + focused BSEED user-facing contract."""
     result = subprocess.run(
         [sys.executable, str(HELPER), "device_db.yaml"],
         capture_output=True,
         text=True,
         check=True,
     )
-    committed = Path("zigbee2mqtt/converters/switch_custom.js").read_text()
-    assert result.stdout == committed
+    js = result.stdout
+
+    # MODULE_GIRIER_TS0002: unique current model must survive even though its
+    # old TS0002-custom alias participates in a collision.
+    assert '"TS0002-GIR"' in js
+
+    assert js.count('{ manufacturerName: "iedhxgyi", modelID: "TS0726-3-BS" }') == 1
+    assert 'lookup: { follow_state: 0, always_on: 1, always_off: 2 }' in js
+    assert 'label: "Physical relay behavior"' in js
+    assert "Recommended for smart bulbs" in js
+    assert "Changing this setting can immediately switch mains power" in js
+    assert 'label: "Advanced hardware configuration"' in js
+    assert "may require recovery firmware" in js
+    assert 'description: "BSEED Echo Click / Scale 3-gang — Romasku custom firmware"' in js
+
+    target_before = js.split('model: "EC-GL86ZPCS31"')[0]
+    target = target_before.rsplit("    {", 1)[-1] + js.split('model: "EC-GL86ZPCS31"', 1)[1].split("\n    },\n    {", 1)[0]
+    assert "configureReporting: false" in target
+    assert "reporting.bind(" not in target
+    assert "reporting.onOff(" not in target
+
+
+def test_regenerated_files_match_committed_files() -> None:
+    """Regeneration consistency: BOTH maintained converter files are clean."""
+    result_v2 = subprocess.run(
+        [sys.executable, str(HELPER), "device_db.yaml"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    result_v1 = subprocess.run(
+        [sys.executable, str(HELPER), "device_db.yaml", "--z2m-v1"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    committed_v2 = Path("zigbee2mqtt/converters/switch_custom.js").read_text()
+    committed_v1 = Path("zigbee2mqtt/converters_v1/switch_custom.js").read_text()
+    assert result_v2.stdout == committed_v2
+    assert result_v1.stdout == committed_v1
