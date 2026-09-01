@@ -807,6 +807,47 @@ def test_forward_complete_swapped_forces_indicator_safety(
         assert device.get_gpio(MAINS_LEFT_PIN, refresh=True)
 
 
+def test_forward_complete_swapped_reproves_right_permanent_power(
+    forward_stub: None,
+) -> None:
+    run_forward_migration()
+    seed_config(SWAPPED_CONFIG)
+    # Simulate a lost/corrupted RIGHT policy slot while the completed marker
+    # remains. Forward boot must repair it because RIGHT is real mains under
+    # both pin maps.
+    seed_physical_mode(2, ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED)
+
+    with booted() as device:
+        assert read_config(device) == SWAPPED_CONFIG
+        assert read_marker() == MIG_FORWARD_COMPLETE
+        assert (
+            read_physical_mode(device, RELAY_RIGHT_ENDPOINT)
+            == ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON
+        )
+        assert device.get_gpio(MAINS_RIGHT_PIN, refresh=True)
+
+
+def test_forward_complete_swapped_blocks_when_right_policy_cannot_be_repaired(
+    forward_stub: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_forward_migration()
+    seed_config(SWAPPED_CONFIG)
+    seed_physical_mode(2, ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED)
+
+    build_forward_image()
+    monkeypatch.setenv("STUB_NVM_FAIL_WRITE", "0x25@1")
+    with booted() as device:
+        assert_blocked_no_parse(device)
+    monkeypatch.delenv("STUB_NVM_FAIL_WRITE")
+
+    with booted() as device:
+        assert (
+            read_physical_mode(device, RELAY_RIGHT_ENDPOINT)
+            == ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON
+        )
+        assert device.get_gpio(MAINS_RIGHT_PIN, refresh=True)
+
+
 def test_forward_complete_blocks_on_swapped_safety_write_failure(
     forward_stub: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
