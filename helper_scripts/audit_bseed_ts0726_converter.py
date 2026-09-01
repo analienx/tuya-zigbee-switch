@@ -82,6 +82,7 @@ def audit(path: Path) -> dict:
     # Human-facing physical relay UX.
     assert 'lookup: { follow_state: 0, always_on: 1, always_off: 2 }' in text
     assert 'label: "Physical relay behavior"' in text
+    assert 'expose.withProperty(name)' in text, "new physical-mode property must not duplicate endpoint suffix"
     assert "Recommended for smart bulbs" in text
     assert "Changing this setting can immediately switch mains power" in text
 
