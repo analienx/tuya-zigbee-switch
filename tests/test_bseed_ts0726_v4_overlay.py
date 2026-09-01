@@ -136,3 +136,23 @@ def test_overlay_javascript_syntax_when_node_is_available() -> None:
         pytest.skip("node is not available in this test environment")
 
     subprocess.run(["node", "--check", str(OVERLAY)], check=True)
+
+
+def test_legacy_action_behavior_probe_when_node_is_available() -> None:
+    if shutil.which("node") is None:
+        pytest.skip("node is not available in this test environment")
+
+    result = subprocess.run(
+        [
+            "node",
+            "helper_scripts/probe_bseed_ts0726_action_contract.js",
+            str(OVERLAY),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert '"status": "PASS"' in result.stdout
+    assert '"action": "switch_0_press"' in result.stdout
+    assert '"action": "switch_1_long_press"' in result.stdout
+    assert '"action": "switch_2_toggle"' in result.stdout
