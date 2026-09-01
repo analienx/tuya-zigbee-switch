@@ -42,6 +42,8 @@ RELAY_MIDDLE_ENDPOINT = 5
 RELAY_RIGHT_ENDPOINT = 6
 
 INDICATOR_MODE_SAME = 0
+INDICATOR_MODE_MANUAL = 2
+INDICATOR_ON = 1
 
 NV_CONFIG_ITEM = 0x02
 NV_MARKER_ITEM = 0x28
@@ -102,6 +104,14 @@ def read_indicator_mode(device: Device, endpoint: int) -> int:
     )
 
 
+def read_indicator_state(device: Device, endpoint: int) -> int:
+    return int(
+        device.read_zigbee_attr(
+            endpoint, ZCL_CLUSTER_ON_OFF, 0xFF02
+        )
+    )
+
+
 def test_migration_then_plain_generic_image(migration_image) -> None:
     # ---- Phase A: BSEED migration image crosses the swapped->canonical gap
     with StubProc(device_config=SWAPPED_CONFIG) as proc:
@@ -119,8 +129,10 @@ def test_migration_then_plain_generic_image(migration_image) -> None:
             read_physical_mode(device, RELAY_RIGHT_ENDPOINT)
             == ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON
         )
-        assert read_indicator_mode(device, RELAY_LEFT_ENDPOINT) == INDICATOR_MODE_SAME
-        assert read_indicator_mode(device, RELAY_MIDDLE_ENDPOINT) == INDICATOR_MODE_SAME
+        assert read_indicator_mode(device, RELAY_LEFT_ENDPOINT) == INDICATOR_MODE_MANUAL
+        assert read_indicator_mode(device, RELAY_MIDDLE_ENDPOINT) == INDICATOR_MODE_MANUAL
+        assert read_indicator_state(device, RELAY_LEFT_ENDPOINT) == INDICATOR_ON
+        assert read_indicator_state(device, RELAY_MIDDLE_ENDPOINT) == INDICATOR_ON
         marker_before = read_nv(NV_MARKER_ITEM)
         assert marker_before is not None
 
@@ -145,8 +157,10 @@ def test_migration_then_plain_generic_image(migration_image) -> None:
             read_physical_mode(device, RELAY_RIGHT_ENDPOINT)
             == ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON
         )
-        assert read_indicator_mode(device, RELAY_LEFT_ENDPOINT) == INDICATOR_MODE_SAME
-        assert read_indicator_mode(device, RELAY_MIDDLE_ENDPOINT) == INDICATOR_MODE_SAME
+        assert read_indicator_mode(device, RELAY_LEFT_ENDPOINT) == INDICATOR_MODE_MANUAL
+        assert read_indicator_mode(device, RELAY_MIDDLE_ENDPOINT) == INDICATOR_MODE_MANUAL
+        assert read_indicator_state(device, RELAY_LEFT_ENDPOINT) == INDICATOR_ON
+        assert read_indicator_state(device, RELAY_MIDDLE_ENDPOINT) == INDICATOR_ON
         assert read_nv(NV_MARKER_ITEM) == marker_before
 
         # The plain image must not even carry the migration strings.
