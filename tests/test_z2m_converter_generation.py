@@ -278,6 +278,35 @@ def test_target_only_overlay_has_clear_logical_vs_physical_ux(tmp_path: Path) ->
     assert js.index('romasku.pressAction("switch_left_press_action"') < js.index('romasku.deviceConfig("device_config"')
 
 
+def test_target_only_overlay_audit_passes_on_fresh_generation(tmp_path: Path) -> None:
+    output = tmp_path / "bseed_ts0726_canary.js"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(HELPER),
+            "device_db.yaml",
+            "--only-db-key",
+            "SWITCH_BSEED_TS0726_3GANG",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    output.write_text(result.stdout)
+
+    audit = subprocess.run(
+        [
+            sys.executable,
+            "helper_scripts/audit_bseed_ts0726_overlay.py",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert '"status": "PASS"' in audit.stdout
+
+
 def test_target_only_generation_rejects_unknown_db_key(tmp_path: Path) -> None:
     result = subprocess.run(
         [
