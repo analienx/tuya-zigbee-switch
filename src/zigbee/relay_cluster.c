@@ -396,6 +396,30 @@ bool relay_cluster_nv_set_indicator_safety(uint8_t relay_idx) {
         (const uint8_t *)&cfg);
 }
 
+bool relay_cluster_nv_set_indicator_mode(uint8_t relay_idx, uint8_t mode) {
+    if (mode > ZCL_ONOFF_INDICATOR_MODE_MANUAL) {
+        return false;
+    }
+
+    zigbee_relay_cluster_config cfg;
+    memset(&cfg, 0, sizeof(cfg));
+
+    hal_nvm_status_t st = hal_nvm_read(NV_ITEM_RELAY_CLUSTER_DATA(relay_idx),
+                                       sizeof(cfg), (uint8_t *)&cfg);
+    if (st != HAL_NVM_SUCCESS && st != HAL_NVM_NOT_FOUND) {
+        return false;
+    }
+
+    if (st == HAL_NVM_SUCCESS && cfg.indicator_led_mode == mode) {
+        return true;
+    }
+
+    cfg.indicator_led_mode = mode;
+    return relay_cluster_nv_write_and_verify(
+        NV_ITEM_RELAY_CLUSTER_DATA(relay_idx), sizeof(cfg),
+        (const uint8_t *)&cfg);
+}
+
 bool relay_cluster_nv_ensure_physical_mode(uint8_t relay_idx, uint8_t mode) {
     // The migration is the explicit authorization to establish this
     // invariant, so ANY other stored value (ATTACHED, DETACHED_OFF or an
@@ -415,6 +439,33 @@ bool relay_cluster_nv_ensure_physical_mode(uint8_t relay_idx, uint8_t mode) {
 
     return relay_cluster_nv_write_and_verify(
         NV_ITEM_RELAY_PHYSICAL_MODE(relay_idx), sizeof(mode), &mode);
+}
+
+bool relay_cluster_nv_ensure_valid_physical_mode(
+    uint8_t relay_idx, uint8_t safe_default_mode) {
+    if (safe_default_mode > ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_OFF) {
+        return false;
+    }
+
+    uint8_t stored = 0;
+    hal_nvm_status_t st = hal_nvm_read(
+        NV_ITEM_RELAY_PHYSICAL_MODE(relay_idx), sizeof(stored), &stored);
+
+    if (st == HAL_NVM_SUCCESS &&
+        stored <= ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_OFF) {
+        // A valid persisted user choice is authoritative after migration.
+        return true;
+    }
+    if (st != HAL_NVM_SUCCESS && st != HAL_NVM_NOT_FOUND) {
+        return false;
+    }
+
+    // Missing/corrupt NVM is repaired to the migration's electrically safe
+    // default. This is intentionally different from ensure_physical_mode(),
+    // which force-establishes an exact invariant during migration/recovery.
+    return relay_cluster_nv_write_and_verify(
+        NV_ITEM_RELAY_PHYSICAL_MODE(relay_idx), sizeof(safe_default_mode),
+        &safe_default_mode);
 }
 
 bool relay_cluster_nv_delete_physical_mode(uint8_t relay_idx) {
