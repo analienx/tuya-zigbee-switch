@@ -19,6 +19,7 @@ const TARGET = {
     manufacturerName: 'iedhxgyi',
     modelID: 'TS0726-3-BS',
     expectedModel: 'EC-GL86ZPCS31',
+    softwareBuildID: '1.1.4-8542fc05',
 };
 
 function die(message) {
@@ -100,12 +101,24 @@ function main() {
     if ((overlayDef.zigbeeModel || []).includes(TARGET.modelID)) {
         die('overlay contains ambiguous bare TS0726-3-BS zigbeeModel matcher');
     }
+    if (fps[0].softwareBuildID !== TARGET.softwareBuildID || (fps[0].priority ?? 0) !== 100) {
+        die(`overlay fingerprint must target ${TARGET.softwareBuildID} at priority 100`);
+    }
 
     const combined = [...overlay, ...historical];
     const selected = selectLikeZhc(combined, TARGET);
     if (!selected.definition) die('combined matcher found no target definition');
     if (selected.definition !== overlayDef || selected.via !== 'fingerprint') {
         die(`target selected ${selected.definition.model} via ${selected.via}, not overlay fingerprint`);
+    }
+
+
+    // Legacy and recovery firmware must NOT be captured by the forward overlay.
+    for (const softwareBuildID of ['1.1.2-8542fc05', '1.1.3-8542fc05-rev']) {
+        const fallback = selectLikeZhc(combined, {...TARGET, softwareBuildID});
+        if (!fallback.definition || fallback.definition === overlayDef || fallback.via !== 'zigbeeModel') {
+            die(`softwareBuildID ${softwareBuildID} did not fall back to the historical converter`);
+        }
     }
 
     // An overlay with only TS0726-3-BS must not create candidates for unrelated
