@@ -22,11 +22,13 @@ from tests.conftest import Device
 from tests.zcl_consts import (
     ZCL_ATTR_BASIC_DEVICE_CONFIG,
     ZCL_ATTR_ONOFF_PHYSICAL_RELAY_MODE,
+    ZCL_ATTR_ONOFF_INDICATOR_MODE,
     ZCL_CLUSTER_BASIC,
     ZCL_CLUSTER_ON_OFF,
     ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED,
     ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON,
 )
+
 
 SWAPPED_CONFIG = (
     "iedhxgyi;TS0726-3-BS;LC4;SB1u;RC0;IC2;SB7u;RD7;IC3;SB4u;RD2;IB5;M;"
@@ -38,6 +40,8 @@ CANONICAL_CONFIG = (
 RELAY_LEFT_ENDPOINT = 4
 RELAY_MIDDLE_ENDPOINT = 5
 RELAY_RIGHT_ENDPOINT = 6
+
+INDICATOR_MODE_SAME = 0
 
 NV_CONFIG_ITEM = 0x02
 NV_MARKER_ITEM = 0x28
@@ -90,6 +94,14 @@ def read_physical_mode(device: Device, endpoint: int) -> int:
     )
 
 
+def read_indicator_mode(device: Device, endpoint: int) -> int:
+    return int(
+        device.read_zigbee_attr(
+            endpoint, ZCL_CLUSTER_ON_OFF, ZCL_ATTR_ONOFF_INDICATOR_MODE
+        )
+    )
+
+
 def test_migration_then_plain_generic_image(migration_image) -> None:
     # ---- Phase A: BSEED migration image crosses the swapped->canonical gap
     with StubProc(device_config=SWAPPED_CONFIG) as proc:
@@ -107,6 +119,8 @@ def test_migration_then_plain_generic_image(migration_image) -> None:
             read_physical_mode(device, RELAY_RIGHT_ENDPOINT)
             == ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON
         )
+        assert read_indicator_mode(device, RELAY_LEFT_ENDPOINT) == INDICATOR_MODE_SAME
+        assert read_indicator_mode(device, RELAY_MIDDLE_ENDPOINT) == INDICATOR_MODE_SAME
         marker_before = read_nv(NV_MARKER_ITEM)
         assert marker_before is not None
 
@@ -131,6 +145,8 @@ def test_migration_then_plain_generic_image(migration_image) -> None:
             read_physical_mode(device, RELAY_RIGHT_ENDPOINT)
             == ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON
         )
+        assert read_indicator_mode(device, RELAY_LEFT_ENDPOINT) == INDICATOR_MODE_SAME
+        assert read_indicator_mode(device, RELAY_MIDDLE_ENDPOINT) == INDICATOR_MODE_SAME
         assert read_nv(NV_MARKER_ITEM) == marker_before
 
         # The plain image must not even carry the migration strings.
