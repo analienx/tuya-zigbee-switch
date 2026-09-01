@@ -219,20 +219,25 @@ def read_config_file() -> str:
 def test_forward_migration_full_transaction(forward_stub: None) -> None:
     with booted(SWAPPED_CONFIG) as device:
         assert_forward_complete(device)
+        # Canonical C0/D7 are now panel LEDs, so the completed migration
+        # switches LEFT/MIDDLE to SAME. With the initial logical relay state
+        # OFF, both indicators follow it OFF while mains remains pinned ON.
         assert (
             read_indicator_mode(device, RELAY_LEFT_ENDPOINT)
-            == INDICATOR_MODE_MANUAL
+            == INDICATOR_MODE_SAME
         )
         assert (
-            read_indicator_state(device, RELAY_LEFT_ENDPOINT) == INDICATOR_ON
+            read_indicator_state(device, RELAY_LEFT_ENDPOINT) == 0
         )
         assert (
             read_indicator_mode(device, RELAY_MIDDLE_ENDPOINT)
-            == INDICATOR_MODE_MANUAL
+            == INDICATOR_MODE_SAME
         )
         assert (
-            read_indicator_state(device, RELAY_MIDDLE_ENDPOINT) == INDICATOR_ON
+            read_indicator_state(device, RELAY_MIDDLE_ENDPOINT) == 0
         )
+        assert not device.get_gpio(LED_LEFT_PIN, refresh=True)
+        assert not device.get_gpio(LED_MIDDLE_PIN, refresh=True)
         # All smart-light mains feeds stay energised even with virtual state off.
         assert device.get_gpio(MAINS_LEFT_PIN, refresh=True)
         assert device.get_gpio(MAINS_MIDDLE_PIN, refresh=True)
@@ -444,6 +449,102 @@ def test_forward_blocks_on_canonical_mode_write_failure(
             assert_forward_complete(device)
 
 
+def test_forward_complete_preserves_valid_user_physical_modes(
+    forward_stub: None,
+) -> None:
+    run_forward_migration()
+
+    # These represent valid user choices made through the writable 0xff03
+    # attribute after migration. Completed-state boot validation must not
+    # overwrite them back to the migration default.
+    seed_physical_mode(0, ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED)
+    seed_physical_mode(1, ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_OFF)
+    seed_physical_mode(2, ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON)
+
+    build_forward_image()
+    with booted() as device:
+        assert (
+            read_physical_mode(device, RELAY_LEFT_ENDPOINT)
+            == ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED
+        )
+        assert (
+            read_physical_mode(device, RELAY_MIDDLE_ENDPOINT)
+            == ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_OFF
+        )
+        assert (
+            read_physical_mode(device, RELAY_RIGHT_ENDPOINT)
+            == ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON
+        )
+        assert read_marker() == MIG_FORWARD_COMPLETE
+
+
+def test_forward_complete_preserves_user_indicator_mode(
+    forward_stub: None,
+) -> None:
+    run_forward_migration()
+
+    # SAME is the migration default once the pins are canonical, not a
+    # permanent boot-time override. A later valid user setting survives.
+    seed_relay_record(
+        0,
+        indicator_mode=INDICATOR_MODE_MANUAL,
+        indicator_on=INDICATOR_ON,
+    )
+
+    build_forward_image()
+    with booted() as device:
+        assert (
+            read_indicator_mode(device, RELAY_LEFT_ENDPOINT)
+            == INDICATOR_MODE_MANUAL
+        )
+        assert (
+            read_indicator_state(device, RELAY_LEFT_ENDPOINT) == INDICATOR_ON
+        )
+        assert read_marker() == MIG_FORWARD_COMPLETE
+
+
+def test_forward_retries_indicator_follow_phase_after_canonicalization(
+    forward_stub: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    build_forward_image()
+
+    # item 9 write #1 = pre-canonical MANUAL+ON safety;
+    # item 9 write #2 = post-canonical transition to SAME.
+    monkeypatch.setenv("STUB_NVM_FAIL_WRITE", "9@2")
+    with booted(SWAPPED_CONFIG) as device:
+        assert read_config(device) == CANONICAL_CONFIG
+        assert read_marker() == MIG_FORWARD_IN_PROGRESS
+        assert (
+            read_indicator_mode(device, RELAY_LEFT_ENDPOINT)
+            == INDICATOR_MODE_MANUAL
+        )
+        for endpoint in (
+            RELAY_LEFT_ENDPOINT,
+            RELAY_MIDDLE_ENDPOINT,
+            RELAY_RIGHT_ENDPOINT,
+        ):
+            assert (
+                read_physical_mode(device, endpoint)
+                == ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON
+            )
+        # Canonical mains are protected despite the incomplete LED phase.
+        assert device.get_gpio(MAINS_LEFT_PIN, refresh=True)
+        assert device.get_gpio(MAINS_MIDDLE_PIN, refresh=True)
+        assert device.get_gpio(MAINS_RIGHT_PIN, refresh=True)
+
+    monkeypatch.delenv("STUB_NVM_FAIL_WRITE")
+    with booted() as device:
+        assert_forward_complete(device)
+        assert (
+            read_indicator_mode(device, RELAY_LEFT_ENDPOINT)
+            == INDICATOR_MODE_SAME
+        )
+        assert (
+            read_indicator_mode(device, RELAY_MIDDLE_ENDPOINT)
+            == INDICATOR_MODE_SAME
+        )
+
+
 def test_forward_complete_state_reproves_detached_on(forward_stub: None) -> None:
     run_forward_migration()
     # Simulate a later corruption/deletion of a safety-critical slot.
@@ -451,7 +552,8 @@ def test_forward_complete_state_reproves_detached_on(forward_stub: None) -> None
 
     build_forward_image()
     with booted() as device:
-        # FORWARD_COMPLETE must re-prove - not trust - DETACHED_ON.
+        # FORWARD_COMPLETE repairs a missing/corrupt slot to the safe
+        # DETACHED_ON default, but preserves valid user-selected modes.
         assert_forward_complete(device)
 
 
