@@ -58,11 +58,12 @@
 
 // OnOff cluster
 
-#define ZCL_ATTR_ONOFF                    0x0000
-#define ZCL_ATTR_START_UP_ONOFF           0x4003
+#define ZCL_ATTR_ONOFF                        0x0000
+#define ZCL_ATTR_START_UP_ONOFF               0x4003
 
-#define ZCL_ATTR_ONOFF_INDICATOR_MODE     0xff01
-#define ZCL_ATTR_ONOFF_INDICATOR_STATE    0xff02
+#define ZCL_ATTR_ONOFF_INDICATOR_MODE         0xff01
+#define ZCL_ATTR_ONOFF_INDICATOR_STATE        0xff02
+#define ZCL_ATTR_ONOFF_PHYSICAL_RELAY_MODE    0xff03
 
 // OnOff configuration cluster
 
@@ -129,14 +130,18 @@
 
 // OnOff cluster
 
-#define ZCL_START_UP_ONOFF_SET_ONOFF_TO_OFF         0x00
-#define ZCL_START_UP_ONOFF_SET_ONOFF_TO_ON          0x01
-#define ZCL_START_UP_ONOFF_SET_ONOFF_TOGGLE         0x02
-#define ZCL_START_UP_ONOFF_SET_ONOFF_TO_PREVIOUS    0xFF
+#define ZCL_START_UP_ONOFF_SET_ONOFF_TO_OFF           0x00
+#define ZCL_START_UP_ONOFF_SET_ONOFF_TO_ON            0x01
+#define ZCL_START_UP_ONOFF_SET_ONOFF_TOGGLE           0x02
+#define ZCL_START_UP_ONOFF_SET_ONOFF_TO_PREVIOUS      0xFF
 
-#define ZCL_ONOFF_INDICATOR_MODE_SAME               0x00
-#define ZCL_ONOFF_INDICATOR_MODE_OPPOSITE           0x01
-#define ZCL_ONOFF_INDICATOR_MODE_MANUAL             0x02
+#define ZCL_ONOFF_INDICATOR_MODE_SAME                 0x00
+#define ZCL_ONOFF_INDICATOR_MODE_OPPOSITE             0x01
+#define ZCL_ONOFF_INDICATOR_MODE_MANUAL               0x02
+
+#define ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED        0x00
+#define ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON     0x01
+#define ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_OFF    0x02
 
 // OnOff configuration cluster
 
