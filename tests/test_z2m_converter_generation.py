@@ -230,6 +230,7 @@ def test_real_db_preserves_mixed_alias_and_target_ux() -> None:
     assert js.count('{ manufacturerName: "iedhxgyi", modelID: "TS0726-3-BS" }') == 1
     assert 'lookup: { follow_state: 0, always_on: 1, always_off: 2 }' in js
     assert 'label: "Physical relay behavior"' in js
+    assert 'expose.withProperty(name)' in js
     assert "Recommended for smart bulbs" in js
     assert "Changing this setting can immediately switch mains power" in js
     assert 'withExposeLabel(text({' in js
