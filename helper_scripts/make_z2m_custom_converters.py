@@ -255,7 +255,7 @@ def generate(db, z2m_v1=False, only_db_keys=None):
         # back to the historical fleet converter.
         for device in devices:
             if device["db_key"] == "SWITCH_BSEED_TS0726_3GANG":
-                device["overlay_software_build_id"] = "1.1.4-8542fc05"
+                device["overlay_software_build_id"] = "1.1.4-bseedv4"
 
     template = env.get_template("switch_custom.js.jinja")
     rendered = template.render(devices=devices, z2m_v1=z2m_v1)
