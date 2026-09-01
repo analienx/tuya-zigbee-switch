@@ -30,6 +30,7 @@ const TARGET_MODEL = 'EC-GL86ZPCS31';
 const TARGET_MANUFACTURER = 'iedhxgyi';
 const TARGET_ZB_MODEL = 'TS0726-3-BS';
 const EXPECTED_PHYSICAL_VALUES = ['follow_state', 'always_on', 'always_off'];
+const TARGET_SW_BUILD = '1.1.4-bseedv4';
 
 function die(message) {
     process.stderr.write(`FAIL: ${message}\n`);
@@ -91,19 +92,21 @@ function locateInstalledZhc() {
 
 function exposeSummary(definition) {
     const exposes = [];
+    const add = (expose) => {
+        exposes.push({
+            name: expose.name ?? null,
+            property: expose.property ?? null,
+            label: expose.label ?? null,
+            endpoint: expose.endpoint ?? null,
+            category: expose.category ?? null,
+            access: expose.access ?? null,
+            values: Array.isArray(expose.values) ? [...expose.values] : null,
+            description: expose.description ?? null,
+        });
+        for (const feature of expose.features || []) add(feature);
+    };
     for (const extend of definition.extend || []) {
-        for (const expose of extend.exposes || []) {
-            exposes.push({
-                name: expose.name ?? null,
-                property: expose.property ?? null,
-                label: expose.label ?? null,
-                endpoint: expose.endpoint ?? null,
-                category: expose.category ?? null,
-                access: expose.access ?? null,
-                values: Array.isArray(expose.values) ? [...expose.values] : null,
-                description: expose.description ?? null,
-            });
-        }
+        for (const expose of extend.exposes || []) add(expose);
     }
     return exposes;
 }
@@ -189,6 +192,9 @@ function verifyContract(definition, exposes, execution) {
         (fp) => fp.manufacturerName === TARGET_MANUFACTURER && fp.modelID === TARGET_ZB_MODEL,
     );
     if (fpMatches.length !== 1) die(`expected exactly one target fingerprint, got ${fpMatches.length}`);
+    if (fpMatches[0].softwareBuildID !== TARGET_SW_BUILD || (fpMatches[0].priority ?? 0) !== 100) {
+        die(`target fingerprint must require ${TARGET_SW_BUILD} at priority 100`);
+    }
 
     if ((definition.zigbeeModel || []).includes(TARGET_ZB_MODEL)) {
         die('ambiguous bare TS0726-3-BS zigbeeModel matcher remains on target');
@@ -215,13 +221,29 @@ function verifyContract(definition, exposes, execution) {
         }
     }
 
-    const deviceConfig = exposes.find((item) => item.name === 'device_config' || item.label === 'Advanced hardware configuration');
+    const deviceConfig = exposes.find(
+        (item) => item.name === 'device_config' ||
+                  item.label === 'Advanced hardware configuration (read-only)',
+    );
     if (!deviceConfig) die('missing processed device_config expose');
-    if (deviceConfig.label !== 'Advanced hardware configuration') {
+    if (deviceConfig.label !== 'Advanced hardware configuration (read-only)') {
         die(`device_config label mismatch: ${JSON.stringify(deviceConfig.label)}`);
+    }
+    if (deviceConfig.category !== 'diagnostic') {
+        die(`device_config must be diagnostic/read-only, got category=${JSON.stringify(deviceConfig.category)}`);
     }
     if (!(deviceConfig.description || '').includes('may require recovery firmware')) {
         die('device_config warning is missing recovery-firmware language');
+    }
+
+    for (const endpoint of ['relay_left', 'relay_middle', 'relay_right']) {
+        const logical = exposes.find(
+            (item) => item.endpoint === endpoint && item.label === 'Logical relay state',
+        );
+        if (!logical) die(`missing Logical relay state expose for ${endpoint}`);
+        if (!(logical.description || '').includes('does not necessarily switch mains power')) {
+            die(`${endpoint}: logical-state description does not distinguish mains`);
+        }
     }
 
     const mutations = execution.events.filter((event) =>
@@ -257,6 +279,8 @@ async function main() {
 
     const interestingExposes = exposes.filter((item) =>
         item.name === 'device_config' ||
+        item.label === 'Logical relay state' ||
+        item.label === 'Logical state after power-up' ||
         item.property?.includes('physical_mode') ||
         item.label === 'Local relay trigger' ||
         item.label === 'Bound-device trigger' ||
