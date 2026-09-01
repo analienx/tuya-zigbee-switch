@@ -160,11 +160,11 @@ static bool ensure_swapped_relay_safety(void) {
     return true;
 }
 
-#if defined(DEVICE_MIGRATION_FROM_CONFIG) && !defined(DEVICE_MIGRATION_REVERT)
 static bool ensure_swapped_relay_modes(void) {
     // detached_on pins the R-side contact. While the config is still swapped
     // this only pins the panel-LED side; once the canonical config exists,
-    // the modes are already durable before C2/C3 become R.
+    // the modes are already durable before C2/C3 become R. The recovery
+    // image uses the same phase to re-prove current-state canonical safety.
     for (uint8_t relay_idx = 0;
          relay_idx < DEVICE_MIGRATION_SWAPPED_RELAY_COUNT;
          relay_idx++) {
@@ -180,8 +180,6 @@ static bool ensure_swapped_relay_modes(void) {
     return true;
 }
 
-#endif // DEVICE_MIGRATION_FROM_CONFIG && !DEVICE_MIGRATION_REVERT
-
 #endif // DEVICE_MIGRATION_FROM_CONFIG || DEVICE_MIGRATION_REVERT
 
 #if defined(DEVICE_MIGRATION_FROM_CONFIG) && !defined(DEVICE_MIGRATION_REVERT)
@@ -195,8 +193,23 @@ static device_migration_result_t migrate_swapped_pins_to_canonical(void) {
         return DEVICE_MIGRATION_BLOCK_INIT;
     }
 
+    device_config_read_from_nv();
+
+    const bool is_swapped = strcmp((const char *)device_config_str.data,
+                                   DEVICE_MIGRATION_FROM_CONFIG_STR) == 0;
+    const bool is_canonical = strcmp((const char *)device_config_str.data,
+                                     DEVICE_MIGRATION_TO_CONFIG_STR) == 0;
+
     if (marker == MARKER_VALID && state == MIG_STATE_FORWARD_COMPLETE) {
-        // One-shot: already applied, never run again.
+        // Completed-state invariant: never trust historical state. On the
+        // canonical map the mains side is the R contact, so every boot must
+        // re-prove DETACHED_ON; a missing/wrong slot is forced back and
+        // verified, and an unprovable slot blocks init.
+        if (is_canonical && !ensure_swapped_relay_modes()) {
+            printf("Device migration: completed state but DETACHED_ON not "
+                   "provable; blocking init\r\n");
+            return DEVICE_MIGRATION_BLOCK_INIT;
+        }
         return DEVICE_MIGRATION_SAFE_TO_CONTINUE;
     }
 
@@ -207,12 +220,6 @@ static device_migration_result_t migrate_swapped_pins_to_canonical(void) {
         return DEVICE_MIGRATION_BLOCK_INIT;
     }
 
-    device_config_read_from_nv();
-
-    const bool is_swapped = strcmp((const char *)device_config_str.data,
-                                   DEVICE_MIGRATION_FROM_CONFIG_STR) == 0;
-    const bool is_canonical = strcmp((const char *)device_config_str.data,
-                                     DEVICE_MIGRATION_TO_CONFIG_STR) == 0;
     const bool resuming = marker == MARKER_VALID &&
                           state == MIG_STATE_FORWARD_IN_PROGRESS;
 
@@ -244,9 +251,16 @@ static device_migration_result_t migrate_swapped_pins_to_canonical(void) {
         return DEVICE_MIGRATION_BLOCK_INIT;
     }
 
-    // Phase D: detached_on pre-seed. Swapped config + verified MANUAL/ON is
-    // an explicitly safe partial state.
+    // Phase D: detached_on pre-seed (forced to the exact mode and verified).
     if (!ensure_swapped_relay_modes()) {
+        if (is_canonical) {
+            // Canonical map: C2/C3 are R and DETACHED_ON is not proven.
+            // Parsing would expose mains to ATTACHED/DETACHED_OFF semantics.
+            printf("Device migration: canonical config with unprovable "
+                   "DETACHED_ON; blocking init\r\n");
+            return DEVICE_MIGRATION_BLOCK_INIT;
+        }
+        // Swapped config + verified MANUAL/ON: explicitly safe partial.
         return DEVICE_MIGRATION_SAFE_PARTIAL;
     }
 
@@ -306,9 +320,23 @@ static device_migration_result_t revert_swapped_pins_migration(void) {
         return DEVICE_MIGRATION_BLOCK_INIT;
     }
 
+    if (is_canonical) {
+        // Phase 0: current canonical safety must be proven NOW. Historical
+        // FORWARD_COMPLETE does not prove the modes still hold - a missing,
+        // wrong or corrupted slot must be forced back to DETACHED_ON and
+        // verified before anything may parse the canonical map.
+        if (!ensure_swapped_relay_modes()) {
+            printf("Device migration revert: cannot establish DETACHED_ON "
+                   "for canonical mains; blocking init\r\n");
+            return DEVICE_MIGRATION_BLOCK_INIT;
+        }
+    }
+
     if (!write_marker_state(MIG_STATE_REVERT_IN_PROGRESS)) {
-        // All resumable states are safe partials by construction.
-        return DEVICE_MIGRATION_SAFE_PARTIAL;
+        // Canonical entry: phase-0-verified DETACHED_ON guards the mains.
+        // Swapped entry: the indicator side is not yet proven - never parse.
+        return is_canonical ? DEVICE_MIGRATION_SAFE_PARTIAL
+                            : DEVICE_MIGRATION_BLOCK_INIT;
     }
 
     // Phase 2: indicator safety FIRST. Canonical operation may have changed
