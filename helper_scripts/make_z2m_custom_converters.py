@@ -1,4 +1,5 @@
 import argparse
+import sys
 from pathlib import Path
 
 import yaml
@@ -11,23 +12,7 @@ env = Environment(
     lstrip_blocks=True,
 )
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Create Zigbee2mqtt converter for custom devices",
-        epilog="Generates a js file that adds support of re-flashed devices to z2m",
-    )
-    parser.add_argument(
-        "db_file", metavar="INPUT", type=str, help="File with device db"
-    )
-    parser.add_argument(
-        "--z2m-v1", action=argparse.BooleanOptionalAction, help="Use old z2m"
-    )
-
-    args = parser.parse_args()
-
-    db_str = Path(args.db_file).read_text()
-    db = yaml.safe_load(db_str)
-
+def collect_devices(db):
     devices = []
 
     for device in db.values():
@@ -107,6 +92,7 @@ if __name__ == "__main__":
 
         devices.append(
             {
+                "zb_manufacturer": zb_manufacturer,
                 "zb_models": [zb_model] + (device.get("old_zb_models") or []),
                 "model": device.get("override_z2m_device")
                 or device["stock_converter_model"],
@@ -120,8 +106,75 @@ if __name__ == "__main__":
             }
         )
 
-    template = env.get_template("switch_custom.js.jinja")
+    return devices
 
-    print(template.render(devices=devices, z2m_v1=args.z2m_v1))
+
+def mark_ambiguous_models(devices):
+    """Detect models claimed by more than one built device.
+
+    A bare `zigbeeModel` match is order-dependent and ambiguous when two
+    devices share the same model string with different manufacturers. Such
+    devices are switched to deterministic `fingerprint` matching on
+    (manufacturerName, modelID) instead.
+    """
+    claims = {}
+    for device in devices:
+        for model in device["zb_models"]:
+            claims[model] = claims.get(model, 0) + 1
+
+    for device in devices:
+        device["ambiguous_models"] = [
+            model for model in device["zb_models"] if claims[model] > 1
+        ]
+        device["has_collision"] = bool(device["ambiguous_models"])
+        device["fingerprints"] = [
+            {
+                "manufacturerName": device["zb_manufacturer"],
+                "modelID": model,
+            }
+            for model in device["zb_models"]
+        ]
+
+    return devices
+
+
+def generate(db, z2m_v1=False):
+    devices = mark_ambiguous_models(collect_devices(db))
+
+    template = env.get_template("switch_custom.js.jinja")
+    rendered = template.render(devices=devices, z2m_v1=z2m_v1)
+
+    for device in devices:
+        if device["has_collision"]:
+            print(
+                "Ambiguous model(s) %s disambiguated via fingerprint for %s"
+                % (
+                    ",".join(device["ambiguous_models"]),
+                    device["zb_manufacturer"],
+                ),
+                file=sys.stderr,
+            )
+
+    return rendered
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Create Zigbee2mqtt converter for custom devices",
+        epilog="Generates a js file that adds support of re-flashed devices to z2m",
+    )
+    parser.add_argument(
+        "db_file", metavar="INPUT", type=str, help="File with device db"
+    )
+    parser.add_argument(
+        "--z2m-v1", action=argparse.BooleanOptionalAction, help="Use old z2m"
+    )
+
+    args = parser.parse_args()
+
+    db_str = Path(args.db_file).read_text()
+    db = yaml.safe_load(db_str)
+
+    print(generate(db, z2m_v1=args.z2m_v1))
 
     exit(0)
