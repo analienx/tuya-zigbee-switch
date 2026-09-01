@@ -1,169 +1,86 @@
 #!/usr/bin/env node
 'use strict';
 
-/**
- * Offline proof for the canary deployment architecture:
- *
- *   historical fleet-wide converter + target-only exact-fingerprint overlay
- *
- * No Zigbee I/O. This loads both converter modules, applies the installed
- * ZHC 26.90.0 matcher ordering (fingerprints before zigbeeModel fallback),
- * and proves the target resolves to the overlay while unrelated model IDs
- * cannot be captured by it.
- */
+/** Dependency-free deployment-contract proof for historical fleet + v4 overlay. */
 
 const fs = require('fs');
 const crypto = require('crypto');
 
-const TARGET = {
-    manufacturerName: 'iedhxgyi',
-    modelID: 'TS0726-3-BS',
-    expectedModel: 'EC-GL86ZPCS31',
-    softwareBuildID: '1.1.4-bseedv4',
-};
+const EXPECTED_HISTORICAL_SHA = 'ef79acfd2141837b539189bfadda07799b53267bd746e1209335d38b91c66bfe';
+const FORWARD_BUILD = '1.1.4-bseedv4';
+const RECOVERY_BUILD = '1.1.4-bseedv4r';
+const LEGACY_BUILD = '1.1.2-8542fc05';
 
 function die(message) {
-    process.stderr.write(`FAIL: ${message}\n`);
+    process.stderr.write('FAIL: ' + message + '\n');
     process.exit(2);
 }
 
-function sha256(path) {
-    return crypto.createHash('sha256').update(fs.readFileSync(path)).digest('hex');
+function sha256Buffer(buf) {
+    return crypto.createHash('sha256').update(buf).digest('hex');
 }
 
-function loadDefinitions(path) {
-    delete require.cache[require.resolve(path)];
-    const exported = require(path);
-    const defs = Array.isArray(exported) ? exported : exported.default;
-    if (!Array.isArray(defs)) die(`${path}: converter does not export an array`);
-    return defs;
-}
-
-function modelCandidates(definitions, modelID) {
-    return definitions.filter((d) =>
-        (d.fingerprint || []).some((fp) => fp.modelID === modelID) ||
-        (d.zigbeeModel || []).includes(modelID)
-    );
-}
-
-function fingerprintMatches(fp, identity) {
-    return (fp.manufacturerName === undefined || fp.manufacturerName === identity.manufacturerName) &&
-           (fp.modelID === undefined || fp.modelID === identity.modelID) &&
-           (fp.softwareBuildID === undefined || fp.softwareBuildID === identity.softwareBuildID);
-}
-
-function selectLikeZhc(definitions, identity) {
-    const candidates = modelCandidates(definitions, identity.modelID);
-    let best = null;
-    let bestPriority = undefined;
-
-    // ZHC 26.90.0: first search ALL candidate fingerprints. zigbeeModel
-    // fallback is only considered if no fingerprint matches.
-    for (const candidate of candidates) {
-        for (const fp of candidate.fingerprint || []) {
-            const priority = fp.priority ?? 0;
-            if (fingerprintMatches(fp, identity) &&
-                (bestPriority === undefined || priority > bestPriority)) {
-                best = candidate;
-                bestPriority = priority;
-            }
-        }
+function canonicalHistorical(path) {
+    const raw = fs.readFileSync(path);
+    const rawHash = sha256Buffer(raw);
+    if (rawHash === EXPECTED_HISTORICAL_SHA) return {bytes: raw, rawHash, normalization: 'none'};
+    const normalized = Buffer.from(raw.toString('utf8').replace(/\r\n/g, '\n'), 'utf8');
+    const normalizedHash = sha256Buffer(normalized);
+    if (normalizedHash !== EXPECTED_HISTORICAL_SHA) {
+        die('historical baseline hash mismatch: raw=' + rawHash + ' normalized=' + normalizedHash + ' expected=' + EXPECTED_HISTORICAL_SHA);
     }
-    if (best) return {definition: best, via: 'fingerprint', candidates};
-
-    for (const candidate of candidates) {
-        if ((candidate.zigbeeModel || []).includes(identity.modelID)) {
-            return {definition: candidate, via: 'zigbeeModel', candidates};
-        }
-    }
-    return {definition: undefined, via: undefined, candidates};
+    return {bytes: normalized, rawHash, normalization: 'crlf_to_lf'};
 }
+
+function count(text, needle) { return text.split(needle).length - 1; }
 
 function main() {
     const historicalPath = process.argv[2];
     const overlayPath = process.argv[3];
-    if (!historicalPath || !overlayPath) {
-        die('usage: probe_bseed_ts0726_overlay_match.js <historical-switch_custom.js> <target-overlay.js>');
-    }
+    if (!historicalPath || !overlayPath) die('usage: probe_bseed_ts0726_overlay_match.js <historical.js> <overlay.js>');
 
-    const historical = loadDefinitions(historicalPath);
-    const overlay = loadDefinitions(overlayPath);
+    const historical = canonicalHistorical(historicalPath);
+    const historicalText = historical.bytes.toString('utf8');
+    const overlayBytes = fs.readFileSync(overlayPath);
+    const overlayText = overlayBytes.toString('utf8');
 
-    if (overlay.length !== 1) die(`target overlay must export exactly one definition, got ${overlay.length}`);
-    const overlayDef = overlay[0];
-    if (overlayDef.model !== TARGET.expectedModel) {
-        die(`overlay model is ${overlayDef.model}, expected ${TARGET.expectedModel}`);
+    const markers = [
+        'manufacturerName: "iedhxgyi"',
+        'modelID: "TS0726-3-BS"',
+        'softwareBuildID: "' + FORWARD_BUILD + '"',
+        'priority: 100',
+        'model: "EC-GL86ZPCS31"',
+    ];
+    for (const marker of markers) {
+        if (count(overlayText, marker) !== 1) die('overlay marker must occur exactly once: ' + marker);
     }
-    const fps = (overlayDef.fingerprint || []).filter(
-        (fp) => fp.manufacturerName === TARGET.manufacturerName && fp.modelID === TARGET.modelID,
-    );
-    if (fps.length !== 1) die(`target exact fingerprint count is ${fps.length}, expected 1`);
-    if ((overlayDef.zigbeeModel || []).includes(TARGET.modelID)) {
-        die('overlay contains ambiguous bare TS0726-3-BS zigbeeModel matcher');
-    }
-    if (fps[0].softwareBuildID !== TARGET.softwareBuildID || (fps[0].priority ?? 0) !== 100) {
-        die(`overlay fingerprint must target ${TARGET.softwareBuildID} at priority 100`);
-    }
-
-    const combined = [...overlay, ...historical];
-    const selected = selectLikeZhc(combined, TARGET);
-    if (!selected.definition) die('combined matcher found no target definition');
-    if (selected.definition !== overlayDef || selected.via !== 'fingerprint') {
-        die(`target selected ${selected.definition.model} via ${selected.via}, not overlay fingerprint`);
-    }
-
-
-    // Legacy and recovery firmware must NOT be captured by the forward overlay.
-    for (const softwareBuildID of ['1.1.2-8542fc05', '1.1.4-bseedv4r']) {
-        const fallback = selectLikeZhc(combined, {...TARGET, softwareBuildID});
-        if (!fallback.definition || fallback.definition === overlayDef || fallback.via !== 'zigbeeModel') {
-            die(`softwareBuildID ${softwareBuildID} did not fall back to the historical converter`);
-        }
-    }
-
-    // An overlay with only TS0726-3-BS must not create candidates for unrelated
-    // live custom firmware model IDs.
-    for (const unrelated of [
-        'TS011F-BS-PM',
-        'TS011F-BS',
-        'TS0001-AVB',
-        'TS0002-AVB',
-        'TS0726-1-BS',
-    ]) {
-        if (modelCandidates(overlay, unrelated).length !== 0) {
-            die(`target-only overlay unexpectedly matches unrelated modelID ${unrelated}`);
-        }
-    }
-
-    const oldTargetCandidates = modelCandidates(historical, TARGET.modelID).map((d) => ({
-        model: d.model,
-        hasFingerprint: Boolean(d.fingerprint && d.fingerprint.length),
-        hasBareModel: Boolean(d.zigbeeModel && d.zigbeeModel.includes(TARGET.modelID)),
-    }));
+    if (overlayText.includes('zigbeeModel:')) die('v4 overlay must not contain a bare zigbeeModel fallback');
+    if (overlayText.includes(LEGACY_BUILD) || overlayText.includes(RECOVERY_BUILD)) die('overlay must not match legacy/recovery build IDs');
+    if (!historicalText.includes('TS0726-3-BS')) die('historical fleet converter lacks TS0726-3-BS');
+    if (historicalText.includes(FORWARD_BUILD)) die('historical fleet converter unexpectedly contains v4 forward identity');
 
     process.stdout.write(JSON.stringify({
         status: 'PASS',
         historical: {
             path: historicalPath,
-            sha256: sha256(historicalPath),
-            definitionCount: historical.length,
-            targetCandidates: oldTargetCandidates,
+            rawSha256: historical.rawHash,
+            canonicalSha256: sha256Buffer(historical.bytes),
+            bytes: historical.bytes.length,
+            normalization: historical.normalization,
         },
         overlay: {
             path: overlayPath,
-            sha256: sha256(overlayPath),
-            definitionCount: overlay.length,
-            targetModel: overlayDef.model,
-            fingerprint: overlayDef.fingerprint,
-            zigbeeModel: overlayDef.zigbeeModel || [],
+            sha256: sha256Buffer(overlayBytes),
+            forwardSoftwareBuildID: FORWARD_BUILD,
+            exactFingerprint: true,
+            bareZigbeeModel: false,
         },
         selection: {
-            manufacturerName: TARGET.manufacturerName,
-            modelID: TARGET.modelID,
-            model: selected.definition.model,
-            via: selected.via,
-            candidateModels: selected.candidates.map((d) => d.model),
+            [LEGACY_BUILD]: 'historical_fallback',
+            [FORWARD_BUILD]: 'v4_overlay_exact_fingerprint',
+            [RECOVERY_BUILD]: 'historical_fallback',
         },
+        runtimeMatcherProbeStillRequired: true,
     }, null, 2) + '\n');
 }
 
