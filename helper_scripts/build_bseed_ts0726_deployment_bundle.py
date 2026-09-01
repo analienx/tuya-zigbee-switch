@@ -16,12 +16,35 @@ TARGET_DB_KEY = "SWITCH_BSEED_TS0726_3GANG"
 AUTHORITATIVE_OVERLAY = Path("zigbee2mqtt/converters/bseed_ts0726_v4.js")
 
 
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
 def sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    return sha256_bytes(path.read_bytes())
+
+
+def canonical_historical_bytes(path: Path) -> tuple[bytes, str, str]:
+    """Return exact Git-baseline bytes, tolerating Windows CRLF checkout only.
+
+    The authoritative artifact is still identified by HISTORICAL_SHA256.
+    A CRLF checkout is accepted only when replacing CRLF with LF reproduces
+    that exact hash; arbitrary content changes still fail closed.
+    """
+    raw = path.read_bytes()
+    raw_hash = sha256_bytes(raw)
+    if raw_hash == HISTORICAL_SHA256:
+        return raw, raw_hash, "none"
+
+    normalized = raw.replace(b"\r\n", b"\n")
+    normalized_hash = sha256_bytes(normalized)
+    if normalized_hash != HISTORICAL_SHA256:
+        raise SystemExit(
+            "refusing non-authoritative fleet baseline: "
+            f"raw={raw_hash}, crlf_normalized={normalized_hash}, "
+            f"expected={HISTORICAL_SHA256}"
+        )
+    return normalized, raw_hash, "crlf_to_lf"
 
 
 def run(*args: str) -> subprocess.CompletedProcess[str]:
@@ -42,17 +65,14 @@ def main() -> int:
     historical = args.historical_converter.resolve()
     if not historical.is_file():
         raise SystemExit(f"historical converter not found: {historical}")
-    historical_hash = sha256(historical)
-    if historical_hash != HISTORICAL_SHA256:
-        raise SystemExit(
-            "refusing non-authoritative fleet baseline: "
-            f"expected {HISTORICAL_SHA256}, got {historical_hash}"
-        )
+    historical_bytes, historical_raw_hash, normalization = canonical_historical_bytes(
+        historical
+    )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     fleet = args.output_dir / "00-switch_custom-historical.js"
     overlay = args.output_dir / "10-bseed-ts0726-overlay.js"
-    shutil.copyfile(historical, fleet)
+    fleet.write_bytes(historical_bytes)
 
     if not AUTHORITATIVE_OVERLAY.is_file():
         raise SystemExit(f"authoritative target overlay missing: {AUTHORITATIVE_OVERLAY}")
@@ -81,6 +101,8 @@ def main() -> int:
             "sha256": sha256(fleet),
             "bytes": fleet.stat().st_size,
             "required_sha256": HISTORICAL_SHA256,
+            "source_raw_sha256": historical_raw_hash,
+            "source_normalization": normalization,
         },
         "overlay": {
             "file": overlay.name,
