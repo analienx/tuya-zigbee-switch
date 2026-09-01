@@ -7,6 +7,8 @@ const {
     binary,
     windowCovering,
     deviceAddCustomCluster,
+    commandsOnOff,
+    commandsLevelCtrl,
 } = require("zigbee-herdsman-converters/lib/modernExtend");
 const {assertString} = require("zigbee-herdsman-converters/lib/utils");
 const reporting = require("zigbee-herdsman-converters/lib/reporting");
@@ -506,6 +508,21 @@ const definitions = [
             {% for relayName in device.relayNames %}
             romasku.relayPhysicalMode("{{relayName}}_physical_mode", "{{relayName}}"),
             {% endfor %}
+            {% if device.switchNames %}
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: {{ device.switchNames | tojson }},
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: {{ device.switchNames | tojson }},
+                bind: false,
+            }),
+            {% endif %}
             {% for coverName in device.coverNames %}
             windowCovering({ 
                 controls: ["lift"],

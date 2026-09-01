@@ -7,6 +7,8 @@ const {
     binary,
     windowCovering,
     deviceAddCustomCluster,
+    commandsOnOff,
+    commandsLevelCtrl,
 } = require("zigbee-herdsman-converters/lib/modernExtend");
 const {assertString} = require("zigbee-herdsman-converters/lib/utils");
 const reporting = require("zigbee-herdsman-converters/lib/reporting");
@@ -460,6 +462,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
             romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
             romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -586,6 +601,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
             romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
             romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -712,6 +740,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
             romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
             romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -838,6 +879,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
             romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
             romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -937,6 +991,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -994,6 +1061,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1068,6 +1148,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1135,6 +1228,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1193,6 +1299,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1250,6 +1369,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1307,6 +1439,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1390,6 +1535,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1499,6 +1657,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
             romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
             romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1600,6 +1771,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1659,6 +1843,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1744,6 +1941,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1855,6 +2065,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
             romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
             romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1972,6 +2195,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2081,6 +2317,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
             romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
             romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2180,6 +2429,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2229,6 +2491,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2287,6 +2562,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2361,6 +2649,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2444,6 +2745,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2535,6 +2849,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2609,6 +2936,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2674,6 +3014,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2731,6 +3084,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2805,6 +3171,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2871,6 +3250,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2938,6 +3330,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3020,6 +3425,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3077,6 +3495,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3142,6 +3573,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3190,6 +3634,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3250,6 +3707,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3504,6 +3974,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3552,6 +4035,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3600,6 +4096,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3648,6 +4157,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3696,6 +4218,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3753,6 +4288,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3827,6 +4375,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3892,6 +4453,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3959,6 +4533,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4068,6 +4655,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
             romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
             romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4167,6 +4767,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4215,6 +4828,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4263,6 +4889,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4320,6 +4959,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4402,6 +5054,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4484,6 +5149,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4541,6 +5219,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4624,6 +5315,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4733,6 +5437,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
             romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
             romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4832,6 +5549,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4880,6 +5610,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4928,6 +5671,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4976,6 +5732,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5033,6 +5802,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5116,6 +5898,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5198,6 +5993,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5246,6 +6054,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5304,6 +6125,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5396,6 +6230,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
             romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
             romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5513,6 +6360,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5595,6 +6455,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5643,6 +6516,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5691,6 +6577,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5739,6 +6638,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5798,6 +6710,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5882,6 +6807,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5964,6 +6902,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6012,6 +6963,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6069,6 +7033,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6152,6 +7129,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6234,6 +7224,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6291,6 +7294,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6356,6 +7372,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6413,6 +7442,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6573,6 +7615,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6655,6 +7710,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6712,6 +7780,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6786,6 +7867,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6851,6 +7945,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6899,6 +8006,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6947,6 +8067,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7022,6 +8155,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
             romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
             romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7130,6 +8276,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7204,6 +8363,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7270,6 +8442,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7320,6 +8505,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7378,6 +8576,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7436,6 +8647,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7494,6 +8718,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7563,6 +8800,19 @@ const definitions = [
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7645,6 +8895,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7702,6 +8965,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7759,6 +9035,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7816,6 +9105,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7873,6 +9175,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7943,6 +9258,19 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8026,6 +9354,19 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8076,6 +9417,19 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8145,6 +9499,19 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8246,6 +9613,19 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8329,6 +9709,19 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8379,6 +9772,19 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8435,6 +9841,19 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8508,6 +9927,19 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8598,6 +10030,19 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8699,6 +10144,19 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8782,6 +10240,19 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8832,6 +10303,19 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8882,6 +10366,19 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8938,6 +10435,19 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9011,6 +10521,19 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9095,6 +10618,19 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9185,6 +10721,19 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9274,6 +10823,19 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9335,6 +10897,19 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9403,6 +10978,19 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9490,6 +11078,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9547,6 +11148,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9631,6 +11245,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9740,6 +11367,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
             romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
             romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9842,6 +11482,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9912,6 +11565,19 @@ const definitions = [
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10012,6 +11678,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10096,6 +11775,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10167,6 +11859,19 @@ const definitions = [
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10273,6 +11978,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10379,6 +12097,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10436,6 +12167,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10520,6 +12264,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10630,6 +12387,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
             romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
             romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10731,6 +12501,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10789,6 +12572,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10856,6 +12652,19 @@ const definitions = [
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10940,6 +12749,19 @@ const definitions = [
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11015,6 +12837,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11085,6 +12920,19 @@ const definitions = [
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11179,6 +13027,19 @@ const definitions = [
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11284,6 +13145,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11392,6 +13266,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11461,6 +13348,19 @@ const definitions = [
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11566,6 +13466,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11630,6 +13543,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
             romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
             romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11763,6 +13689,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11832,6 +13771,19 @@ const definitions = [
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11937,6 +13889,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -12077,6 +14042,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
             romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
             romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -12209,6 +14187,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -12265,6 +14256,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -12322,6 +14326,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -12405,6 +14422,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -12487,6 +14517,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -12544,6 +14587,19 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -12627,6 +14683,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -12721,6 +14790,19 @@ const definitions = [
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -12825,6 +14907,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -12965,6 +15060,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
             romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
             romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -13174,6 +15282,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -13242,6 +15363,19 @@ const definitions = [
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -13346,6 +15480,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -13453,6 +15600,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -13521,6 +15681,19 @@ const definitions = [
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -13625,6 +15798,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -13733,6 +15919,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -13802,6 +16001,19 @@ const definitions = [
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -13907,6 +16119,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -14048,6 +16273,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
             romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
             romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -14181,6 +16419,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -14250,6 +16501,19 @@ const definitions = [
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -14355,6 +16619,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -14495,6 +16772,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
             romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
             romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -14660,6 +16950,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
             romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
             romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -14814,6 +17117,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -14922,6 +17238,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -14991,6 +17320,19 @@ const definitions = [
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -15075,6 +17417,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -15145,6 +17500,19 @@ const definitions = [
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -15250,6 +17618,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -15357,6 +17738,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -15414,6 +17808,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -15482,6 +17889,19 @@ const definitions = [
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -15586,6 +18006,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -15715,6 +18148,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -15855,6 +18301,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
             romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
             romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -15986,6 +18445,19 @@ const definitions = [
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -16061,6 +18533,19 @@ const definitions = [
             romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
             romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
             romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -16161,6 +18646,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -16230,6 +18728,19 @@ const definitions = [
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -16312,6 +18823,19 @@ const definitions = [
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -16380,6 +18904,19 @@ const definitions = [
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
