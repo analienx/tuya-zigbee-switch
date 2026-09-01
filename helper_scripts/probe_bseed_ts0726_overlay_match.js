@@ -19,7 +19,7 @@ const TARGET = {
     manufacturerName: 'iedhxgyi',
     modelID: 'TS0726-3-BS',
     expectedModel: 'EC-GL86ZPCS31',
-    softwareBuildID: '1.1.4-8542fc05',
+    softwareBuildID: '1.1.4-bseedv4',
 };
 
 function die(message) {
@@ -114,7 +114,7 @@ function main() {
 
 
     // Legacy and recovery firmware must NOT be captured by the forward overlay.
-    for (const softwareBuildID of ['1.1.2-8542fc05', '1.1.3-8542fc05-rev']) {
+    for (const softwareBuildID of ['1.1.2-8542fc05', '1.1.4-bseedv4r']) {
         const fallback = selectLikeZhc(combined, {...TARGET, softwareBuildID});
         if (!fallback.definition || fallback.definition === overlayDef || fallback.via !== 'zigbeeModel') {
             die(`softwareBuildID ${softwareBuildID} did not fall back to the historical converter`);
