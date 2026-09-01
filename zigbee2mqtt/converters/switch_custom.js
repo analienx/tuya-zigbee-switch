@@ -13,6 +13,15 @@ const reporting = require("zigbee-herdsman-converters/lib/reporting");
 const constants = require("zigbee-herdsman-converters/lib/constants");
 const Zcl = require('zigbee-herdsman').Zcl;
 
+// Current ZHC text() lacks a label argument while the expose itself supports
+// withLabel(). Keep the property stable and improve only presentation metadata.
+const withExposeLabel = (extend, label) => {
+    for (const expose of extend.exposes || []) {
+        if (typeof expose.withLabel === "function") expose.withLabel(label);
+    }
+    return extend;
+};
+
 /********************************************************************
   This file (`switch_custom.js`) is generated. 
   
@@ -32,7 +41,8 @@ const romasku = {
             lookup: { on_off: 0, off_on: 1, toggle_simple: 2, toggle_smart_sync: 3, toggle_smart_opposite: 4 },
             cluster: "genOnOffSwitchCfg",
             attribute: {ID: 0x0010, type: 0x30, required: true, write: true, min: 0, max: 4}, // Enum8
-            description: `Select how switch should work:
+            label: "Button command behavior",
+            description: `Controls which On/Off command the wall control produces:
             - on_off: When switch physically moved to position 1 it always generates ON command, and when moved to position 2 it generates OFF command
             - off_on: Same as on_off, but positions are swapped
             - toggle_simple: Any press of physical switch will TOGGLE the relay and send TOGGLE command to binds
@@ -47,7 +57,8 @@ const romasku = {
             lookup: { toggle: 0, momentary: 1, momentary_nc: 2 },
             cluster: "genOnOffSwitchCfg",
             attribute: { ID: 0xff00, type: 0x30 }, // Enum8
-            description: "Select the type of switch connected to the device",
+            label: "Button type",
+            description: "Electrical type of the wall control: toggle/rocker, momentary push button, or normally-closed momentary input.",
             entityCategory: "config",
         }),
     relayMode: (name, endpointName) =>
@@ -57,7 +68,8 @@ const romasku = {
             lookup: { detached: 0, press_start: 1, short_press: 3, long_press: 2},
             cluster: "genOnOffSwitchCfg",
             attribute: { ID: 0xff01, type: 0x30 }, // Enum8
-            description: "When to turn on/off internal relay",
+            label: "Local relay trigger",
+            description: "Controls when this physical button changes its assigned local Zigbee relay state. This is independent of Physical relay behavior: the Zigbee relay state can change even when the electrical output is forced Always on or Always off.",
             entityCategory: "config",
         }),
     relayIndex: (name, endpointName, relay_cnt) =>
@@ -69,7 +81,8 @@ const romasku = {
             ),
             cluster: "genOnOffSwitchCfg",
             attribute: { ID: 0xff02, type: 0x20 }, // uint8
-            description: "Which internal relay it should trigger",
+            label: "Assigned local relay",
+            description: "Selects which local relay endpoint this wall control changes.",
             entityCategory: "config",
         }),
     bindedMode: (name, endpointName) =>
@@ -79,7 +92,8 @@ const romasku = {
             lookup: { press_start: 1, short_press: 3, long_press: 2},
             cluster: "genOnOffSwitchCfg",
             attribute: { ID: 0xff05, type: 0x30 }, // Enum8
-            description: "When turn on/off binded device",
+            label: "Bound-device trigger",
+            description: "Controls when this button sends commands directly to Zigbee-bound devices or groups.",
             entityCategory: "config",
         }),
     longPressDuration: (name, endpointName) =>
@@ -88,7 +102,9 @@ const romasku = {
             endpointNames: [endpointName],
             cluster: "genOnOffSwitchCfg",
             attribute: { ID: 0xff03, type: 0x21 }, // uint16
-            description: "What duration is considerd to be long press",
+            label: "Long-press threshold",
+            description: "How long the button must be held before it is treated as a long press.",
+            unit: "ms",
             valueMin: 0,
             valueMax: 5000,
             entityCategory: "config",
@@ -99,7 +115,9 @@ const romasku = {
             endpointNames: [endpointName],
             cluster: "genOnOffSwitchCfg",
             attribute: { ID: 0xff04, type: 0x20 }, // uint8
-            description: "Level (dim) move rate in steps per ms",
+            label: "Hold dimming speed",
+            description: "Brightness-change rate sent in Zigbee Level Control Move commands while the button is held.",
+            unit: "level/s",
             valueMin: 1,
             valueMax: 255,
             entityCategory: "config",
@@ -112,7 +130,8 @@ const romasku = {
             lookup: { released: 0, press: 1, long_press: 2, position_on: 3, position_off: 4 },
             cluster: "genMultistateInput",
             attribute: "presentValue",
-            description: "Action of the switch: 'released' or 'press' or 'long_press'",
+            label: "Last button action",
+            description: "Most recently reported physical button action.",
             entityCategory: "diagnostic",
         }),
     relayIndicatorMode: (name, endpointName) =>
@@ -122,7 +141,8 @@ const romasku = {
             lookup: { same: 0, opposite: 1, manual: 2 },
             cluster: "genOnOff",
             attribute: { ID: 0xff01, type: 0x30 }, // Enum8
-            description: "Mode for the relay indicator LED",
+            label: "Indicator LED behavior",
+            description: "same: LED follows the relay's virtual On/Off state; opposite: LED shows the inverse state; manual: LED state is controlled separately with Indicator LED state.",
             entityCategory: "config",
         }),
     relayIndicator: (name, endpointName) =>
@@ -133,7 +153,8 @@ const romasku = {
             valueOff: ["OFF", 0],
             cluster: "genOnOff",
             attribute: {ID: 0xff02, type: 0x10},  // Boolean
-            description: "State of the relay indicator LED",
+            label: "Indicator LED state",
+            description: "Manual state of the panel indicator LED. Used when Indicator LED behavior is set to manual.",
             access: "ALL",
             entityCategory: "config",
         }),
@@ -141,13 +162,17 @@ const romasku = {
         enumLookup({
             name,
             endpointName,
-            lookup: { attached: 0, detached_on: 1, detached_off: 2 },
+            // UI/MQTT vocabulary only. Firmware/NVM ABI remains 0/1/2 =
+            // ATTACHED / DETACHED_ON / DETACHED_OFF.
+            lookup: { follow_state: 0, always_on: 1, always_off: 2 },
             cluster: "genOnOff",
             attribute: {ID: 0xff03, type: 0x30}, // Enum8
-            description: `Physical relay policy:
-            - attached: physical relay follows the virtual on/off state
-            - detached_on: physical relay is pinned ON while virtual state can change independently
-            - detached_off: physical relay is pinned OFF while virtual state can change independently`,
+            label: "Physical relay behavior",
+            description: `Controls the electrical relay independently of the Zigbee On/Off state.
+Follow state: the physical relay follows the Zigbee On/Off state; selecting it immediately synchronizes the electrical output to the current Zigbee state.
+Always on: keeps the physical output energized. Recommended for smart bulbs or other loads that must remain powered; Zigbee state, button actions and bindings can continue independently.
+Always off: keeps the physical output de-energized while the Zigbee state can continue to change independently.
+Changing this setting can immediately switch mains power. The setting is stored and restored after restart.`,
             entityCategory: "config",
         }),
     batteryPercentage: () => {
@@ -181,7 +206,8 @@ const romasku = {
             valueOff: ["OFF", 0],
             cluster: "genBasic",
             attribute: {ID: 0xff01, type: 0x10},  // Boolean
-            description: "State of the network indicator LED",
+            label: "Network indicator",
+            description: "Controls the dedicated network-status indicator LED.",
             access: "ALL",
             entityCategory: "config",
         }),
@@ -191,19 +217,20 @@ const romasku = {
             endpointNames: [endpointName],
             cluster: "genBasic",
             attribute: { ID: 0xff02, type: 0x20 }, // uint8
-            description: "Number of consecutive presses to trigger factory reset (0 = disabled)",
+            label: "Factory-reset press count",
+            description: "Number of consecutive button presses required to trigger factory reset. Set to 0 to disable multi-press reset.",
             valueMin: 0,
             valueMax: 255,
             entityCategory: "config",
         }),
     deviceConfig: (name, endpointName) =>
-        text({
+        withExposeLabel(text({
             name,
             endpointName,
             access: "ALL",
             cluster: "genBasic",
             attribute:  { ID: 0xff00, type: 0x44 }, // long str
-            description: "Current configuration of the device",
+            description: "Advanced Romasku hardware pin mapping. This describes which MCU pins are connected to buttons, relays, indicators and other peripherals; it is NOT a normal behavior setting. An incorrect value can make buttons, relays or indicators stop working and may require recovery firmware. Do not edit unless you are porting or repairing a device.",
             zigbeeCommandOptions: {timeout: 30_000},
             validate: (value) => {
                 assertString(value);
@@ -257,7 +284,7 @@ const romasku = {
                 }
             },
             entityCategory: "config",
-        }),
+        }), "Advanced hardware configuration"),
     coverSwitchPressAction: (name, endpointName) =>
         enumLookup({
             name,
@@ -377,7 +404,7 @@ const definitions = [
         ],
         model: "TYWB 4ch-RF",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "MHCOZY TYWB 4ch-RF ZG-005(-RF) \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -503,7 +530,7 @@ const definitions = [
         ],
         model: "TYWB 4ch-RF",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "MHCOZY TYWB 4ch-RF ZG-005(-RF) \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -629,7 +656,7 @@ const definitions = [
         ],
         model: "TYWB 4ch-RF",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "MHCOZY TYWB 4ch-RF ZG-005(-RF) \ud83c\udd72 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -755,7 +782,7 @@ const definitions = [
         ],
         model: "TYWB 4ch-RF",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "MHCOZY TYWB 4ch-RF ZG-005(-RF) \ud83c\udd73 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -881,7 +908,7 @@ const definitions = [
         ],
         model: "ZG-001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Scimagic ZG-001 1ch-RF \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -929,7 +956,7 @@ const definitions = [
         ],
         model: "ZG-2002-RF",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Scimagic ZG-2002-RF \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -1003,7 +1030,7 @@ const definitions = [
         ],
         model: "ZG-2002-RF",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Scimagic ZG-2002-RF \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -1077,7 +1104,7 @@ const definitions = [
         ],
         model: "Zigbee_SoC_Board_V2_(ZTU)",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "ZTU dev board 2 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -1135,7 +1162,7 @@ const definitions = [
         ],
         model: "TS011F_din_smart_relay",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya DIN circuit breaker PM \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -1194,7 +1221,7 @@ const definitions = [
         ],
         model: "WHD02",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Aubess WHD02 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -1242,7 +1269,7 @@ const definitions = [
         ],
         model: "TMZ02",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Aubess TMZ02 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -1316,7 +1343,7 @@ const definitions = [
         ],
         model: "TS0003_switch_module_2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Aubess 3-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -1416,7 +1443,7 @@ const definitions = [
         ],
         model: "TS0004_switch_module",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Aubess 4-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -1544,7 +1571,7 @@ const definitions = [
         ],
         model: "ZWSM16-1-Zigbee",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO ZWSM16-1 \ud83c\udd70\ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -1594,7 +1621,7 @@ const definitions = [
         ],
         model: "ZWSM16-2-Zigbee",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO ZWSM16-2 \ud83c\udd70\ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -1670,7 +1697,7 @@ const definitions = [
         ],
         model: "ZWSM16-3-Zigbee",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO ZWSM16-3 \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -1772,7 +1799,7 @@ const definitions = [
         ],
         model: "ZWSM16-4-Zigbee",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO ZWSM16-4 \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -1898,7 +1925,7 @@ const definitions = [
         ],
         model: "ZWSM16-3-Zigbee",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO ZWSM16-3 \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -1998,7 +2025,7 @@ const definitions = [
         ],
         model: "ZWSM16-4-Zigbee",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO ZWSM16-4 \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -2124,7 +2151,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO 1-gang dry-contact \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -2173,7 +2200,7 @@ const definitions = [
         ],
         model: "LZWSM16-1",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO LZWSM16-1 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -2222,7 +2249,7 @@ const definitions = [
         ],
         model: "LZWSM16-2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO LZWSM16-2 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -2296,7 +2323,7 @@ const definitions = [
         ],
         model: "LZWSM16-2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO LZWSM16-2 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -2370,7 +2397,7 @@ const definitions = [
         ],
         model: "LZWSM16-3",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO LZWSM16-3 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -2470,7 +2497,7 @@ const definitions = [
         ],
         model: "EKAC-T3092Z",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "EKAZA EKAC-T3092Z \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -2544,7 +2571,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "EKF ssh-2g-zb-nn \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -2618,7 +2645,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "GoSmart IP-2101SZ EMOS H5101 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -2666,7 +2693,7 @@ const definitions = [
         ],
         model: "TS0002",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "GoSmart IP-2102SZ EMOS H5102 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -2740,7 +2767,7 @@ const definitions = [
         ],
         model: "L13Z",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Farylink FS-02HZ (Nous L13Z clone) \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -2815,7 +2842,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Farylink FS-02Z-L \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -2864,7 +2891,7 @@ const definitions = [
         ],
         model: "TS0003_switch_module_2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Girier \ud83c\udd70 3-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -2964,7 +2991,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Girier \ud83c\udd71 1-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -3012,7 +3039,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Girier \ud83c\udd71 2-gang L-only \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -3086,7 +3113,7 @@ const definitions = [
         ],
         model: "TS0001_switch_module",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Girier 1-gang dry-contact \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -3134,7 +3161,7 @@ const definitions = [
         ],
         model: "JR-ZDS01",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Girier JR-ZDS01 \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -3180,9 +3207,12 @@ const definitions = [
         fingerprint: [
             { manufacturerName: "zmy4lslw", modelID: "TS0002-custom" },
         ],
+        zigbeeModel: [
+            "TS0002-GIR",
+        ],
         model: "TS0002_basic",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Girier 2-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -3256,7 +3286,7 @@ const definitions = [
         ],
         model: "TS130F_GIRIER",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Girier 1-gang curtains \u2014 Romasku custom firmware",
         extend: [
             deviceAddCustomCluster("manuSpecificTuyaCoverSwitchConfig", {
                 ID: 0xFC01,
@@ -3333,7 +3363,7 @@ const definitions = [
         ],
         model: "TS130F_GIRIER_DUAL",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Girier 2-gang curtains \u2014 Romasku custom firmware",
         extend: [
             deviceAddCustomCluster("manuSpecificTuyaCoverSwitchConfig", {
                 ID: 0xFC01,
@@ -3445,7 +3475,7 @@ const definitions = [
         ],
         model: "JR-ZDS01",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Girier JR-ZDS01 \ud83c\udd72 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -3493,7 +3523,7 @@ const definitions = [
         ],
         model: "ZG-301Z",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "HOBEIAN ZG-301Z mini \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -3541,7 +3571,7 @@ const definitions = [
         ],
         model: "WHD02",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "HOBEIAN ZG-301Z V1.3 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -3589,7 +3619,7 @@ const definitions = [
         ],
         model: "ZG-301Z",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "HOBEIAN ZG-301Z V2.0 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -3637,7 +3667,7 @@ const definitions = [
         ],
         model: "TS0011",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "HOMMYN RLZBNN01 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -3685,7 +3715,7 @@ const definitions = [
         ],
         model: "TS0002_limited",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Hommyn RLZBN02 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -3759,7 +3789,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Hommyn 2-gang L-only relay module \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -3833,7 +3863,7 @@ const definitions = [
         ],
         model: "_TZ3000_pgq7ormg",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno 1-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -3882,7 +3912,7 @@ const definitions = [
         ],
         model: "_TZ3000_mhhxxjrs",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno 3-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -3982,7 +4012,7 @@ const definitions = [
         ],
         model: "_TZ3000_knoj8lpk",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno 4-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -4108,7 +4138,7 @@ const definitions = [
         ],
         model: "WHD02",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno 1-gang \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -4156,7 +4186,7 @@ const definitions = [
         ],
         model: "WHD02",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno 1-gang \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -4204,7 +4234,7 @@ const definitions = [
         ],
         model: "TS0001_power",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "LVGESS 1-gang PM \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -4252,7 +4282,7 @@ const definitions = [
         ],
         model: "ZM-104B-M",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes ZM-104B-M \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -4326,7 +4356,7 @@ const definitions = [
         ],
         model: "MS-104CZ",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes MS-104CZ \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -4425,7 +4455,7 @@ const definitions = [
         ],
         model: "TS0011",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes ZM-104-L-MS Moes MS-104ZL \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -4473,7 +4503,7 @@ const definitions = [
         ],
         model: "ZM4LT2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes ZM4LT2 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -4547,7 +4577,7 @@ const definitions = [
         ],
         model: "ZM4LT3",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes ZM4LT3 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -4647,7 +4677,7 @@ const definitions = [
         ],
         model: "ZM4LT4",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes ZM4LT4 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -4773,7 +4803,7 @@ const definitions = [
         ],
         model: "B1Z",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Nous B1Z \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -4821,7 +4851,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "NovaDigital MS105-ZB \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -4869,7 +4899,7 @@ const definitions = [
         ],
         model: "ZBMINIL2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "SONOFF ZBMINIL2 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -4917,7 +4947,7 @@ const definitions = [
         ],
         model: "WHD02",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "T-LED 1-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -4965,7 +4995,7 @@ const definitions = [
         ],
         model: "TS0002",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 2-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -5039,7 +5069,7 @@ const definitions = [
         ],
         model: "TS0003",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 3-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -5139,7 +5169,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya common 1-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -5187,7 +5217,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya common 1-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -5236,7 +5266,7 @@ const definitions = [
         ],
         model: "TS0002_basic_2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya common 2-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -5310,7 +5340,7 @@ const definitions = [
         ],
         model: "SB04-Zigbee",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya common 4-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -5436,7 +5466,7 @@ const definitions = [
         ],
         model: "SB03-Zigbee",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya common 3-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -5536,7 +5566,7 @@ const definitions = [
         ],
         model: "WHD02",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya default 1-gang \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -5584,7 +5614,7 @@ const definitions = [
         ],
         model: "WHD02",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya default 1-gang \ud83c\udd72 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -5632,7 +5662,7 @@ const definitions = [
         ],
         model: "TS0011_switch_module",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/Girier 1-gang L-only \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -5680,7 +5710,7 @@ const definitions = [
         ],
         model: "TS0011_switch_module",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/Girier 1-gang L-only \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -5730,7 +5760,7 @@ const definitions = [
         ],
         model: "TS0012_switch_module",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/Girier 2-gang L-only \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -5805,7 +5835,7 @@ const definitions = [
         ],
         model: "ZB08",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/Girier 3-gang L-only \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -5905,7 +5935,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya QS-Zigbee-S05-LN \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -5953,7 +5983,7 @@ const definitions = [
         ],
         model: "TS0011_switch_module",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya QS-Zigbee-S05-L Leomoca 1-gang L-only \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -6001,7 +6031,7 @@ const definitions = [
         ],
         model: "TS0002_limited",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya QS-Zigbee-S04-2C \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -6075,7 +6105,7 @@ const definitions = [
         ],
         model: "TS0003",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "QS-Zigbee-S10-3C \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -6175,7 +6205,7 @@ const definitions = [
         ],
         model: "QS-Zigbee-SEC01-U",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "NOVATO ZRM01 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -6223,7 +6253,7 @@ const definitions = [
         ],
         model: "QS-Zigbee-SEC02-U",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "NOVATO ZRM02 Tuya QS-Zigbee-S10-2C \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -6297,7 +6327,7 @@ const definitions = [
         ],
         model: "TS0011",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "NOVATO ZNR01 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -6345,7 +6375,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya QS-Zigbee-S04-2C-ML-C \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -6419,7 +6449,7 @@ const definitions = [
         ],
         model: "TS130F",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya QS-Zigbee-S10-C04 curtains \u2014 Romasku custom firmware",
         extend: [
             deviceAddCustomCluster("manuSpecificTuyaCoverSwitchConfig", {
                 ID: 0xFC01,
@@ -6496,7 +6526,7 @@ const definitions = [
         ],
         model: "TS0003",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/OXT 3-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -6596,7 +6626,7 @@ const definitions = [
         ],
         model: "TS0001_switch_module",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/OXT 1-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -6644,7 +6674,7 @@ const definitions = [
         ],
         model: "TS0002_basic",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/OXT 2-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -6718,7 +6748,7 @@ const definitions = [
         ],
         model: "TS0002_basic",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 2-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -6792,7 +6822,7 @@ const definitions = [
         ],
         model: "WHD02",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 1-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -6840,7 +6870,7 @@ const definitions = [
         ],
         model: "WHD02",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya ZS2S 1-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -6888,7 +6918,7 @@ const definitions = [
         ],
         model: "TS0001_switch_module",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya ZTU 1-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -6936,7 +6966,7 @@ const definitions = [
         ],
         model: "TS0004_switch_module",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 4-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -7062,7 +7092,7 @@ const definitions = [
         ],
         model: "L13Z",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "UNSH FS-02HW (Nous L13Z clone) \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -7136,7 +7166,7 @@ const definitions = [
         ],
         model: "TS0002",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Zbeacon 2-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -7211,7 +7241,7 @@ const definitions = [
         ],
         model: "TS011F_plug_1_2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED/Boruidapls PM Outlet \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -7259,7 +7289,7 @@ const definitions = [
         ],
         model: "TS011F_plug_1_2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED PM outlet \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -7317,7 +7347,7 @@ const definitions = [
         ],
         model: "TS011F_plug_1_2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED PM outlet \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -7375,7 +7405,7 @@ const definitions = [
         ],
         model: "TS011F_plug_1_2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED PM outlet \ud83c\udd72 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -7433,7 +7463,7 @@ const definitions = [
         ],
         model: "_TZ3000_o1jzcxou",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED outlet \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -7491,7 +7521,7 @@ const definitions = [
         ],
         model: "MG-GPO01",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "MakeGood MG-GPO01 double socket \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -7585,7 +7615,7 @@ const definitions = [
         ],
         model: "ZK-EU",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes PM wall socket \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -7642,7 +7672,7 @@ const definitions = [
         ],
         model: "TS011F_plug_1",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya PM wall socket \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -7699,7 +7729,7 @@ const definitions = [
         ],
         model: "TS011F_plug_1",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Aubess PM plug \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -7756,7 +7786,7 @@ const definitions = [
         ],
         model: "TS011F_plug_1",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Lellki plug \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -7813,7 +7843,7 @@ const definitions = [
         ],
         model: "HG08673",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "LIDL PM plug HG08673 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -7870,7 +7900,7 @@ const definitions = [
         ],
         model: "ZG-101ZS",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "HOBEIAN ZG-101ZS \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, } }),
@@ -7971,7 +8001,7 @@ const definitions = [
         ],
         model: "ZG-101ZL",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "HOBEIAN ZG-101ZL button \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch": 1, } }),
@@ -8021,7 +8051,7 @@ const definitions = [
         ],
         model: "IH-K663",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno IH-K663 button \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch": 1, } }),
@@ -8071,7 +8101,7 @@ const definitions = [
         ],
         model: "_TZ3000_mh9px7cq",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno 4-button remote \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, } }),
@@ -8173,7 +8203,7 @@ const definitions = [
         ],
         model: "TS0046",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno 6-button remote \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, } }),
@@ -8274,7 +8304,7 @@ const definitions = [
         ],
         model: "HG08164",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "LIDL button \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch": 1, } }),
@@ -8324,7 +8354,7 @@ const definitions = [
         ],
         model: "ZT-B-EU1",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes 1-gang scene switch (multiple variants) \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch": 1, } }),
@@ -8374,7 +8404,7 @@ const definitions = [
         ],
         model: "ZT-B-EU2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes 2-gang scene switch (multiple variants) \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, } }),
@@ -8441,7 +8471,7 @@ const definitions = [
         ],
         model: "ZT-B-EU3",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes 3-gang scene switch (multiple variants) \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, } }),
@@ -8525,7 +8555,7 @@ const definitions = [
         ],
         model: "ZT-SR-EU4",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes 4-gang scene switch (multiple variants) \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, } }),
@@ -8626,7 +8656,7 @@ const definitions = [
         ],
         model: "TS0044",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes 4-gang scene switch \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, } }),
@@ -8727,7 +8757,7 @@ const definitions = [
         ],
         model: "SH-SC07",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya button \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch": 1, } }),
@@ -8777,7 +8807,7 @@ const definitions = [
         ],
         model: "TS0041",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya button \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch": 1, } }),
@@ -8827,7 +8857,7 @@ const definitions = [
         ],
         model: "TS0041",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/Moes 1-gang scene switch \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch": 1, } }),
@@ -8877,7 +8907,7 @@ const definitions = [
         ],
         model: "TS0042",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/Moes 2-gang scene switch \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, } }),
@@ -8944,7 +8974,7 @@ const definitions = [
         ],
         model: "TS0043",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/Moes 3-gang scene switch \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, } }),
@@ -9028,7 +9058,7 @@ const definitions = [
         ],
         model: "TS0043",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/Moes 3-gang scene switch \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, } }),
@@ -9112,7 +9142,7 @@ const definitions = [
         ],
         model: "TS0044",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/Moes 4-button wireless switch \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, } }),
@@ -9213,7 +9243,7 @@ const definitions = [
         ],
         model: "TLSR82xx_2btn_remote",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 2-button remote \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, } }),
@@ -9280,7 +9310,7 @@ const definitions = [
         ],
         model: "ZG-101ZL",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya button wireless switch \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch": 1, } }),
@@ -9330,7 +9360,7 @@ const definitions = [
         ],
         model: "TS004F",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 4-button wireless switch \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, } }),
@@ -9431,7 +9461,7 @@ const definitions = [
         ],
         model: "RoomsAI_37022454",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO ZTS02RD-US-W1 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -9479,7 +9509,7 @@ const definitions = [
         ],
         model: "37022463-2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO ZTS02RD-US-W2 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -9554,7 +9584,7 @@ const definitions = [
         ],
         model: "370224742",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO ZTS02RD-US-W3 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -9654,7 +9684,7 @@ const definitions = [
         ],
         model: "TS0004",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO ZTS02RD-US-W4 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -9781,7 +9811,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED dim-backlight 1-gang touch switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -9840,7 +9870,7 @@ const definitions = [
         ],
         model: "TS0002",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED dim-backlight 2-gang touch switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -9935,7 +9965,7 @@ const definitions = [
         ],
         model: "TS0003",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED dim-backlight 3-gang touch switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -10035,7 +10065,7 @@ const definitions = [
         ],
         model: "TS0011",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED latching-relays 1-gang touch switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -10095,7 +10125,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED latching-relays 2-gang touch switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -10190,7 +10220,7 @@ const definitions = [
         ],
         model: "TS0013",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED latching-relays 3-gang touch switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -10320,7 +10350,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Melody 1-gang touch switch L+N \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -10368,7 +10398,7 @@ const definitions = [
         ],
         model: "TS0002",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Melody 2-gang touch switch L+N \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -10443,7 +10473,7 @@ const definitions = [
         ],
         model: "TS0003",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Melody 3-gang touch switch L+N \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -10544,7 +10574,7 @@ const definitions = [
         ],
         model: "TS0004",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Melody 4-gang touch switch L+N \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -10670,7 +10700,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED 1-gang touch switch \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -10728,7 +10758,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED 1-gang touch switch \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -10786,7 +10816,7 @@ const definitions = [
         ],
         model: "TS0002",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED 2-gang touch switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -10870,7 +10900,7 @@ const definitions = [
         ],
         model: "TS0002",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED 2-gang touch switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -10954,7 +10984,7 @@ const definitions = [
         ],
         model: "TS0011",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED 1-gang touch switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -11013,7 +11043,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED 2-gang touch switch \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -11107,7 +11137,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED 2-gang touch switch \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -11201,7 +11231,7 @@ const definitions = [
         ],
         model: "TS0013",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED 3-gang touch switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -11331,7 +11361,7 @@ const definitions = [
         ],
         model: "EC-GL86ZPCS11",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Echo Click / Scale 1-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -11389,7 +11419,7 @@ const definitions = [
         ],
         model: "EC-GL86ZPCS21",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Echo Click / Scale 2-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -11483,13 +11513,13 @@ const definitions = [
         ],
         model: "EC-GL86ZPCS31",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Echo Click / Scale 3-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
             romasku.multiPressResetCount("multi_press_reset_count", "switch_left"),
             romasku.networkIndicator("network_led", "switch_left"),
-            onOff({ endpointNames: ["relay_left", "relay_middle", "relay_right"] }),
+            onOff({ endpointNames: ["relay_left", "relay_middle", "relay_right"], configureReporting: false }),
             romasku.pressAction("switch_left_press_action", "switch_left"),
             romasku.switchMode("switch_left_mode", "switch_left"),
             romasku.switchAction("switch_left_action_mode", "switch_left"),
@@ -11526,84 +11556,6 @@ const definitions = [
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
-            const endpoint1 = device.getEndpoint(1);
-            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint1.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
-            const endpoint2 = device.getEndpoint(2);
-            await reporting.bind(endpoint2, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint2.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
-            const endpoint3 = device.getEndpoint(3);
-            await reporting.bind(endpoint3, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint3.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
-            const endpoint4 = device.getEndpoint(4);
-            await reporting.onOff(endpoint4, {
-                min: 0,
-                max: constants.repInterval.MAX,
-                change: 1,
-            });
-            const endpoint5 = device.getEndpoint(5);
-            await reporting.onOff(endpoint5, {
-                min: 0,
-                max: constants.repInterval.MAX,
-                change: 1,
-            });
-            const endpoint6 = device.getEndpoint(6);
-            await reporting.onOff(endpoint6, {
-                min: 0,
-                max: constants.repInterval.MAX,
-                change: 1,
-            });
-
-            await endpoint4.configureReporting("genOnOff", [
-                {
-                    attribute: {ID: 0xff02, type: 0x10}, // Boolean
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
-            await endpoint5.configureReporting("genOnOff", [
-                {
-                    attribute: {ID: 0xff02, type: 0x10}, // Boolean
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
-            await endpoint6.configureReporting("genOnOff", [
-                {
-                    attribute: {ID: 0xff02, type: 0x10}, // Boolean
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
-
-
         },
         ota: true,
     },
@@ -11614,7 +11566,7 @@ const definitions = [
         ],
         model: "EC-GL86ZPCS41",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Echo Click / Scale 4-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -11780,7 +11732,7 @@ const definitions = [
         ],
         model: "EC-SL-FK86ZPCS11",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Echo Click 1-gang L-only \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -11838,7 +11790,7 @@ const definitions = [
         ],
         model: "EC-SL-FK86ZPCS21",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Echo Click 2-gang L-only \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -11932,7 +11884,7 @@ const definitions = [
         ],
         model: "EC-SL-FK86ZPCS31",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Echo Click 3-gang L-only \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -12062,7 +12014,7 @@ const definitions = [
         ],
         model: "TS0014",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Girier 4-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -12227,7 +12179,7 @@ const definitions = [
         ],
         model: "TS0601_switch_1_gang",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "HOBEIAN ZG-302Z1 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -12284,7 +12236,7 @@ const definitions = [
         ],
         model: "Homeetec_37022454",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "homeetec 1-gang touch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -12332,7 +12284,7 @@ const definitions = [
         ],
         model: "37022463-1",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "homeetec 2-gang touch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -12406,7 +12358,7 @@ const definitions = [
         ],
         model: "37022474_1",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "homeetec 3-gang touch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -12506,7 +12458,7 @@ const definitions = [
         ],
         model: "_TZ3000_qq9ahj6z",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno 1-gang switches (button/touch) UNSH 1-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -12554,7 +12506,7 @@ const definitions = [
         ],
         model: "_TZ3000_zxrfobzw",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno 2-gang switches (buttons/touch) UNSH 2-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -12628,7 +12580,7 @@ const definitions = [
         ],
         model: "TW-03",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno 3-gang switches (buttons/touch) UNSH 3-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -12728,7 +12680,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "LerLink 2-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -12821,7 +12773,7 @@ const definitions = [
         ],
         model: "TS0013",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "LerLink 3-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -12950,7 +12902,7 @@ const definitions = [
         ],
         model: "TS0014",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "LerLink 4-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -13115,7 +13067,7 @@ const definitions = [
         ],
         model: "TS130F",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "LoraTap 1-gang curtains switch \u2014 Romasku custom firmware",
         extend: [
             deviceAddCustomCluster("manuSpecificTuyaCoverSwitchConfig", {
                 ID: 0xFC01,
@@ -13192,7 +13144,7 @@ const definitions = [
         ],
         model: "TS0011",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Manhot \ud83c\udd70 1-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -13249,7 +13201,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Manhot \ud83c\udd70 2-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -13342,7 +13294,7 @@ const definitions = [
         ],
         model: "TS0013",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Manhot \ud83c\udd70 3-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -13471,7 +13423,7 @@ const definitions = [
         ],
         model: "TS0011",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Manhot \ud83c\udd71 1-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -13528,7 +13480,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Manhot \ud83c\udd71 2-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -13621,7 +13573,7 @@ const definitions = [
         ],
         model: "TS0013",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Manhot \ud83c\udd71 3-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -13750,7 +13702,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Milfra 1-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -13808,7 +13760,7 @@ const definitions = [
         ],
         model: "TS0002",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Milfra 2-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -13902,7 +13854,7 @@ const definitions = [
         ],
         model: "TS0003",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Milfra 3-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -14032,7 +13984,7 @@ const definitions = [
         ],
         model: "TS0004",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Milfra 4-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -14199,7 +14151,7 @@ const definitions = [
         ],
         model: "ZS-EUB_1gang",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes 1-gang switches (all variants) \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -14257,7 +14209,7 @@ const definitions = [
         ],
         model: "ZS-EUB_2gang",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes 2-gang switches (all variants) \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -14351,7 +14303,7 @@ const definitions = [
         ],
         model: "TS0013",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes 3-gang switches (all variants) \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -14480,7 +14432,7 @@ const definitions = [
         ],
         model: "TS0014",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes 4-gang switches (all variants) \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -14645,7 +14597,7 @@ const definitions = [
         ],
         model: "SR-ZS",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes SR-ZS \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -14810,7 +14762,7 @@ const definitions = [
         ],
         model: "WS-US-ZB",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "NovaDigital ZTS-3W \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -14939,7 +14891,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "PSMART T441/T451 TL \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -14997,7 +14949,7 @@ const definitions = [
         ],
         model: "TS0002",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "PSMART T442/T452 TL \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -15092,7 +15044,7 @@ const definitions = [
         ],
         model: "T441",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "PSMART T441/T451 SL \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -15151,7 +15103,7 @@ const definitions = [
         ],
         model: "T442",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "PSMART T442/T452 SL \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -15245,7 +15197,7 @@ const definitions = [
         ],
         model: "ZM-L03E-Z",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "PSMART T443/T453 SL \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -15375,7 +15327,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 1-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -15432,7 +15384,7 @@ const definitions = [
         ],
         model: "X701A",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 1-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -15489,7 +15441,7 @@ const definitions = [
         ],
         model: "X702A",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 2-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -15582,7 +15534,7 @@ const definitions = [
         ],
         model: "X703A",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 3-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -15711,7 +15663,7 @@ const definitions = [
         ],
         model: "TS0003",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 3-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -15840,7 +15792,7 @@ const definitions = [
         ],
         model: "TS0004",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 4-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -16005,7 +15957,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 1-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -16053,7 +16005,7 @@ const definitions = [
         ],
         model: "TS0004",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 4-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -16179,7 +16131,7 @@ const definitions = [
         ],
         model: "X701A",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/Lonsonho 1-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -16237,7 +16189,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Zemismart 2-gang switch \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -16330,7 +16282,7 @@ const definitions = [
         ],
         model: "TS0011",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Zemismart 1-gang switch \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -16387,7 +16339,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Zemismart 2-gang switch \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),

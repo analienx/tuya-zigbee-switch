@@ -9,6 +9,7 @@ Model collisions are classified per re-review 5492467354 (gate E):
   matcher and is reported - never presented as deterministic.
 """
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -144,8 +145,16 @@ def test_mixed_unique_current_and_colliding_old_alias_keeps_both_match_surfaces(
     # definition. This is the real TS0002-GIR/TS0002-custom regression shape.
     assert '{ manufacturerName: "mfg_a", modelID: "MODEL-OLD" }' in js
     assert '"MODEL-CURRENT"' in js
-    block = js.split('model: "conv_a"')[0].rsplit("    {", 1)[-1]
+    # Extract THIS definition's match surface: everything from the last
+    # definition-opening brace (a 4-space '{' on its own line — fingerprint
+    # entries are 12-space indented with content on the same line, so they
+    # never match) up to the model line.
+    head = js.split('model: "conv_a"')[0]
+    block = re.split(r"\n    \{\n", head)[-1]
     assert "fingerprint:" in block
+    assert '"MODEL-OLD"' in block
+    assert "zigbeeModel:" in block
+    assert '"MODEL-CURRENT"' in block
     assert "zigbeeModel:" in block
 
 
