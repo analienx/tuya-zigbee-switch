@@ -13,6 +13,7 @@ from pathlib import Path
 
 HISTORICAL_SHA256 = "ef79acfd2141837b539189bfadda07799b53267bd746e1209335d38b91c66bfe"
 TARGET_DB_KEY = "SWITCH_BSEED_TS0726_3GANG"
+AUTHORITATIVE_OVERLAY = Path("zigbee2mqtt/converters/bseed_ts0726_v4.js")
 
 
 def sha256(path: Path) -> str:
@@ -53,33 +54,28 @@ def main() -> int:
     overlay = args.output_dir / "10-bseed-ts0726-overlay.js"
     shutil.copyfile(historical, fleet)
 
-    generated = run(
-        sys.executable,
-        "helper_scripts/make_z2m_custom_converters.py",
-        "device_db.yaml",
-        "--only-db-key",
-        TARGET_DB_KEY,
-    )
-    overlay.write_text(generated.stdout, encoding="utf-8")
+    if not AUTHORITATIVE_OVERLAY.is_file():
+        raise SystemExit(f"authoritative target overlay missing: {AUTHORITATIVE_OVERLAY}")
+    shutil.copyfile(AUTHORITATIVE_OVERLAY, overlay)
 
     audit = run(
         sys.executable,
-        "helper_scripts/audit_bseed_ts0726_overlay.py",
+        "helper_scripts/audit_bseed_ts0726_v4_overlay.py",
         str(overlay),
     )
-    action_probe_syntax = run(
-        sys.executable,
-        "-c",
-        (
-            "from pathlib import Path; "
-            "p=Path('helper_scripts/probe_bseed_ts0726_action_contract.js'); "
-            "assert p.exists() and p.stat().st_size > 0"
-        ),
+    syntax = run("node", "--check", str(overlay))
+    action_probe = run(
+        "node",
+        "helper_scripts/probe_bseed_ts0726_action_contract.js",
+        str(overlay),
     )
 
     manifest = {
         "status": "BUILT_NOT_DEPLOYED",
-        "architecture": "historical fleet converter + exact-fingerprint target overlay",
+        "architecture": (
+            "exact historical fleet converter + authoritative firmware-scoped "
+            "BSEED v4 target overlay"
+        ),
         "historical": {
             "file": fleet.name,
             "sha256": sha256(fleet),
@@ -94,12 +90,15 @@ def main() -> int:
             "fingerprint": {
                 "manufacturerName": "iedhxgyi",
                 "modelID": "TS0726-3-BS",
+                "softwareBuildID": "1.1.4-bseedv4",
+                "priority": 100,
             },
             "model": "EC-GL86ZPCS31",
         },
         "checks": {
             "overlay_audit": json.loads(audit.stdout),
-            "action_probe_present": action_probe_syntax.returncode == 0,
+            "javascript_syntax": "PASS" if syntax.returncode == 0 else "FAIL",
+            "action_contract": json.loads(action_probe.stdout),
             "runtime_match_probe_required": True,
             "installed_zhc_mutation_probe_required": True,
         },
