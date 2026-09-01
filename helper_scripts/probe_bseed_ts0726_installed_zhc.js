@@ -212,7 +212,7 @@ function verifyContract(definition, exposes, execution) {
         }
     }
 
-    const deviceConfig = exposes.find((item) => item.property === 'device_config');
+    const deviceConfig = exposes.find((item) => item.name === 'device_config' || item.label === 'Advanced hardware configuration');
     if (!deviceConfig) die('missing processed device_config expose');
     if (deviceConfig.label !== 'Advanced hardware configuration') {
         die(`device_config label mismatch: ${JSON.stringify(deviceConfig.label)}`);
@@ -253,7 +253,7 @@ async function main() {
     const verified = verifyContract(definition, exposes, execution);
 
     const interestingExposes = exposes.filter((item) =>
-        item.property === 'device_config' ||
+        item.name === 'device_config' ||
         item.property?.includes('physical_mode') ||
         item.label === 'Local relay trigger' ||
         item.label === 'Bound-device trigger' ||
