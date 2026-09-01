@@ -103,6 +103,10 @@ def test_migration_then_plain_generic_image(migration_image) -> None:
             read_physical_mode(device, RELAY_MIDDLE_ENDPOINT)
             == ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON
         )
+        assert (
+            read_physical_mode(device, RELAY_RIGHT_ENDPOINT)
+            == ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON
+        )
         marker_before = read_nv(NV_MARKER_ITEM)
         assert marker_before is not None
 
@@ -124,8 +128,8 @@ def test_migration_then_plain_generic_image(migration_image) -> None:
             == ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON
         )
         assert (
-            read_physical_mode(device, 6)
-            == ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED
+            read_physical_mode(device, RELAY_RIGHT_ENDPOINT)
+            == ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON
         )
         assert read_nv(NV_MARKER_ITEM) == marker_before
 
@@ -148,18 +152,22 @@ def test_plain_generic_image_first_enable_and_behavior(migration_image) -> None:
     with StubProc() as proc:
         device = Device(proc)
 
-        # First physical output enable for LEFT/MIDDLE is already ON.
-        res = device.p.exec("read_pin_init 34")  # C2 = (2<<4)|2
-        assert res.ok and int(res.payload["value"]) == 1
-        res = device.p.exec("read_pin_init 35")  # C3 = (2<<4)|3
-        assert res.ok and int(res.payload["value"]) == 1
-        assert device.get_gpio("C2", refresh=True)
-        assert device.get_gpio("C3", refresh=True)
+        # First physical output enable for ALL THREE smart-light feeds is ON.
+        for pin_num in (34, 35, 50):  # C2, C3, D2
+            res = device.p.exec(f"read_pin_init {pin_num}")
+            assert res.ok and int(res.payload["value"]) == 1
+        for pin in ("C2", "C3", "D2"):
+            assert device.get_gpio(pin, refresh=True)
 
-        # Virtual relay state changes independently of the physical output.
-        device.zcl_relay_off(RELAY_LEFT_ENDPOINT)
-        assert device.zcl_relay_get(RELAY_LEFT_ENDPOINT) == "0"
-        assert device.get_gpio("C2", refresh=True)
-        device.zcl_relay_on(RELAY_LEFT_ENDPOINT)
-        assert device.zcl_relay_get(RELAY_LEFT_ENDPOINT) == "1"
-        assert device.get_gpio("C2", refresh=True)
+        # Virtual relay state changes independently of every physical output.
+        for endpoint, pin in (
+            (RELAY_LEFT_ENDPOINT, "C2"),
+            (RELAY_MIDDLE_ENDPOINT, "C3"),
+            (RELAY_RIGHT_ENDPOINT, "D2"),
+        ):
+            device.zcl_relay_off(endpoint)
+            assert device.zcl_relay_get(endpoint) == "0"
+            assert device.get_gpio(pin, refresh=True)
+            device.zcl_relay_on(endpoint)
+            assert device.zcl_relay_get(endpoint) == "1"
+            assert device.get_gpio(pin, refresh=True)
