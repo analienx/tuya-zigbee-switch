@@ -25,7 +25,7 @@
 // Multi-state marker stored in NV_ITEM_MIGRATION_MARKER as a uint32. Item
 // absence is equivalent to MIG_STATE_NONE. Every boot can therefore classify
 // the NVM into exactly one of:
-//   canonical + detached_on, swapped + MANUAL/ON, or "not ours (yet)".
+//   canonical + valid physical policy, swapped + MANUAL/ON, or "not ours (yet)".
 #define MIG_STATE_NONE                   0x00000000
 #define MIG_STATE_FORWARD_IN_PROGRESS    0x00000001
 #define MIG_STATE_FORWARD_COMPLETE       0x00000002
@@ -199,6 +199,47 @@ static bool ensure_permanent_power_relay_modes(void) {
     return true;
 }
 
+
+static bool ensure_valid_or_default_power_relay_modes(void) {
+    // After the migration is complete, a valid persisted physical mode is a
+    // user setting and must survive reboot. Only missing/corrupt slots are
+    // repaired to the safe smart-light default DETACHED_ON.
+    for (uint8_t relay_idx = 0;
+         relay_idx < DEVICE_MIGRATION_PERMANENT_POWER_RELAY_COUNT;
+         relay_idx++) {
+        if (!relay_cluster_nv_ensure_valid_physical_mode(
+                relay_idx, ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON)) {
+            printf("Device migration: failed to validate relay %d physical "
+                   "mode\r\n",
+                   relay_idx);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool ensure_canonical_indicator_modes(void) {
+    // LEFT/MIDDLE indicator pins become real panel LEDs only AFTER the
+    // canonical map is durable. At that point SAME makes the LED follow the
+    // logical Zigbee relay state while DETACHED_ON keeps mains independent.
+    //
+    // Never call this before canonicalization: on the historical swapped map
+    // these indicator pins are the mains contacts.
+    for (uint8_t relay_idx = 0;
+         relay_idx < DEVICE_MIGRATION_SWAPPED_RELAY_COUNT;
+         relay_idx++) {
+        if (!relay_cluster_nv_set_indicator_mode(
+                relay_idx, ZCL_ONOFF_INDICATOR_MODE_SAME)) {
+            printf("Device migration: failed to set relay %d indicator SAME\r\n",
+                   relay_idx);
+            return false;
+        }
+    }
+
+    return true;
+}
+
 #endif // DEVICE_MIGRATION_FROM_CONFIG || DEVICE_MIGRATION_REVERT
 
 #if defined(DEVICE_MIGRATION_FROM_CONFIG) && !defined(DEVICE_MIGRATION_REVERT)
@@ -223,10 +264,12 @@ static device_migration_result_t migrate_swapped_pins_to_canonical(void) {
         // Completed-state invariant: never trust historical state - the
         // CURRENT config decides which side is mains right now.
         if (is_canonical) {
-            // Mains is the R side: DETACHED_ON must be re-proven every boot.
-            if (!ensure_permanent_power_relay_modes()) {
-                printf("Device migration: completed state but DETACHED_ON not "
-                       "provable; blocking init\r\n");
+            // Migration established DETACHED_ON as the safe default, but the
+            // physical-policy attribute is a real persisted user setting.
+            // Preserve any valid mode; repair only missing/corrupt slots.
+            if (!ensure_valid_or_default_power_relay_modes()) {
+                printf("Device migration: completed state has unprovable "
+                       "physical policy; blocking init\r\n");
                 return DEVICE_MIGRATION_BLOCK_INIT;
             }
         } else if (is_swapped) {
@@ -310,9 +353,20 @@ static device_migration_result_t migrate_swapped_pins_to_canonical(void) {
         }
     }
 
-    // Phase F: only now is the transaction complete.
+    // Phase F: now that canonical C0/D7 are panel LEDs (not mains), switch
+    // LEFT/MIDDLE from the migration's MANUAL+ON safety state to SAME. This
+    // lets the panel LEDs follow the logical relay-state proxy while the real
+    // C2/C3/D2 mains contacts remain protected by DETACHED_ON.
+    if (!ensure_canonical_indicator_modes()) {
+        // Canonical + verified DETACHED_ON remains electrically safe. The
+        // transaction stays IN_PROGRESS and retries this UX/indicator phase
+        // on the next boot.
+        return DEVICE_MIGRATION_SAFE_PARTIAL;
+    }
+
+    // Phase G: only now is the transaction complete.
     if (!write_marker_state(MIG_STATE_FORWARD_COMPLETE)) {
-        // Canonical + verified DETACHED_ON: safe partial.
+        // Canonical + verified DETACHED_ON + canonical indicator semantics.
         return DEVICE_MIGRATION_SAFE_PARTIAL;
     }
 
