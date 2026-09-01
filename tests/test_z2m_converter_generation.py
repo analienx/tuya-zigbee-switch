@@ -236,6 +236,30 @@ def test_real_db_preserves_mixed_alias_and_target_ux() -> None:
     assert "reporting.onOff(" not in target
 
 
+def test_bseed_audit_script_passes_on_fresh_generation(tmp_path: Path) -> None:
+    audit = Path("helper_scripts/audit_bseed_ts0726_converter.py")
+    out_v2 = tmp_path / "switch_custom.js"
+    out_v1 = tmp_path / "switch_custom_v1.js"
+
+    for path, extra_args in ((out_v2, []), (out_v1, ["--z2m-v1"])):
+        result = subprocess.run(
+            [sys.executable, str(HELPER), "device_db.yaml", *extra_args],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        path.write_text(result.stdout)
+
+    result = subprocess.run(
+        [sys.executable, str(audit), str(out_v2), str(out_v1)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert '"status": "PASS"' in result.stdout
+    assert '"ux_contract": "PASS"' in result.stdout
+
+
 def test_regenerated_files_match_committed_files() -> None:
     """Regeneration consistency: BOTH maintained converter files are clean."""
     result_v2 = subprocess.run(
