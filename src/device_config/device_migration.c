@@ -219,26 +219,6 @@ static bool ensure_valid_or_default_power_relay_modes(void) {
     return true;
 }
 
-static bool ensure_canonical_indicator_modes(void) {
-    // LEFT/MIDDLE indicator pins become real panel LEDs only AFTER the
-    // canonical map is durable. At that point SAME makes the LED follow the
-    // logical Zigbee relay state while DETACHED_ON keeps mains independent.
-    //
-    // Never call this before canonicalization: on the historical swapped map
-    // these indicator pins are the mains contacts.
-    for (uint8_t relay_idx = 0;
-         relay_idx < DEVICE_MIGRATION_SWAPPED_RELAY_COUNT;
-         relay_idx++) {
-        if (!relay_cluster_nv_set_indicator_mode(
-                relay_idx, ZCL_ONOFF_INDICATOR_MODE_SAME)) {
-            printf("Device migration: failed to set relay %d indicator SAME\r\n",
-                   relay_idx);
-            return false;
-        }
-    }
-
-    return true;
-}
 
 #endif // DEVICE_MIGRATION_FROM_CONFIG || DEVICE_MIGRATION_REVERT
 
@@ -353,20 +333,15 @@ static device_migration_result_t migrate_swapped_pins_to_canonical(void) {
         }
     }
 
-    // Phase F: now that canonical C0/D7 are panel LEDs (not mains), switch
-    // LEFT/MIDDLE from the migration's MANUAL+ON safety state to SAME. This
-    // lets the panel LEDs follow the logical relay-state proxy while the real
-    // C2/C3/D2 mains contacts remain protected by DETACHED_ON.
-    if (!ensure_canonical_indicator_modes()) {
-        // Canonical + verified DETACHED_ON remains electrically safe. The
-        // transaction stays IN_PROGRESS and retries this UX/indicator phase
-        // on the next boot.
-        return DEVICE_MIGRATION_SAFE_PARTIAL;
-    }
-
-    // Phase G: only now is the transaction complete.
+    // Phase F: the electrical migration is complete once canonical config
+    // and all three DETACHED_ON modes are durable. LEFT/MIDDLE indicators
+    // intentionally remain MANUAL + ON here. They are changed to SAME only
+    // after the operator has read back canonical config + physical modes and
+    // physically proved uninterrupted power on the real device. Keeping that
+    // user/physical boundary out of the one-shot firmware transaction prevents
+    // software-only evidence from silently completing the final panel-LED step.
     if (!write_marker_state(MIG_STATE_FORWARD_COMPLETE)) {
-        // Canonical + verified DETACHED_ON + canonical indicator semantics.
+        // Canonical + verified DETACHED_ON + MANUAL/ON indicator safety.
         return DEVICE_MIGRATION_SAFE_PARTIAL;
     }
 
