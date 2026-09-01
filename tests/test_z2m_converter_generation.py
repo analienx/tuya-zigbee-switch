@@ -307,6 +307,61 @@ def test_target_only_overlay_audit_passes_on_fresh_generation(tmp_path: Path) ->
     assert '"status": "PASS"' in audit.stdout
 
 
+def test_target_overlay_preserves_legacy_action_without_configure_binds(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(HELPER),
+            "device_db.yaml",
+            "--only-db-key",
+            "SWITCH_BSEED_TS0726_3GANG",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    js = result.stdout
+
+    # Historical compatibility surface: generic action plus per-button event
+    # payloads retain stable positional switch_0/1/2 prefixes.
+    assert "romasku.actionEvent({" in js
+    assert 'prefix: "switch_0", name: "switch_left"' in js
+    assert 'prefix: "switch_1", name: "switch_middle"' in js
+    assert 'prefix: "switch_2", name: "switch_right"' in js
+    assert "e.action(actions)" in js
+    assert 'cluster: "genMultistateInput"' in js
+    assert 'cluster: "genOnOff"' in js
+    assert 'cluster: "genLevelCtrl"' in js
+
+    # Compatibility decoder itself has no configure callback, and the BSEED
+    # target definition remains zero-bind/zero-reporting mutation.
+    target = js.split('model: "EC-GL86ZPCS31"', 1)[1]
+    assert "reporting.bind(" not in target
+    assert "reporting.onOff(" not in target
+
+
+def test_physical_relay_mode_is_explicit_firmware_capability(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [sys.executable, str(HELPER), "device_db.yaml"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    js = result.stdout
+
+    # Only SWITCH_BSEED_TS0726_3GANG currently declares the capability, with
+    # exactly three physical-relay endpoints. Older live Romasku firmware must
+    # not be offered unsupported 0xff03 controls.
+    calls = re.findall(r'romasku\.relayPhysicalMode\("[^"]+_physical_mode"', js)
+    assert len(calls) == 3, calls
+
+    target_head = js.split('model: "EC-GL86ZPCS31"')[0]
+    target_block = re.split(r"\n    \{\n", target_head)[-1] + js.split(
+        'model: "EC-GL86ZPCS31"', 1
+    )[1].split("\n    },\n    {", 1)[0]
+    assert target_block.count("relayPhysicalMode(") == 3
+
+
 def test_target_only_generation_rejects_unknown_db_key(tmp_path: Path) -> None:
     result = subprocess.run(
         [
