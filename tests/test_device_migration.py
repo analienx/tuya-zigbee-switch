@@ -205,6 +205,7 @@ def assert_blocked_no_parse(device: Device) -> None:
     # Mains contacts stay at power-on defaults: no unsafe initialization.
     assert not device.get_gpio(MAINS_LEFT_PIN, refresh=True)
     assert not device.get_gpio(MAINS_MIDDLE_PIN, refresh=True)
+    assert not device.get_gpio(MAINS_RIGHT_PIN, refresh=True)
 
 
 def read_config_file() -> str:
