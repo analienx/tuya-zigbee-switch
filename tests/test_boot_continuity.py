@@ -225,22 +225,25 @@ def test_reattach_synchronizes_to_virtual_on(device: Device) -> None:
         assert d.get_gpio(RELAY_PIN, refresh=True)
 
 
-def test_latching_detached_on_issues_single_policy_pulse(
-    latching_device: Device,
-) -> None:
+def test_latching_detached_on_coils_first_enable_inactive_and_single_pulse() -> None:
     seed_physical_mode(ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON)
 
     with StubProc(device_config=LATCHING_DEVICE_CONFIG) as proc:
         d = Device(proc)
-        # The single boot policy pulse is in flight (frozen time): the ON
-        # coil is driven and both coils return inactive after the pulse.
+        # CRITICAL: both coil pins first-enable INACTIVE — the persisted
+        # policy must never be established by holding a coil active.
+        assert first_enable_level(d, RELAY_PIN) == 0
+        assert first_enable_level(d, RELAY_OFF_COIL_PIN) == 0
+
+        # Exactly one ON pulse is initiated by policy application (frozen
+        # time keeps it in flight), and it ends after RELAY_PULSE_MS.
         assert d.get_gpio(RELAY_PIN, refresh=True)
         assert not d.get_gpio(RELAY_OFF_COIL_PIN, refresh=True)
         d.step_time(300)
         assert not d.get_gpio(RELAY_PIN, refresh=True)
         assert not d.get_gpio(RELAY_OFF_COIL_PIN, refresh=True)
 
-        # Virtual ON/OFF while detached does not generate coil pulses.
+        # Virtual ON/OFF while detached does not generate further pulses.
         d.zcl_relay_on(RELAY_ENDPOINT)
         d.zcl_relay_off(RELAY_ENDPOINT)
         assert not d.get_gpio(RELAY_PIN, refresh=True)
@@ -248,8 +251,28 @@ def test_latching_detached_on_issues_single_policy_pulse(
         assert d.zcl_relay_get(RELAY_ENDPOINT) == "0"
 
 
-def test_latching_attached_boot_unchanged(latching_device: Device) -> None:
+def test_latching_detached_off_single_off_pulse() -> None:
+    seed_physical_mode(ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_OFF)
+
+    with StubProc(device_config=LATCHING_DEVICE_CONFIG) as proc:
+        d = Device(proc)
+        assert first_enable_level(d, RELAY_PIN) == 0
+        assert first_enable_level(d, RELAY_OFF_COIL_PIN) == 0
+        # Exactly one OFF pulse: the OFF coil drives, then both deactivate.
+        assert not d.get_gpio(RELAY_PIN, refresh=True)
+        assert d.get_gpio(RELAY_OFF_COIL_PIN, refresh=True)
+        d.step_time(300)
+        assert not d.get_gpio(RELAY_PIN, refresh=True)
+        assert not d.get_gpio(RELAY_OFF_COIL_PIN, refresh=True)
+        assert d.zcl_relay_get(RELAY_ENDPOINT) == "0"
+
+
+def test_latching_attached_coils_first_enable_inactive(
+    latching_device: Device,
+) -> None:
     # Legacy attached boot: startup OFF, no pulse, coils inactive.
+    assert first_enable_level(latching_device, RELAY_PIN) == 0
+    assert first_enable_level(latching_device, RELAY_OFF_COIL_PIN) == 0
     assert not latching_device.get_gpio(RELAY_PIN, refresh=True)
     assert not latching_device.get_gpio(RELAY_OFF_COIL_PIN, refresh=True)
     latching_device.zcl_relay_on(RELAY_ENDPOINT)
@@ -257,6 +280,24 @@ def test_latching_attached_boot_unchanged(latching_device: Device) -> None:
     latching_device.step_time(300)
     assert not latching_device.get_gpio(RELAY_PIN, refresh=True)
     assert not latching_device.get_gpio(RELAY_OFF_COIL_PIN, refresh=True)
+
+
+def test_low_level_relay_component_on_high_zero(device: Device) -> None:
+    # Low-level polarity-coverage test: the config parser cannot express
+    # on_high=0, so the component polarity is flipped via the stub test hook
+    # and re-initialized at the component level.
+    device.zcl_relay_on(RELAY_ENDPOINT)
+    assert device.get_gpio(RELAY_PIN, refresh=True)  # on_high=1: ON = HIGH
+
+    res = device.p.exec("set_on_high 0 0")
+    assert res.ok
+    # Re-initialized OFF with on_high=0: inactive level = !on_high = HIGH.
+    assert device.get_gpio(RELAY_PIN, refresh=True)
+    device.zcl_relay_on(RELAY_ENDPOINT)
+    # Logical ON with on_high=0 drives the pin LOW.
+    assert not device.get_gpio(RELAY_PIN, refresh=True)
+    device.zcl_relay_off(RELAY_ENDPOINT)
+    assert device.get_gpio(RELAY_PIN, refresh=True)
 
 
 @pytest.mark.parametrize(

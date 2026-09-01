@@ -213,16 +213,16 @@ void parse_config() {
             switch_clusters_cnt++;
         } else if (entry[0] == 'R') {
             hal_gpio_pin_t pin = hal_gpio_parse_pin(entry + 1);
-            // NOTE: relay outputs are NOT enabled here. They are enabled by
-            // relay_init() once the persisted physical policy is known, so
-            // the first output enable already carries the correct level.
+            // NOTE: relay outputs are NOT enabled here — neither the main
+            // pin nor the latching off_pin. Both are enabled by relay_init()
+            // once the persisted physical policy is known, and latching
+            // coils always first-enable INACTIVE.
 
             relays[relays_cnt].pin     = pin;
             relays[relays_cnt].on_high = 1;
 
             if (entry[3] != '\0') {
                 pin = hal_gpio_parse_pin(entry + 3);
-                hal_gpio_init(pin, 0, HAL_GPIO_PULL_NONE);
                 relays[relays_cnt].off_pin     = pin;
                 relays[relays_cnt].is_latching = 1;
             }

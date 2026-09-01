@@ -49,22 +49,26 @@ void relay_init(relay_t *relay, uint8_t initial_physical_state) {
     hal_tasks_init(&relay->latching_task);
     relay->pending_on = 0;
 
-    // First output enable already carries the desired electrical level:
-    // compute it from on_high so active-low relays behave identically.
-    // NOTE: relay->on is the VIRTUAL state and is deliberately not touched
-    // here; the startup-mode logic owns it.
+    if (relay->is_latching) {
+        // Latching coils must never be held energized, and the contact state
+        // cannot be inferred by driving a coil: BOTH coil pins first-enable
+        // INACTIVE regardless of the persisted policy. The relay cluster
+        // issues at most the single serialized policy pulse when it applies
+        // the policy. relay->on (virtual state) is left to the startup-mode
+        // logic.
+        hal_gpio_init_output(relay->pin, HAL_GPIO_PULL_NONE, !relay->on_high);
+        hal_gpio_init_output(relay->off_pin, HAL_GPIO_PULL_NONE,
+                             !relay->on_high);
+        return;
+    }
+
+    // Normal relay: first output enable already carries the desired
+    // electrical level, computed from on_high so active-low relays behave
+    // identically. NOTE: relay->on is the VIRTUAL state and is deliberately
+    // not touched here; the startup-mode logic owns it.
     hal_gpio_init_output(relay->pin, HAL_GPIO_PULL_NONE,
                          initial_physical_state ? relay->on_high
                                                 : !relay->on_high);
-
-    if (relay->is_latching) {
-        // Latching coils must never be held energized: both coil pins
-        // initialize inactive and no boot pulse is issued here. The relay
-        // cluster issues at most the single policy pulse when it applies
-        // the persisted physical policy.
-        hal_gpio_init_output(relay->off_pin, HAL_GPIO_PULL_NONE,
-                             !relay->on_high);
-    }
 }
 
 void relay_drive_physical(relay_t *relay, uint8_t state) {
