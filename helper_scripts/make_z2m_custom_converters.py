@@ -218,8 +218,21 @@ def mark_ambiguous_models(devices):
     return deduped, merged
 
 
-def generate(db, z2m_v1=False):
+def generate(db, z2m_v1=False, only_db_keys=None):
+    # Collision classification MUST run against the complete DB. Filtering
+    # first would make a target-only overlay lose fingerprints for models that
+    # collide elsewhere in the DB (e.g. TS0726-3-BS).
     devices, merged = mark_ambiguous_models(collect_devices(db))
+
+    if only_db_keys:
+        wanted = set(only_db_keys)
+        found = {device["db_key"] for device in devices if device["db_key"] in wanted}
+        missing = wanted - found
+        if missing:
+            raise ValueError(
+                "Requested DB key(s) not generated: %s" % ", ".join(sorted(missing))
+            )
+        devices = [device for device in devices if device["db_key"] in wanted]
 
     template = env.get_template("switch_custom.js.jinja")
     rendered = template.render(devices=devices, z2m_v1=z2m_v1)
@@ -271,12 +284,27 @@ if __name__ == "__main__":
     parser.add_argument(
         "--z2m-v1", action=argparse.BooleanOptionalAction, help="Use old z2m"
     )
+    parser.add_argument(
+        "--only-db-key",
+        action="append",
+        dest="only_db_keys",
+        help=(
+            "Generate only the selected DB key. May be repeated. Collision "
+            "classification still uses the full DB so fingerprints remain correct."
+        ),
+    )
 
     args = parser.parse_args()
 
     db_str = Path(args.db_file).read_text()
     db = yaml.safe_load(db_str)
 
-    print(generate(db, z2m_v1=args.z2m_v1))
+    print(
+        generate(
+            db,
+            z2m_v1=args.z2m_v1,
+            only_db_keys=args.only_db_keys,
+        )
+    )
 
     exit(0)
