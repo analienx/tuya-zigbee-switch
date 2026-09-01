@@ -111,6 +111,16 @@ def collect_devices(db):
                 # BSEED canary; upstream/generic converter branches must not
                 # carry this special case.
                 "bseed_canary_no_configure": db_key == "SWITCH_BSEED_TS0726_3GANG",
+                # Firmware capability is explicit. Do not advertise physical
+                # relay policy to old firmware merely because a board has relays.
+                "has_physical_relay_policy": bool(
+                    device.get("physical_relay_policy", False)
+                ),
+                # Compatibility overlay only: retain the historical Z2M action
+                # event stream without re-creating configure-time bindings.
+                "preserve_legacy_action": bool(
+                    device.get("preserve_legacy_action", False)
+                ),
                 "model": device.get("override_z2m_device")
                 or device["stock_converter_model"],
                 "switchNames": switch_names,
