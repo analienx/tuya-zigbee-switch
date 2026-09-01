@@ -753,3 +753,89 @@ def test_revert_retries_when_marker_delete_fails(
         assert read_config(device) == SWAPPED_CONFIG
         assert read_marker() is None
 
+
+def test_forward_complete_swapped_forces_indicator_safety(
+    forward_stub: None,
+) -> None:
+    # CRITICAL 10: FORWARD_COMPLETE + swapped config re-proves MANUAL+ON
+    # (C2/C3 are the indicator/mains side again), one-shot preserved.
+    run_forward_migration()
+    seed_config(SWAPPED_CONFIG)
+    seed_relay_record(0, indicator_mode=INDICATOR_MODE_SAME)
+    seed_relay_record(1, indicator_mode=INDICATOR_MODE_SAME)
+
+    with booted() as device:
+        assert read_config(device) == SWAPPED_CONFIG
+        assert read_marker() == MIG_FORWARD_COMPLETE
+        assert (
+            read_indicator_mode(device, RELAY_LEFT_ENDPOINT)
+            == INDICATOR_MODE_MANUAL
+        )
+        assert read_indicator_state(device, RELAY_LEFT_ENDPOINT) == INDICATOR_ON
+        assert device.get_gpio(MAINS_LEFT_PIN, refresh=True)
+
+
+def test_forward_complete_blocks_on_swapped_safety_write_failure(
+    forward_stub: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_forward_migration()
+    seed_config(SWAPPED_CONFIG)
+    seed_relay_record(0, indicator_mode=INDICATOR_MODE_SAME)
+
+    build_forward_image()
+    monkeypatch.setenv("STUB_NVM_FAIL_WRITE", "9@1")
+    with booted() as device:
+        assert_blocked_no_parse(device)
+    monkeypatch.delenv("STUB_NVM_FAIL_WRITE")
+
+    with booted() as device:
+        assert read_config(device) == SWAPPED_CONFIG
+        assert (
+            read_indicator_mode(device, RELAY_LEFT_ENDPOINT)
+            == INDICATOR_MODE_MANUAL
+        )
+
+
+def test_forward_complete_blocks_on_foreign_config_byte_identical(
+    forward_stub: None,
+) -> None:
+    run_forward_migration()
+    seed_config(UNRELATED_CONFIG)
+    watched = (
+        NV_CONFIG_ITEM,
+        NV_RELAY_RECORD_BASE,
+        NV_PHYSICAL_MODE_BASE,
+        NV_MARKER_ITEM,
+    )
+    before = {item: read_nv(item) for item in watched}
+
+    with booted() as device:
+        assert_blocked_no_parse(device)
+
+    assert {item: read_nv(item) for item in watched} == before
+
+
+def test_forward_zero_marker_behaves_like_absent(forward_stub: None) -> None:
+    # CRITICAL 11: a physically present zero marker must behave exactly like
+    # marker absence - the migration runs to completion.
+    seed_config(SWAPPED_CONFIG)
+    seed_marker(0)
+
+    with booted() as device:
+        assert_forward_complete(device)
+
+
+def test_revert_zero_marker_leaves_device_untouched(forward_stub: None) -> None:
+    # CRITICAL 11: recovery must not treat a zero marker as migration-owned.
+    seed_config(CANONICAL_CONFIG)
+    seed_marker(0)
+    seed_relay_record(0, indicator_mode=INDICATOR_MODE_SAME)
+    watched = (NV_CONFIG_ITEM, NV_RELAY_RECORD_BASE, NV_MARKER_ITEM)
+    before = {item: read_nv(item) for item in watched}
+
+    build_revert_image()
+    with booted() as device:
+        assert read_config(device) == CANONICAL_CONFIG
+        assert read_marker() == 0
+        assert {item: read_nv(item) for item in watched} == before
+

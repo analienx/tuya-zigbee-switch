@@ -67,6 +67,13 @@ static marker_status_t migration_marker_state(uint32_t *state) {
         return MARKER_INVALID;
     }
 
+    if (stored == MIG_STATE_NONE) {
+        // A physically present zero value is semantically identical to
+        // absence: no transaction is owned or in flight, so neither image
+        // may treat the device as migration-owned.
+        return MARKER_ABSENT;
+    }
+
     *state = stored;
     return MARKER_VALID;
 }
@@ -201,13 +208,28 @@ static device_migration_result_t migrate_swapped_pins_to_canonical(void) {
                                      DEVICE_MIGRATION_TO_CONFIG_STR) == 0;
 
     if (marker == MARKER_VALID && state == MIG_STATE_FORWARD_COMPLETE) {
-        // Completed-state invariant: never trust historical state. On the
-        // canonical map the mains side is the R contact, so every boot must
-        // re-prove DETACHED_ON; a missing/wrong slot is forced back and
-        // verified, and an unprovable slot blocks init.
-        if (is_canonical && !ensure_swapped_relay_modes()) {
-            printf("Device migration: completed state but DETACHED_ON not "
-                   "provable; blocking init\r\n");
+        // Completed-state invariant: never trust historical state - the
+        // CURRENT config decides which side is mains right now.
+        if (is_canonical) {
+            // Mains is the R side: DETACHED_ON must be re-proven every boot.
+            if (!ensure_swapped_relay_modes()) {
+                printf("Device migration: completed state but DETACHED_ON not "
+                       "provable; blocking init\r\n");
+                return DEVICE_MIGRATION_BLOCK_INIT;
+            }
+        } else if (is_swapped) {
+            // Mains is the indicator side again: MANUAL + ON must be
+            // re-proven, even though the transaction marked itself complete.
+            if (!ensure_swapped_relay_safety()) {
+                printf("Device migration: completed state on swapped config "
+                       "with unprovable MANUAL/ON; blocking init\r\n");
+                return DEVICE_MIGRATION_BLOCK_INIT;
+            }
+        } else {
+            // Protected invariant failure: a foreign config under our
+            // completed marker is never mutated.
+            printf("Device migration: completed state with foreign config; "
+                   "blocking init, NVM untouched\r\n");
             return DEVICE_MIGRATION_BLOCK_INIT;
         }
         return DEVICE_MIGRATION_SAFE_TO_CONTINUE;
