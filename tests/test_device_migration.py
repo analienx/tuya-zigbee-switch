@@ -398,6 +398,107 @@ def test_forward_skips_fresh_canonical_device(forward_stub: None) -> None:
         assert read_nv(NV_PHYSICAL_MODE_BASE) is None
 
 
+def test_forward_blocks_on_canonical_mode_write_failure(
+    forward_stub: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # CRITICAL 8: canonical + FORWARD_IN_PROGRESS + failed mode write must
+    # never parse - C2/C3 are R and DETACHED_ON is unproven.
+    for pre_mode in (None, ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED):
+        build_forward_image()
+        seed_config(CANONICAL_CONFIG)
+        seed_marker(MIG_FORWARD_IN_PROGRESS)
+        if pre_mode is not None:
+            seed_physical_mode(0, pre_mode)
+            seed_physical_mode(1, pre_mode)
+
+        monkeypatch.setenv("STUB_NVM_FAIL_WRITE", "0x23@1")
+        with booted() as device:
+            assert_blocked_no_parse(device)
+        monkeypatch.delenv("STUB_NVM_FAIL_WRITE")
+
+        with booted() as device:
+            assert_forward_complete(device)
+
+
+def test_forward_complete_state_reproves_detached_on(forward_stub: None) -> None:
+    run_forward_migration()
+    # Simulate a later corruption/deletion of a safety-critical slot.
+    nv_path(NV_PHYSICAL_MODE_BASE).unlink()
+
+    build_forward_image()
+    with booted() as device:
+        # FORWARD_COMPLETE must re-prove - not trust - DETACHED_ON.
+        assert_forward_complete(device)
+
+
+def test_forward_blocks_when_completed_state_mode_write_fails(
+    forward_stub: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_forward_migration()
+    nv_path(NV_PHYSICAL_MODE_BASE).unlink()
+
+    build_forward_image()
+    monkeypatch.setenv("STUB_NVM_FAIL_WRITE", "0x23@1")
+    with booted() as device:
+        assert_blocked_no_parse(device)
+    monkeypatch.delenv("STUB_NVM_FAIL_WRITE")
+
+    with booted() as device:
+        assert_forward_complete(device)
+
+
+@pytest.mark.parametrize(
+    "pre_mode",
+    [
+        None,  # slot absent
+        ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED,
+        ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_OFF,
+        0xAB,  # invalid byte
+    ],
+)
+def test_revert_canonical_forces_modes_to_detached_on(
+    forward_stub: None, pre_mode: int | None
+) -> None:
+    # CRITICAL 9: recovery on the canonical map must prove DETACHED_ON from
+    # current state, not from the historical FORWARD_COMPLETE marker.
+    seed_config(CANONICAL_CONFIG)
+    seed_marker(MIG_FORWARD_COMPLETE)
+    seed_relay_record(0, indicator_mode=INDICATOR_MODE_SAME)
+    seed_relay_record(1, indicator_mode=INDICATOR_MODE_SAME)
+    if pre_mode is not None:
+        seed_physical_mode(0, pre_mode)
+        seed_physical_mode(1, pre_mode)
+
+    build_revert_image()
+    with booted() as device:
+        assert read_config(device) == SWAPPED_CONFIG
+        assert read_nv(NV_PHYSICAL_MODE_BASE) is None
+        assert read_marker() is None
+        assert (
+            read_indicator_mode(device, RELAY_LEFT_ENDPOINT)
+            == INDICATOR_MODE_MANUAL
+        )
+        assert device.get_gpio(MAINS_LEFT_PIN, refresh=True)
+
+
+def test_revert_blocks_when_canonical_mode_write_fails(
+    forward_stub: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed_config(CANONICAL_CONFIG)
+    seed_marker(MIG_FORWARD_COMPLETE)
+    seed_relay_record(0, indicator_mode=INDICATOR_MODE_SAME)
+
+    build_revert_image()
+    monkeypatch.setenv("STUB_NVM_FAIL_WRITE", "0x23@1")
+    with booted() as device:
+        assert_blocked_no_parse(device)
+    monkeypatch.delenv("STUB_NVM_FAIL_WRITE")
+
+    with booted() as device:
+        assert read_config(device) == SWAPPED_CONFIG
+        assert read_marker() is None
+
+
 def test_forward_retries_when_config_write_fails(
     forward_stub: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
