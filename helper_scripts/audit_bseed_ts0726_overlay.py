@@ -7,7 +7,7 @@ import argparse
 import json
 from pathlib import Path
 
-TARGET_FP = '{ manufacturerName: "iedhxgyi", modelID: "TS0726-3-BS" }'
+TARGET_FP = '{ manufacturerName: "iedhxgyi", modelID: "TS0726-3-BS", softwareBuildID: "1.1.4-8542fc05", priority: 100 }'
 TARGET_MODEL = 'model: "EC-GL86ZPCS31"'
 
 
@@ -47,6 +47,8 @@ def main() -> int:
         "Changing this setting can immediately switch mains power",
         "Advanced hardware configuration",
         "may require recovery firmware",
+        'softwareBuildID: "1.1.4-8542fc05"',
+        "priority: 100",
     ):
         if marker not in text:
             failures.append(f"missing marker: {marker}")
