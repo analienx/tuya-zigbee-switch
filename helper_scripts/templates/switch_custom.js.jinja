@@ -363,11 +363,20 @@ const romasku = {
 const definitions = [
 {% for device in devices %}
     {
+        {% if device.has_collision %}
+        {# Ambiguous model: match deterministically on manufacturer+model #}
+        fingerprint: [
+        {% for fp in device.fingerprints %}
+            { manufacturerName: "{{fp.manufacturerName}}", modelID: "{{fp.modelID}}" },
+        {% endfor %}
+        ],
+        {% else %}
         zigbeeModel: [
         {% for zb_model in device.zb_models %}
             "{{zb_model}}",
         {% endfor %}
         ],
+        {% endif %}
         model: "{{device.model}}",
         vendor: "Tuya-custom",
         description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
