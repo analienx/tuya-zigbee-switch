@@ -213,6 +213,56 @@ def test_generation_is_reproducible(tmp_path: Path) -> None:
     assert run_generator(db)[0] == run_generator(db)[0]
 
 
+def test_target_only_generation_preserves_full_db_collision_context(tmp_path: Path) -> None:
+    """Filtering happens AFTER collision analysis, so target keeps fingerprint."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(HELPER),
+            "device_db.yaml",
+            "--only-db-key",
+            "SWITCH_BSEED_TS0726_3GANG",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    js = result.stdout
+
+    assert js.count('model: "EC-GL86ZPCS31"') == 1
+    assert 'model: "EC-SL-FK86ZPCS31"' not in js
+    assert js.count(
+        '{ manufacturerName: "iedhxgyi", modelID: "TS0726-3-BS" }'
+    ) == 1
+    # The target model collides in the full DB, therefore a target-only
+    # overlay must NOT fall back to a bare TS0726-3-BS zigbeeModel matcher.
+    bare = [
+        line
+        for line in js.splitlines()
+        if '"TS0726-3-BS"' in line and "manufacturerName" not in line
+    ]
+    assert not bare, bare
+    assert "configureReporting: false" in js
+    assert "reporting.bind(" not in js
+    assert "reporting.onOff(" not in js
+
+
+def test_target_only_generation_rejects_unknown_db_key(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(HELPER),
+            "device_db.yaml",
+            "--only-db-key",
+            "DOES_NOT_EXIST",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "Requested DB key(s) not generated" in result.stderr
+
+
 def test_real_db_preserves_mixed_alias_and_target_ux() -> None:
     """Real DB regression + focused BSEED user-facing contract."""
     result = subprocess.run(
