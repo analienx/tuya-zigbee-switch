@@ -159,8 +159,8 @@ const romasku = {
             access: "ALL",
             entityCategory: "config",
         }),
-    relayPhysicalMode: (name, endpointName) =>
-        enumLookup({
+    relayPhysicalMode: (name, endpointName) => {
+        const result = enumLookup({
             name,
             endpointName,
             // UI/MQTT vocabulary only. Firmware/NVM ABI remains 0/1/2 =
@@ -175,7 +175,19 @@ Always on: keeps the physical output energized. Recommended for smart bulbs or o
 Always off: keeps the physical output de-energized while the Zigbee state can continue to change independently.
 Changing this setting can immediately switch mains power. The setting is stored and restored after restart.`,
             entityCategory: "config",
-        }),
+        });
+
+        // The generator already includes the logical relay name in `name`
+        // (e.g. relay_left_physical_mode). Current ZHC withEndpoint() appends
+        // the endpoint again to expose.property, which would otherwise create
+        // relay_left_physical_mode_relay_left. This feature is new and not yet
+        // deployed, so normalize only this new property before its MQTT ABI is
+        // frozen. Endpoint metadata remains intact for UI grouping/routing.
+        for (const expose of result.exposes || []) {
+            if (typeof expose.withProperty === "function") expose.withProperty(name);
+        }
+        return result;
+    },
     batteryPercentage: () => {
         const result = numeric({
             name: "battery",
