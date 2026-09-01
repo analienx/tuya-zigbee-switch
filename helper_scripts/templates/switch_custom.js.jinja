@@ -9,6 +9,7 @@ const {
     deviceAddCustomCluster,
 } = require("zigbee-herdsman-converters/lib/modernExtend");
 const {assertString} = require("zigbee-herdsman-converters/lib/utils");
+const e = require("zigbee-herdsman-converters/lib/exposes").presets;
 const reporting = require("zigbee-herdsman-converters/lib/reporting");
 const constants = require("zigbee-herdsman-converters/lib/constants");
 const Zcl = require('zigbee-herdsman').Zcl;
@@ -227,6 +228,122 @@ Changing this setting can immediately switch mains power. The setting is stored 
             if (typeof expose.withProperty === "function") expose.withProperty(name);
         }
         return result;
+    },
+    // Historical BSEED/Romasku action API preserved for compatibility.
+    // IMPORTANT: this helper only decodes frames; it has NO configure callback
+    // and therefore never creates coordinator bindings. The target already has
+    // the needed coordinator genMultistateInput/genOnOff/genLevelCtrl bindings
+    // in the retained live topology.
+    actionEvent: ({switches = [], longSwitches = [], coverSwitches = []}) => {
+        const switchStates = {
+            0: "release", 1: "press", 2: "long_press",
+            3: "position_on", 4: "position_off",
+        };
+        const coverStates = {
+            0: "release", 1: "open", 2: "close",
+            3: "stop", 4: "long_open", 5: "long_close",
+        };
+        const onOffCommands = {commandOn: "on", commandOff: "off", commandToggle: "toggle"};
+        const coverCommands = {
+            commandUpOpen: "cover_open",
+            commandDownClose: "cover_close",
+            commandStop: "cover_stop",
+        };
+        const levelSuffixes = ["brightness_move_up", "brightness_move_down", "brightness_stop"];
+
+        const byEndpoint = (list) => Object.fromEntries(list.map((item) => [item.endpoint, item.prefix]));
+        const namesByEndpoint = Object.fromEntries(
+            [...switches, ...longSwitches, ...coverSwitches]
+                .filter((item) => item.name)
+                .map((item) => [item.endpoint, item.name]),
+        );
+        const suffixPrefixByEndpoint = Object.fromEntries(
+            [...switches, ...longSwitches, ...coverSwitches].map(
+                (item) => [item.endpoint, item.suffixPrefix || ""],
+            ),
+        );
+        const multistatePrefixes = byEndpoint([...switches, ...coverSwitches]);
+        const multistateStates = Object.fromEntries([
+            ...switches.map((item) => [item.endpoint, switchStates]),
+            ...coverSwitches.map((item) => [item.endpoint, coverStates]),
+        ]);
+        const onOffPrefixes = byEndpoint([...switches, ...longSwitches]);
+        const levelPrefixes = byEndpoint(switches);
+        const coverPrefixes = byEndpoint(coverSwitches);
+
+        const actions = [];
+        const perButton = {};
+        const add = (item, suffixes) => {
+            const suffixPrefix = item.suffixPrefix || "";
+            actions.push(...suffixes.map((suffix) => `${item.prefix}_${suffix}`));
+            if (!item.name) return;
+            perButton[item.name] = perButton[item.name] || [];
+            perButton[item.name].push(...suffixes.map((suffix) => `${suffixPrefix}${suffix}`));
+        };
+        for (const item of switches) {
+            add(item, Object.values(switchStates));
+            add(item, Object.values(onOffCommands));
+            add(item, levelSuffixes);
+        }
+        for (const item of longSwitches) add(item, Object.values(onOffCommands));
+        for (const item of coverSwitches) {
+            add(item, Object.values(coverStates));
+            add(item, Object.values(coverCommands));
+        }
+
+        const lookupAction = (prefixes, msg, suffix) => {
+            const prefix = prefixes[msg.endpoint.ID];
+            if (prefix === undefined || suffix === undefined) return;
+            const result = {action: `${prefix}_${suffix}`};
+            const name = namesByEndpoint[msg.endpoint.ID];
+            if (name !== undefined) {
+                const suffixPrefix = suffixPrefixByEndpoint[msg.endpoint.ID] || "";
+                result[`action_${name}`] = `${suffixPrefix}${suffix}`;
+            }
+            return result;
+        };
+
+        return {
+            isModernExtend: true,
+            exposes: [
+                e.action(actions),
+                ...Object.entries(perButton).map(
+                    ([name, values]) => e.action([...new Set(values)]).withEndpoint(name),
+                ),
+            ],
+            fromZigbee: [
+                {
+                    cluster: "genMultistateInput",
+                    type: ["attributeReport", "readResponse"],
+                    convert: (model, msg) => {
+                        const states = multistateStates[msg.endpoint.ID];
+                        if (states === undefined) return;
+                        return lookupAction(multistatePrefixes, msg, states[msg.data.presentValue]);
+                    },
+                },
+                {
+                    cluster: "genOnOff",
+                    type: Object.keys(onOffCommands),
+                    convert: (model, msg) => lookupAction(onOffPrefixes, msg, onOffCommands[msg.type]),
+                },
+                {
+                    cluster: "genLevelCtrl",
+                    type: ["commandMove", "commandMoveWithOnOff", "commandStop", "commandStopWithOnOff"],
+                    convert: (model, msg) => {
+                        const stop = msg.type === "commandStop" || msg.type === "commandStopWithOnOff";
+                        const suffix = stop
+                            ? "brightness_stop"
+                            : `brightness_move_${msg.data.movemode === 0 ? "up" : "down"}`;
+                        return lookupAction(levelPrefixes, msg, suffix);
+                    },
+                },
+                {
+                    cluster: "closuresWindowCovering",
+                    type: Object.keys(coverCommands),
+                    convert: (model, msg) => lookupAction(coverPrefixes, msg, coverCommands[msg.type]),
+                },
+            ],
+        };
     },
     batteryPercentage: () => {
         const result = numeric({
@@ -516,6 +633,17 @@ const definitions = [
                     "{{coverName}}": {{loop.index + (device.switchNames | length) + (device.relayNames | length) + (device.coverSwitchNames | length)}},{{" "}}
                 {%- endfor -%}
             } }),
+            {% if device.preserve_legacy_action %}
+            romasku.actionEvent({
+                switches: [
+                {% for switchName in device.switchNames %}
+                    {endpoint: {{loop.index}}, prefix: "switch_{{loop.index0}}", name: "{{switchName}}"},
+                {% endfor %}
+                ],
+                longSwitches: [],
+                coverSwitches: [],
+            }),
+            {% endif %}
             {% set first_endpoint = device.switchNames[0] if device.switchNames else (device.relayNames[0] if device.relayNames else (device.coverSwitchNames[0] if device.coverSwitchNames else device.coverNames[0])) %}
             {% if not device.bseed_canary_no_configure %}
             romasku.deviceConfig("device_config", "{{first_endpoint}}"),
@@ -531,7 +659,7 @@ const definitions = [
             onOff({ endpointNames: {{device.relayNames | tojson }} }),
             {% endif %}
             {% endif %}
-            {% if device.bseed_canary_no_configure %}
+            {% if device.has_physical_relay_policy %}
             {% for relayName in device.relayNames %}
             romasku.relayPhysicalMode("{{relayName}}_physical_mode", "{{relayName}}"),
             {% endfor %}
@@ -554,7 +682,7 @@ const definitions = [
             romasku.relayIndicatorMode("{{relayName}}_indicator_mode", "{{relayName}}"),
             romasku.relayIndicator("{{relayName}}_indicator", "{{relayName}}"),
             {% endfor %}
-            {% if not device.bseed_canary_no_configure %}
+            {% if device.has_physical_relay_policy and not device.bseed_canary_no_configure %}
             {% for relayName in device.relayNames %}
             romasku.relayPhysicalMode("{{relayName}}_physical_mode", "{{relayName}}"),
             {% endfor %}
