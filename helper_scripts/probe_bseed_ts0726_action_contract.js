@@ -1,6 +1,41 @@
 #!/usr/bin/env node
 'use strict';
 
+const Module = require('module');
+
+// This probe must run on a clean checkout too, without installing ZHC.
+// Stub only the construction-time helpers used while loading the overlay.
+// The actual historical action decoder callbacks are still the real code from
+// bseed_ts0726_v4.js and are invoked below with synthetic Zigbee frames.
+const originalLoad = Module._load;
+const emptyExtend = () => ({isModernExtend: true, exposes: [], fromZigbee: [], toZigbee: []});
+const exposeAction = (values) => ({
+    name: 'action',
+    property: 'action',
+    values,
+    withEndpoint(endpoint) {
+        this.endpoint = endpoint;
+        this.property = `action_${endpoint}`;
+        return this;
+    },
+});
+Module._load = function(request, parent, isMain) {
+    if (request === 'zigbee-herdsman-converters/lib/modernExtend') {
+        return {
+            binary: emptyExtend,
+            deviceEndpoints: emptyExtend,
+            enumLookup: emptyExtend,
+            numeric: emptyExtend,
+            onOff: emptyExtend,
+            text: emptyExtend,
+        };
+    }
+    if (request === 'zigbee-herdsman-converters/lib/exposes') {
+        return {presets: {action: exposeAction}};
+    }
+    return originalLoad.call(this, request, parent, isMain);
+};
+
 /**
  * Offline behavioral proof for the preserved BSEED TS0726 action API.
  *
