@@ -108,27 +108,30 @@ function exposeSummary(definition) {
     return exposes;
 }
 
-function makeEndpoint(id, events) {
-    const record = (op, args) => {
-        events.push({endpoint: id, op, args});
-    };
-    return {
-        ID: id,
-        deviceIeeeAddress: '0xa4c13843a9d40f85',
-        bind: async (...args) => record('bind', args),
-        unbind: async (...args) => record('unbind', args),
-        configureReporting: async (...args) => record('configureReporting', args),
-        read: async (...args) => {
-            record('read', args);
+class Endpoint {
+    constructor(id, events) {
+        this.ID = id;
+        this.deviceIeeeAddress = '0xa4c13843a9d40f85';
+        this.ieeeAddr = '0xa4c13843a9d40f85';
+        this.supportsInputCluster = () => true;
+        this.supportsOutputCluster = () => true;
+        this.getInputClusters = () => [];
+        this.getOutputClusters = () => [];
+        this.bind = async (...args) => events.push({endpoint: id, op: 'bind', args});
+        this.unbind = async (...args) => events.push({endpoint: id, op: 'unbind', args});
+        this.configureReporting = async (...args) =>
+            events.push({endpoint: id, op: 'configureReporting', args});
+        this.read = async (...args) => {
+            events.push({endpoint: id, op: 'read', args});
             return {};
-        },
-        write: async (...args) => record('write', args),
-        command: async (...args) => record('command', args),
-        supportsInputCluster: () => true,
-        supportsOutputCluster: () => true,
-        getInputClusters: () => [],
-        getOutputClusters: () => [],
-    };
+        };
+        this.write = async (...args) => events.push({endpoint: id, op: 'write', args});
+        this.command = async (...args) => events.push({endpoint: id, op: 'command', args});
+    }
+}
+
+function makeEndpoint(id, events) {
+    return new Endpoint(id, events);
 }
 
 async function executeConfigureSurface(definition) {
