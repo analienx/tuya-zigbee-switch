@@ -1,4 +1,5 @@
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -11,6 +12,14 @@ env = Environment(
     trim_blocks=True,
     lstrip_blocks=True,
 )
+
+def _plain_text(value):
+    """Normalize human_name for a one-line JS device description."""
+    if value is None:
+        return ""
+    value = re.sub(r"<[^>]+>", " ", str(value))
+    return " ".join(value.split())
+
 
 def collect_devices(db):
     devices = []
@@ -93,8 +102,13 @@ def collect_devices(db):
         devices.append(
             {
                 "db_key": db_key,
+                "human_name": _plain_text(device.get("human_name") or db_key),
                 "zb_manufacturer": zb_manufacturer,
                 "zb_models": [zb_model] + (device.get("old_zb_models") or []),
+                # Deployment-only safety overlay. This branch is used for the
+                # BSEED canary; upstream/generic converter branches must not
+                # carry this special case.
+                "bseed_canary_no_configure": db_key == "SWITCH_BSEED_TS0726_3GANG",
                 "model": device.get("override_z2m_device")
                 or device["stock_converter_model"],
                 "switchNames": switch_names,
@@ -153,21 +167,24 @@ def mark_ambiguous_models(devices):
         for model in device["zb_models"]:
             claims.setdefault(model, []).append(device)
 
-    # 3. Classify each device's models.
+    # 3. Classify each MODEL independently. A single definition may need
+    # both match surfaces: exact fingerprints for resolvable collisions and
+    # zigbeeModel fallback entries for unique / unresolved legacy aliases.
     for device in deduped:
-        device["ambiguous_models"] = []  # RESOLVABLE
-        device["unresolved_models"] = []  # UNRESOLVED LEGACY
+        device["unique_models"] = []
+        device["ambiguous_models"] = []  # RESOLVABLE -> fingerprint
+        device["unresolved_models"] = []  # legacy model-only fallback
         for model in device["zb_models"]:
             group = claims[model]
             if len(group) == 1:
+                device["unique_models"].append(model)
                 continue
             manufacturers = {x["zb_manufacturer"] for x in group}
             if len(manufacturers) == len(group):
                 device["ambiguous_models"].append(model)
             else:
                 device["unresolved_models"].append(model)
-        device["has_collision"] = bool(device["ambiguous_models"])
-        device["has_unresolved"] = bool(device["unresolved_models"])
+
         device["fingerprints"] = [
             {
                 "manufacturerName": device["zb_manufacturer"],
@@ -175,6 +192,15 @@ def mark_ambiguous_models(devices):
             }
             for model in device["ambiguous_models"]
         ]
+        # ZHC supports fingerprint + zigbeeModel on the same definition.
+        # Preserve unique aliases and unresolved legacy collisions here so a
+        # collision in one old alias never drops the definition's current
+        # unique model (e.g. TS0002-GIR + old TS0002-custom).
+        device["legacy_models"] = (
+            device["unique_models"] + device["unresolved_models"]
+        )
+        device["has_collision"] = bool(device["fingerprints"])
+        device["has_unresolved"] = bool(device["unresolved_models"])
 
     return deduped, merged
 
