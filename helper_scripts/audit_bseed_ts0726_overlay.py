@@ -47,6 +47,11 @@ def main() -> int:
         "Changing this setting can immediately switch mains power",
         "Advanced hardware configuration",
         "may require recovery firmware",
+        "romasku.actionEvent({",
+        "e.action(actions)",
+        'prefix: "switch_0", name: "switch_left"',
+        'prefix: "switch_1", name: "switch_middle"',
+        'prefix: "switch_2", name: "switch_right"',
         'softwareBuildID: "1.1.4-8542fc05"',
         "priority: 100",
     ):
