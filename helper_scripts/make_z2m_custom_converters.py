@@ -121,6 +121,10 @@ def collect_devices(db):
                 "preserve_legacy_action": bool(
                     device.get("preserve_legacy_action", False)
                 ),
+                # Deployment-only overlay discriminator. Set only when the
+                # generator is explicitly asked for the BSEED target overlay;
+                # normal full converter generation remains firmware-agnostic.
+                "overlay_software_build_id": None,
                 "model": device.get("override_z2m_device")
                 or device["stock_converter_model"],
                 "switchNames": switch_names,
@@ -243,6 +247,15 @@ def generate(db, z2m_v1=False, only_db_keys=None):
                 "Requested DB key(s) not generated: %s" % ", ".join(sorted(missing))
             )
         devices = [device for device in devices if device["db_key"] in wanted]
+
+        # Canary overlay MUST NOT capture the currently installed legacy build
+        # or the recovery image. ZHC matches fingerprints before zigbeeModel,
+        # so adding the exact canary softwareBuildID makes the new UI/API appear
+        # only after a successful forward OTA. Recovery automatically falls
+        # back to the historical fleet converter.
+        for device in devices:
+            if device["db_key"] == "SWITCH_BSEED_TS0726_3GANG":
+                device["overlay_software_build_id"] = "1.1.4-8542fc05"
 
     template = env.get_template("switch_custom.js.jinja")
     rendered = template.render(devices=devices, z2m_v1=z2m_v1)
