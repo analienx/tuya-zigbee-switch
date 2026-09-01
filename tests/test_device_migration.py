@@ -195,14 +195,19 @@ def assert_forward_complete(device: Device) -> None:
         read_physical_mode(device, RELAY_RIGHT_ENDPOINT)
         == ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON
     )
+    # Firmware stops at the electrical-safety boundary. LEFT/MIDDLE stay
+    # MANUAL+ON until post-OTA readback + operator continuity proof authorizes
+    # the separate panel-LED transition to SAME.
     assert (
         read_indicator_mode(device, RELAY_LEFT_ENDPOINT)
-        == INDICATOR_MODE_SAME
+        == INDICATOR_MODE_MANUAL
     )
+    assert read_indicator_state(device, RELAY_LEFT_ENDPOINT) == INDICATOR_ON
     assert (
         read_indicator_mode(device, RELAY_MIDDLE_ENDPOINT)
-        == INDICATOR_MODE_SAME
+        == INDICATOR_MODE_MANUAL
     )
+    assert read_indicator_state(device, RELAY_MIDDLE_ENDPOINT) == INDICATOR_ON
     assert read_marker() == MIG_FORWARD_COMPLETE
 
 
@@ -227,25 +232,21 @@ def read_config_file() -> str:
 def test_forward_migration_full_transaction(forward_stub: None) -> None:
     with booted(SWAPPED_CONFIG) as device:
         assert_forward_complete(device)
-        # Canonical C0/D7 are now panel LEDs, so the completed migration
-        # switches LEFT/MIDDLE to SAME. With the initial logical relay state
-        # OFF, both indicators follow it OFF while mains remains pinned ON.
+        # Canonical C0/D7 are now panel LEDs, but migration deliberately
+        # leaves LEFT/MIDDLE in MANUAL+ON. The later SAME transition is an
+        # operator-gated step after real-device continuity proof.
         assert (
             read_indicator_mode(device, RELAY_LEFT_ENDPOINT)
-            == INDICATOR_MODE_SAME
+            == INDICATOR_MODE_MANUAL
         )
-        assert (
-            read_indicator_state(device, RELAY_LEFT_ENDPOINT) == 0
-        )
+        assert read_indicator_state(device, RELAY_LEFT_ENDPOINT) == INDICATOR_ON
         assert (
             read_indicator_mode(device, RELAY_MIDDLE_ENDPOINT)
-            == INDICATOR_MODE_SAME
+            == INDICATOR_MODE_MANUAL
         )
-        assert (
-            read_indicator_state(device, RELAY_MIDDLE_ENDPOINT) == 0
-        )
-        assert not device.get_gpio(LED_LEFT_PIN, refresh=True)
-        assert not device.get_gpio(LED_MIDDLE_PIN, refresh=True)
+        assert read_indicator_state(device, RELAY_MIDDLE_ENDPOINT) == INDICATOR_ON
+        assert device.get_gpio(LED_LEFT_PIN, refresh=True)
+        assert device.get_gpio(LED_MIDDLE_PIN, refresh=True)
         # All smart-light mains feeds stay energised even with virtual state off.
         assert device.get_gpio(MAINS_LEFT_PIN, refresh=True)
         assert device.get_gpio(MAINS_MIDDLE_PIN, refresh=True)
@@ -491,19 +492,20 @@ def test_forward_complete_preserves_user_indicator_mode(
 ) -> None:
     run_forward_migration()
 
-    # SAME is the migration default once the pins are canonical, not a
-    # permanent boot-time override. A later valid user setting survives.
+    # MANUAL+ON is the migration safety default. After the operator has
+    # physically proved continuity, SAME is a valid user choice and completed
+    # migration boots must preserve it rather than restoring MANUAL.
     seed_relay_record(
         0,
-        indicator_mode=INDICATOR_MODE_MANUAL,
-        indicator_on=INDICATOR_ON,
+        indicator_mode=INDICATOR_MODE_SAME,
+        indicator_on=0,
     )
 
     build_forward_image()
     with booted() as device:
         assert (
             read_indicator_mode(device, RELAY_LEFT_ENDPOINT)
-            == INDICATOR_MODE_MANUAL
+            == INDICATOR_MODE_SAME
         )
         assert (
             read_indicator_state(device, RELAY_LEFT_ENDPOINT) == INDICATOR_ON
@@ -511,47 +513,33 @@ def test_forward_complete_preserves_user_indicator_mode(
         assert read_marker() == MIG_FORWARD_COMPLETE
 
 
-def test_forward_retries_indicator_follow_phase_after_canonicalization(
+def test_forward_has_no_post_canonical_indicator_write_before_physical_proof(
     forward_stub: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     build_forward_image()
 
-    # item 9 write #1 = pre-canonical MANUAL+ON safety;
-    # item 9 write #2 = post-canonical transition to SAME.
+    # item 9 write #1 is the required pre-canonical MANUAL+ON safety write.
+    # A hypothetical write #2 would be the forbidden automatic transition to
+    # SAME. Fail that second write: migration must still COMPLETE because no
+    # second indicator write is attempted by firmware.
     monkeypatch.setenv("STUB_NVM_FAIL_WRITE", "9@2")
     with booted(SWAPPED_CONFIG) as device:
-        assert read_config(device) == CANONICAL_CONFIG
-        assert read_marker() == MIG_FORWARD_IN_PROGRESS
+        assert_forward_complete(device)
         assert (
             read_indicator_mode(device, RELAY_LEFT_ENDPOINT)
             == INDICATOR_MODE_MANUAL
         )
-        for endpoint in (
-            RELAY_LEFT_ENDPOINT,
-            RELAY_MIDDLE_ENDPOINT,
-            RELAY_RIGHT_ENDPOINT,
-        ):
-            assert (
-                read_physical_mode(device, endpoint)
-                == ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON
-            )
-        # Canonical mains are protected despite the incomplete LED phase.
+        assert read_indicator_state(device, RELAY_LEFT_ENDPOINT) == INDICATOR_ON
+        assert (
+            read_indicator_mode(device, RELAY_MIDDLE_ENDPOINT)
+            == INDICATOR_MODE_MANUAL
+        )
+        assert read_indicator_state(device, RELAY_MIDDLE_ENDPOINT) == INDICATOR_ON
         assert device.get_gpio(MAINS_LEFT_PIN, refresh=True)
         assert device.get_gpio(MAINS_MIDDLE_PIN, refresh=True)
         assert device.get_gpio(MAINS_RIGHT_PIN, refresh=True)
 
     monkeypatch.delenv("STUB_NVM_FAIL_WRITE")
-    with booted() as device:
-        assert_forward_complete(device)
-        assert (
-            read_indicator_mode(device, RELAY_LEFT_ENDPOINT)
-            == INDICATOR_MODE_SAME
-        )
-        assert (
-            read_indicator_mode(device, RELAY_MIDDLE_ENDPOINT)
-            == INDICATOR_MODE_SAME
-        )
-
 
 def test_forward_complete_state_reproves_detached_on(forward_stub: None) -> None:
     run_forward_migration()
