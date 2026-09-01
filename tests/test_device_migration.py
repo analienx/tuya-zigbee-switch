@@ -59,8 +59,10 @@ INDICATOR_ON = 1
 # Mains (physically energised) and panel-LED pins per pin map.
 MAINS_LEFT_PIN = "C2"
 MAINS_MIDDLE_PIN = "C3"
+MAINS_RIGHT_PIN = "D2"
 LED_LEFT_PIN = "C0"
 LED_MIDDLE_PIN = "D7"
+LED_RIGHT_PIN = "B5"
 
 NV_CONFIG_ITEM = 0x02
 NV_CONFIG_SIZE = 2 + 128
@@ -191,7 +193,7 @@ def assert_forward_complete(device: Device) -> None:
     )
     assert (
         read_physical_mode(device, RELAY_RIGHT_ENDPOINT)
-        == ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED
+        == ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON
     )
     assert read_marker() == MIG_FORWARD_COMPLETE
 
@@ -230,11 +232,17 @@ def test_forward_migration_full_transaction(forward_stub: None) -> None:
         assert (
             read_indicator_state(device, RELAY_MIDDLE_ENDPOINT) == INDICATOR_ON
         )
-        # Mains pinned energised by detached_on even with the virtual state off.
+        # All smart-light mains feeds stay energised even with virtual state off.
         assert device.get_gpio(MAINS_LEFT_PIN, refresh=True)
         assert device.get_gpio(MAINS_MIDDLE_PIN, refresh=True)
-        device.zcl_relay_off(RELAY_LEFT_ENDPOINT)
-        assert device.get_gpio(MAINS_LEFT_PIN, refresh=True)
+        assert device.get_gpio(MAINS_RIGHT_PIN, refresh=True)
+        for endpoint, pin in (
+            (RELAY_LEFT_ENDPOINT, MAINS_LEFT_PIN),
+            (RELAY_MIDDLE_ENDPOINT, MAINS_MIDDLE_PIN),
+            (RELAY_RIGHT_ENDPOINT, MAINS_RIGHT_PIN),
+        ):
+            device.zcl_relay_off(endpoint)
+            assert device.get_gpio(pin, refresh=True)
 
 
 def test_forward_is_one_shot_for_hand_reverted_config(forward_stub: None) -> None:
@@ -269,7 +277,7 @@ def test_forward_resumes_after_crash_after_left_mode_write(
         assert_forward_complete(device)
 
 
-def test_forward_resumes_after_crash_after_both_mode_writes(
+def test_forward_resumes_after_crash_after_two_mode_writes(
     forward_stub: None,
 ) -> None:
     seed_config(SWAPPED_CONFIG)
@@ -281,11 +289,26 @@ def test_forward_resumes_after_crash_after_both_mode_writes(
         assert_forward_complete(device)
 
 
+def test_forward_resumes_after_crash_after_all_three_mode_writes(
+    forward_stub: None,
+) -> None:
+    seed_config(SWAPPED_CONFIG)
+    seed_marker(MIG_FORWARD_IN_PROGRESS)
+    for relay_idx in range(3):
+        seed_physical_mode(
+            relay_idx, ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON
+        )
+
+    with booted() as device:
+        assert_forward_complete(device)
+
+
 def test_forward_resumes_after_crash_after_config_write(forward_stub: None) -> None:
     seed_config(CANONICAL_CONFIG)
     seed_marker(MIG_FORWARD_IN_PROGRESS)
     seed_physical_mode(0, ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON)
     seed_physical_mode(1, ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON)
+    seed_physical_mode(2, ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON)
 
     # Canonical + IN_PROGRESS must NOT be treated as a skip: the transaction
     # re-ensures safety and then completes.
@@ -554,6 +577,10 @@ def test_forward_retries_when_complete_marker_write_fails(
             read_physical_mode(device, RELAY_MIDDLE_ENDPOINT)
             == ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON
         )
+        assert (
+            read_physical_mode(device, RELAY_RIGHT_ENDPOINT)
+            == ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON
+        )
 
     monkeypatch.delenv("STUB_NVM_FAIL_WRITE")
 
@@ -604,6 +631,10 @@ def test_revert_restores_swapped_state() -> None:
         )
         assert (
             read_physical_mode(device, RELAY_MIDDLE_ENDPOINT)
+            == ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED
+        )
+        assert (
+            read_physical_mode(device, RELAY_RIGHT_ENDPOINT)
             == ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED
         )
         assert (
@@ -710,6 +741,7 @@ def test_revert_resumes_after_partial_mode_delete() -> None:
         assert read_config(device) == SWAPPED_CONFIG
         assert read_nv(NV_PHYSICAL_MODE_BASE) is None
         assert read_nv(NV_PHYSICAL_MODE_BASE + 1) is None
+        assert read_nv(NV_PHYSICAL_MODE_BASE + 2) is None
         assert read_marker() is None
 
 
