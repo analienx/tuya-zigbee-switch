@@ -195,6 +195,14 @@ def assert_forward_complete(device: Device) -> None:
         read_physical_mode(device, RELAY_RIGHT_ENDPOINT)
         == ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON
     )
+    assert (
+        read_indicator_mode(device, RELAY_LEFT_ENDPOINT)
+        == INDICATOR_MODE_SAME
+    )
+    assert (
+        read_indicator_mode(device, RELAY_MIDDLE_ENDPOINT)
+        == INDICATOR_MODE_SAME
+    )
     assert read_marker() == MIG_FORWARD_COMPLETE
 
 
