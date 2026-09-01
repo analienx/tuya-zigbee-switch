@@ -1,4 +1,5 @@
 import argparse
+import html
 import re
 import sys
 from pathlib import Path
@@ -17,7 +18,8 @@ def _plain_text(value):
     """Normalize human_name for a one-line JS device description."""
     if value is None:
         return ""
-    value = re.sub(r"<[^>]+>", " ", str(value))
+    value = html.unescape(str(value))
+    value = re.sub(r"<[^>]+>", " ", value)
     return " ".join(value.split())
 
 
@@ -125,8 +127,14 @@ def collect_devices(db):
 
 
 def _contract_signature(device):
-    """Everything the generator uses to render this device's contract."""
-    return repr(sorted((k, v) for k, v in device.items() if k != "db_key"))
+    """Functional generated contract, excluding presentation-only metadata."""
+    return repr(
+        sorted(
+            (k, v)
+            for k, v in device.items()
+            if k not in {"db_key", "human_name"}
+        )
+    )
 
 
 def mark_ambiguous_models(devices):
@@ -156,7 +164,12 @@ def mark_ambiguous_models(devices):
             _contract_signature(device),
         )
         if key in seen:
-            merged.append((device["db_key"], seen[key]["db_key"]))
+            # Presentation metadata must not prevent deterministic merging of
+            # byte/semantic-identical functional contracts. Pick a stable
+            # description independent of DB traversal order.
+            kept = seen[key]
+            kept["human_name"] = min(kept["human_name"], device["human_name"])
+            merged.append((device["db_key"], kept["db_key"]))
             continue
         seen[key] = device
         deduped.append(device)
