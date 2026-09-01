@@ -574,7 +574,7 @@ const definitions = [
         {# Resolvable collisions: exact manufacturer + model matching. #}
         fingerprint: [
         {% for fp in device.fingerprints %}
-            { manufacturerName: "{{fp.manufacturerName}}", modelID: "{{fp.modelID}}" },
+            { manufacturerName: "{{fp.manufacturerName}}", modelID: "{{fp.modelID}}"{% if device.overlay_software_build_id %}, softwareBuildID: "{{device.overlay_software_build_id}}", priority: 100{% endif %} },
         {% endfor %}
         ],
         {% endif %}
