@@ -13,3 +13,4 @@ __pycache__
 *.pyc
 *.pyo
 *.pydwget-log
+stub_nvm_data_gen

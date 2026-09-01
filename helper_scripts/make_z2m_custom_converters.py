@@ -15,7 +15,7 @@ env = Environment(
 def collect_devices(db):
     devices = []
 
-    for device in db.values():
+    for db_key, device in db.items():
         # Skip if build == no. Defaults to yes
         if not device.get("build", True):
             continue
@@ -92,6 +92,7 @@ def collect_devices(db):
 
         devices.append(
             {
+                "db_key": db_key,
                 "zb_manufacturer": zb_manufacturer,
                 "zb_models": [zb_model] + (device.get("old_zb_models") or []),
                 "model": device.get("override_z2m_device")
@@ -109,37 +110,77 @@ def collect_devices(db):
     return devices
 
 
+def _contract_signature(device):
+    """Everything the generator uses to render this device's contract."""
+    return repr(sorted((k, v) for k, v in device.items() if k != "db_key"))
+
+
 def mark_ambiguous_models(devices):
-    """Detect models claimed by more than one built device.
+    """Classify model collisions per re-review 5492467354 (gate E).
 
-    A bare `zigbeeModel` match is order-dependent and ambiguous when two
-    devices share the same model string with different manufacturers. Such
-    devices are switched to deterministic `fingerprint` matching on
-    (manufacturerName, modelID) instead.
+    - RESOLVABLE: every claimant of a model has a distinct manufacturer, so
+      each definition is pinned with a `fingerprint` on
+      (manufacturerName, modelID). Matching becomes order-independent.
+    - Deterministic merge: definitions with an IDENTICAL
+      (manufacturer, models, contract) collapse into one — they were
+      byte-identical in the output anyway.
+    - UNRESOLVED LEGACY: the same (manufacturer, model) tuple is claimed by
+      definitions with different contracts. Fingerprints cannot separate
+      them; the legacy bare `zigbeeModel` matcher is preserved for the whole
+      model group and a deterministic warning lists all DB keys. We do NOT
+      pretend the group became deterministic and we never silently merge
+      different contracts.
     """
-    claims = {}
+    # 1. Deterministic merge of byte-identical definitions.
+    seen = {}
+    deduped = []
+    merged = []
     for device in devices:
-        for model in device["zb_models"]:
-            claims[model] = claims.get(model, 0) + 1
+        key = (
+            device["zb_manufacturer"],
+            tuple(device["zb_models"]),
+            _contract_signature(device),
+        )
+        if key in seen:
+            merged.append((device["db_key"], seen[key]["db_key"]))
+            continue
+        seen[key] = device
+        deduped.append(device)
 
-    for device in devices:
-        device["ambiguous_models"] = [
-            model for model in device["zb_models"] if claims[model] > 1
-        ]
+    # 2. Group claims per model string.
+    claims = {}
+    for device in deduped:
+        for model in device["zb_models"]:
+            claims.setdefault(model, []).append(device)
+
+    # 3. Classify each device's models.
+    for device in deduped:
+        device["ambiguous_models"] = []  # RESOLVABLE
+        device["unresolved_models"] = []  # UNRESOLVED LEGACY
+        for model in device["zb_models"]:
+            group = claims[model]
+            if len(group) == 1:
+                continue
+            manufacturers = {x["zb_manufacturer"] for x in group}
+            if len(manufacturers) == len(group):
+                device["ambiguous_models"].append(model)
+            else:
+                device["unresolved_models"].append(model)
         device["has_collision"] = bool(device["ambiguous_models"])
+        device["has_unresolved"] = bool(device["unresolved_models"])
         device["fingerprints"] = [
             {
                 "manufacturerName": device["zb_manufacturer"],
                 "modelID": model,
             }
-            for model in device["zb_models"]
+            for model in device["ambiguous_models"]
         ]
 
-    return devices
+    return deduped, merged
 
 
 def generate(db, z2m_v1=False):
-    devices = mark_ambiguous_models(collect_devices(db))
+    devices, merged = mark_ambiguous_models(collect_devices(db))
 
     template = env.get_template("switch_custom.js.jinja")
     rendered = template.render(devices=devices, z2m_v1=z2m_v1)
@@ -154,6 +195,28 @@ def generate(db, z2m_v1=False):
                 ),
                 file=sys.stderr,
             )
+        if device["has_unresolved"]:
+            print(
+                "UNRESOLVED legacy model collision for %s: model(s) %s "
+                "claimed by DB keys with different contracts: %s"
+                % (
+                    device["zb_manufacturer"],
+                    ",".join(device["unresolved_models"]),
+                    ",".join(
+                        d["db_key"]
+                        for d in devices
+                        if set(d["unresolved_models"])
+                        & set(device["unresolved_models"])
+                    ),
+                ),
+                file=sys.stderr,
+            )
+    for dup, kept in merged:
+        print(
+            "Merged byte-identical definition: %s merged into %s"
+            % (dup, kept),
+            file=sys.stderr,
+        )
 
     return rendered
 

@@ -1,9 +1,12 @@
 """Tests for the deterministic Z2M converter fingerprint generation.
 
-Two built devices sharing a `zb_model` string would previously both emit a
-bare `zigbeeModel`, making Z2M matching order-dependent and ambiguous. The
-generator now detects the collision and pins such definitions with a
-`fingerprint` on (manufacturerName, modelID).
+Model collisions are classified per re-review 5492467354 (gate E):
+- RESOLVABLE: every claimant of a model has a distinct manufacturer -> each
+  definition is pinned with a `fingerprint` on (manufacturerName, modelID).
+- Deterministic merge: byte-identical definitions collapse into one.
+- UNRESOLVED LEGACY: the same (manufacturer, model) tuple claimed by
+  definitions with different contracts keeps the legacy bare `zigbeeModel`
+  matcher and is reported - never presented as deterministic.
 """
 
 import subprocess
@@ -14,84 +17,176 @@ import pytest
 
 HELPER = Path("helper_scripts/make_z2m_custom_converters.py")
 
-DB_TEMPLATE = """
-colliding_a:
-  human_name: Collision A
+DEVICE_TMPL = """
+{key}:
+  human_name: {key}
   output: relay
   device_type: router
   stock_model_name: {model}
-  stock_manufacturer_name: mfg_a
-  stock_converter_model: conv_a
+  stock_manufacturer_name: {manufacturer}
+  stock_converter_model: {converter_model}
   tuya_module: ZT3L
   mcu_family: Telink
   mcu: TLSR8258
-  config_str: mfg_a;{model};LC4;SB1u;RC2;IC0;SB7u;RC3;ID7;SB4u;RD2;IB5;M;
-  build: yes
-colliding_b:
-  human_name: Collision B
-  output: relay
-  device_type: router
-  stock_model_name: {model}
-  stock_manufacturer_name: mfg_b
-  stock_converter_model: conv_b
-  tuya_module: ZT3L
-  mcu_family: Telink
-  mcu: TLSR8258
-  config_str: mfg_b;{model};LD4;SA1u;RB4;IC1;SC2u;RD2;IB5;M;
-  build: yes
-unique:
-  human_name: Unique device
-  output: relay
-  device_type: router
-  stock_model_name: UNIQUE-1
-  stock_manufacturer_name: mfg_c
-  stock_converter_model: conv_c
-  tuya_module: ZT3L
-  mcu_family: Telink
-  mcu: TLSR8258
-  config_str: mfg_c;UNIQUE-1;SB0u;RB1;M;
-  build: yes
+  config_str: {manufacturer};{model};{peripherals}
+  build: {build}
 """
 
 
-@pytest.fixture()
-def run_generator(tmp_path: Path):
-    def _run(model: str) -> str:
-        db_file = tmp_path / "device_db.yaml"
-        db_file.write_text(DB_TEMPLATE.format(model=model))
-        result = subprocess.run(
-            [sys.executable, str(HELPER), str(db_file)],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        return result.stdout
-
-    return _run
-
-
-def test_colliding_models_use_fingerprints(run_generator) -> None:
-    js = run_generator("TS0726-TEST")
-
-    # Both colliding definitions are pinned to their own manufacturer.
-    assert (
-        '{ manufacturerName: "mfg_a", modelID: "TS0726-TEST" }' in js
+def _device(key, manufacturer, model, peripherals, converter_model, build="yes"):
+    return DEVICE_TMPL.format(
+        key=key,
+        manufacturer=manufacturer,
+        model=model,
+        peripherals=peripherals,
+        converter_model=converter_model,
+        build=build,
     )
-    assert (
-        '{ manufacturerName: "mfg_b", modelID: "TS0726-TEST" }' in js
+
+
+def run_generator(db_text: str) -> tuple[str, str]:
+    db_file = Path("stub_nvm_data_gen") / "device_db.yaml"
+    db_file.parent.mkdir(exist_ok=True)
+    db_file.write_text(db_text)
+    result = subprocess.run(
+        [sys.executable, str(HELPER), str(db_file)],
+        capture_output=True,
+        text=True,
+        check=True,
     )
-    # No bare zigbeeModel may remain for the ambiguous model.
-    assert '"TS0726-TEST"' not in js.split("fingerprint:")[0].split(
-        "const definitions"
-    )[-1]
+    return result.stdout, result.stderr
 
 
-def test_unique_model_keeps_zigbee_model(run_generator) -> None:
-    js = run_generator("TS0726-TEST")
+def test_resolvable_same_model_different_manufacturer(tmp_path: Path) -> None:
+    db = _device("a", "mfg_a", "MODEL-X", "SB1u;RC2;IC0;M;", "conv_a") + _device(
+        "b", "mfg_b", "MODEL-X", "SB1u;RC2;IC0;M;", "conv_b"
+    )
+    js, err = run_generator(db)
 
-    # The non-colliding device keeps the classic zigbeeModel matching.
-    assert 'zigbeeModel: [\n            "UNIQUE-1",' in js
+    assert '{ manufacturerName: "mfg_a", modelID: "MODEL-X" }' in js
+    assert '{ manufacturerName: "mfg_b", modelID: "MODEL-X" }' in js
+    # No bare zigbeeModel matcher may remain for the ambiguous model.
+    bare = [
+        line
+        for line in js.splitlines()
+        if '"MODEL-X"' in line and "manufacturerName" not in line
+    ]
+    assert not bare, bare
+    assert "disambiguated via fingerprint" in err
 
 
-def test_generation_is_reproducible(run_generator) -> None:
-    assert run_generator("TS0726-TEST") == run_generator("TS0726-TEST")
+def test_target_ts0726_group_maps_exactly_once(tmp_path: Path) -> None:
+    db = _device(
+        "target",
+        "iedhxgyi",
+        "TS0726-TEST",
+        "LC4;SB1u;RC2;IC0;SB7u;RC3;ID7;SB4u;RD2;IB5;M;",
+        "EC-GL86ZPCS31",
+    ) + _device(
+        "other",
+        "r2fgo9ks",
+        "TS0726-TEST",
+        "LD4;SA1u;RB4;IC1;SC2u;RD2;IB5;M;",
+        "EC-SL-FK86ZPCS31",
+    )
+    js, _ = run_generator(db)
+
+    assert js.count('{ manufacturerName: "iedhxgyi", modelID: "TS0726-TEST" }') == 1
+    assert js.count('{ manufacturerName: "r2fgo9ks", modelID: "TS0726-TEST" }') == 1
+    gl = js.split('model: "EC-GL86ZPCS31"')[0]
+    sl = js.split('model: "EC-SL-FK86ZPCS31"')[0]
+    assert "iedhxgyi" in gl
+    assert "r2fgo9ks" in sl
+
+
+def test_unresolved_same_tuple_different_contract_stays_legacy(
+    tmp_path: Path,
+) -> None:
+    db = _device(
+        "legacy_a", "same_mfg", "SHARED-1", "SB1u;RC2;IC0;M;", "conv_a"
+    ) + _device(
+        "legacy_b", "same_mfg", "SHARED-1", "SB1u;RC2;IC0;SB7u;RC3;M;", "conv_b"
+    )
+    js, err = run_generator(db)
+
+    # Legacy matcher preserved for the whole group; no false fingerprint.
+    assert "fingerprint" not in js
+    assert "UNRESOLVED legacy model collision" in err
+    assert "legacy_a" in err and "legacy_b" in err
+
+
+def test_identical_tuple_and_contract_is_merged(tmp_path: Path) -> None:
+    db = _device(
+        "dup_a", "same_mfg", "SHARED-2", "SB1u;RC2;IC0;M;", "conv_same"
+    ) + _device("dup_b", "same_mfg", "SHARED-2", "SB1u;RC2;IC0;M;", "conv_same")
+    js, err = run_generator(db)
+
+    assert js.count("SHARED-2") == 1  # one definition, not two
+    assert "Merged byte-identical definition" in err
+
+
+def test_old_zb_models_participates_in_collision(tmp_path: Path) -> None:
+    db = _device("a", "mfg_a", "MODEL-NEW", "SB1u;RC2;M;", "conv_a") + _device(
+        "b", "mfg_b", "MODEL-OTHER", "SB1u;RC2;M;", "conv_b"
+    ).replace(
+        "config_str: mfg_b;MODEL-OTHER;SB1u;RC2;M;",
+        "config_str: mfg_b;MODEL-OTHER;SB1u;RC2;M;\n  old_zb_models: [MODEL-NEW]",
+    )
+    js, err = run_generator(db)
+
+    assert '{ manufacturerName: "mfg_a", modelID: "MODEL-NEW" }' in js
+    assert '{ manufacturerName: "mfg_b", modelID: "MODEL-NEW" }' in js
+    assert "disambiguated via fingerprint" in err
+
+
+def test_build_no_is_ignored(tmp_path: Path) -> None:
+    db = _device("a", "mfg_a", "MODEL-X", "SB1u;RC2;M;", "conv_a") + _device(
+        "b", "mfg_b", "MODEL-X", "SB1u;RC2;M;", "conv_b", build="no"
+    )
+    js, _ = run_generator(db)
+
+    # The build:no device is not a claimant: the survivor keeps zigbeeModel.
+    assert 'zigbeeModel: [\n            "MODEL-X",' in js
+    assert "conv_b" not in js
+
+
+def test_input_order_does_not_change_tuple_mapping(tmp_path: Path) -> None:
+    db_ab = _device("a", "mfg_a", "MODEL-X", "SB1u;RC2;IC0;M;", "conv_a") + _device(
+        "b", "mfg_b", "MODEL-X", "SB1u;RC2;IC0;M;", "conv_b"
+    )
+    db_ba = _device("b", "mfg_b", "MODEL-X", "SB1u;RC2;IC0;M;", "conv_b") + _device(
+        "a", "mfg_a", "MODEL-X", "SB1u;RC2;IC0;M;", "conv_a"
+    )
+    js_ab, _ = run_generator(db_ab)
+    js_ba, _ = run_generator(db_ba)
+
+    # Reversing the input order must not change which contract each tuple
+    # maps to (definition ORDER may differ; fingerprint->contract must not).
+    def mapping(js: str) -> dict:
+        out = {}
+        for chunk in js.split('model: "')[1:]:
+            name = chunk.split('"')[0]
+            mfg = "mfg_a" if "mfg_a" in chunk[:400] else "mfg_b"
+            out[name] = mfg
+        return out
+
+    assert mapping(js_ab) == mapping(js_ba)
+
+
+def test_generation_is_reproducible(tmp_path: Path) -> None:
+    db = _device("a", "mfg_a", "MODEL-X", "SB1u;RC2;IC0;M;", "conv_a") + _device(
+        "b", "mfg_b", "MODEL-X", "SB1u;RC2;IC0;M;", "conv_b"
+    )
+    assert run_generator(db)[0] == run_generator(db)[0]
+
+
+def test_regenerated_files_match_committed_files() -> None:
+    """Regeneration consistency: the maintained converter files are clean."""
+    result = subprocess.run(
+        [sys.executable, str(HELPER), "device_db.yaml"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    committed = Path("zigbee2mqtt/converters/switch_custom.js").read_text()
+    assert result.stdout == committed
