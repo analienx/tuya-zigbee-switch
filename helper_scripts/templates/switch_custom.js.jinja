@@ -12,6 +12,15 @@ const {assertString} = require("zigbee-herdsman-converters/lib/utils");
 const reporting = require("zigbee-herdsman-converters/lib/reporting");
 const constants = require("zigbee-herdsman-converters/lib/constants");
 const Zcl = require('zigbee-herdsman').Zcl;
+
+// Current ZHC text() lacks a label argument while the expose itself supports
+// withLabel(). Keep the property stable and improve only presentation metadata.
+const withExposeLabel = (extend, label) => {
+    for (const expose of extend.exposes || []) {
+        if (typeof expose.withLabel === "function") expose.withLabel(label);
+    }
+    return extend;
+};
 {% if z2m_v1 %}
 const ota = require("zigbee-herdsman-converters/lib/ota");
 {% endif%}
@@ -35,7 +44,8 @@ const romasku = {
             lookup: { on_off: 0, off_on: 1, toggle_simple: 2, toggle_smart_sync: 3, toggle_smart_opposite: 4 },
             cluster: "genOnOffSwitchCfg",
             attribute: {ID: 0x0010, type: 0x30, required: true, write: true, min: 0, max: 4}, // Enum8
-            description: `Select how switch should work:
+            label: "Button command behavior",
+            description: `Controls which On/Off command the wall control produces:
             - on_off: When switch physically moved to position 1 it always generates ON command, and when moved to position 2 it generates OFF command
             - off_on: Same as on_off, but positions are swapped
             - toggle_simple: Any press of physical switch will TOGGLE the relay and send TOGGLE command to binds
@@ -50,7 +60,8 @@ const romasku = {
             lookup: { toggle: 0, momentary: 1, momentary_nc: 2 },
             cluster: "genOnOffSwitchCfg",
             attribute: { ID: 0xff00, type: 0x30 }, // Enum8
-            description: "Select the type of switch connected to the device",
+            label: "Button type",
+            description: "Electrical type of the wall control: toggle/rocker, momentary push button, or normally-closed momentary input.",
             entityCategory: "config",
         }),
     relayMode: (name, endpointName) =>
@@ -60,7 +71,8 @@ const romasku = {
             lookup: { detached: 0, press_start: 1, short_press: 3, long_press: 2},
             cluster: "genOnOffSwitchCfg",
             attribute: { ID: 0xff01, type: 0x30 }, // Enum8
-            description: "When to turn on/off internal relay",
+            label: "Local relay trigger",
+            description: "Controls when this physical button changes its assigned local Zigbee relay state. This is independent of Physical relay behavior: the Zigbee relay state can change even when the electrical output is forced Always on or Always off.",
             entityCategory: "config",
         }),
     relayIndex: (name, endpointName, relay_cnt) =>
@@ -72,7 +84,8 @@ const romasku = {
             ),
             cluster: "genOnOffSwitchCfg",
             attribute: { ID: 0xff02, type: 0x20 }, // uint8
-            description: "Which internal relay it should trigger",
+            label: "Assigned local relay",
+            description: "Selects which local relay endpoint this wall control changes.",
             entityCategory: "config",
         }),
     bindedMode: (name, endpointName) =>
@@ -82,7 +95,8 @@ const romasku = {
             lookup: { press_start: 1, short_press: 3, long_press: 2},
             cluster: "genOnOffSwitchCfg",
             attribute: { ID: 0xff05, type: 0x30 }, // Enum8
-            description: "When turn on/off binded device",
+            label: "Bound-device trigger",
+            description: "Controls when this button sends commands directly to Zigbee-bound devices or groups.",
             entityCategory: "config",
         }),
     longPressDuration: (name, endpointName) =>
@@ -91,7 +105,9 @@ const romasku = {
             endpointNames: [endpointName],
             cluster: "genOnOffSwitchCfg",
             attribute: { ID: 0xff03, type: 0x21 }, // uint16
-            description: "What duration is considerd to be long press",
+            label: "Long-press threshold",
+            description: "How long the button must be held before it is treated as a long press.",
+            unit: "ms",
             valueMin: 0,
             valueMax: 5000,
             entityCategory: "config",
@@ -102,7 +118,9 @@ const romasku = {
             endpointNames: [endpointName],
             cluster: "genOnOffSwitchCfg",
             attribute: { ID: 0xff04, type: 0x20 }, // uint8
-            description: "Level (dim) move rate in steps per ms",
+            label: "Hold dimming speed",
+            description: "Brightness-change rate sent in Zigbee Level Control Move commands while the button is held.",
+            unit: "level/s",
             valueMin: 1,
             valueMax: 255,
             entityCategory: "config",
@@ -115,7 +133,8 @@ const romasku = {
             lookup: { released: 0, press: 1, long_press: 2, position_on: 3, position_off: 4 },
             cluster: "genMultistateInput",
             attribute: "presentValue",
-            description: "Action of the switch: 'released' or 'press' or 'long_press'",
+            label: "Last button action",
+            description: "Most recently reported physical button action.",
             entityCategory: "diagnostic",
         }),
     relayIndicatorMode: (name, endpointName) =>
@@ -125,7 +144,8 @@ const romasku = {
             lookup: { same: 0, opposite: 1, manual: 2 },
             cluster: "genOnOff",
             attribute: { ID: 0xff01, type: 0x30 }, // Enum8
-            description: "Mode for the relay indicator LED",
+            label: "Indicator LED behavior",
+            description: "same: LED follows the relay's virtual On/Off state; opposite: LED shows the inverse state; manual: LED state is controlled separately with Indicator LED state.",
             entityCategory: "config",
         }),
     relayIndicator: (name, endpointName) =>
@@ -136,7 +156,8 @@ const romasku = {
             valueOff: ["OFF", 0],
             cluster: "genOnOff",
             attribute: {ID: 0xff02, type: 0x10},  // Boolean
-            description: "State of the relay indicator LED",
+            label: "Indicator LED state",
+            description: "Manual state of the panel indicator LED. Used when Indicator LED behavior is set to manual.",
             access: "ALL",
             entityCategory: "config",
         }),
@@ -144,13 +165,17 @@ const romasku = {
         enumLookup({
             name,
             endpointName,
-            lookup: { attached: 0, detached_on: 1, detached_off: 2 },
+            // UI/MQTT vocabulary only. Firmware/NVM ABI remains 0/1/2 =
+            // ATTACHED / DETACHED_ON / DETACHED_OFF.
+            lookup: { follow_state: 0, always_on: 1, always_off: 2 },
             cluster: "genOnOff",
             attribute: {ID: 0xff03, type: 0x30}, // Enum8
-            description: `Physical relay policy:
-            - attached: physical relay follows the virtual on/off state
-            - detached_on: physical relay is pinned ON while virtual state can change independently
-            - detached_off: physical relay is pinned OFF while virtual state can change independently`,
+            label: "Physical relay behavior",
+            description: `Controls the electrical relay independently of the Zigbee On/Off state.
+Follow state: the physical relay follows the Zigbee On/Off state; selecting it immediately synchronizes the electrical output to the current Zigbee state.
+Always on: keeps the physical output energized. Recommended for smart bulbs or other loads that must remain powered; Zigbee state, button actions and bindings can continue independently.
+Always off: keeps the physical output de-energized while the Zigbee state can continue to change independently.
+Changing this setting can immediately switch mains power. The setting is stored and restored after restart.`,
             entityCategory: "config",
         }),
     batteryPercentage: () => {
@@ -184,7 +209,8 @@ const romasku = {
             valueOff: ["OFF", 0],
             cluster: "genBasic",
             attribute: {ID: 0xff01, type: 0x10},  // Boolean
-            description: "State of the network indicator LED",
+            label: "Network indicator",
+            description: "Controls the dedicated network-status indicator LED.",
             access: "ALL",
             entityCategory: "config",
         }),
@@ -194,19 +220,20 @@ const romasku = {
             endpointNames: [endpointName],
             cluster: "genBasic",
             attribute: { ID: 0xff02, type: 0x20 }, // uint8
-            description: "Number of consecutive presses to trigger factory reset (0 = disabled)",
+            label: "Factory-reset press count",
+            description: "Number of consecutive button presses required to trigger factory reset. Set to 0 to disable multi-press reset.",
             valueMin: 0,
             valueMax: 255,
             entityCategory: "config",
         }),
     deviceConfig: (name, endpointName) =>
-        text({
+        withExposeLabel(text({
             name,
             endpointName,
             access: "ALL",
             cluster: "genBasic",
             attribute:  { ID: 0xff00, type: 0x44 }, // long str
-            description: "Current configuration of the device",
+            description: "Advanced Romasku hardware pin mapping. This describes which MCU pins are connected to buttons, relays, indicators and other peripherals; it is NOT a normal behavior setting. An incorrect value can make buttons, relays or indicators stop working and may require recovery firmware. Do not edit unless you are porting or repairing a device.",
             zigbeeCommandOptions: {timeout: 30_000},
             validate: (value) => {
                 assertString(value);
@@ -260,7 +287,7 @@ const romasku = {
                 }
             },
             entityCategory: "config",
-        }),
+        }), "Advanced hardware configuration"),
     coverSwitchPressAction: (name, endpointName) =>
         enumLookup({
             name,
@@ -376,23 +403,25 @@ const romasku = {
 const definitions = [
 {% for device in devices %}
     {
-        {% if device.has_collision %}
-        {# Ambiguous model: match deterministically on manufacturer+model #}
+        {% if device.fingerprints %}
+        {# Resolvable collisions: exact manufacturer + model matching. #}
         fingerprint: [
         {% for fp in device.fingerprints %}
             { manufacturerName: "{{fp.manufacturerName}}", modelID: "{{fp.modelID}}" },
         {% endfor %}
         ],
-        {% else %}
+        {% endif %}
+        {% if device.legacy_models %}
+        {# Unique aliases + explicitly unresolved legacy collisions. #}
         zigbeeModel: [
-        {% for zb_model in device.zb_models %}
+        {% for zb_model in device.legacy_models %}
             "{{zb_model}}",
         {% endfor %}
         ],
         {% endif %}
         model: "{{device.model}}",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: {{ (device.human_name ~ " — Romasku custom firmware") | tojson }},
         {% set first_endpoint = device.switchNames[0] if device.switchNames else (device.relayNames[0] if device.relayNames else device.coverNames[0]) %}
         extend: [
             {% if device.has_battery_cluster %}
@@ -444,7 +473,7 @@ const definitions = [
             romasku.networkIndicator("network_led", "{{first_endpoint}}"),
             {% endif%}
             {% if device.relayNames %}
-            onOff({ endpointNames: {{device.relayNames | tojson }} }),
+            onOff({ endpointNames: {{device.relayNames | tojson }}{% if device.bseed_canary_no_configure %}, configureReporting: false{% endif %} }),
             {% endif %}
             {% for switchName in device.switchNames %}
             romasku.pressAction("{{switchName}}_press_action", "{{switchName}}"),
@@ -489,6 +518,7 @@ const definitions = [
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
+            {% if not device.bseed_canary_no_configure %}
             {% for switchName in device.switchNames %}
             const endpoint{{loop.index}} = device.getEndpoint({{loop.index}});
             await reporting.bind(endpoint{{loop.index}}, coordinatorEndpoint, ["genMultistateInput"]);
@@ -561,6 +591,7 @@ const definitions = [
                 },
             ]);
             {% endfor %}
+            {% endif %}
         },
         {% if z2m_v1 %}
         ota: ota.zigbeeOTA,
