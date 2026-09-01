@@ -32,9 +32,16 @@
 #define MIG_STATE_REVERT_IN_PROGRESS     0x00000003
 #define MIG_STATE_MAX_VALID              MIG_STATE_REVERT_IN_PROGRESS
 
-// Zero-based relay indexes (config-string order) whose mains contact and
-// panel LED are swapped on this hardware: LEFT and MIDDLE.
-#define DEVICE_MIGRATION_SWAPPED_RELAY_COUNT    2
+// Two different scopes matter on this board:
+//
+// 1) LEFT/MIDDLE are the only channels whose historical config swapped the
+//    relay and indicator pins. Only those two need MANUAL+ON indicator safety
+//    before/while the pin map changes.
+// 2) LEFT/MIDDLE/RIGHT all feed smart Zigbee lighting that must stay powered.
+//    The forward migration therefore persists DETACHED_ON for all three real
+//    relay outputs once the canonical pin map is active.
+#define DEVICE_MIGRATION_SWAPPED_RELAY_COUNT        2
+#define DEVICE_MIGRATION_PERMANENT_POWER_RELAY_COUNT    3
 
 // Marker read classification. Corruption fails closed (BLOCK), it is never
 // converted to "absent": an unknown marker must not re-arm a one-shot
@@ -167,13 +174,18 @@ static bool ensure_swapped_relay_safety(void) {
     return true;
 }
 
-static bool ensure_swapped_relay_modes(void) {
-    // detached_on pins the R-side contact. While the config is still swapped
-    // this only pins the panel-LED side; once the canonical config exists,
-    // the modes are already durable before C2/C3 become R. The recovery
-    // image uses the same phase to re-prove current-state canonical safety.
+static bool ensure_permanent_power_relay_modes(void) {
+    // DETACHED_ON pins every smart-light feed ON while allowing the Zigbee
+    // On/Off state to continue changing independently.
+    //
+    // On the historical swapped map, relay indexes 0/1 still point at panel
+    // LED pins, so pre-seeding those slots is electrically harmless; relay 2
+    // already points at the real RIGHT mains contact and is intentionally
+    // energized here. After canonicalization all three slots protect the
+    // actual mains feeds. Recovery re-proves this invariant on canonical NVM
+    // before it is allowed to restore the historical map.
     for (uint8_t relay_idx = 0;
-         relay_idx < DEVICE_MIGRATION_SWAPPED_RELAY_COUNT;
+         relay_idx < DEVICE_MIGRATION_PERMANENT_POWER_RELAY_COUNT;
          relay_idx++) {
         if (!relay_cluster_nv_ensure_physical_mode(
                 relay_idx, ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON)) {
@@ -212,17 +224,19 @@ static device_migration_result_t migrate_swapped_pins_to_canonical(void) {
         // CURRENT config decides which side is mains right now.
         if (is_canonical) {
             // Mains is the R side: DETACHED_ON must be re-proven every boot.
-            if (!ensure_swapped_relay_modes()) {
+            if (!ensure_permanent_power_relay_modes()) {
                 printf("Device migration: completed state but DETACHED_ON not "
                        "provable; blocking init\r\n");
                 return DEVICE_MIGRATION_BLOCK_INIT;
             }
         } else if (is_swapped) {
-            // Mains is the indicator side again: MANUAL + ON must be
-            // re-proven, even though the transaction marked itself complete.
-            if (!ensure_swapped_relay_safety()) {
+            // LEFT/MIDDLE mains is the indicator side again: MANUAL + ON must
+            // be re-proven. RIGHT remains a real relay under both maps, so the
+            // three-channel permanent-power policy must also be re-proven.
+            if (!ensure_swapped_relay_safety() ||
+                !ensure_permanent_power_relay_modes()) {
                 printf("Device migration: completed state on swapped config "
-                       "with unprovable MANUAL/ON; blocking init\r\n");
+                       "with unprovable power invariants; blocking init\r\n");
                 return DEVICE_MIGRATION_BLOCK_INIT;
             }
         } else {
@@ -273,8 +287,9 @@ static device_migration_result_t migrate_swapped_pins_to_canonical(void) {
         return DEVICE_MIGRATION_BLOCK_INIT;
     }
 
-    // Phase D: detached_on pre-seed (forced to the exact mode and verified).
-    if (!ensure_swapped_relay_modes()) {
+    // Phase D: DETACHED_ON pre-seed for ALL THREE smart-light feeds
+    // (forced to the exact mode and verified).
+    if (!ensure_permanent_power_relay_modes()) {
         if (is_canonical) {
             // Canonical map: C2/C3 are R and DETACHED_ON is not proven.
             // Parsing would expose mains to ATTACHED/DETACHED_OFF semantics.
@@ -347,7 +362,7 @@ static device_migration_result_t revert_swapped_pins_migration(void) {
         // FORWARD_COMPLETE does not prove the modes still hold - a missing,
         // wrong or corrupted slot must be forced back to DETACHED_ON and
         // verified before anything may parse the canonical map.
-        if (!ensure_swapped_relay_modes()) {
+        if (!ensure_permanent_power_relay_modes()) {
             printf("Device migration revert: cannot establish DETACHED_ON "
                    "for canonical mains; blocking init\r\n");
             return DEVICE_MIGRATION_BLOCK_INIT;
@@ -383,11 +398,12 @@ static device_migration_result_t revert_swapped_pins_migration(void) {
         }
     }
 
-    // Phase 4: neutralize physical-mode slots. Absence makes the cluster use
-    // its ATTACHED default, which under the swapped map drives the panel-LED
-    // side again - the exact pre-migration semantics.
+    // Phase 4: neutralize all forward physical-mode slots. Absence makes the
+    // cluster use its ATTACHED default. On LEFT/MIDDLE the swapped map then
+    // drives the panel-LED side again; RIGHT returns to its historical
+    // attached mains-relay semantics.
     for (uint8_t relay_idx = 0;
-         relay_idx < DEVICE_MIGRATION_SWAPPED_RELAY_COUNT;
+         relay_idx < DEVICE_MIGRATION_PERMANENT_POWER_RELAY_COUNT;
          relay_idx++) {
         if (!relay_cluster_nv_delete_physical_mode(relay_idx)) {
             // Swapped + verified MANUAL/ON: safe partial.
