@@ -21,6 +21,40 @@ const withExposeLabel = (extend, label) => {
     }
     return extend;
 };
+
+// Canary target UX: the ordinary On/Off state becomes a LOGICAL Zigbee state
+// when Physical relay behavior is Always on/off. Keep MQTT properties stable,
+// but make that distinction explicit so users do not confuse logical state
+// with mains power.
+const bseedTargetOnOff = (endpointNames) => {
+    const result = onOff({endpointNames, configureReporting: false});
+    for (const expose of result.exposes || []) {
+        if (expose.type === "switch") {
+            for (const feature of expose.features || []) {
+                if (feature.name === "state") {
+                    if (typeof feature.withLabel === "function") {
+                        feature.withLabel("Logical relay state");
+                    }
+                    if (typeof feature.withDescription === "function") {
+                        feature.withDescription(
+                            "Logical Zigbee On/Off state. This does not necessarily switch mains power: Physical relay behavior can force the electrical output Always on or Always off."
+                        );
+                    }
+                }
+            }
+        } else if (expose.name === "power_on_behavior") {
+            if (typeof expose.withLabel === "function") {
+                expose.withLabel("Logical state after power-up");
+            }
+            if (typeof expose.withDescription === "function") {
+                expose.withDescription(
+                    "Controls the logical Zigbee relay state after power-up. Physical relay behavior is independent and can keep the electrical output Always on or Always off."
+                );
+            }
+        }
+    }
+    return result;
+};
 {% if z2m_v1 %}
 const ota = require("zigbee-herdsman-converters/lib/ota");
 {% endif%}
@@ -85,7 +119,11 @@ const romasku = {
             cluster: "genOnOffSwitchCfg",
             attribute: { ID: 0xff02, type: 0x20 }, // uint8
             label: "Assigned local relay",
-            description: "Selects which local relay endpoint this wall control changes.",
+            description: relay_cnt === 3
+                ? "Selects which local Zigbee relay state this button changes: relay_1 = Left, relay_2 = Middle, relay_3 = Right."
+                : relay_cnt === 2
+                    ? "Selects which local Zigbee relay state this button changes: relay_1 = Left, relay_2 = Right."
+                    : "Selects which local Zigbee relay state this button changes.",
             entityCategory: "config",
         }),
     bindedMode: (name, endpointName) =>
@@ -479,16 +517,29 @@ const definitions = [
                 {%- endfor -%}
             } }),
             {% set first_endpoint = device.switchNames[0] if device.switchNames else (device.relayNames[0] if device.relayNames else (device.coverSwitchNames[0] if device.coverSwitchNames else device.coverNames[0])) %}
+            {% if not device.bseed_canary_no_configure %}
             romasku.deviceConfig("device_config", "{{first_endpoint}}"),
             romasku.multiPressResetCount("multi_press_reset_count", "{{first_endpoint}}"),
             {% if device.has_dedicated_net_led %}
             romasku.networkIndicator("network_led", "{{first_endpoint}}"),
             {% endif%}
+            {% endif %}
             {% if device.relayNames %}
-            onOff({ endpointNames: {{device.relayNames | tojson }}{% if device.bseed_canary_no_configure %}, configureReporting: false{% endif %} }),
+            {% if device.bseed_canary_no_configure %}
+            bseedTargetOnOff({{device.relayNames | tojson }}),
+            {% else %}
+            onOff({ endpointNames: {{device.relayNames | tojson }} }),
+            {% endif %}
+            {% endif %}
+            {% if device.bseed_canary_no_configure %}
+            {% for relayName in device.relayNames %}
+            romasku.relayPhysicalMode("{{relayName}}_physical_mode", "{{relayName}}"),
+            {% endfor %}
             {% endif %}
             {% for switchName in device.switchNames %}
+            {% if not device.bseed_canary_no_configure %}
             romasku.pressAction("{{switchName}}_press_action", "{{switchName}}"),
+            {% endif %}
             romasku.switchMode("{{switchName}}_mode", "{{switchName}}"),
             romasku.switchAction("{{switchName}}_action_mode", "{{switchName}}"),
             {% if device.relayNames %}
@@ -503,9 +554,21 @@ const definitions = [
             romasku.relayIndicatorMode("{{relayName}}_indicator_mode", "{{relayName}}"),
             romasku.relayIndicator("{{relayName}}_indicator", "{{relayName}}"),
             {% endfor %}
+            {% if not device.bseed_canary_no_configure %}
             {% for relayName in device.relayNames %}
             romasku.relayPhysicalMode("{{relayName}}_physical_mode", "{{relayName}}"),
             {% endfor %}
+            {% endif %}
+            {% if device.bseed_canary_no_configure %}
+            {% for switchName in device.switchNames %}
+            romasku.pressAction("{{switchName}}_press_action", "{{switchName}}"),
+            {% endfor %}
+            {% if device.has_dedicated_net_led %}
+            romasku.networkIndicator("network_led", "{{first_endpoint}}"),
+            {% endif %}
+            romasku.multiPressResetCount("multi_press_reset_count", "{{first_endpoint}}"),
+            romasku.deviceConfig("device_config", "{{first_endpoint}}"),
+            {% endif %}
             {% for coverName in device.coverNames %}
             windowCovering({ 
                 controls: ["lift"],
