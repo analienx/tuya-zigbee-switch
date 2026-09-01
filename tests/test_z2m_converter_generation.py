@@ -232,7 +232,8 @@ def test_target_only_generation_preserves_full_db_collision_context(tmp_path: Pa
     assert js.count('model: "EC-GL86ZPCS31"') == 1
     assert 'model: "EC-SL-FK86ZPCS31"' not in js
     assert js.count(
-        '{ manufacturerName: "iedhxgyi", modelID: "TS0726-3-BS" }'
+        '{ manufacturerName: "iedhxgyi", modelID: "TS0726-3-BS", '
+        'softwareBuildID: "1.1.4-8542fc05", priority: 100 }'
     ) == 1
     # The target model collides in the full DB, therefore a target-only
     # overlay must NOT fall back to a bare TS0726-3-BS zigbeeModel matcher.
@@ -242,6 +243,8 @@ def test_target_only_generation_preserves_full_db_collision_context(tmp_path: Pa
         if '"TS0726-3-BS"' in line and "manufacturerName" not in line
     ]
     assert not bare, bare
+    assert 'softwareBuildID: "1.1.4-8542fc05"' in js
+    assert "priority: 100" in js
     assert "configureReporting: false" in js
     assert "reporting.bind(" not in js
     assert "reporting.onOff(" not in js
