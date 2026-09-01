@@ -62,6 +62,18 @@ void relay_cluster_add_to_endpoint(zigbee_relay_cluster *cluster,
     relay_cluster_load_attrs_from_nv(cluster);
     relay_cluster_load_physical_mode_from_nv(cluster);
 
+    // Enable the relay outputs only now that the persisted physical policy
+    // is known: the FIRST output enable already carries the correct
+    // electrical level, so detached_on boots never drive the contact LOW
+    // first. ATTACHED (and invalid/missing NVM, which maps to ATTACHED)
+    // keeps the legacy boot-at-OFF behavior.
+    uint8_t initial_physical_state = 0;
+    if (cluster->physical_relay_mode ==
+        ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON) {
+        initial_physical_state = 1;
+    }
+    relay_init(cluster->relay, initial_physical_state);
+
     cluster->relay->callback_param = cluster;
     cluster->relay->on_change      = (relay_callback_t)relay_cluster_on_relay_change;
 

@@ -25,6 +25,18 @@ void hal_gpio_init(hal_gpio_pin_t gpio_pin, uint8_t is_input,
                    hal_gpio_pull_t pull);
 
 /**
+ * Initialize GPIO pin as push-pull output whose FIRST driven level is
+ * already `initial_value`. The output driver must be enabled only after the
+ * output register carries `initial_value`, so enabling the pin never
+ * produces a transient level different from `initial_value`.
+ * @param gpio_pin GPIO pin identifier
+ * @param pull Pull resistor configuration
+ * @param initial_value 0=low, non-zero=high (level present at first enable)
+ */
+void hal_gpio_init_output(hal_gpio_pin_t gpio_pin, hal_gpio_pull_t pull,
+                          uint8_t initial_value);
+
+/**
  * Set output pin high
  * @param gpio_pin GPIO pin identifier
  */

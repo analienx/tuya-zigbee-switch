@@ -20,11 +20,20 @@ typedef struct {
 } relay_t;
 
 /**
- * @brief      Initialize relay (set initial state)
+ * @brief      Initialize relay outputs. The relay GPIOs are enabled HERE —
+ *             with the first driven level already equal to the desired
+ *             electrical state — so the persisted physical policy must be
+ *             known before calling this (see relay_cluster /
+ *             cover_cluster). Never enable at the inactive level and flip
+ *             afterwards: that is a boot glitch.
  * @param      *relay - Relay to use
+ * @param      initial_physical_state - Electrical state at first enable
+ *             (0 = off, 1 = on). For latching relays both coil pins
+ *             initialize inactive regardless; the policy pulse, if any, is
+ *             issued by the relay cluster when it applies the policy.
  * @return     none
  */
-void relay_init(relay_t *relay);
+void relay_init(relay_t *relay, uint8_t initial_physical_state);
 
 /**
  * @brief      Turn on relay

@@ -12,6 +12,8 @@ typedef struct {
     uint8_t         initialized;
     uint8_t         is_input;
     uint8_t         value;
+    uint8_t         initial_value; // Level present when the pin was first enabled
+    uint8_t         has_initial;   // 1 once an output-enable level was recorded
     hal_gpio_pull_t pull;
     gpio_callback_t callback;
     void *          callback_arg;
@@ -34,8 +36,35 @@ void hal_gpio_init(hal_gpio_pin_t gpio_pin, uint8_t is_input,
     gpio_pins[gpio_pin].callback     = NULL;
     gpio_pins[gpio_pin].callback_arg = NULL;
 
+    if (!is_input && !gpio_pins[gpio_pin].has_initial) {
+        gpio_pins[gpio_pin].initial_value = gpio_pins[gpio_pin].value;
+        gpio_pins[gpio_pin].has_initial   = 1;
+    }
+
     io_log("GPIO", "Init pin %d as %s, pull=%d", gpio_pin,
            is_input ? "input" : "output", pull);
+}
+
+void hal_gpio_init_output(hal_gpio_pin_t gpio_pin, hal_gpio_pull_t pull,
+                          uint8_t initial_value) {
+    if (gpio_pin >= MAX_GPIO_PINS)
+        return;
+
+    // Record the FIRST enabled level so tests can distinguish
+    // "enabled ON" from "enabled LOW then set HIGH" (the latter is a glitch).
+    gpio_pins[gpio_pin].initialized   = 1;
+    gpio_pins[gpio_pin].is_input      = 0;
+    gpio_pins[gpio_pin].pull          = pull;
+    gpio_pins[gpio_pin].value         = initial_value ? 1 : 0;
+    gpio_pins[gpio_pin].initial_value = gpio_pins[gpio_pin].value;
+    gpio_pins[gpio_pin].has_initial   = 1;
+    gpio_pins[gpio_pin].callback      = NULL;
+    gpio_pins[gpio_pin].callback_arg  = NULL;
+
+    io_log("GPIO", "Init output pin %d, first level=%d", gpio_pin,
+           gpio_pins[gpio_pin].initial_value);
+    io_evt("gpio_init_output pin=%d value=%d", gpio_pin,
+           gpio_pins[gpio_pin].initial_value);
 }
 
 void hal_gpio_set(hal_gpio_pin_t gpio_pin) {
@@ -146,6 +175,20 @@ uint8_t stub_gpio_get_output(hal_gpio_pin_t gpio_pin) {
         return 0;
     }
     return gpio_pins[gpio_pin].value;
+}
+
+uint8_t stub_gpio_has_initial_output(hal_gpio_pin_t gpio_pin) {
+    if (gpio_pin >= MAX_GPIO_PINS) {
+        return 0;
+    }
+    return gpio_pins[gpio_pin].has_initial;
+}
+
+uint8_t stub_gpio_get_initial_output(hal_gpio_pin_t gpio_pin) {
+    if (gpio_pin >= MAX_GPIO_PINS) {
+        return 0;
+    }
+    return gpio_pins[gpio_pin].initial_value;
 }
 
 // Helper funcs

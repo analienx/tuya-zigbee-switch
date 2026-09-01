@@ -114,6 +114,19 @@ void hal_gpio_init(hal_gpio_pin_t gpio_pin, uint8_t is_input,
     // by looking up the slot when the user calls hal_gpio_int_callback.
 }
 
+void hal_gpio_init_output(hal_gpio_pin_t gpio_pin, hal_gpio_pull_t pull,
+                          uint8_t initial_value) {
+    (void)pull;
+    hal_gpio_ensure_clock();
+
+    const sl_gpio_t sl_gpio = silabs_hal_gpio_to_sl_gpio(gpio_pin);
+
+    // Push-pull output whose first driven level is already `initial_value`
+    // (the Silicon Labs API sets DOUT in the same operation as the mode).
+    sl_gpio_set_pin_mode(&sl_gpio, SL_GPIO_MODE_PUSH_PULL,
+                         initial_value ? 1 : 0);
+}
+
 void hal_gpio_set(hal_gpio_pin_t gpio_pin) {
     const sl_gpio_t sl_gpio = silabs_hal_gpio_to_sl_gpio(gpio_pin);
 

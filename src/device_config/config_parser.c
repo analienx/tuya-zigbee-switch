@@ -213,7 +213,9 @@ void parse_config() {
             switch_clusters_cnt++;
         } else if (entry[0] == 'R') {
             hal_gpio_pin_t pin = hal_gpio_parse_pin(entry + 1);
-            hal_gpio_init(pin, 0, HAL_GPIO_PULL_NONE);
+            // NOTE: relay outputs are NOT enabled here. They are enabled by
+            // relay_init() once the persisted physical policy is known, so
+            // the first output enable already carries the correct level.
 
             relays[relays_cnt].pin     = pin;
             relays[relays_cnt].on_high = 1;
@@ -263,8 +265,9 @@ void parse_config() {
             hal_gpio_pin_t open_pin  = hal_gpio_parse_pin(entry + 1);
             hal_gpio_pin_t close_pin = hal_gpio_parse_pin(entry + 3);
 
-            hal_gpio_init(open_pin, 0, HAL_GPIO_PULL_NONE);
-            hal_gpio_init(close_pin, 0, HAL_GPIO_PULL_NONE);
+            // Cover relay outputs are enabled by relay_init() (explicitly
+            // OFF) in cover_cluster_init(), keeping the GPIO-enable ordering
+            // identical to ordinary relays.
 
             relays[relays_cnt].pin         = open_pin;
             relays[relays_cnt].on_high     = 1;
@@ -417,9 +420,10 @@ void peripherals_init() {
     for (int index = 0; index < leds_cnt; index++) {
         led_init(&leds[index]);
     }
-    for (int index = 0; index < relays_cnt; index++) {
-        relay_init(&relays[index]);
-    }
+    // Relay GPIOs are intentionally NOT initialized here: they are enabled
+    // by relay_init() once their owner (relay cluster or cover cluster) has
+    // loaded the persisted physical policy, so the first output enable
+    // already carries the correct electrical level.
     if (hal_zigbee_get_network_status() == HAL_ZIGBEE_NETWORK_JOINED) {
         network_indicator_connected(&network_indicator);
         update_switch_clusters();
