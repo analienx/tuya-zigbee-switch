@@ -247,6 +247,37 @@ def test_target_only_generation_preserves_full_db_collision_context(tmp_path: Pa
     assert "reporting.onOff(" not in js
 
 
+def test_target_only_overlay_has_clear_logical_vs_physical_ux(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(HELPER),
+            "device_db.yaml",
+            "--only-db-key",
+            "SWITCH_BSEED_TS0726_3GANG",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    js = result.stdout
+
+    assert 'feature.withLabel("Logical relay state")' in js
+    assert "does not necessarily switch mains power" in js
+    assert 'expose.withLabel("Logical state after power-up")' in js
+    assert "Physical relay behavior is independent" in js
+    assert "relay_1 = Left, relay_2 = Middle, relay_3 = Right" in js
+
+    # Conceptual order in generated target: ordinary state first, then physical
+    # policy, then button settings/indicators, diagnostics, device settings,
+    # and the dangerous raw hardware map last.
+    assert js.index("bseedTargetOnOff") < js.index('romasku.relayPhysicalMode("relay_left_physical_mode"')
+    assert js.index('romasku.relayPhysicalMode("relay_left_physical_mode"') < js.index('romasku.switchMode("switch_left_mode"')
+    assert js.index('romasku.switchMode("switch_left_mode"') < js.index('romasku.relayIndicatorMode("relay_left_indicator_mode"')
+    assert js.index('romasku.relayIndicatorMode("relay_left_indicator_mode"') < js.index('romasku.pressAction("switch_left_press_action"')
+    assert js.index('romasku.pressAction("switch_left_press_action"') < js.index('romasku.deviceConfig("device_config"')
+
+
 def test_target_only_generation_rejects_unknown_db_key(tmp_path: Path) -> None:
     result = subprocess.run(
         [
