@@ -12,4 +12,4 @@ silabs_tools
 __pycache__
 *.pyc
 *.pyo
-*.pyd
+*.pydstub_nvm_data_gen
