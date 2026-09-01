@@ -9,6 +9,7 @@ HIGH" (the latter is a glitch).
 """
 
 import pathlib
+from typing import Iterator
 
 import pytest
 
