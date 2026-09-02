@@ -340,8 +340,8 @@ const requireDeviceConfigUnlock = (meta) => {
 };
 
 const configTransportCluster = () =>
-    deviceAddCustomCluster("bseedBasicTransport", {
-        name: "bseedBasicTransport",
+    deviceAddCustomCluster("genBasic", {
+        name: "genBasic",
         ID: 0x0000,
         attributes: {},
         commands: {
@@ -469,7 +469,7 @@ const deviceConfigEditable = (name) => {
                     for (let offset = 0; offset < bytes.length; offset += DEVICE_CONFIG_CHUNK_MAX) {
                         const chunk = [...bytes.subarray(offset, offset + DEVICE_CONFIG_CHUNK_MAX)];
                         await endpoint.command(
-                            "bseedBasicTransport",
+                            "genBasic",
                             "deviceConfigStage",
                             {data: [tx, offset, chunk.length, ...chunk]},
                             options,
@@ -478,7 +478,7 @@ const deviceConfigEditable = (name) => {
 
                     const crc = crc16CcittFalse(bytes);
                     await endpoint.command(
-                        "bseedBasicTransport",
+                        "genBasic",
                         "deviceConfigCommit",
                         {data: [tx, bytes.length, crc & 0xff, crc >> 8]},
                         options,
