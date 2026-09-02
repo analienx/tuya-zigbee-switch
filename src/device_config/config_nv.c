@@ -2,6 +2,7 @@
 #include "hal/nvm.h"
 #include "hal/printf_selector.h"
 #include "nvm_items.h"
+#include <stddef.h>
 #include <string.h>
 
 #ifdef HAL_SILABS
