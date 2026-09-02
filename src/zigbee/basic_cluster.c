@@ -171,7 +171,6 @@ void basic_cluster_callback_attr_write_trampoline(uint16_t attribute_id) {
         // chunked commands above to avoid APS MESSAGE_TOO_LONG failures.
         if (!device_config_is_valid(device_config_str.data,
                                     device_config_str.size)) {
-            printf("Rejected invalid direct device_config write (%d)\r\n", 0);
             device_config_read_from_nv();
             return;
         }
