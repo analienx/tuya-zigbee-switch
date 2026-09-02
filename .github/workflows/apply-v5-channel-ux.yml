@@ -1,0 +1,36 @@
+name: apply-v5-channel-ux
+
+on:
+  push:
+    branches:
+      - supervisor/target-overlay-v5
+    paths:
+      - helper_scripts/apply_bseed_ts0726_v5_channel_ux.py
+      - .github/workflows/apply-v5-channel-ux.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: supervisor/target-overlay-v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Apply channel/advanced UX transformation
+        run: |
+          python helper_scripts/apply_bseed_ts0726_v5_channel_ux.py
+          node --check zigbee2mqtt/converters/bseed_ts0726_v5.js
+          git diff --check
+      - name: Commit transformed converter
+        run: |
+          git config user.name "Supervisor UX builder"
+          git config user.email "actions@github.com"
+          git add zigbee2mqtt/converters/bseed_ts0726_v5.js
+          git commit -m "v5 UX: explicit channels and dedicated advanced section"
+          git push origin HEAD:supervisor/target-overlay-v5
