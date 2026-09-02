@@ -15,7 +15,7 @@ jobs:
       - name: Checkout frozen firmware source
         uses: actions/checkout@v6
         with:
-          ref: 01e225ea9bf8404b6180d5e711e55b54c24accd7
+          ref: a748e230993977c397fdda8d699a0da4ccd25069
           fetch-depth: 0
       - name: Install dependencies
         run: |
@@ -48,7 +48,7 @@ jobs:
       - name: Upload frozen artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: bseed-ts0726-v5-final-01e225ea
+          name: bseed-ts0726-v5-final-a748e230
           path: |
             build/bseed-ts0726-v5-final/forward.bin
             build/bseed-ts0726-v5-final/forward.ota
