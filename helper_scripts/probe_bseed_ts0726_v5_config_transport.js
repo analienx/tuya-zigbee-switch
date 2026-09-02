@@ -37,7 +37,11 @@ Module._load = function(request, parent, isMain) {
         };
     }
     if (request === 'zigbee-herdsman-converters/lib/exposes') {
-        return {presets: {action: (values) => ({...makeExpose('action'), values})}};
+        return {
+            presets: {action: (values) => ({...makeExpose('action'), values})},
+            access: {SET: 2},
+            enum: (name, access, values) => ({...makeExpose(name, access), values}),
+        };
     }
     if (request === 'zigbee-herdsman') {
         return {Zcl: {BuffaloZclDataType: {LIST_UINT8: 0x1001}}};
@@ -70,11 +74,13 @@ async function main() {
     const defs = Array.isArray(exported) ? exported : exported.default;
     if (!Array.isArray(defs) || defs.length !== 1) die('expected one definition');
 
-    const converters = defs[0].extend
-        .flatMap((ext) => ext.toZigbee || [])
-        .filter((converter) => (converter.key || []).includes('device_config'));
+    const allConverters = defs[0].extend.flatMap((ext) => ext.toZigbee || []);
+    const converters = allConverters.filter((converter) => (converter.key || []).includes('device_config'));
+    const unlockers = allConverters.filter((converter) => (converter.key || []).includes('device_config_unlock'));
     if (converters.length !== 1) die(`expected one device_config converter, got ${converters.length}`);
+    if (unlockers.length !== 1) die(`expected one device_config unlock converter, got ${unlockers.length}`);
     const converter = converters[0];
+    const unlocker = unlockers[0];
 
     const events = [];
     const endpoint = {
@@ -82,14 +88,41 @@ async function main() {
         async read(...args) { events.push({op: 'read', args}); return {}; },
         async write(...args) { events.push({op: 'write', args}); return {}; },
     };
-    const meta = {device: {getEndpoint(id) { if (id !== 1) die(`unexpected endpoint ${id}`); return endpoint; }}};
+    const meta = {
+        device: {
+            ieeeAddr: '0xa4c13843a9d40f85',
+            getEndpoint(id) { if (id !== 1) die(`unexpected endpoint ${id}`); return endpoint; },
+        },
+    };
 
     const config = 'iedhxgyi;TS0726-3-BS;LC4;SB1u;RC2;IC0;SB7u;RC3;ID7;SB4u;RD2;IB5;M;';
     const source = Buffer.from(config, 'ascii');
     if (source.length <= 64) die('fixture must exercise formerly oversized config');
 
+    let lockedRejected = false;
+    try {
+        await converter.convertSet(endpoint, 'device_config', config, meta);
+    } catch (error) {
+        lockedRejected = String(error).includes('locked');
+    }
+    if (!lockedRejected) die('valid config was not rejected while editor was locked');
+    if (events.length !== 0) die('locked SET emitted Zigbee traffic');
+
+    await unlocker.convertSet(endpoint, 'device_config_unlock', 'enable_editing', meta);
+    if (events.length !== 0) die('unlock button emitted Zigbee traffic');
+
     const result = await converter.convertSet(endpoint, 'device_config', config, meta);
     if (result?.state?.device_config !== config) die('SET did not return exact public property value');
+
+    const afterFirstSave = events.length;
+    let consumedRejected = false;
+    try {
+        await converter.convertSet(endpoint, 'device_config', config, meta);
+    } catch (error) {
+        consumedRejected = String(error).includes('locked');
+    }
+    if (!consumedRejected) die('one-shot unlock was not consumed by the valid save');
+    if (events.length !== afterFirstSave) die('second locked SET emitted Zigbee traffic');
 
     const writes = events.filter((event) => event.op === 'write');
     if (writes.length !== 0) die(`direct attribute write attempted: ${JSON.stringify(writes)}`);
@@ -130,10 +163,14 @@ async function main() {
     const expectedCrc = crc16(source);
     if (actualCrc !== expectedCrc) die(`CRC mismatch actual=${actualCrc} expected=${expectedCrc}`);
 
+    await unlocker.convertSet(endpoint, 'device_config_unlock', 'enable_editing', meta);
     const beforeInvalid = events.length;
     for (const invalid of [
         config.slice(0, -1),
-        'iedhxgyi;;RC2;',
+        'other;TS0726-3-BS;LC4;SB1u;RC2;IC0;SB7u;RC3;ID7;SB4u;RD2;IB5;M;',
+        'iedhxgyi;TS0726-3-BS;LC4;SB1u;RC2;IC0;SB7u;RC3;ID7;SB4u;RD2;M;',
+        'iedhxgyi;TS0726-3-BS;LC4;SB1u;RC2;IC0;SB7u;RC3;ID7;SB4u;RD2;IC0;M;',
+        'iedhxgyi;TS0726-3-BS;LC4;SB1u;RC2;IC0;SB7u;RC3;ID7;SB4u;RD2;IB5;XA0B0u;M;',
         'iedhxgyi;TS0726-3-BS;RC2;\u0000BAD;',
         123,
     ]) {
@@ -160,7 +197,10 @@ async function main() {
         directWriteCount: writes.length,
         commit: {transaction, total, crc16: actualCrc},
         exactRoundTrip: true,
-        invalidValuesRejectedWithoutTraffic: true,
+        lockedSetRejectedWithoutTraffic: true,
+        unlockButtonEmitsNoZigbeeTraffic: true,
+        unlockConsumedAfterOneValidSave: true,
+        invalidBoardLayoutsRejectedWithoutTraffic: true,
         getReadsBasicDeviceConfig: true,
     }, null, 2) + '\n');
 }
