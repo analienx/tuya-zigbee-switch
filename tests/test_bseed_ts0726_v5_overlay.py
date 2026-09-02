@@ -35,11 +35,11 @@ def test_configure_surface_remains_non_mutating() -> None:
 
 def test_physical_policy_ux_is_clear_and_smart_light_oriented() -> None:
     js = source()
-    assert '"Logical relay state"' in js
+    assert 'channelLabel(feature.endpoint || expose.endpoint) + " — Logical state"' in js
+    assert 'channelLabel(expose.endpoint) + " — State after power-up"' in js
     assert "not the same as mains power" in js
-    assert '"Logical state after power-up"' in js
     assert 'lookup: {follow_state: 0, always_on: 1, always_off: 2}' in js
-    assert '"Mains power behavior"' in js
+    assert 'channelLabel(endpointName) + " — Mains power"' in js
     assert "smart bulbs and smart dimmers choose Always on" in js
     assert "affect power immediately" in js
 
@@ -54,7 +54,7 @@ def test_indicator_source_has_new_modes_without_reinterpreting_legacy_values() -
         "binding_status: 4",
     ):
         assert mapping in js
-    assert '"LED shows"' in js
+    assert 'channelLabel(endpointName) + " — LED shows"' in js
     assert "Binding status is recommended" in js
     assert "intent, not confirmation of remote state" in js
     assert "control only the panel LED" in js
@@ -68,7 +68,7 @@ def test_binding_intent_state_is_exposed_per_channel_with_reconciliation_warning
             f'bindingIntentState("relay_{channel}_binding_intent", "relay_{channel}")'
             in js
         )
-    assert '"Bound light state (tracked)"' in js
+    assert 'channelLabel(endpointName) + " — Bound light (tracked)"' in js
     assert "not remote-state confirmation" in js
     assert "sends no command" in js
     assert "changes no binding" in js
@@ -78,12 +78,14 @@ def test_binding_intent_state_is_exposed_per_channel_with_reconciliation_warning
 def test_advanced_editor_is_click_to_unlock_and_fail_closed() -> None:
     js = source()
     assert 'exposes.enum("device_config_unlock", ea.SET, ["enable_editing"])' in js
-    assert '"Enable advanced editing"' in js
+    assert '.withLabel("Advanced — Enable editing")' in js
     assert "DEVICE_CONFIG_UNLOCK_MS = 60_000" in js
     assert "deviceConfigUnlocks = new Map()" in js
     assert "requireDeviceConfigUnlock(meta)" in js
     assert "deviceConfigUnlocks.delete(unlockKey)" in js
     assert "Click 'Enable advanced editing'" in js
+    assert '.withEndpoint("advanced")' in js
+    assert '.withProperty("device_config_unlock")' in js
     assert "The button itself changes nothing" in js
 
 
@@ -101,9 +103,11 @@ def test_advanced_editor_validates_this_exact_board_before_transport() -> None:
 
 def test_device_config_is_editable_but_uses_chunked_transport_not_direct_write() -> None:
     js = source()
-    assert 'deviceConfigEditable("device_config", "switch_left")' in js
-    assert '"Advanced hardware configuration"' in js
-    assert 'access: "ALL"' in js
+    assert 'deviceConfigEditable("device_config")' in js
+    assert '.withLabel("Advanced — Hardware configuration")' in js
+    assert '.text(name, ea.ALL)' in js
+    assert '.withEndpoint("advanced")' in js
+    assert '.withProperty(name)' in js
     assert "DEVICE_CONFIG_CHUNK_MAX = 24" in js
     assert '"deviceConfigStage"' in js
     assert '"deviceConfigCommit"' in js
@@ -117,15 +121,45 @@ def test_device_config_is_editable_but_uses_chunked_transport_not_direct_write()
     assert '.read("genBasic", [0xff00]' in config_block
 
 
-def test_advanced_config_remains_last_after_normal_controls() -> None:
+def test_channel_labels_are_self_identifying_when_frontend_hides_endpoint_headings() -> None:
     js = source()
+    for endpoint, label in (
+        ("switch_left", "Left"),
+        ("switch_middle", "Middle"),
+        ("switch_right", "Right"),
+        ("relay_left", "Left"),
+        ("relay_middle", "Middle"),
+        ("relay_right", "Right"),
+    ):
+        assert f'{endpoint}: "{label}"' in js
+
+    for suffix in (
+        " — Mains power",
+        " — Button type",
+        " — Direct-binding command",
+        " — Update local state",
+        " — Control bound light",
+        " — LED shows",
+        " — Bound light (tracked)",
+        " — Manual LED",
+        " — Last button input",
+    ):
+        assert suffix in js
+
+
+def test_advanced_config_is_a_dedicated_final_endpoint_group() -> None:
+    js = source()
+    assert "advanced: 1" in js
+    assert '.withEndpoint("advanced")' in js
+    assert 'deviceConfigEditable("device_config")' in js
+
     logical = js.index('logicalOnOff(["relay_left", "relay_middle", "relay_right"])')
     physical = js.index('physicalRelayMode("relay_left_physical_mode"')
     buttons = js.index('buttonType("switch_left_mode"')
     indicators = js.index('indicatorBehavior("relay_left_indicator_mode"')
     diagnostics = js.index('lastButtonAction("switch_left_press_action"')
     unlock = js.index("deviceConfigUnlock()")
-    advanced = js.index('deviceConfigEditable("device_config"')
+    advanced = js.index('deviceConfigEditable("device_config")')
     assert logical < physical < buttons < indicators < diagnostics < unlock < advanced
 
 
