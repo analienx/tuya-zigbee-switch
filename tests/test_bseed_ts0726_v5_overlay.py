@@ -107,6 +107,8 @@ def test_advanced_editor_validates_this_exact_board_before_transport() -> None:
     assert "indicators.length !== 3" in js
     assert "momentary.length !== 1" in js
     assert "GPIO pin(s) assigned more than once" in js
+    assert 'token === "SLP"' in js
+    assert '/^D[0-9]+$/' in js
 
 
 def test_transport_extends_builtin_basic_without_shadow_cluster() -> None:
@@ -250,4 +252,6 @@ def test_javascript_syntax_and_behavioral_probes_when_node_is_available() -> Non
     assert '"lockedSetRejectedWithoutTraffic": true' in transport.stdout
     assert '"unlockButtonEmitsNoZigbeeTraffic": true' in transport.stdout
     assert '"unlockConsumedAfterOneValidSave": true' in transport.stdout
+    assert '"unlockExpiresAfter60SecondsWithoutTraffic": true' in transport.stdout
+    assert '"safeAdvancedOptionsRoundTrip": true' in transport.stdout
     assert '"invalidBoardLayoutsRejectedWithoutTraffic": true' in transport.stdout
