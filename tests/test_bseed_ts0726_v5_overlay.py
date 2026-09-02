@@ -77,7 +77,7 @@ def test_binding_intent_state_is_exposed_per_channel_with_reconciliation_warning
 
 def test_advanced_editor_is_click_to_unlock_and_fail_closed() -> None:
     js = source()
-    assert 'exposes.enum("device_config_unlock", ea.SET, ["enable_editing"])' in js
+    assert '.enum("device_config_unlock", ea.SET, ["enable_editing"])' in js
     assert '.withLabel("Advanced — Enable editing")' in js
     assert "DEVICE_CONFIG_UNLOCK_MS = 60_000" in js
     assert "deviceConfigUnlocks = new Map()" in js
