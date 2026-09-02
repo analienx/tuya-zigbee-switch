@@ -6,6 +6,7 @@ on:
       - supervisor/target-overlay-v5
     paths:
       - helper_scripts/apply_bseed_ts0726_v5_ux_lock.py
+      - .github/workflows/apply-v5-ux-lock.yml
 
 permissions:
   contents: write
