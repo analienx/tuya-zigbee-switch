@@ -57,7 +57,6 @@ void device_config_read_from_nv() {
            device_config_str.data);
 }
 
-
 #ifdef DEVICE_CONFIG_GUARD_BSEED_TS0726_3GANG
 static bool bseed_token_equals(const uint8_t *data, uint16_t start,
                                uint16_t len, const char *expected) {
@@ -103,6 +102,7 @@ static bool bseed_pull_is_valid(uint8_t pull) {
     case 'n':
     case 'N':
         return true;
+
     default:
         return false;
     }
@@ -124,15 +124,15 @@ static bool bseed_digits_only(const uint8_t *data, uint16_t start,
 }
 
 static bool bseed_ts0726_3gang_config_is_valid(const uint8_t *data,
-                                                uint16_t size) {
-    uint8_t network_count   = 0;
-    uint8_t switch_count    = 0;
-    uint8_t relay_count     = 0;
-    uint8_t indicator_count = 0;
-    uint8_t momentary_count = 0;
-    bool    used_pins[40]   = { false };
-    uint16_t token_start    = 0;
-    uint8_t token_index     = 0;
+                                               uint16_t size) {
+    uint8_t  network_count   = 0;
+    uint8_t  switch_count    = 0;
+    uint8_t  relay_count     = 0;
+    uint8_t  indicator_count = 0;
+    uint8_t  momentary_count = 0;
+    bool     used_pins[40]   = { false };
+    uint16_t token_start     = 0;
+    uint8_t  token_index     = 0;
 
     for (uint16_t cursor = 0; cursor < size; cursor++) {
         if (data[cursor] != ';') {
@@ -202,6 +202,7 @@ static bool bseed_ts0726_3gang_config_is_valid(const uint8_t *data,
     return token_index >= 2 && network_count == 1 && switch_count == 3 &&
            relay_count == 3 && indicator_count == 3 && momentary_count == 1;
 }
+
 #endif
 
 bool device_config_is_valid(const uint8_t *data, uint16_t size) {
