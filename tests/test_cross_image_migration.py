@@ -21,6 +21,7 @@ from tests.client import StubProc
 from tests.conftest import Device
 from tests.zcl_consts import (
     ZCL_ATTR_BASIC_DEVICE_CONFIG,
+    ZCL_ATTR_ONOFF_BINDING_INTENT_STATE,
     ZCL_ATTR_ONOFF_PHYSICAL_RELAY_MODE,
     ZCL_ATTR_ONOFF_INDICATOR_MODE,
     ZCL_CLUSTER_BASIC,
@@ -48,6 +49,7 @@ INDICATOR_ON = 1
 NV_CONFIG_ITEM = 0x02
 NV_MARKER_ITEM = 0x28
 NV_PHYSICAL_MODE_BASE = 0x23
+NV_BINDING_INTENT_BASE = 0x29
 
 MIG_FORWARD_COMPLETE = 2
 
@@ -172,6 +174,61 @@ def test_migration_then_plain_generic_image(migration_image) -> None:
     binary = pathlib.Path("build/stub/stub_device").read_bytes()
     assert b"swapped-pin migration complete" not in binary
     assert b"swapped-pin state restored" not in binary
+
+
+def test_v4_style_canonical_state_initializes_v5_binding_intent_without_regression(
+    migration_image,
+) -> None:
+    """Simulate live v4 -> v5: canonical safety NVM exists, v5 intent slots do not."""
+
+    with StubProc(device_config=SWAPPED_CONFIG) as proc:
+        device = Device(proc)
+        assert read_config(device) == CANONICAL_CONFIG
+        marker_before = read_nv(NV_MARKER_ITEM)
+        assert marker_before is not None
+
+    # v4 did not have the v5 binding-intent items. Remove only those new slots,
+    # preserving the migrated config, physical policies, indicator records and
+    # migration marker exactly as the live v4 device would.
+    for relay_idx in range(3):
+        path = pathlib.Path("stub_nvm_data") / f"item_{NV_BINDING_INTENT_BASE + relay_idx:02x}.bin"
+        if path.exists():
+            path.unlink()
+
+    plain_image()
+    with StubProc() as proc:
+        device = Device(proc)
+
+        assert read_config(device) == CANONICAL_CONFIG
+        assert read_nv(NV_MARKER_ITEM) == marker_before
+
+        for endpoint in (
+            RELAY_LEFT_ENDPOINT,
+            RELAY_MIDDLE_ENDPOINT,
+            RELAY_RIGHT_ENDPOINT,
+        ):
+            assert (
+                read_physical_mode(device, endpoint)
+                == ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON
+            )
+            logical = int(
+                device.read_zigbee_attr(
+                    endpoint, ZCL_CLUSTER_ON_OFF, 0x0000
+                )
+            )
+            binding_intent = int(
+                device.read_zigbee_attr(
+                    endpoint,
+                    ZCL_CLUSTER_ON_OFF,
+                    ZCL_ATTR_ONOFF_BINDING_INTENT_STATE,
+                )
+            )
+            assert binding_intent == logical
+
+        assert read_indicator_mode(device, RELAY_LEFT_ENDPOINT) == INDICATOR_MODE_MANUAL
+        assert read_indicator_mode(device, RELAY_MIDDLE_ENDPOINT) == INDICATOR_MODE_MANUAL
+        assert read_indicator_state(device, RELAY_LEFT_ENDPOINT) == INDICATOR_ON
+        assert read_indicator_state(device, RELAY_MIDDLE_ENDPOINT) == INDICATOR_ON
 
 
 def test_plain_generic_image_first_enable_and_behavior(migration_image) -> None:
