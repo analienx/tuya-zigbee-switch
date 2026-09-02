@@ -39,7 +39,7 @@ def test_physical_policy_ux_is_clear_and_smart_light_oriented() -> None:
     assert 'channelLabel(feature.endpoint || expose.endpoint) + " — Logical state"' in js
     assert 'channelLabel(expose.endpoint) + " — State after power-up"' in js
     assert "not the same as mains power" in js
-    assert 'lookup: {follow_state: 0, always_on: 1, always_off: 2}' in js
+    assert 'lookup: {"Follow logical state": 0, "Always on": 1, "Always off": 2}' in js
     assert 'channelLabel(endpointName) + " — Mains power"' in js
     assert "smart bulbs and smart dimmers choose Always on" in js
     assert "affect power immediately" in js
@@ -48,11 +48,11 @@ def test_physical_policy_ux_is_clear_and_smart_light_oriented() -> None:
 def test_indicator_source_has_new_modes_without_reinterpreting_legacy_values() -> None:
     js = source()
     for mapping in (
-        "logical_state: 0",
-        "inverse_logical_state: 1",
-        "manual: 2",
-        "physical_output: 3",
-        "binding_status: 4",
+        '"Logical state": 0',
+        '"Inverse logical state": 1',
+        '"Manual": 2',
+        '"Physical output": 3',
+        '"Binding status": 4',
     ):
         assert mapping in js
     assert 'channelLabel(endpointName) + " — LED shows"' in js
@@ -60,6 +60,13 @@ def test_indicator_source_has_new_modes_without_reinterpreting_legacy_values() -
     assert "intent, not confirmation of remote state" in js
     assert "control only the panel LED" in js
     assert "lookup: {same:" not in js
+    assert '"Rocker / toggle": 0' in js
+    assert '"Push button": 1' in js
+    assert '"Push button (normally closed)": 2' in js
+    assert '"Toggle": 2' in js
+    assert '"Match local state": 3' in js
+    assert '"Never (detached)": 0' in js
+    assert 'lookup: {Left: 1, Middle: 2, Right: 3}' in js
 
 
 def test_binding_intent_state_is_exposed_per_channel_with_reconciliation_warning() -> None:
