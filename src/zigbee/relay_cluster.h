@@ -14,7 +14,8 @@ typedef struct {
     uint8_t              startup_mode;
     uint8_t              indicator_led_mode;
     uint8_t              physical_relay_mode;
-    hal_zigbee_attribute attr_infos[5];
+    uint8_t              binding_intent_state;
+    hal_zigbee_attribute attr_infos[6];
     relay_t *            relay;
     led_t *              indicator_led;
     uint8_t              indicator_state;
@@ -26,6 +27,11 @@ void relay_cluster_add_to_endpoint(zigbee_relay_cluster *cluster,
 void relay_cluster_on(zigbee_relay_cluster *cluster);
 void relay_cluster_off(zigbee_relay_cluster *cluster);
 void relay_cluster_toggle(zigbee_relay_cluster *cluster);
+
+// Update only the locally tracked/intended direct-binding On/Off state.
+// This never emits a Zigbee command and never changes logical or mains state.
+void relay_cluster_set_binding_intent(zigbee_relay_cluster *cluster,
+                                      uint8_t state);
 
 void relay_cluster_report(zigbee_relay_cluster *cluster);
 
