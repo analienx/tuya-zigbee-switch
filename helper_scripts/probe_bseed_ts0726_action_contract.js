@@ -33,7 +33,19 @@ Module._load = function(request, parent, isMain) {
         };
     }
     if (request === 'zigbee-herdsman-converters/lib/exposes') {
-        return {presets: {action: exposeAction}};
+        return {
+            presets: {action: exposeAction},
+            access: {SET: 2},
+            enum: (name, access, values) => ({
+                name,
+                property: name,
+                access,
+                values,
+                withLabel(label) { this.label = label; return this; },
+                withDescription(description) { this.description = description; return this; },
+                withCategory(category) { this.category = category; return this; },
+            }),
+        };
     }
     if (request === 'zigbee-herdsman') {
         return {Zcl: {BuffaloZclDataType: {LIST_UINT8: 0x1001}}};
