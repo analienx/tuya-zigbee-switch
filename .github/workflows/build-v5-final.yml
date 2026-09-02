@@ -1,0 +1,60 @@
+name: Build exact BSEED v5 final
+
+on:
+  push:
+    branches:
+      - supervisor/build-v5-final
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout frozen firmware source
+        uses: actions/checkout@v6
+        with:
+          ref: 01e225ea9bf8404b6180d5e711e55b54c24accd7
+          fetch-depth: 0
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make python3 python3-venv python3-yaml yq unzip wget gcc-arm-none-eabi
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Cache Telink tools
+        uses: actions/cache@v4
+        with:
+          path: telink_tools
+          key: telink-tools-v3.7.2.0
+      - name: Cache Python environment
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: python-venv-${{ hashFiles('requirements.txt') }}
+      - name: Install toolchain
+        run: make setup
+      - name: Build exact v5 forward and recovery
+        run: |
+          source .venv/bin/activate
+          bash make_scripts/build_bseed_ts0726_v5.sh build/bseed-ts0726-v5-final | tee build-v5-final.log
+          cat build/bseed-ts0726-v5-final/manifest.json
+          sha256sum build/bseed-ts0726-v5-final/*
+          sha512sum build/bseed-ts0726-v5-final/*.ota
+      - name: Upload frozen artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseed-ts0726-v5-final-01e225ea
+          path: |
+            build/bseed-ts0726-v5-final/forward.bin
+            build/bseed-ts0726-v5-final/forward.ota
+            build/bseed-ts0726-v5-final/recovery.bin
+            build/bseed-ts0726-v5-final/recovery.ota
+            build/bseed-ts0726-v5-final/manifest.json
+            build-v5-final.log
+          if-no-files-found: error
+          retention-days: 30
