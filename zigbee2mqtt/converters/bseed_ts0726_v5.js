@@ -386,7 +386,8 @@ const validateDeviceConfig = (value) => {
     const relays = entries.filter((token) => /^R[A-E][0-7]([A-E][0-7])?$/.test(token));
     const indicators = entries.filter((token) => /^I[A-E][0-7]i?$/.test(token));
     const momentary = entries.filter((token) => token === "M");
-    const recognized = new Set([...network, ...switches, ...relays, ...indicators, ...momentary]);
+    const advancedOptions = entries.filter((token) => token === "SLP" || /^D[0-9]+$/.test(token));
+    const recognized = new Set([...network, ...switches, ...relays, ...indicators, ...momentary, ...advancedOptions]);
     const unknown = entries.filter((token) => !recognized.has(token));
     if (unknown.length) {
         throw new Error("Unsupported token(s) for this BSEED 3-gang board: " + unknown.join(", "));
@@ -426,7 +427,8 @@ const deviceConfigEditable = (name) => {
     const description =
         "Current low-level hardware map for this exact BSEED 3-gang device. Editing is locked by default: first click " +
         "Advanced — Enable editing, then save within 60 seconds. Before Zigbee traffic is sent, the converter checks identity, " +
-        "required 3-gang structure, token syntax and duplicate GPIO assignments. Firmware then checks all chunks and CRC before " +
+        "required 3-gang structure, token syntax and duplicate GPIO assignments. Safe Romasku options D… (debounce) and SLP are allowed. " +
+        "Firmware repeats the board-topology checks, then verifies all chunks and CRC before " +
         "replacing NVM and rebooting. A valid save consumes the unlock. Wrong pin assignments can still require recovery firmware.";
 
     const expose = exposes
