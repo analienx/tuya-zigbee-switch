@@ -200,31 +200,36 @@ function verifyContract(definition, exposes, execution) {
         die('ambiguous bare TS0726-3-BS zigbeeModel matcher remains on target');
     }
 
-    const expectedProperties = [
-        'relay_left_physical_mode',
-        'relay_middle_physical_mode',
-        'relay_right_physical_mode',
+    const expectedPhysical = [
+        {property: 'relay_left_physical_mode', label: 'Left — Mains power'},
+        {property: 'relay_middle_physical_mode', label: 'Middle — Mains power'},
+        {property: 'relay_right_physical_mode', label: 'Right — Mains power'},
     ];
-    for (const property of expectedProperties) {
-        const expose = exposes.find((item) => item.property === property);
-        if (!expose) die(`missing processed expose ${property}`);
-        if (expose.label !== 'Physical relay behavior') {
-            die(`${property}: expected label 'Physical relay behavior', got ${JSON.stringify(expose.label)}`);
+    for (const expected of expectedPhysical) {
+        const expose = exposes.find((item) => item.property === expected.property);
+        if (!expose) die(`missing processed expose ${expected.property}`);
+        if (expose.label !== expected.label) {
+            die(`${expected.property}: expected label ${JSON.stringify(expected.label)}, got ${JSON.stringify(expose.label)}`);
         }
-        if (expose.category !== 'config') die(`${property}: expected category=config, got ${JSON.stringify(expose.category)}`);
+        if (expose.category !== 'config') {
+            die(`${expected.property}: expected category=config, got ${JSON.stringify(expose.category)}`);
+        }
         if (JSON.stringify(expose.values) !== JSON.stringify(EXPECTED_PHYSICAL_VALUES)) {
-            die(`${property}: unexpected enum values ${JSON.stringify(expose.values)}`);
+            die(`${expected.property}: unexpected enum values ${JSON.stringify(expose.values)}`);
         }
         const description = expose.description || '';
-        for (const marker of ['smart bulbs', 'Always on', 'immediately']) {
-            if (!description.includes(marker)) die(`${property}: description missing ${JSON.stringify(marker)}`);
+        for (const marker of ['smart bulbs', 'Always on', 'affect power immediately']) {
+            if (!description.includes(marker)) die(`${expected.property}: description missing ${JSON.stringify(marker)}`);
         }
     }
 
     const deviceConfig = exposes.find((item) => item.name === 'device_config');
     if (!deviceConfig) die('missing processed device_config expose');
-    if (deviceConfig.label !== 'Advanced hardware configuration') {
+    if (deviceConfig.label !== 'Advanced — Hardware configuration') {
         die(`device_config label mismatch: ${JSON.stringify(deviceConfig.label)}`);
+    }
+    if (deviceConfig.endpoint !== 'advanced' || deviceConfig.property !== 'device_config') {
+        die(`device_config must use dedicated advanced endpoint while preserving property: ${JSON.stringify(deviceConfig)}`);
     }
     if (deviceConfig.category !== 'diagnostic') {
         die(`device_config must remain advanced/diagnostic, got category=${JSON.stringify(deviceConfig.category)}`);
@@ -233,8 +238,22 @@ function verifyContract(definition, exposes, execution) {
         die(`device_config must be editable in v5, got access=${JSON.stringify(deviceConfig.access)}`);
     }
     const configDescription = deviceConfig.description || '';
-    for (const marker of ['transactional chunk', 'recovery firmware']) {
+    for (const marker of ['locked by default', 'Advanced — Enable editing', 'checks identity', 'all chunks and CRC', 'recovery firmware']) {
         if (!configDescription.includes(marker)) die(`device_config description missing ${JSON.stringify(marker)}`);
+    }
+
+    const unlock = exposes.find((item) => item.name === 'device_config_unlock');
+    if (!unlock) die('missing advanced editor unlock button expose');
+    if (unlock.label !== 'Advanced — Enable editing' || unlock.endpoint !== 'advanced') {
+        die(`unlock button placement/label mismatch: ${JSON.stringify(unlock)}`);
+    }
+    if (unlock.access !== 2 || JSON.stringify(unlock.values) !== JSON.stringify(['enable_editing'])) {
+        die(`unlock must be a SET-only one-value enum button: ${JSON.stringify(unlock)}`);
+    }
+    for (const marker of ['60 seconds', 'changes nothing', 'consumes the unlock']) {
+        if (!(unlock.description || '').includes(marker)) {
+            die(`unlock description missing ${JSON.stringify(marker)}`);
+        }
     }
 
     const expectedIndicatorValues = [
@@ -244,29 +263,32 @@ function verifyContract(definition, exposes, execution) {
         'physical_output',
         'binding_status',
     ];
-    for (const endpoint of ['relay_left', 'relay_middle', 'relay_right']) {
+    const channelNames = {
+        relay_left: 'Left',
+        relay_middle: 'Middle',
+        relay_right: 'Right',
+    };
+    for (const [endpoint, channel] of Object.entries(channelNames)) {
         const indicator = exposes.find(
-            (item) => item.endpoint === endpoint && item.label === 'Indicator LED source',
+            (item) => item.endpoint === endpoint && item.label === `${channel} — LED shows`,
         );
-        if (!indicator) die(`missing Indicator LED source expose for ${endpoint}`);
+        if (!indicator) die(`missing channel-scoped LED source expose for ${endpoint}`);
         if (JSON.stringify(indicator.values) !== JSON.stringify(expectedIndicatorValues)) {
             die(`${endpoint}: unexpected indicator values ${JSON.stringify(indicator.values)}`);
         }
         const intent = exposes.find(
-            (item) => item.endpoint === endpoint && item.label === 'Bound-light intent state',
+            (item) => item.endpoint === endpoint && item.label === `${channel} — Bound light (tracked)`,
         );
-        if (!intent) die(`missing bound-light intent expose for ${endpoint}`);
-        if (!(intent.description || '').includes('not proof')) {
+        if (!intent) die(`missing channel-scoped binding intent expose for ${endpoint}`);
+        if (!(intent.description || '').includes('not remote-state confirmation')) {
             die(`${endpoint}: binding intent warning missing`);
         }
-    }
 
-    for (const endpoint of ['relay_left', 'relay_middle', 'relay_right']) {
         const logical = exposes.find(
-            (item) => item.endpoint === endpoint && item.label === 'Logical relay state',
+            (item) => item.endpoint === endpoint && item.label === `${channel} — Logical state`,
         );
-        if (!logical) die(`missing Logical relay state expose for ${endpoint}`);
-        if (!(logical.description || '').includes('does not necessarily switch mains power')) {
+        if (!logical) die(`missing channel-scoped logical state expose for ${endpoint}`);
+        if (!(logical.description || '').includes('not the same as mains power')) {
             die(`${endpoint}: logical-state description does not distinguish mains`);
         }
     }
@@ -311,15 +333,16 @@ async function main() {
 
     const interestingExposes = exposes.filter((item) =>
         item.name === 'device_config' ||
-        item.label === 'Logical relay state' ||
-        item.label === 'Logical state after power-up' ||
+        item.name === 'device_config_unlock' ||
+        item.label?.includes('Logical state') ||
+        item.label?.includes('State after power-up') ||
         item.property?.includes('physical_mode') ||
-        item.label === 'Local relay trigger' ||
-        item.label === 'Bound-device trigger' ||
-        item.label === 'Button type' ||
-        item.label === 'Button command behavior' ||
-        item.label === 'Indicator LED source' ||
-        item.label === 'Bound-light intent state',
+        item.label?.includes('Update local state') ||
+        item.label?.includes('Control bound light') ||
+        item.label?.includes('Button type') ||
+        item.label?.includes('Direct-binding command') ||
+        item.label?.includes('LED shows') ||
+        item.label?.includes('Bound light (tracked)'),
     );
 
     const output = {
