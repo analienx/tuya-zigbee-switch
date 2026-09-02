@@ -507,8 +507,17 @@ def test_forward_complete_preserves_user_indicator_mode(
             read_indicator_mode(device, RELAY_LEFT_ENDPOINT)
             == INDICATOR_MODE_SAME
         )
+        # SAME is the post-continuity user mode: the panel LED follows the
+        # current LOGICAL relay state. indicator_on is only authoritative in
+        # MANUAL mode, so completed-state boot must not force the old migration
+        # safety value ON after the operator has selected SAME.
+        logical_state = int(
+            device.read_zigbee_attr(
+                RELAY_LEFT_ENDPOINT, ZCL_CLUSTER_ON_OFF, ZCL_ATTR_ONOFF
+            )
+        )
         assert (
-            read_indicator_state(device, RELAY_LEFT_ENDPOINT) == INDICATOR_ON
+            read_indicator_state(device, RELAY_LEFT_ENDPOINT) == logical_state
         )
         assert read_marker() == MIG_FORWARD_COMPLETE
 
