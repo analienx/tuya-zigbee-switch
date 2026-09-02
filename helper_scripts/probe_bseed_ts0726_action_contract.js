@@ -10,16 +10,22 @@ const pathModule = require('path');
 // bseed_ts0726_v4.js and are invoked below with synthetic Zigbee frames.
 const originalLoad = Module._load;
 const emptyExtend = () => ({isModernExtend: true, exposes: [], fromZigbee: [], toZigbee: []});
-const exposeAction = (values) => ({
-    name: 'action',
-    property: 'action',
+const simpleExpose = (name, access = 7, values = undefined) => ({
+    name,
+    property: name,
+    access,
     values,
     withEndpoint(endpoint) {
         this.endpoint = endpoint;
-        this.property = `action_${endpoint}`;
+        this.property = `${this.property}_${endpoint}`;
         return this;
     },
+    withProperty(property) { this.property = property; return this; },
+    withLabel(label) { this.label = label; return this; },
+    withDescription(description) { this.description = description; return this; },
+    withCategory(category) { this.category = category; return this; },
 });
+const exposeAction = (values) => simpleExpose('action', 1, values);
 Module._load = function(request, parent, isMain) {
     if (request === 'zigbee-herdsman-converters/lib/modernExtend') {
         return {
@@ -35,16 +41,9 @@ Module._load = function(request, parent, isMain) {
     if (request === 'zigbee-herdsman-converters/lib/exposes') {
         return {
             presets: {action: exposeAction},
-            access: {SET: 2},
-            enum: (name, access, values) => ({
-                name,
-                property: name,
-                access,
-                values,
-                withLabel(label) { this.label = label; return this; },
-                withDescription(description) { this.description = description; return this; },
-                withCategory(category) { this.category = category; return this; },
-            }),
+            access: {STATE: 1, SET: 2, GET: 4, ALL: 7},
+            enum: (name, access, values) => simpleExpose(name, access, values),
+            text: (name, access) => simpleExpose(name, access),
         };
     }
     if (request === 'zigbee-herdsman') {
