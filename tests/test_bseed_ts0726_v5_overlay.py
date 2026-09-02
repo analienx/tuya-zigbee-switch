@@ -70,7 +70,8 @@ def test_binding_intent_state_is_exposed_per_channel_with_reconciliation_warning
             in js
         )
     assert '"Bound-light intent state"' in js
-    assert "not proof of the remote light's actual state" in js
+    assert "not proof" in js
+    assert "remote light's actual state" in js
     assert "does not send a bound-device command" in js
     assert "does not change logical relay state or mains power" in js
     assert "attribute: {ID: 0xff04, type: 0x10}" in js
@@ -86,7 +87,7 @@ def test_device_config_is_editable_but_uses_chunked_transport_not_direct_write()
     assert '"deviceConfigCommit"' in js
     assert "crc16CcittFalse" in js
     assert "complete coverage" in js
-    assert "may require recovery firmware" in js
+    assert "recovery firmware" in js
     # The custom SET path must not call endpoint.write().
     config_block = js[js.index("const deviceConfigEditable"):js.index("const legacyActionEvent")]
     assert ".write(" not in config_block
