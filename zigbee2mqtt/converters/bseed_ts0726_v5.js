@@ -435,7 +435,7 @@ const deviceConfigEditable = (name) => {
         .withProperty(name)
         .withLabel("Advanced — Hardware configuration")
         .withDescription(description)
-        .withCategory("diagnostic");
+        .withCategory("config");
 
     return {
         isModernExtend: true,
