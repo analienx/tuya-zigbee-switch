@@ -71,7 +71,7 @@ const physicalRelayMode = (name, endpointName) => {
     const result = enumLookup({
         name,
         endpointName,
-        lookup: {follow_state: 0, always_on: 1, always_off: 2},
+        lookup: {"Follow logical state": 0, "Always on": 1, "Always off": 2},
         cluster: "genOnOff",
         attribute: {ID: 0xff03, type: 0x30},
         label: channelLabel(endpointName) + " — Mains power",
@@ -90,13 +90,13 @@ const buttonType = (name, endpointName) =>
     enumLookup({
         name,
         endpointName,
-        lookup: {toggle: 0, momentary: 1, momentary_nc: 2},
+        lookup: {"Rocker / toggle": 0, "Push button": 1, "Push button (normally closed)": 2},
         cluster: "genOnOffSwitchCfg",
         attribute: {ID: 0xff00, type: 0x30},
         label: channelLabel(endpointName) + " — Button type",
         description:
-            "Match this to the wall mechanism. Toggle is a maintained rocker; Momentary is a normal push button; " +
-            "Momentary NC is normally closed. A wrong choice makes presses appear inverted or unreliable.",
+            "Match this to the wall mechanism. Rocker / toggle is a maintained switch. Push button is a normal momentary input. " +
+            "Use Push button (normally closed) only for an NC contact. A wrong choice makes presses appear inverted or unreliable.",
         entityCategory: "config",
     });
 
@@ -105,19 +105,19 @@ const buttonCommandBehavior = (name, endpointName) =>
         name,
         endpointName,
         lookup: {
-            on_off: 0,
-            off_on: 1,
-            toggle_simple: 2,
-            toggle_smart_sync: 3,
-            toggle_smart_opposite: 4,
+            "On then off": 0,
+            "Off then on": 1,
+            "Toggle": 2,
+            "Match local state": 3,
+            "Opposite local state": 4,
         },
         cluster: "genOnOffSwitchCfg",
         attribute: {ID: 0x0010, type: 0x30, required: true, write: true, min: 0, max: 4},
         label: channelLabel(endpointName) + " — Direct-binding command",
         description:
-            "Chooses the command sent directly to bound lights. Toggle simple sends Zigbee Toggle and depends least on local state. " +
-            "Smart sync sends explicit On/Off to match the local logical state; Smart opposite sends the inverse. " +
-            "On/off and Off/on are mainly useful with maintained rocker inputs.",
+            "Chooses the On/Off command sent directly to bound lights. Toggle is the simplest choice and does not depend on local state. " +
+            "Match local state sends explicit On/Off to match this channel; Opposite local state sends the inverse. " +
+            "On then off and Off then on are mainly useful with maintained rocker inputs.",
         entityCategory: "config",
     });
 
@@ -125,13 +125,13 @@ const localRelayTrigger = (name, endpointName) =>
     enumLookup({
         name,
         endpointName,
-        lookup: {detached: 0, press_start: 1, short_press: 3, long_press: 2},
+        lookup: {"Never (detached)": 0, "On press": 1, "Short press": 3, "Long press": 2},
         cluster: "genOnOffSwitchCfg",
         attribute: {ID: 0xff01, type: 0x30},
         label: channelLabel(endpointName) + " — Update local state",
         description:
-            "Chooses when this physical button updates the assigned Zigbee state. Detached never changes local state. " +
-            "Press start updates immediately; Short press after a completed click; Long press only after the hold threshold. " +
+            "Chooses when this physical button updates the assigned Zigbee state. Never (detached) leaves local state untouched. " +
+            "On press updates immediately; Short press waits for a completed click; Long press waits for the hold threshold. " +
             "This does not override Mains power behavior.",
         entityCategory: "config",
     });
@@ -140,12 +140,12 @@ const localRelayIndex = (name, endpointName) =>
     enumLookup({
         name,
         endpointName,
-        lookup: {relay_1: 1, relay_2: 2, relay_3: 3},
+        lookup: {Left: 1, Middle: 2, Right: 3},
         cluster: "genOnOffSwitchCfg",
         attribute: {ID: 0xff02, type: 0x20},
         label: channelLabel(endpointName) + " — Local state channel",
         description:
-            "Chooses which local Zigbee channel this button updates: Relay 1 = Left, Relay 2 = Middle, Relay 3 = Right. " +
+            "Chooses which local Zigbee channel this button updates: Left, Middle or Right. " +
             "This affects logical state only and does not remap physical GPIO pins.",
         entityCategory: "config",
     });
@@ -154,12 +154,12 @@ const boundDeviceTrigger = (name, endpointName) =>
     enumLookup({
         name,
         endpointName,
-        lookup: {press_start: 1, short_press: 3, long_press: 2},
+        lookup: {"On press": 1, "Short press": 3, "Long press": 2},
         cluster: "genOnOffSwitchCfg",
         attribute: {ID: 0xff05, type: 0x30},
         label: channelLabel(endpointName) + " — Control bound light",
         description:
-            "Chooses when the button sends a direct command to existing bindings or groups. Press start is fastest; " +
+            "Chooses when the button sends a direct command to existing bindings or groups. On press is fastest; " +
             "Short press waits for a completed click; Long press sends only after a hold. This does not create or remove bindings.",
         entityCategory: "config",
     });
@@ -197,11 +197,11 @@ const indicatorBehavior = (name, endpointName) =>
         name,
         endpointName,
         lookup: {
-            logical_state: 0,
-            inverse_logical_state: 1,
-            manual: 2,
-            physical_output: 3,
-            binding_status: 4,
+            "Logical state": 0,
+            "Inverse logical state": 1,
+            "Manual": 2,
+            "Physical output": 3,
+            "Binding status": 4,
         },
         cluster: "genOnOff",
         attribute: {ID: 0xff01, type: 0x30},
