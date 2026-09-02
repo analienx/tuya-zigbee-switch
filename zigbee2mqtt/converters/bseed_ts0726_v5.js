@@ -18,7 +18,6 @@ const {
     enumLookup,
     numeric,
     onOff,
-    text,
 } = require("zigbee-herdsman-converters/lib/modernExtend");
 const exposes = require("zigbee-herdsman-converters/lib/exposes");
 const e = exposes.presets;
@@ -32,13 +31,24 @@ const withExposeLabel = (extend, label) => {
     return extend;
 };
 
+const CHANNEL_LABELS = {
+    switch_left: "Left",
+    switch_middle: "Middle",
+    switch_right: "Right",
+    relay_left: "Left",
+    relay_middle: "Middle",
+    relay_right: "Right",
+    advanced: "Advanced",
+};
+const channelLabel = (endpointName) => CHANNEL_LABELS[endpointName] || endpointName || "Channel";
+
 const logicalOnOff = (endpointNames) => {
     const result = onOff({endpointNames, configureReporting: false});
     for (const expose of result.exposes || []) {
         if (expose.type === "switch") {
             for (const feature of expose.features || []) {
                 if (feature.name === "state") {
-                    feature.withLabel?.("Logical relay state");
+                    feature.withLabel?.(channelLabel(feature.endpoint || expose.endpoint) + " — Logical state");
                     feature.withDescription?.(
                         "The Zigbee state for this channel. Use it for automations and state tracking. " +
                         "It is not the same as mains power: with Mains power behavior set to Always on, " +
@@ -47,7 +57,7 @@ const logicalOnOff = (endpointNames) => {
                 }
             }
         } else if (expose.name === "power_on_behavior") {
-            expose.withLabel?.("Logical state after power-up");
+            expose.withLabel?.(channelLabel(expose.endpoint) + " — State after power-up");
             expose.withDescription?.(
                 "Chooses the Zigbee state restored after restart. This affects the logical channel only. " +
                 "It never overrides Mains power behavior, so Always on remains electrically powered.",
@@ -64,7 +74,7 @@ const physicalRelayMode = (name, endpointName) => {
         lookup: {follow_state: 0, always_on: 1, always_off: 2},
         cluster: "genOnOff",
         attribute: {ID: 0xff03, type: 0x30},
-        label: "Mains power behavior",
+        label: channelLabel(endpointName) + " — Mains power",
         description:
             "Controls the actual electrical output for this channel. For smart bulbs and smart dimmers choose Always on " +
             "so they stay powered while logical state changes. Follow state is for a load this device should physically switch. " +
@@ -83,7 +93,7 @@ const buttonType = (name, endpointName) =>
         lookup: {toggle: 0, momentary: 1, momentary_nc: 2},
         cluster: "genOnOffSwitchCfg",
         attribute: {ID: 0xff00, type: 0x30},
-        label: "Button type",
+        label: channelLabel(endpointName) + " — Button type",
         description:
             "Match this to the wall mechanism. Toggle is a maintained rocker; Momentary is a normal push button; " +
             "Momentary NC is normally closed. A wrong choice makes presses appear inverted or unreliable.",
@@ -103,7 +113,7 @@ const buttonCommandBehavior = (name, endpointName) =>
         },
         cluster: "genOnOffSwitchCfg",
         attribute: {ID: 0x0010, type: 0x30, required: true, write: true, min: 0, max: 4},
-        label: "Direct-binding command",
+        label: channelLabel(endpointName) + " — Direct-binding command",
         description:
             "Chooses the command sent directly to bound lights. Toggle simple sends Zigbee Toggle and depends least on local state. " +
             "Smart sync sends explicit On/Off to match the local logical state; Smart opposite sends the inverse. " +
@@ -118,7 +128,7 @@ const localRelayTrigger = (name, endpointName) =>
         lookup: {detached: 0, press_start: 1, short_press: 3, long_press: 2},
         cluster: "genOnOffSwitchCfg",
         attribute: {ID: 0xff01, type: 0x30},
-        label: "Update local state",
+        label: channelLabel(endpointName) + " — Update local state",
         description:
             "Chooses when this physical button updates the assigned Zigbee state. Detached never changes local state. " +
             "Press start updates immediately; Short press after a completed click; Long press only after the hold threshold. " +
@@ -133,7 +143,7 @@ const localRelayIndex = (name, endpointName) =>
         lookup: {relay_1: 1, relay_2: 2, relay_3: 3},
         cluster: "genOnOffSwitchCfg",
         attribute: {ID: 0xff02, type: 0x20},
-        label: "Local state channel",
+        label: channelLabel(endpointName) + " — Local state channel",
         description:
             "Chooses which local Zigbee channel this button updates: Relay 1 = Left, Relay 2 = Middle, Relay 3 = Right. " +
             "This affects logical state only and does not remap physical GPIO pins.",
@@ -147,7 +157,7 @@ const boundDeviceTrigger = (name, endpointName) =>
         lookup: {press_start: 1, short_press: 3, long_press: 2},
         cluster: "genOnOffSwitchCfg",
         attribute: {ID: 0xff05, type: 0x30},
-        label: "Control bound light",
+        label: channelLabel(endpointName) + " — Control bound light",
         description:
             "Chooses when the button sends a direct command to existing bindings or groups. Press start is fastest; " +
             "Short press waits for a completed click; Long press sends only after a hold. This does not create or remove bindings.",
@@ -160,7 +170,7 @@ const longPressThreshold = (name, endpointName) =>
         endpointNames: [endpointName],
         cluster: "genOnOffSwitchCfg",
         attribute: {ID: 0xff03, type: 0x21},
-        label: "Hold threshold",
+        label: channelLabel(endpointName) + " — Hold threshold",
         description: "How long the button must stay pressed before it becomes a long press. Increase it to reduce accidental holds; decrease it for faster hold actions.",
         unit: "ms",
         valueMin: 0,
@@ -174,7 +184,7 @@ const holdDimmingSpeed = (name, endpointName) =>
         endpointNames: [endpointName],
         cluster: "genOnOffSwitchCfg",
         attribute: {ID: 0xff04, type: 0x20},
-        label: "Dimming speed",
+        label: channelLabel(endpointName) + " — Dimming speed",
         description: "Speed of direct-binding brightness changes while held. Higher values dim faster; lower values give finer control.",
         unit: "level/s",
         valueMin: 1,
@@ -195,7 +205,7 @@ const indicatorBehavior = (name, endpointName) =>
         },
         cluster: "genOnOff",
         attribute: {ID: 0xff01, type: 0x30},
-        label: "LED shows",
+        label: channelLabel(endpointName) + " — LED shows",
         description:
             "Chooses what the small panel LED represents. Logical state follows this channel's Zigbee state. " +
             "Inverse logical state shows the opposite. Manual lets you control the LED separately. Physical output shows " +
@@ -213,7 +223,7 @@ const bindingIntentState = (name, endpointName) =>
         valueOff: ["OFF", 0],
         cluster: "genOnOff",
         attribute: {ID: 0xff04, type: 0x10},
-        label: "Bound light state (tracked)",
+        label: channelLabel(endpointName) + " — Bound light (tracked)",
         description:
             "The On/Off state this device currently believes the bound light should be in. Direct-binding commands update it locally, " +
             "and Home Assistant can correct it from the real light state. Use it with LED shows = Binding status. " +
@@ -231,7 +241,7 @@ const indicatorState = (name, endpointName) =>
         valueOff: ["OFF", 0],
         cluster: "genOnOff",
         attribute: {ID: 0xff02, type: 0x10},
-        label: "Manual LED state",
+        label: channelLabel(endpointName) + " — Manual LED",
         description: "Turns the panel LED on or off when LED shows is Manual. It has no effect in other LED modes and never controls power.",
         access: "ALL",
         entityCategory: "config",
@@ -245,7 +255,7 @@ const lastButtonAction = (name, endpointName) =>
         lookup: {released: 0, press: 1, long_press: 2, position_on: 3, position_off: 4},
         cluster: "genMultistateInput",
         attribute: "presentValue",
-        label: "Last button input",
+        label: channelLabel(endpointName) + " — Last button input",
         description: "Diagnostic view of the most recent physical input event seen by firmware. Useful for checking wiring and input mode.",
         entityCategory: "diagnostic",
     });
@@ -293,7 +303,9 @@ const deviceConfigUnlock = () => ({
     exposes: [
         exposes
             .enum("device_config_unlock", ea.SET, ["enable_editing"])
-            .withLabel("Enable advanced editing")
+            .withEndpoint("advanced")
+            .withProperty("device_config_unlock")
+            .withLabel("Advanced — Enable editing")
             .withDescription(
                 "Unlocks Hardware configuration for this device for 60 seconds. The button itself changes nothing. " +
                 "A valid save consumes the unlock immediately. If transfer fails, unlock again before retrying. " +
@@ -410,63 +422,73 @@ const crc16CcittFalse = (bytes) => {
     return crc;
 };
 
-const deviceConfigEditable = (name, endpointName) => {
-    const result = withExposeLabel(
-        text({
-            name,
-            endpointName,
-            access: "ALL",
-            cluster: "genBasic",
-            attribute: {ID: 0xff00, type: 0x44},
-            description:
-                "Current low-level hardware map for this exact BSEED 3-gang device. Editing is locked by default: first click " +
-                "Enable advanced editing, then save within 60 seconds. Before Zigbee traffic is sent, the converter checks identity, " +
-                "required 3-gang structure, token syntax and duplicate GPIO assignments. Firmware then checks all chunks and CRC before " +
-                "replacing NVM and rebooting. A valid save consumes the unlock. Wrong pin assignments can still require recovery firmware.",
-            zigbeeCommandOptions: {timeout: 30_000},
-            entityCategory: "diagnostic",
-        }),
-        "Advanced hardware configuration",
-    );
+const deviceConfigEditable = (name) => {
+    const description =
+        "Current low-level hardware map for this exact BSEED 3-gang device. Editing is locked by default: first click " +
+        "Advanced — Enable editing, then save within 60 seconds. Before Zigbee traffic is sent, the converter checks identity, " +
+        "required 3-gang structure, token syntax and duplicate GPIO assignments. Firmware then checks all chunks and CRC before " +
+        "replacing NVM and rebooting. A valid save consumes the unlock. Wrong pin assignments can still require recovery firmware.";
 
-    result.toZigbee = [
-        {
-            key: [name],
-            convertGet: async (entity, key, meta) => {
-                await meta.device.getEndpoint(1).read("genBasic", [0xff00], {timeout: 30_000});
+    const expose = exposes
+        .text(name, ea.ALL)
+        .withEndpoint("advanced")
+        .withProperty(name)
+        .withLabel("Advanced — Hardware configuration")
+        .withDescription(description)
+        .withCategory("diagnostic");
+
+    return {
+        isModernExtend: true,
+        exposes: [expose],
+        fromZigbee: [
+            {
+                cluster: "genBasic",
+                type: ["attributeReport", "readResponse"],
+                convert: (model, msg) => {
+                    if (msg.endpoint.ID !== 1) return;
+                    const value = msg.data[0xff00] ?? msg.data["65280"];
+                    if (value !== undefined) return {[name]: value};
+                },
             },
-            convertSet: async (entity, key, value, meta) => {
-                const bytes = validateDeviceConfig(value);
-                const unlockKey = requireDeviceConfigUnlock(meta);
-                deviceConfigUnlocks.delete(unlockKey);
-                const endpoint = meta.device.getEndpoint(1);
-                const tx = (deviceConfigTransaction % 255) + 1;
-                deviceConfigTransaction = tx;
-                const options = {disableDefaultResponse: false, timeout: 30_000};
+        ],
+        toZigbee: [
+            {
+                key: [name],
+                convertGet: async (entity, key, meta) => {
+                    await meta.device.getEndpoint(1).read("genBasic", [0xff00], {timeout: 30_000});
+                },
+                convertSet: async (entity, key, value, meta) => {
+                    const bytes = validateDeviceConfig(value);
+                    const unlockKey = requireDeviceConfigUnlock(meta);
+                    deviceConfigUnlocks.delete(unlockKey);
+                    const endpoint = meta.device.getEndpoint(1);
+                    const tx = (deviceConfigTransaction % 255) + 1;
+                    deviceConfigTransaction = tx;
+                    const options = {disableDefaultResponse: false, timeout: 30_000};
 
-                for (let offset = 0; offset < bytes.length; offset += DEVICE_CONFIG_CHUNK_MAX) {
-                    const chunk = [...bytes.subarray(offset, offset + DEVICE_CONFIG_CHUNK_MAX)];
+                    for (let offset = 0; offset < bytes.length; offset += DEVICE_CONFIG_CHUNK_MAX) {
+                        const chunk = [...bytes.subarray(offset, offset + DEVICE_CONFIG_CHUNK_MAX)];
+                        await endpoint.command(
+                            "bseedBasicTransport",
+                            "deviceConfigStage",
+                            {data: [tx, offset, chunk.length, ...chunk]},
+                            options,
+                        );
+                    }
+
+                    const crc = crc16CcittFalse(bytes);
                     await endpoint.command(
                         "bseedBasicTransport",
-                        "deviceConfigStage",
-                        {data: [tx, offset, chunk.length, ...chunk]},
+                        "deviceConfigCommit",
+                        {data: [tx, bytes.length, crc & 0xff, crc >> 8]},
                         options,
                     );
-                }
-
-                const crc = crc16CcittFalse(bytes);
-                await endpoint.command(
-                    "bseedBasicTransport",
-                    "deviceConfigCommit",
-                    {data: [tx, bytes.length, crc & 0xff, crc >> 8]},
-                    options,
-                );
-                return {state: {[key]: value}};
+                    return {state: {[key]: value}};
+                },
             },
-        },
-    ];
-    result.configure = [];
-    return result;
+        ],
+        configure: [],
+    };
 };
 
 const legacyActionEvent = () => {
@@ -564,6 +586,7 @@ module.exports = [
                     relay_left: 4,
                     relay_middle: 5,
                     relay_right: 6,
+                    advanced: 1,
                 },
             }),
 
@@ -617,7 +640,7 @@ module.exports = [
 
             // Advanced section: deliberately last and locked by default.
             deviceConfigUnlock(),
-            deviceConfigEditable("device_config", "switch_left"),
+            deviceConfigEditable("device_config"),
         ],
         meta: {multiEndpoint: true},
         configure: async () => {},
