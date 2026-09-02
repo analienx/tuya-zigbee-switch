@@ -38,4 +38,8 @@
 // mid-migration simply re-runs it on the next boot.
 #define NV_ITEM_MIGRATION_MARKER    40
 
+// Locally tracked/intended On/Off state of each switch's binding target.
+// Separate storage preserves the legacy relay-cluster NVM record ABI.
+#define NV_ITEM_RELAY_BINDING_INTENT(relay_idx)    (41 + (relay_idx))
+
 #endif /* DEVICE_CONFIG_NVM_ITEMS_H_ */
