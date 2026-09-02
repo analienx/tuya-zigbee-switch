@@ -322,7 +322,10 @@ void relay_cluster_set_binding_intent(zigbee_relay_cluster *cluster,
                                       uint8_t state) {
     state = state ? 1 : 0;
     if (cluster->binding_intent_state == state) {
-        sync_indicator_led(cluster);
+        if (cluster->indicator_led_mode ==
+            ZCL_ONOFF_INDICATOR_MODE_BINDING_INTENT) {
+            sync_indicator_led(cluster);
+        }
         return;
     }
 
@@ -330,7 +333,10 @@ void relay_cluster_set_binding_intent(zigbee_relay_cluster *cluster,
     relay_cluster_store_binding_intent_to_nv(cluster);
     hal_zigbee_notify_attribute_changed(cluster->endpoint, ZCL_CLUSTER_ON_OFF,
                                         ZCL_ATTR_ONOFF_BINDING_INTENT_STATE);
-    sync_indicator_led(cluster);
+    if (cluster->indicator_led_mode ==
+        ZCL_ONOFF_INDICATOR_MODE_BINDING_INTENT) {
+        sync_indicator_led(cluster);
+    }
 }
 
 void relay_cluster_on_write_attr(zigbee_relay_cluster *cluster,
@@ -349,7 +355,10 @@ void relay_cluster_on_write_attr(zigbee_relay_cluster *cluster,
         cluster->binding_intent_state =
             cluster->binding_intent_state ? 1 : 0;
         relay_cluster_store_binding_intent_to_nv(cluster);
-        sync_indicator_led(cluster);
+        if (cluster->indicator_led_mode ==
+            ZCL_ONOFF_INDICATOR_MODE_BINDING_INTENT) {
+            sync_indicator_led(cluster);
+        }
     }
 
     if (attribute_id == ZCL_ATTR_ONOFF_INDICATOR_MODE &&
