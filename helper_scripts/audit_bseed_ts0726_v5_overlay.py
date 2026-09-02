@@ -61,6 +61,8 @@ def main() -> int:
         "GPIO pin(s) assigned more than once",
         ".text(name, ea.ALL)",
         "DEVICE_CONFIG_CHUNK_MAX = 24",
+        'deviceAddCustomCluster("genBasic"',
+        'name: "genBasic"',
         '"deviceConfigStage"',
         '"deviceConfigCommit"',
         "crc16CcittFalse",
@@ -72,6 +74,9 @@ def main() -> int:
     for marker in required:
         if marker not in text:
             failures.append(f"missing marker: {marker}")
+
+    if '"bseedBasicTransport"' in text:
+        failures.append("v5 transport must extend genBasic; parallel cluster ID 0 would shadow normal Basic decoding")
 
     for forbidden in (
         "reporting.bind(",
