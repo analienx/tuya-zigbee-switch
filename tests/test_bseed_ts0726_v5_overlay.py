@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -161,6 +162,24 @@ def test_advanced_config_is_a_dedicated_final_endpoint_group() -> None:
     unlock = js.index("deviceConfigUnlock()")
     advanced = js.index('deviceConfigEditable("device_config")')
     assert logical < physical < buttons < indicators < diagnostics < unlock < advanced
+
+
+def test_fail_closed_static_audit() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "helper_scripts/audit_bseed_ts0726_v5_overlay.py",
+            str(OVERLAY),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert '"status": "PASS"' in result.stdout
+    assert '"clickToUnlock": true' in result.stdout
+    assert '"boardStructureValidation": true' in result.stdout
+    assert '"channelLabelsSelfIdentify": true' in result.stdout
+    assert '"advancedEndpointAlias": true' in result.stdout
 
 
 def test_historical_action_api_is_preserved() -> None:
