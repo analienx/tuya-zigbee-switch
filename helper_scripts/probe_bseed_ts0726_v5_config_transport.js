@@ -67,6 +67,9 @@ function crc16(bytes) {
 }
 
 async function main() {
+    let fakeNow = 1_000_000;
+    Date.now = () => fakeNow;
+
     const input = process.argv[2];
     if (!input) die('usage: probe_bseed_ts0726_v5_config_transport.js <overlay-v5.js>');
 
@@ -96,7 +99,7 @@ async function main() {
         },
     };
 
-    const config = 'iedhxgyi;TS0726-3-BS;LC4;SB1u;RC2;IC0;SB7u;RC3;ID7;SB4u;RD2;IB5;M;';
+    const config = 'iedhxgyi;TS0726-3-BS;LC4;SB1u;RC2;IC0;SB7u;RC3;ID7;SB4u;RD2;IB5;D50;SLP;M;';
     const source = Buffer.from(config, 'ascii');
     if (source.length <= 64) die('fixture must exercise formerly oversized config');
 
@@ -124,6 +127,18 @@ async function main() {
     }
     if (!consumedRejected) die('one-shot unlock was not consumed by the valid save');
     if (events.length !== afterFirstSave) die('second locked SET emitted Zigbee traffic');
+
+    await unlocker.convertSet(endpoint, 'device_config_unlock', 'enable_editing', meta);
+    const beforeExpiry = events.length;
+    fakeNow += 60_001;
+    let expiryRejected = false;
+    try {
+        await converter.convertSet(endpoint, 'device_config', config, meta);
+    } catch (error) {
+        expiryRejected = String(error).includes('locked');
+    }
+    if (!expiryRejected) die('60-second unlock expiry was not enforced');
+    if (events.length !== beforeExpiry) die('expired unlock emitted Zigbee traffic');
 
     const writes = events.filter((event) => event.op === 'write');
     if (writes.length !== 0) die(`direct attribute write attempted: ${JSON.stringify(writes)}`);
@@ -201,6 +216,8 @@ async function main() {
         lockedSetRejectedWithoutTraffic: true,
         unlockButtonEmitsNoZigbeeTraffic: true,
         unlockConsumedAfterOneValidSave: true,
+        unlockExpiresAfter60SecondsWithoutTraffic: true,
+        safeAdvancedOptionsRoundTrip: config.includes('D50;SLP;'),
         invalidBoardLayoutsRejectedWithoutTraffic: true,
         getReadsBasicDeviceConfig: true,
     }, null, 2) + '\n');
