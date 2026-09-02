@@ -68,7 +68,10 @@ int simple_repl_dispatch_line(const SimpleReplConfig *cfg, char *line) {
         return -1;
 
     rtrim_(line);
-    char *argv[16];
+    // ZCL transport tests can legitimately carry dozens of byte tokens.
+    // Keep this comfortably above the 24-byte BSEED config chunk plus command
+    // metadata; the input line is still bounded by SIMPLE_REPL_MAX_LINE.
+    char *argv[96];
     int   argc = split_tokens_(line, argv, (int)(sizeof(argv) / sizeof(argv[0])));
     if (argc == 0)
         return 0;
