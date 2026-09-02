@@ -146,6 +146,36 @@ static int cmd_pin(int argc, char **argv) {
     return 0;
 }
 
+static int cmd_bind_add(int argc, char **argv) {
+    if (argc != 4) {
+        fprintf(stderr, "Usage: bind_add <short_addr:hex> <ep:dec> <cluster:hex>\n");
+        io_res_err("usage");
+        return -1;
+    }
+
+    uint16_t short_addr, cluster;
+    uint8_t endpoint;
+    if (parse_u16_hex(argv[1], &short_addr) ||
+        parse_u8_dec(argv[2], &endpoint) ||
+        parse_u16_hex(argv[3], &cluster)) {
+        io_res_err("bad_args");
+        return -1;
+    }
+
+    stub_zigbee_add_binding(short_addr, endpoint, cluster);
+    io_res_ok("short_addr=0x%04X endpoint=%u cluster=0x%04X",
+              short_addr, endpoint, cluster);
+    return 0;
+}
+
+static int cmd_bind_clear(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    stub_zigbee_clear_bindings();
+    io_res_ok(NULL);
+    return 0;
+}
+
 static int cmd_zcl_list_attrs(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -438,6 +468,8 @@ static const SimpleReplCommand kCmds[] = {
     { "read_pin",            cmd_read_pin            },
     { "read_pin_init",       cmd_read_pin_init       },
     { "set_on_high",         cmd_set_on_high         },
+    { "bind_add",            cmd_bind_add            },
+    { "bind_clear",          cmd_bind_clear          },
     { "zcl_read",            cmd_zcl_read            },
     { "zcl_write",           cmd_zcl_write           },
     { "zcl_list_attrs",      cmd_zcl_list_attrs      },
