@@ -39,8 +39,9 @@ Module._load = function(request, parent, isMain) {
     if (request === 'zigbee-herdsman-converters/lib/exposes') {
         return {
             presets: {action: (values) => ({...makeExpose('action'), values})},
-            access: {SET: 2},
+            access: {STATE: 1, SET: 2, GET: 4, ALL: 7},
             enum: (name, access, values) => ({...makeExpose(name, access), values}),
+            text: (name, access) => makeExpose(name, access),
         };
     }
     if (request === 'zigbee-herdsman') {
