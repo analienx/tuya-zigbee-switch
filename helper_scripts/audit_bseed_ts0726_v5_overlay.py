@@ -49,7 +49,7 @@ def main() -> int:
         '.withLabel("Advanced — Enable editing")',
         '.withEndpoint("advanced")',
         "advanced: 1",
-        'exposes.enum("device_config_unlock", ea.SET, ["enable_editing"])',
+        '.enum("device_config_unlock", ea.SET, ["enable_editing"])',
         "DEVICE_CONFIG_UNLOCK_MS = 60_000",
         "requireDeviceConfigUnlock(meta)",
         "deviceConfigUnlocks.delete(unlockKey)",
