@@ -141,7 +141,7 @@ async function main() {
     const coverage = new Array(source.length).fill(false);
     for (const event of stages) {
         const [cluster, command, payload] = event.args;
-        if (cluster !== 'bseedBasicTransport' || command !== 'deviceConfigStage') {
+        if (cluster !== 'genBasic' || command !== 'deviceConfigStage') {
             die(`unexpected stage route: ${JSON.stringify(event.args)}`);
         }
         const data = payload.data;
@@ -157,7 +157,7 @@ async function main() {
     if (!reconstructed.equals(source)) die('reconstructed config differs from source');
 
     const [commitCluster, commitCommand, commitPayload] = commits[0].args;
-    if (commitCluster !== 'bseedBasicTransport' || commitCommand !== 'deviceConfigCommit') die('wrong commit route');
+    if (commitCluster !== 'genBasic' || commitCommand !== 'deviceConfigCommit') die('wrong commit route');
     const [commitTx, total, crcLo, crcHi] = commitPayload.data;
     if (commitTx !== transaction || total !== source.length) die('commit metadata mismatch');
     const actualCrc = crcLo | (crcHi << 8);
