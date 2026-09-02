@@ -159,6 +159,16 @@ void hal_zigbee_notify_attribute_changed(uint8_t endpoint, uint16_t cluster_id,
            cluster_id, attribute_id);
 }
 
+bool hal_zigbee_has_binding(uint8_t endpoint, uint16_t cluster_id) {
+    for (int i = 0; i < binding_count; i++) {
+        if (bindings[i].endpoint == endpoint &&
+            bindings[i].cluster_id == cluster_id) {
+            return true;
+        }
+    }
+    return false;
+}
+
 hal_zigbee_status_t hal_zigbee_send_cmd_to_bindings(const hal_zigbee_cmd *cmd) {
     if (!cmd)
         return HAL_ZIGBEE_ERR_BAD_ARG;
