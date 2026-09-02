@@ -2,6 +2,7 @@
 'use strict';
 
 const Module = require('module');
+const pathModule = require('path');
 
 // This probe must run on a clean checkout too, without installing ZHC.
 // Stub only the construction-time helpers used while loading the overlay.
@@ -100,10 +101,15 @@ function expect(actual, expected, label) {
 }
 
 function main() {
-    const path = process.argv[2];
-    if (!path) die('usage: probe_bseed_ts0726_action_contract.js <target-overlay.js>');
+    const inputPath = process.argv[2];
+    if (!inputPath) die('usage: probe_bseed_ts0726_action_contract.js <target-overlay.js>');
 
-    const defs = loadDefinitions(path);
+    // Node treats a bare relative path such as "zigbee2mqtt/converters/foo.js"
+    // as a package lookup. Resolve the CLI argument against the current
+    // checkout so the documented invocation works identically on clean
+    // Linux/Windows worktrees and for already-absolute paths.
+    const targetPath = pathModule.resolve(inputPath);
+    const defs = loadDefinitions(targetPath);
     if (defs.length !== 1) die(`expected one target definition, got ${defs.length}`);
     const definition = defs[0];
     if (definition.model !== 'EC-GL86ZPCS31') die(`unexpected model ${definition.model}`);
