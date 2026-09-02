@@ -40,7 +40,7 @@
 // 2) LEFT/MIDDLE/RIGHT all feed smart Zigbee lighting that must stay powered.
 //    The forward migration therefore persists DETACHED_ON for all three real
 //    relay outputs once the canonical pin map is active.
-#define DEVICE_MIGRATION_SWAPPED_RELAY_COUNT        2
+#define DEVICE_MIGRATION_SWAPPED_RELAY_COUNT            2
 #define DEVICE_MIGRATION_PERMANENT_POWER_RELAY_COUNT    3
 
 // Marker read classification. Corruption fails closed (BLOCK), it is never
@@ -199,7 +199,6 @@ static bool ensure_permanent_power_relay_modes(void) {
     return true;
 }
 
-
 static bool ensure_valid_or_default_power_relay_modes(void) {
     // After the migration is complete, a valid persisted physical mode is a
     // user setting and must survive reboot. Only missing/corrupt slots are
@@ -218,7 +217,6 @@ static bool ensure_valid_or_default_power_relay_modes(void) {
 
     return true;
 }
-
 
 #endif // DEVICE_MIGRATION_FROM_CONFIG || DEVICE_MIGRATION_REVERT
 
