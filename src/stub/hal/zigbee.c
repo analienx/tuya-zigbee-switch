@@ -35,6 +35,10 @@ static uint32_t poll_rate_ms = 0;
 
 static stub_binding_t bindings[MAX_BINDINGS];
 static int            binding_count = 0;
+// Legacy simulator tests historically treated send-to-bindings as available
+// without constructing a binding table. Explicit bind_clear/bind_add enables
+// strict presence semantics for v5 tests without weakening production HALs.
+static bool           binding_presence_strict = false;
 
 void hal_zigbee_init(hal_zigbee_endpoint *ep_list, uint8_t ep_count) {
     if (!ep_list && ep_count > 0) {
@@ -160,6 +164,9 @@ void hal_zigbee_notify_attribute_changed(uint8_t endpoint, uint16_t cluster_id,
 }
 
 bool hal_zigbee_has_binding(uint8_t endpoint, uint16_t cluster_id) {
+    if (!binding_presence_strict) {
+        return true;
+    }
     for (int i = 0; i < binding_count; i++) {
         if (bindings[i].endpoint == endpoint &&
             bindings[i].cluster_id == cluster_id) {
@@ -242,6 +249,7 @@ void stub_zigbee_set_network_status(hal_zigbee_network_status_t status) {
 
 void stub_zigbee_add_binding(uint16_t short_addr, uint8_t endpoint,
                              uint16_t cluster_id) {
+    binding_presence_strict = true;
     if (binding_count >= MAX_BINDINGS) {
         io_log("ZIGBEE", "Cannot add binding - table full");
         return;
@@ -257,6 +265,7 @@ void stub_zigbee_add_binding(uint16_t short_addr, uint8_t endpoint,
 }
 
 void stub_zigbee_clear_bindings(void) {
+    binding_presence_strict = true;
     binding_count = 0;
     io_log("ZIGBEE", "Cleared all bindings");
 }
