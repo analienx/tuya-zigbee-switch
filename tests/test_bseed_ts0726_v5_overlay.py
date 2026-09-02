@@ -72,7 +72,8 @@ def test_binding_intent_state_is_exposed_per_channel_with_reconciliation_warning
     assert '"Bound-light intent state"' in js
     assert "not proof" in js
     assert "remote light's actual state" in js
-    assert "does not send a bound-device command" in js
+    assert "does not send a bound-device" in js
+    assert "command and does not change logical relay state or mains power" in js
     assert "does not change logical relay state or mains power" in js
     assert "attribute: {ID: 0xff04, type: 0x10}" in js
 
