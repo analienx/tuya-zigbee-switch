@@ -299,6 +299,14 @@ function verifyContract(definition, exposes, execution) {
     if (clusterRegistrations.length !== 1) {
         die(`expected one local custom-cluster registration, got ${clusterRegistrations.length}`);
     }
+    if (clusterRegistrations[0].args?.[0] !== 'genBasic' ||
+        clusterRegistrations[0].args?.[1]?.ID !== 0x0000) {
+        die(`v5 transport must extend built-in genBasic instead of shadowing ID 0: ${JSON.stringify(clusterRegistrations[0])}`);
+    }
+    const addedCommands = clusterRegistrations[0].args?.[1]?.commands || {};
+    if (addedCommands.deviceConfigStage?.ID !== 0xf0 || addedCommands.deviceConfigCommit?.ID !== 0xf1) {
+        die(`genBasic extension is missing v5 transport commands: ${JSON.stringify(addedCommands)}`);
+    }
     const mutations = execution.events.filter((event) =>
         ['bind', 'unbind', 'configureReporting', 'write', 'command'].includes(event.op),
     );
