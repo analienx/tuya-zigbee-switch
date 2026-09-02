@@ -221,69 +221,61 @@ void switch_cluster_relay_action_off(zigbee_switch_cluster *cluster) {
     }
 }
 
-// Send OnOff command to binded device based on ON position (position 1 in
-// ZCL docs)
-void switch_cluster_binding_action_on(zigbee_switch_cluster *cluster) {
-    if (hal_zigbee_get_network_status() != HAL_ZIGBEE_NETWORK_JOINED) {
+// Update the independent binding-intent latch only after a command was accepted
+// for an actually configured binding. The latch represents local command
+// intent; it is deliberately not a claim about remote target state.
+static void switch_cluster_apply_binding_intent(
+    zigbee_switch_cluster *cluster, uint8_t cmd_id) {
+    if (!switch_cluster_has_valid_relay(cluster)) {
         return;
     }
 
-    uint8_t cmd_id;
+    zigbee_relay_cluster *relay_cluster =
+        &relay_clusters[cluster->relay_index - 1];
 
-    switch (cluster->action) {
-    case ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_ONOFF:
-        cmd_id = ZCL_CMD_ONOFF_ON;
+    switch (cmd_id) {
+    case ZCL_CMD_ONOFF_ON:
+        relay_cluster_set_binding_intent(relay_cluster, 1);
         break;
-
-    case ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_OFFON:
-        cmd_id = ZCL_CMD_ONOFF_OFF;
+    case ZCL_CMD_ONOFF_OFF:
+        relay_cluster_set_binding_intent(relay_cluster, 0);
         break;
-
-    case ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SIMPLE:
-        cmd_id = ZCL_CMD_ONOFF_TOGGLE;
+    case ZCL_CMD_ONOFF_TOGGLE:
+        relay_cluster_set_binding_intent(
+            relay_cluster, !relay_cluster->binding_intent_state);
         break;
-
-    case ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SMART_SYNC:
-    case ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SMART_OPPOSITE:
-        if (!switch_cluster_has_valid_relay(cluster)) {
-            cmd_id = ZCL_CMD_ONOFF_TOGGLE;
-        } else {
-            zigbee_relay_cluster *relay_cluster =
-                &relay_clusters[cluster->relay_index - 1];
-            if (cluster->action ==
-                ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SMART_SYNC)
-                cmd_id = (relay_cluster->relay->on) ? ZCL_CMD_ONOFF_ON
-                                                    : ZCL_CMD_ONOFF_OFF;
-            else
-                cmd_id = (relay_cluster->relay->on) ? ZCL_CMD_ONOFF_OFF
-                                                    : ZCL_CMD_ONOFF_ON;
-        }
-        break;
-
     default:
-        return;
+        break;
     }
-
-    hal_zigbee_cmd c = build_onoff_cmd(cluster->endpoint, cmd_id);
-    hal_zigbee_send_cmd_to_bindings(&c);
 }
 
-// Send OnOff command to binded device based on OFF position (position 2 in
-// ZCL docs)
-void switch_cluster_binding_action_off(zigbee_switch_cluster *cluster) {
-    if (hal_zigbee_get_network_status() != HAL_ZIGBEE_NETWORK_JOINED) {
-        return;
+static bool switch_cluster_send_binding_onoff(
+    zigbee_switch_cluster *cluster, uint8_t cmd_id) {
+    if (hal_zigbee_get_network_status() != HAL_ZIGBEE_NETWORK_JOINED ||
+        !hal_zigbee_has_binding(cluster->endpoint, ZCL_CLUSTER_ON_OFF)) {
+        return false;
     }
 
+    hal_zigbee_cmd c = build_onoff_cmd(cluster->endpoint, cmd_id);
+    if (hal_zigbee_send_cmd_to_bindings(&c) != HAL_ZIGBEE_OK) {
+        return false;
+    }
+
+    switch_cluster_apply_binding_intent(cluster, cmd_id);
+    return true;
+}
+
+static void switch_cluster_binding_action(
+    zigbee_switch_cluster *cluster, bool position_on) {
     uint8_t cmd_id;
 
     switch (cluster->action) {
     case ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_ONOFF:
-        cmd_id = ZCL_CMD_ONOFF_OFF;
+        cmd_id = position_on ? ZCL_CMD_ONOFF_ON : ZCL_CMD_ONOFF_OFF;
         break;
 
     case ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_OFFON:
-        cmd_id = ZCL_CMD_ONOFF_ON;
+        cmd_id = position_on ? ZCL_CMD_ONOFF_OFF : ZCL_CMD_ONOFF_ON;
         break;
 
     case ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SIMPLE:
@@ -297,13 +289,12 @@ void switch_cluster_binding_action_off(zigbee_switch_cluster *cluster) {
         } else {
             zigbee_relay_cluster *relay_cluster =
                 &relay_clusters[cluster->relay_index - 1];
-            if (cluster->action ==
-                ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SMART_SYNC)
-                cmd_id = (relay_cluster->relay->on) ? ZCL_CMD_ONOFF_ON
-                                                    : ZCL_CMD_ONOFF_OFF;
-            else
-                cmd_id = (relay_cluster->relay->on) ? ZCL_CMD_ONOFF_OFF
-                                                    : ZCL_CMD_ONOFF_ON;
+            const bool logical_on = relay_cluster->relay->on != 0;
+            const bool sync =
+                cluster->action ==
+                ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SMART_SYNC;
+            const bool intended_on = sync ? logical_on : !logical_on;
+            cmd_id = intended_on ? ZCL_CMD_ONOFF_ON : ZCL_CMD_ONOFF_OFF;
         }
         break;
 
@@ -311,28 +302,45 @@ void switch_cluster_binding_action_off(zigbee_switch_cluster *cluster) {
         return;
     }
 
-    hal_zigbee_cmd c = build_onoff_cmd(cluster->endpoint, cmd_id);
-    hal_zigbee_send_cmd_to_bindings(&c);
+    (void)switch_cluster_send_binding_onoff(cluster, cmd_id);
+}
+
+// Send OnOff command to bound device based on ON position (position 1).
+void switch_cluster_binding_action_on(zigbee_switch_cluster *cluster) {
+    switch_cluster_binding_action(cluster, true);
+}
+
+// Send OnOff command to bound device based on OFF position (position 2).
+void switch_cluster_binding_action_off(zigbee_switch_cluster *cluster) {
+    switch_cluster_binding_action(cluster, false);
 }
 
 void switch_cluster_level_stop(zigbee_switch_cluster *cluster) {
-    if (hal_zigbee_get_network_status() != HAL_ZIGBEE_NETWORK_JOINED) {
+    if (hal_zigbee_get_network_status() != HAL_ZIGBEE_NETWORK_JOINED ||
+        !hal_zigbee_has_binding(cluster->endpoint, ZCL_CLUSTER_LEVEL_CONTROL)) {
         return;
     }
 
     hal_zigbee_cmd c = build_level_stop_onoff_cmd(cluster->endpoint);
-    hal_zigbee_send_cmd_to_bindings(&c);
+    (void)hal_zigbee_send_cmd_to_bindings(&c);
 }
 
 void switch_cluster_level_control(zigbee_switch_cluster *cluster) {
-    if (hal_zigbee_get_network_status() != HAL_ZIGBEE_NETWORK_JOINED) {
+    if (hal_zigbee_get_network_status() != HAL_ZIGBEE_NETWORK_JOINED ||
+        !hal_zigbee_has_binding(cluster->endpoint, ZCL_CLUSTER_LEVEL_CONTROL)) {
         return;
     }
 
     hal_zigbee_cmd c = build_level_move_onoff_cmd(cluster->endpoint,
                                                   cluster->level_move_direction,
                                                   cluster->level_move_rate);
-    hal_zigbee_send_cmd_to_bindings(&c);
+    if (hal_zigbee_send_cmd_to_bindings(&c) == HAL_ZIGBEE_OK &&
+        switch_cluster_has_valid_relay(cluster)) {
+        // MoveWithOnOff has "turn/keep the target on while moving" intent.
+        // StopWithOnOff above intentionally does not change this latch.
+        relay_cluster_set_binding_intent(
+            &relay_clusters[cluster->relay_index - 1], 1);
+    }
 
     if (cluster->level_move_direction == ZCL_LEVEL_MOVE_DOWN) {
         cluster->level_move_direction = ZCL_LEVEL_MOVE_UP;
