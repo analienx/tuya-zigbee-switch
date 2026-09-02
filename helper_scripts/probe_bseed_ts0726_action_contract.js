@@ -24,6 +24,7 @@ Module._load = function(request, parent, isMain) {
     if (request === 'zigbee-herdsman-converters/lib/modernExtend') {
         return {
             binary: emptyExtend,
+            deviceAddCustomCluster: emptyExtend,
             deviceEndpoints: emptyExtend,
             enumLookup: emptyExtend,
             numeric: emptyExtend,
@@ -33,6 +34,9 @@ Module._load = function(request, parent, isMain) {
     }
     if (request === 'zigbee-herdsman-converters/lib/exposes') {
         return {presets: {action: exposeAction}};
+    }
+    if (request === 'zigbee-herdsman') {
+        return {Zcl: {BuffaloZclDataType: {LIST_UINT8: 0x1001}}};
     }
     return originalLoad.call(this, request, parent, isMain);
 };
