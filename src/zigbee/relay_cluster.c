@@ -37,6 +37,10 @@ void relay_cluster_store_attrs_to_nv(zigbee_relay_cluster *cluster);
 void relay_cluster_load_attrs_from_nv(zigbee_relay_cluster *cluster);
 void relay_cluster_store_physical_mode_to_nv(zigbee_relay_cluster *cluster);
 void relay_cluster_load_physical_mode_from_nv(zigbee_relay_cluster *cluster);
+static void relay_cluster_store_binding_intent_to_nv(
+    zigbee_relay_cluster *cluster);
+static bool relay_cluster_load_binding_intent_from_nv(
+    zigbee_relay_cluster *cluster);
 void relay_cluster_handle_startup_mode(zigbee_relay_cluster *cluster);
 void relay_cluster_apply_physical_mode(zigbee_relay_cluster *cluster);
 
@@ -64,6 +68,8 @@ void relay_cluster_add_to_endpoint(zigbee_relay_cluster *cluster,
     cluster->endpoint = endpoint->endpoint;
     relay_cluster_load_attrs_from_nv(cluster);
     relay_cluster_load_physical_mode_from_nv(cluster);
+    bool binding_intent_loaded =
+        relay_cluster_load_binding_intent_from_nv(cluster);
 
     // Enable the relay outputs only now that the persisted physical policy
     // is known: the FIRST output enable already carries the correct
@@ -89,6 +95,14 @@ void relay_cluster_add_to_endpoint(zigbee_relay_cluster *cluster,
         // that extra pulse defers the pulses of every other latching relay.
         relay_cluster_apply_physical_mode(cluster);
     }
+
+    if (!binding_intent_loaded) {
+        // Deterministic first-boot initialization for the new independent
+        // binding-intent latch. Existing devices start from their settled
+        // logical state; future direct-binding commands own subsequent changes.
+        cluster->binding_intent_state = cluster->relay->on ? 1 : 0;
+        relay_cluster_store_binding_intent_to_nv(cluster);
+    }
     sync_indicator_led(cluster);
 
     SETUP_ATTR(0, ZCL_ATTR_ONOFF, ZCL_DATA_TYPE_BOOLEAN, ATTR_READONLY,
@@ -97,16 +111,18 @@ void relay_cluster_add_to_endpoint(zigbee_relay_cluster *cluster,
                cluster->startup_mode);
     SETUP_ATTR(2, ZCL_ATTR_ONOFF_PHYSICAL_RELAY_MODE, ZCL_DATA_TYPE_ENUM8,
                ATTR_WRITABLE, cluster->physical_relay_mode);
+    SETUP_ATTR(3, ZCL_ATTR_ONOFF_BINDING_INTENT_STATE, ZCL_DATA_TYPE_BOOLEAN,
+               ATTR_WRITABLE, cluster->binding_intent_state);
     if (cluster->indicator_led != NULL) {
-        SETUP_ATTR(3, ZCL_ATTR_ONOFF_INDICATOR_MODE, ZCL_DATA_TYPE_ENUM8,
+        SETUP_ATTR(4, ZCL_ATTR_ONOFF_INDICATOR_MODE, ZCL_DATA_TYPE_ENUM8,
                    ATTR_WRITABLE, cluster->indicator_led_mode);
-        SETUP_ATTR(4, ZCL_ATTR_ONOFF_INDICATOR_STATE, ZCL_DATA_TYPE_BOOLEAN,
+        SETUP_ATTR(5, ZCL_ATTR_ONOFF_INDICATOR_STATE, ZCL_DATA_TYPE_BOOLEAN,
                    ATTR_WRITABLE, cluster->indicator_state);
     }
 
     endpoint->clusters[endpoint->cluster_count].cluster_id      = ZCL_CLUSTER_ON_OFF;
     endpoint->clusters[endpoint->cluster_count].attribute_count =
-        cluster->indicator_led != NULL ? 5 : 3;
+        cluster->indicator_led != NULL ? 6 : 4;
     endpoint->clusters[endpoint->cluster_count].attributes   = cluster->attr_infos;
     endpoint->clusters[endpoint->cluster_count].is_server    = 1;
     endpoint->clusters[endpoint->cluster_count].cmd_callback =
@@ -190,17 +206,45 @@ hal_zigbee_cmd_result_t relay_cluster_level_callback(zigbee_relay_cluster *clust
     return HAL_ZIGBEE_CMD_PROCESSED;
 }
 
+static uint8_t relay_cluster_effective_physical_state(
+    const zigbee_relay_cluster *cluster) {
+    switch (cluster->physical_relay_mode) {
+    case ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON:
+        return 1;
+    case ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_OFF:
+        return 0;
+    case ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED:
+    default:
+        return cluster->relay->on ? 1 : 0;
+    }
+}
+
 void sync_indicator_led(zigbee_relay_cluster *cluster) {
     if (cluster->indicator_led == NULL) {
         return;
     }
 
-    if (cluster->indicator_led_mode != ZCL_ONOFF_INDICATOR_MODE_MANUAL) {
-        if (cluster->indicator_led_mode == ZCL_ONOFF_INDICATOR_MODE_SAME) {
-            cluster->indicator_state = cluster->relay->on;
-        } else {
-            cluster->indicator_state = !cluster->relay->on;
-        }
+    switch (cluster->indicator_led_mode) {
+    case ZCL_ONOFF_INDICATOR_MODE_SAME:
+        cluster->indicator_state = cluster->relay->on ? 1 : 0;
+        break;
+    case ZCL_ONOFF_INDICATOR_MODE_OPPOSITE:
+        cluster->indicator_state = cluster->relay->on ? 0 : 1;
+        break;
+    case ZCL_ONOFF_INDICATOR_MODE_MANUAL:
+        break;
+    case ZCL_ONOFF_INDICATOR_MODE_PHYSICAL_OUTPUT:
+        cluster->indicator_state =
+            relay_cluster_effective_physical_state(cluster);
+        break;
+    case ZCL_ONOFF_INDICATOR_MODE_BINDING_INTENT:
+        cluster->indicator_state = cluster->binding_intent_state ? 1 : 0;
+        break;
+    default:
+        // Unknown future/corrupt values fail to the non-automatic legacy
+        // manual behavior rather than accidentally coupling an LED to mains.
+        cluster->indicator_led_mode = ZCL_ONOFF_INDICATOR_MODE_MANUAL;
+        break;
     }
 
     cluster->indicator_state ? led_on(cluster->indicator_led)
@@ -274,6 +318,21 @@ void relay_cluster_on_relay_change(zigbee_relay_cluster *cluster,
     }
 }
 
+void relay_cluster_set_binding_intent(zigbee_relay_cluster *cluster,
+                                      uint8_t state) {
+    state = state ? 1 : 0;
+    if (cluster->binding_intent_state == state) {
+        sync_indicator_led(cluster);
+        return;
+    }
+
+    cluster->binding_intent_state = state;
+    relay_cluster_store_binding_intent_to_nv(cluster);
+    hal_zigbee_notify_attribute_changed(cluster->endpoint, ZCL_CLUSTER_ON_OFF,
+                                        ZCL_ATTR_ONOFF_BINDING_INTENT_STATE);
+    sync_indicator_led(cluster);
+}
+
 void relay_cluster_on_write_attr(zigbee_relay_cluster *cluster,
                                  uint16_t attribute_id) {
     if (attribute_id == ZCL_ATTR_ONOFF_PHYSICAL_RELAY_MODE) {
@@ -286,10 +345,20 @@ void relay_cluster_on_write_attr(zigbee_relay_cluster *cluster,
         relay_cluster_store_physical_mode_to_nv(cluster);
     }
 
-    if (attribute_id == ZCL_ATTR_ONOFF_INDICATOR_STATE) {
+    if (attribute_id == ZCL_ATTR_ONOFF_BINDING_INTENT_STATE) {
+        cluster->binding_intent_state =
+            cluster->binding_intent_state ? 1 : 0;
+        relay_cluster_store_binding_intent_to_nv(cluster);
         sync_indicator_led(cluster);
     }
-    if (cluster->indicator_led_mode != ZCL_ONOFF_INDICATOR_MODE_MANUAL) {
+
+    if (attribute_id == ZCL_ATTR_ONOFF_INDICATOR_MODE &&
+        cluster->indicator_led_mode > ZCL_ONOFF_INDICATOR_MODE_MAX) {
+        cluster->indicator_led_mode = ZCL_ONOFF_INDICATOR_MODE_MANUAL;
+    }
+
+    if (attribute_id == ZCL_ATTR_ONOFF_INDICATOR_STATE ||
+        cluster->indicator_led_mode != ZCL_ONOFF_INDICATOR_MODE_MANUAL) {
         sync_indicator_led(cluster);
     }
 
@@ -352,6 +421,27 @@ void relay_cluster_load_physical_mode_from_nv(
     }
 }
 
+static void relay_cluster_store_binding_intent_to_nv(
+    zigbee_relay_cluster *cluster) {
+    hal_nvm_write(NV_ITEM_RELAY_BINDING_INTENT(cluster->relay_idx),
+                  sizeof(cluster->binding_intent_state),
+                  &cluster->binding_intent_state);
+}
+
+static bool relay_cluster_load_binding_intent_from_nv(
+    zigbee_relay_cluster *cluster) {
+    uint8_t state = 0;
+    hal_nvm_status_t st = hal_nvm_read(
+        NV_ITEM_RELAY_BINDING_INTENT(cluster->relay_idx), sizeof(state), &state);
+
+    if (st != HAL_NVM_SUCCESS || state > 1) {
+        return false;
+    }
+
+    cluster->binding_intent_state = state;
+    return true;
+}
+
 static bool relay_cluster_nv_write_and_verify(uint8_t item_id, uint16_t size,
                                               const uint8_t *data) {
     if (size > 32) {
@@ -397,7 +487,7 @@ bool relay_cluster_nv_set_indicator_safety(uint8_t relay_idx) {
 }
 
 bool relay_cluster_nv_set_indicator_mode(uint8_t relay_idx, uint8_t mode) {
-    if (mode > ZCL_ONOFF_INDICATOR_MODE_MANUAL) {
+    if (mode > ZCL_ONOFF_INDICATOR_MODE_MAX) {
         return false;
     }
 
