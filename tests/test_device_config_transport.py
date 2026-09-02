@@ -1,6 +1,7 @@
 """Transactional chunked device_config transport tests."""
 
 import struct
+from pathlib import Path
 
 from tests.client import StubProc
 from tests.conftest import Device
@@ -66,7 +67,7 @@ def test_full_canonical_value_round_trips_unchanged() -> None:
         )
         assert read_config(d) == CANONICAL
 
-        raw = (proc.nvm_dir / f"item_{NV_CONFIG_ITEM:02x}.bin").read_bytes()
+        raw = (Path("stub_nvm_data") / f"item_{NV_CONFIG_ITEM:02x}.bin").read_bytes()
         stored_len = struct.unpack("<H", raw[:2])[0]
         assert stored_len == len(data)
         assert raw[2 : 2 + stored_len] == data
