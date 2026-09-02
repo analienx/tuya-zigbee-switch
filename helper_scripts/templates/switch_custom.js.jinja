@@ -140,6 +140,19 @@ const romasku = {
             access: "ALL",
             entityCategory: "config",
         }),
+    relayPhysicalMode: (name, endpointName) =>
+        enumLookup({
+            name,
+            endpointName,
+            lookup: { attached: 0, detached_on: 1, detached_off: 2 },
+            cluster: "genOnOff",
+            attribute: {ID: 0xff03, type: 0x30}, // Enum8
+            description: `Physical relay policy:
+            - attached: physical relay follows the virtual on/off state
+            - detached_on: physical relay is pinned ON while virtual state can change independently
+            - detached_off: physical relay is pinned OFF while virtual state can change independently`,
+            entityCategory: "config",
+        }),
     batteryPercentage: () => {
         const result = numeric({
             name: "battery",
@@ -439,6 +452,9 @@ const definitions = [
             {% for relayName in device.relayIndicatorNames %}
             romasku.relayIndicatorMode("{{relayName}}_indicator_mode", "{{relayName}}"),
             romasku.relayIndicator("{{relayName}}_indicator", "{{relayName}}"),
+            {% endfor %}
+            {% for relayName in device.relayNames %}
+            romasku.relayPhysicalMode("{{relayName}}_physical_mode", "{{relayName}}"),
             {% endfor %}
             {% for coverName in device.coverNames %}
             windowCovering({ 

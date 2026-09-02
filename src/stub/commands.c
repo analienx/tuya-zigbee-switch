@@ -1,6 +1,7 @@
 #include "commands.h"
 #include "machine_io.h"
 
+#include "base_components/relay.h"
 #include "hal/timer.h"
 #include "hal/zigbee.h"
 
@@ -11,6 +12,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+extern relay_t relays[10];
+extern uint8_t relays_cnt;
 
 static int parse_u8_dec(const char *s, uint8_t *out) {
     char *e = NULL;
@@ -236,6 +240,52 @@ static int cmd_read_pin(int argc, char **argv) {
     return 0;
 }
 
+static int cmd_read_pin_init(int argc, char **argv) {
+    if (argc != 2) {
+        fprintf(stderr, "Usage: read_pin_init <pin:dec>\n");
+        io_res_err("usage");
+        return -1;
+    }
+    char *e   = NULL;
+    int   pin = strtol(argv[1], &e, 10);
+    if (*argv[1] == '\0' || *e) {
+        fprintf(stderr, "Bad pin\n");
+        io_res_err("bad_pin=%s", argv[1]);
+        return -1;
+    }
+    if (!stub_gpio_has_initial_output(pin)) {
+        fprintf(stderr, "Pin %d was never enabled as output\n", pin);
+        io_res_err("no_initial pin=%d", pin);
+        return -1;
+    }
+    int val = stub_gpio_get_initial_output(pin);
+    printf("Pin %d first enabled level => %d\n", pin, val);
+    io_res_ok("pin=%d value=%d", pin, val);
+    return 0;
+}
+
+static int cmd_set_on_high(int argc, char **argv) {
+    if (argc != 3) {
+        fprintf(stderr, "Usage: set_on_high <relay_idx:dec> <on_high:0|1>\n");
+        io_res_err("usage");
+        return -1;
+    }
+    char *e       = NULL;
+    int   idx     = strtol(argv[1], &e, 10);
+    int   on_high = strtol(argv[2], &e, 10);
+    if (idx < 0 || idx >= relays_cnt || (*argv[2] == '\0' || *e) ||
+        (on_high != 0 && on_high != 1)) {
+        io_res_err("bad_args");
+        return -1;
+    }
+    // Test-only polarity hook: flips the component polarity and re-initializes
+    // the outputs at the component level (attached default state).
+    relays[idx].on_high = (uint8_t)on_high;
+    relay_init(&relays[idx], 0);
+    io_res_ok("relay_idx=%d on_high=%d", idx, on_high);
+    return 0;
+}
+
 static int cmd_zcl_cmd_impl(int argc, char **argv, bool trigger_activity) {
     if (argc < 4) {
         fprintf(stderr, "Usage: zcl_cmd <ep:dec> <cluster:hex> <cmd:hex> "
@@ -386,6 +436,8 @@ static const SimpleReplCommand kCmds[] = {
     { "net",                 cmd_net                 },
     { "set_pin",             cmd_pin                 },
     { "read_pin",            cmd_read_pin            },
+    { "read_pin_init",       cmd_read_pin_init       },
+    { "set_on_high",         cmd_set_on_high         },
     { "zcl_read",            cmd_zcl_read            },
     { "zcl_write",           cmd_zcl_write           },
     { "zcl_list_attrs",      cmd_zcl_list_attrs      },

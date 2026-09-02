@@ -28,4 +28,14 @@
 #define NV_ITEM_MULTI_PRESS_RESET_COUNT    33
 #define NV_ITEM_POLL_CONTROL_CONFIG        34
 
+// Physical relay mode is stored separately from the legacy relay-cluster
+// structure so older NVM data remains binary-compatible. Five slots are
+// reserved for relay indexes 0..4.
+#define NV_ITEM_RELAY_PHYSICAL_MODE(relay_idx)    (35 + (relay_idx))
+
+// Device-specific one-shot migration marker (device_migration.c). Written
+// only after every other change the migration makes is complete, so a crash
+// mid-migration simply re-runs it on the next boot.
+#define NV_ITEM_MIGRATION_MARKER    40
+
 #endif /* DEVICE_CONFIG_NVM_ITEMS_H_ */

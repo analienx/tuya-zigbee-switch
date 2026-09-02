@@ -88,6 +88,28 @@ void hal_gpio_init(hal_gpio_pin_t gpio_pin, uint8_t is_input,
     config->pull     = pull;
 }
 
+void hal_gpio_init_output(hal_gpio_pin_t gpio_pin, hal_gpio_pull_t pull,
+                          uint8_t initial_value) {
+    // Preload the output data register BEFORE enabling the output driver so
+    // the first driven level is already `initial_value` (no LOW-then-HIGH
+    // boot glitch). Mirrors the deep-retention restore ordering above.
+    gpio_write((GPIO_PinTypeDef)gpio_pin, initial_value);
+    gpio_init_hw(gpio_pin, 0, pull);
+
+    gpio_config_t *config = find_gpio_config(gpio_pin);
+    if (config == NULL) {
+        if (gpio_config_cnt >= MAX_GPIO_CONFIGS) {
+            return;
+        }
+        config = &gpio_configs[gpio_config_cnt++];
+    }
+
+    config->pin      = gpio_pin;
+    config->is_input = 0;
+    config->value    = initial_value ? 1 : 0;
+    config->pull     = pull;
+}
+
 void telink_gpio_reinit_after_deep_retention(void) {
     for (uint8_t i = 0; i < gpio_config_cnt; i++) {
         if (!gpio_configs[i].is_input) {

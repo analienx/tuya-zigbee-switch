@@ -207,6 +207,10 @@ void cover_cluster_init(zigbee_cover_cluster *cluster) {
     cluster->moving         = ZCL_ATTR_WINDOW_COVERING_MOVING_STOPPED;
     cluster->motor_reversal = 0;
 
+    // Cover relays have no physical-mode NVM: initialize explicitly OFF.
+    relay_init(cluster->open_relay, 0);
+    relay_init(cluster->close_relay, 0);
+
     // State
     cluster->last_switch_time     = 0;
     cluster->pending_movement     = 0;

@@ -1,0 +1,462 @@
+#include "device_migration.h"
+
+#include "config_nv.h"
+#include "hal/nvm.h"
+#include "hal/printf_selector.h"
+#include "nvm_items.h"
+#include "zigbee/relay_cluster.h"
+#include "zigbee/consts.h"
+
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+
+#ifndef STRINGIFY
+#define _STRINGIFY(x)    #x
+#define STRINGIFY(x)     _STRINGIFY(x)
+#endif
+
+// The build passes the swapped and canonical config strings as bare
+// -D token sequences (the recipe shell strips the quotes, exactly as for
+// DEFAULT_CONFIG), so stringize them into real C string literals here.
+#define DEVICE_MIGRATION_FROM_CONFIG_STR    STRINGIFY(DEVICE_MIGRATION_FROM_CONFIG)
+#define DEVICE_MIGRATION_TO_CONFIG_STR      STRINGIFY(DEVICE_MIGRATION_TO_CONFIG)
+
+// Multi-state marker stored in NV_ITEM_MIGRATION_MARKER as a uint32. Item
+// absence is equivalent to MIG_STATE_NONE. Every boot can therefore classify
+// the NVM into exactly one of:
+//   canonical + valid physical policy, swapped + MANUAL/ON, or "not ours (yet)".
+#define MIG_STATE_NONE                   0x00000000
+#define MIG_STATE_FORWARD_IN_PROGRESS    0x00000001
+#define MIG_STATE_FORWARD_COMPLETE       0x00000002
+#define MIG_STATE_REVERT_IN_PROGRESS     0x00000003
+#define MIG_STATE_MAX_VALID              MIG_STATE_REVERT_IN_PROGRESS
+
+// Two different scopes matter on this board:
+//
+// 1) LEFT/MIDDLE are the only channels whose historical config swapped the
+//    relay and indicator pins. Only those two need MANUAL+ON indicator safety
+//    before/while the pin map changes.
+// 2) LEFT/MIDDLE/RIGHT all feed smart Zigbee lighting that must stay powered.
+//    The forward migration therefore persists DETACHED_ON for all three real
+//    relay outputs once the canonical pin map is active.
+#define DEVICE_MIGRATION_SWAPPED_RELAY_COUNT            2
+#define DEVICE_MIGRATION_PERMANENT_POWER_RELAY_COUNT    3
+
+// Marker read classification. Corruption fails closed (BLOCK), it is never
+// converted to "absent": an unknown marker must not re-arm a one-shot
+// migration on a device whose history is unknown.
+typedef enum {
+    MARKER_ABSENT = 0,
+    MARKER_VALID,
+    MARKER_INVALID,
+} marker_status_t;
+
+#if defined(DEVICE_MIGRATION_FROM_CONFIG) || defined(DEVICE_MIGRATION_REVERT)
+static marker_status_t migration_marker_state(uint32_t *state) {
+    *state = MIG_STATE_NONE;
+
+    uint32_t         stored = 0;
+    hal_nvm_status_t st     = hal_nvm_read(NV_ITEM_MIGRATION_MARKER,
+                                           sizeof(stored), (uint8_t *)&stored);
+    if (st == HAL_NVM_NOT_FOUND) {
+        return MARKER_ABSENT;
+    }
+    if (st != HAL_NVM_SUCCESS) {
+        printf("Device migration: marker read failed (%lu), fail closed\r\n",
+               (unsigned long)st);
+        return MARKER_INVALID;
+    }
+
+    if (stored > MIG_STATE_MAX_VALID) {
+        printf("Device migration: corrupt marker state %lu, fail closed\r\n",
+               (unsigned long)stored);
+        return MARKER_INVALID;
+    }
+
+    if (stored == MIG_STATE_NONE) {
+        // A physically present zero value is semantically identical to
+        // absence: no transaction is owned or in flight, so neither image
+        // may treat the device as migration-owned.
+        return MARKER_ABSENT;
+    }
+
+    *state = stored;
+    return MARKER_VALID;
+}
+
+static bool write_marker_state(uint32_t state) {
+    uint32_t current = 0;
+
+    if (hal_nvm_read(NV_ITEM_MIGRATION_MARKER, sizeof(current),
+                     (uint8_t *)&current) == HAL_NVM_SUCCESS &&
+        current == state) {
+        return true; // already persisted
+    }
+
+    if (hal_nvm_write(NV_ITEM_MIGRATION_MARKER, sizeof(state),
+                      (uint8_t *)&state) != HAL_NVM_SUCCESS) {
+        return false;
+    }
+
+    uint32_t readback = 0;
+    if (hal_nvm_read(NV_ITEM_MIGRATION_MARKER, sizeof(readback),
+                     (uint8_t *)&readback) != HAL_NVM_SUCCESS) {
+        return false;
+    }
+
+    return readback == state;
+}
+
+#ifdef DEVICE_MIGRATION_REVERT
+static bool delete_migration_marker(void) {
+    // Ignore the delete result: absence is the target state and is verified
+    // below regardless.
+    hal_nvm_delete(NV_ITEM_MIGRATION_MARKER);
+
+    uint32_t probe = 0;
+    return hal_nvm_read(NV_ITEM_MIGRATION_MARKER, sizeof(probe),
+                        (uint8_t *)&probe) == HAL_NVM_NOT_FOUND;
+}
+
+#endif // DEVICE_MIGRATION_REVERT
+
+static bool write_device_config_verified(const char *config) {
+    size_t len = strlen(config);
+
+    if (len >= sizeof(device_config_str.data)) {
+        printf("Device migration: replacement config too long (%d)\r\n",
+               (int)len);
+        return false;
+    }
+
+    device_config_str_t desired;
+    memset(&desired, 0, sizeof(desired));
+    memcpy(desired.data, config, len);
+    desired.size = (uint16_t)len;
+
+    if (hal_nvm_write(NV_ITEM_DEVICE_CONFIG, sizeof(desired),
+                      (uint8_t *)&desired) != HAL_NVM_SUCCESS) {
+        return false;
+    }
+
+    device_config_str_t readback;
+    if (hal_nvm_read(NV_ITEM_DEVICE_CONFIG, sizeof(readback),
+                     (uint8_t *)&readback) != HAL_NVM_SUCCESS) {
+        return false;
+    }
+
+    if (memcmp(&readback, &desired, sizeof(desired)) != 0) {
+        printf("Device migration: config readback mismatch\r\n");
+        return false;
+    }
+
+    // Commit the verified bytes to the in-memory copy parse_config() uses.
+    memcpy(&device_config_str, &desired, sizeof(desired));
+    return true;
+}
+
+static bool ensure_swapped_relay_safety(void) {
+    // MANUAL + ON keeps the indicator-driven mains side energised and
+    // uncoupled under BOTH pin maps, so this phase is safe before and after
+    // the config rewrite.
+    for (uint8_t relay_idx = 0;
+         relay_idx < DEVICE_MIGRATION_SWAPPED_RELAY_COUNT;
+         relay_idx++) {
+        if (!relay_cluster_nv_set_indicator_safety(relay_idx)) {
+            printf("Device migration: failed to secure relay %d indicator "
+                   "NVM\r\n",
+                   relay_idx);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool ensure_permanent_power_relay_modes(void) {
+    // DETACHED_ON pins every smart-light feed ON while allowing the Zigbee
+    // On/Off state to continue changing independently.
+    //
+    // On the historical swapped map, relay indexes 0/1 still point at panel
+    // LED pins, so pre-seeding those slots is electrically harmless; relay 2
+    // already points at the real RIGHT mains contact and is intentionally
+    // energized here. After canonicalization all three slots protect the
+    // actual mains feeds. Recovery re-proves this invariant on canonical NVM
+    // before it is allowed to restore the historical map.
+    for (uint8_t relay_idx = 0;
+         relay_idx < DEVICE_MIGRATION_PERMANENT_POWER_RELAY_COUNT;
+         relay_idx++) {
+        if (!relay_cluster_nv_ensure_physical_mode(
+                relay_idx, ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON)) {
+            printf("Device migration: failed to pre-seed relay %d physical "
+                   "mode\r\n",
+                   relay_idx);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool ensure_valid_or_default_power_relay_modes(void) {
+    // After the migration is complete, a valid persisted physical mode is a
+    // user setting and must survive reboot. Only missing/corrupt slots are
+    // repaired to the safe smart-light default DETACHED_ON.
+    for (uint8_t relay_idx = 0;
+         relay_idx < DEVICE_MIGRATION_PERMANENT_POWER_RELAY_COUNT;
+         relay_idx++) {
+        if (!relay_cluster_nv_ensure_valid_physical_mode(
+                relay_idx, ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON)) {
+            printf("Device migration: failed to validate relay %d physical "
+                   "mode\r\n",
+                   relay_idx);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+#endif // DEVICE_MIGRATION_FROM_CONFIG || DEVICE_MIGRATION_REVERT
+
+#if defined(DEVICE_MIGRATION_FROM_CONFIG) && !defined(DEVICE_MIGRATION_REVERT)
+static device_migration_result_t migrate_swapped_pins_to_canonical(void) {
+    uint32_t        state  = MIG_STATE_NONE;
+    marker_status_t marker = migration_marker_state(&state);
+
+    if (marker == MARKER_INVALID) {
+        // Fail closed: an unreadable/corrupt transaction marker must never
+        // re-arm a one-shot migration or parse an unproven NVM state.
+        return DEVICE_MIGRATION_BLOCK_INIT;
+    }
+
+    device_config_read_from_nv();
+
+    const bool is_swapped = strcmp((const char *)device_config_str.data,
+                                   DEVICE_MIGRATION_FROM_CONFIG_STR) == 0;
+    const bool is_canonical = strcmp((const char *)device_config_str.data,
+                                     DEVICE_MIGRATION_TO_CONFIG_STR) == 0;
+
+    if (marker == MARKER_VALID && state == MIG_STATE_FORWARD_COMPLETE) {
+        // Completed-state invariant: never trust historical state - the
+        // CURRENT config decides which side is mains right now.
+        if (is_canonical) {
+            // Migration established DETACHED_ON as the safe default, but the
+            // physical-policy attribute is a real persisted user setting.
+            // Preserve any valid mode; repair only missing/corrupt slots.
+            if (!ensure_valid_or_default_power_relay_modes()) {
+                printf("Device migration: completed state has unprovable "
+                       "physical policy; blocking init\r\n");
+                return DEVICE_MIGRATION_BLOCK_INIT;
+            }
+        } else if (is_swapped) {
+            // LEFT/MIDDLE mains is the indicator side again: MANUAL + ON must
+            // be re-proven. RIGHT remains a real relay under both maps, so the
+            // three-channel permanent-power policy must also be re-proven.
+            if (!ensure_swapped_relay_safety() ||
+                !ensure_permanent_power_relay_modes()) {
+                printf("Device migration: completed state on swapped config "
+                       "with unprovable power invariants; blocking init\r\n");
+                return DEVICE_MIGRATION_BLOCK_INIT;
+            }
+        } else {
+            // Protected invariant failure: a foreign config under our
+            // completed marker is never mutated.
+            printf("Device migration: completed state with foreign config; "
+                   "blocking init, NVM untouched\r\n");
+            return DEVICE_MIGRATION_BLOCK_INIT;
+        }
+        return DEVICE_MIGRATION_SAFE_TO_CONTINUE;
+    }
+
+    if (marker == MARKER_VALID && state == MIG_STATE_REVERT_IN_PROGRESS) {
+        // A revert image owns this NVM; never forward-migrate over it.
+        printf("Device migration: revert in progress, forward migration "
+               "refuses to run\r\n");
+        return DEVICE_MIGRATION_BLOCK_INIT;
+    }
+
+    const bool resuming = marker == MARKER_VALID &&
+                          state == MIG_STATE_FORWARD_IN_PROGRESS;
+
+    if (!is_swapped && !(is_canonical && resuming)) {
+        if (resuming) {
+            // Protected invariant failure: an interrupted migration must
+            // never be silently marked complete for a foreign config, and
+            // its pin-map/NVM combination is unproven. Block, do not parse.
+            printf("Device migration: forward in progress but config matches "
+                   "neither known form; blocking init for manual recovery\r\n");
+            return DEVICE_MIGRATION_BLOCK_INIT;
+        }
+        // Foreign/factory config without our marker: not ours to touch.
+        return DEVICE_MIGRATION_SAFE_TO_CONTINUE;
+    }
+
+    if (!resuming) {
+        if (!write_marker_state(MIG_STATE_FORWARD_IN_PROGRESS)) {
+            printf("Device migration: failed to persist "
+                   "FORWARD_IN_PROGRESS\r\n");
+            // Swapped config with unproven indicator NVM: not parseable.
+            return DEVICE_MIGRATION_BLOCK_INIT;
+        }
+    }
+
+    // Phase C: indicator safety. Until this is verified, the swapped map may
+    // still be active with an unproven mains side - never parse on failure.
+    if (!ensure_swapped_relay_safety()) {
+        return DEVICE_MIGRATION_BLOCK_INIT;
+    }
+
+    // Phase D: DETACHED_ON pre-seed for ALL THREE smart-light feeds
+    // (forced to the exact mode and verified).
+    if (!ensure_permanent_power_relay_modes()) {
+        if (is_canonical) {
+            // Canonical map: C2/C3 are R and DETACHED_ON is not proven.
+            // Parsing would expose mains to ATTACHED/DETACHED_OFF semantics.
+            printf("Device migration: canonical config with unprovable "
+                   "DETACHED_ON; blocking init\r\n");
+            return DEVICE_MIGRATION_BLOCK_INIT;
+        }
+        // Swapped config + verified MANUAL/ON: explicitly safe partial.
+        return DEVICE_MIGRATION_SAFE_PARTIAL;
+    }
+
+    // Phase E: canonical config (skipped when resuming a config that is
+    // already canonical).
+    if (!is_canonical) {
+        if (!write_device_config_verified(DEVICE_MIGRATION_TO_CONFIG_STR)) {
+            // Swapped + MANUAL/ON + verified DETACHED_ON: safe partial.
+            return DEVICE_MIGRATION_SAFE_PARTIAL;
+        }
+    }
+
+    // Phase F: the electrical migration is complete once canonical config
+    // and all three DETACHED_ON modes are durable. LEFT/MIDDLE indicators
+    // intentionally remain MANUAL + ON here. They are changed to SAME only
+    // after the operator has read back canonical config + physical modes and
+    // physically proved uninterrupted power on the real device. Keeping that
+    // user/physical boundary out of the one-shot firmware transaction prevents
+    // software-only evidence from silently completing the final panel-LED step.
+    if (!write_marker_state(MIG_STATE_FORWARD_COMPLETE)) {
+        // Canonical + verified DETACHED_ON + MANUAL/ON indicator safety.
+        return DEVICE_MIGRATION_SAFE_PARTIAL;
+    }
+
+    printf("Device migration: swapped-pin migration complete\r\n");
+    return DEVICE_MIGRATION_SAFE_TO_CONTINUE;
+}
+
+#endif // DEVICE_MIGRATION_FROM_CONFIG && !DEVICE_MIGRATION_REVERT
+
+#ifdef DEVICE_MIGRATION_REVERT
+static device_migration_result_t revert_swapped_pins_migration(void) {
+    uint32_t        state  = MIG_STATE_NONE;
+    marker_status_t marker = migration_marker_state(&state);
+
+    if (marker == MARKER_INVALID) {
+        // Fail closed on an unreadable/corrupt transaction marker.
+        return DEVICE_MIGRATION_BLOCK_INIT;
+    }
+
+    if (marker == MARKER_ABSENT) {
+        // Never migrated (or already reverted): nothing is ours to revert.
+        return DEVICE_MIGRATION_SAFE_TO_CONTINUE;
+    }
+
+    // Classify BEFORE any mutation: a foreign/user-edited config under our
+    // marker must be left byte-for-byte untouched (protected invariant).
+    device_config_read_from_nv();
+
+    const bool is_swapped = strcmp((const char *)device_config_str.data,
+                                   DEVICE_MIGRATION_FROM_CONFIG_STR) == 0;
+    const bool is_canonical = strcmp((const char *)device_config_str.data,
+                                     DEVICE_MIGRATION_TO_CONFIG_STR) == 0;
+
+    // FORWARD_COMPLETE + swapped means the pin map is already back to the
+    // swapped form; only the safety cleanup is performed (no config write).
+    const bool resumable = is_swapped || is_canonical;
+
+    if (!resumable) {
+        printf("Device migration revert: protected invariant failure (marker "
+               "state %lu with foreign config); NVM left untouched\r\n",
+               (unsigned long)state);
+        return DEVICE_MIGRATION_BLOCK_INIT;
+    }
+
+    if (is_canonical) {
+        // Phase 0: current canonical safety must be proven NOW. Historical
+        // FORWARD_COMPLETE does not prove the modes still hold - a missing,
+        // wrong or corrupted slot must be forced back to DETACHED_ON and
+        // verified before anything may parse the canonical map.
+        if (!ensure_permanent_power_relay_modes()) {
+            printf("Device migration revert: cannot establish DETACHED_ON "
+                   "for canonical mains; blocking init\r\n");
+            return DEVICE_MIGRATION_BLOCK_INIT;
+        }
+    }
+
+    if (!write_marker_state(MIG_STATE_REVERT_IN_PROGRESS)) {
+        // Canonical entry: phase-0-verified DETACHED_ON guards the mains.
+        // Swapped entry: the indicator side is not yet proven - never parse.
+        return is_canonical ? DEVICE_MIGRATION_SAFE_PARTIAL
+                            : DEVICE_MIGRATION_BLOCK_INIT;
+    }
+
+    // Phase 2: indicator safety FIRST. Canonical operation may have changed
+    // the indicator mode (e.g. SAME); reverting the pin map before restoring
+    // MANUAL + ON would move that behavior onto the C2/C3 mains relays.
+    if (!ensure_swapped_relay_safety()) {
+        if (is_canonical) {
+            // Canonical map: mains is the R side, still guarded by the
+            // forward's verified DETACHED_ON modes. Safe partial.
+            return DEVICE_MIGRATION_SAFE_PARTIAL;
+        }
+        // Swapped map with unproven indicator side: never parse.
+        return DEVICE_MIGRATION_BLOCK_INIT;
+    }
+
+    // Phase 3: swapped config, verified byte-exact (skipped when the config
+    // is already the swapped form).
+    if (!is_swapped) {
+        if (!write_device_config_verified(DEVICE_MIGRATION_FROM_CONFIG_STR)) {
+            // Canonical + forward-verified DETACHED_ON: safe partial.
+            return DEVICE_MIGRATION_SAFE_PARTIAL;
+        }
+    }
+
+    // Phase 4: neutralize all forward physical-mode slots. Absence makes the
+    // cluster use its ATTACHED default. On LEFT/MIDDLE the swapped map then
+    // drives the panel-LED side again; RIGHT returns to its historical
+    // attached mains-relay semantics.
+    for (uint8_t relay_idx = 0;
+         relay_idx < DEVICE_MIGRATION_PERMANENT_POWER_RELAY_COUNT;
+         relay_idx++) {
+        if (!relay_cluster_nv_delete_physical_mode(relay_idx)) {
+            // Swapped + verified MANUAL/ON: safe partial.
+            return DEVICE_MIGRATION_SAFE_PARTIAL;
+        }
+    }
+
+    // Phase 5: only now clear the migration state.
+    if (!delete_migration_marker()) {
+        // Swapped + verified MANUAL/ON: safe partial.
+        return DEVICE_MIGRATION_SAFE_PARTIAL;
+    }
+
+    printf("Device migration revert: swapped-pin state restored\r\n");
+    return DEVICE_MIGRATION_SAFE_TO_CONTINUE;
+}
+
+#endif // DEVICE_MIGRATION_REVERT
+
+device_migration_result_t handle_device_specific_migrations(void) {
+#if defined(DEVICE_MIGRATION_REVERT)
+    return revert_swapped_pins_migration();
+#elif defined(DEVICE_MIGRATION_FROM_CONFIG)
+    return migrate_swapped_pins_to_canonical();
+#else
+    // No device-specific migration compiled into this build.
+    return DEVICE_MIGRATION_NOT_APPLICABLE;
+#endif
+}
