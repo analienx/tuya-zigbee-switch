@@ -114,6 +114,13 @@ endif
 
 DEVICE_DEFS := $(DEVICE_DEFS) $(MIGRATION_DEFINES)
 
+# Optional compile-time guard for device_config writes. The guard is enabled
+# only by target-specific release builds; generic/upstream boards keep the
+# existing permissive parser behavior.
+ifneq ($(strip $(DEVICE_CONFIG_GUARD)),)
+DEVICE_DEFS := $(DEVICE_DEFS) -DDEVICE_CONFIG_GUARD_$(DEVICE_CONFIG_GUARD)
+endif
+
 # Include paths (SDK paths first to avoid conflicts)
 INCLUDE_PATHS := \
 	-I. \
