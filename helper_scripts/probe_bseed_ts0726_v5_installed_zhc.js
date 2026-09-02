@@ -29,7 +29,7 @@ const Module = require('module');
 const TARGET_MODEL = 'EC-GL86ZPCS31';
 const TARGET_MANUFACTURER = 'iedhxgyi';
 const TARGET_ZB_MODEL = 'TS0726-3-BS';
-const EXPECTED_PHYSICAL_VALUES = ['follow_state', 'always_on', 'always_off'];
+const EXPECTED_PHYSICAL_VALUES = ['Follow logical state', 'Always on', 'Always off'];
 const TARGET_SW_BUILD = '1.1.5-bseedv5';
 
 function die(message) {
@@ -257,11 +257,11 @@ function verifyContract(definition, exposes, execution) {
     }
 
     const expectedIndicatorValues = [
-        'logical_state',
-        'inverse_logical_state',
-        'manual',
-        'physical_output',
-        'binding_status',
+        'Logical state',
+        'Inverse logical state',
+        'Manual',
+        'Physical output',
+        'Binding status',
     ];
     const channelNames = {
         relay_left: 'Left',
