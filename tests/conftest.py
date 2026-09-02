@@ -302,6 +302,16 @@ class Device:
     def clear_events(self) -> None:
         self._events.clear()
 
+    def add_binding(self, endpoint: int, cluster: int, short_addr: int = 0x1234) -> None:
+        res = self.p.exec(
+            f"bind_add {short_addr:04X} {endpoint} {cluster:04X}"
+        )
+        assert res.ok, f"binding add failed: {res.payload}"
+
+    def clear_bindings(self) -> None:
+        res = self.p.exec("bind_clear")
+        assert res.ok, f"binding clear failed: {res.payload}"
+
     def wait_for_attr_change(
         self,
         ep: int,
