@@ -154,7 +154,7 @@ static int cmd_bind_add(int argc, char **argv) {
     }
 
     uint16_t short_addr, cluster;
-    uint8_t endpoint;
+    uint8_t  endpoint;
     if (parse_u16_hex(argv[1], &short_addr) ||
         parse_u8_dec(argv[2], &endpoint) ||
         parse_u16_hex(argv[3], &cluster)) {

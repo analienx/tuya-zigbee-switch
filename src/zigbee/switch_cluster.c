@@ -290,7 +290,7 @@ static void switch_cluster_binding_action(
             zigbee_relay_cluster *relay_cluster =
                 &relay_clusters[cluster->relay_index - 1];
             const bool logical_on = relay_cluster->relay->on != 0;
-            const bool sync =
+            const bool sync       =
                 cluster->action ==
                 ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SMART_SYNC;
             const bool intended_on = sync ? logical_on : !logical_on;

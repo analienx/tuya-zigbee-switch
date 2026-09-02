@@ -57,7 +57,6 @@ void device_config_read_from_nv() {
            device_config_str.data);
 }
 
-
 bool device_config_is_valid(const uint8_t *data, uint16_t size) {
     // data[128] also needs one byte available for the parser's temporary NUL.
     if (data == NULL || size < 4 || size >= sizeof(device_config_str.data)) {
@@ -67,8 +66,8 @@ bool device_config_is_valid(const uint8_t *data, uint16_t size) {
         return false;
     }
 
-    uint16_t separators = 0;
-    bool previous_was_separator = false;
+    uint16_t separators             = 0;
+    bool     previous_was_separator = false;
     for (uint16_t i = 0; i < size; i++) {
         uint8_t ch = data[i];
         if (ch < 0x20 || ch > 0x7e) {

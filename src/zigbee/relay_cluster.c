@@ -211,8 +211,10 @@ static uint8_t relay_cluster_effective_physical_state(
     switch (cluster->physical_relay_mode) {
     case ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON:
         return 1;
+
     case ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_OFF:
         return 0;
+
     case ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED:
     default:
         return cluster->relay->on ? 1 : 0;
@@ -439,8 +441,8 @@ static void relay_cluster_store_binding_intent_to_nv(
 
 static bool relay_cluster_load_binding_intent_from_nv(
     zigbee_relay_cluster *cluster) {
-    uint8_t state = 0;
-    hal_nvm_status_t st = hal_nvm_read(
+    uint8_t          state = 0;
+    hal_nvm_status_t st    = hal_nvm_read(
         NV_ITEM_RELAY_BINDING_INTENT(cluster->relay_idx), sizeof(state), &state);
 
     if (st != HAL_NVM_SUCCESS || state > 1) {
@@ -546,8 +548,8 @@ bool relay_cluster_nv_ensure_valid_physical_mode(
         return false;
     }
 
-    uint8_t stored = 0;
-    hal_nvm_status_t st = hal_nvm_read(
+    uint8_t          stored = 0;
+    hal_nvm_status_t st     = hal_nvm_read(
         NV_ITEM_RELAY_PHYSICAL_MODE(relay_idx), sizeof(stored), &stored);
 
     if (st == HAL_NVM_SUCCESS &&

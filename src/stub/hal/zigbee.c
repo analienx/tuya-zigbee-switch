@@ -38,7 +38,7 @@ static int            binding_count = 0;
 // Legacy simulator tests historically treated send-to-bindings as available
 // without constructing a binding table. Explicit bind_clear/bind_add enables
 // strict presence semantics for v5 tests without weakening production HALs.
-static bool           binding_presence_strict = false;
+static bool binding_presence_strict = false;
 
 void hal_zigbee_init(hal_zigbee_endpoint *ep_list, uint8_t ep_count) {
     if (!ep_list && ep_count > 0) {
@@ -266,7 +266,7 @@ void stub_zigbee_add_binding(uint16_t short_addr, uint8_t endpoint,
 
 void stub_zigbee_clear_bindings(void) {
     binding_presence_strict = true;
-    binding_count = 0;
+    binding_count           = 0;
     io_log("ZIGBEE", "Cleared all bindings");
 }
 

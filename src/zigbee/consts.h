@@ -58,12 +58,12 @@
 
 // OnOff cluster
 
-#define ZCL_ATTR_ONOFF                        0x0000
-#define ZCL_ATTR_START_UP_ONOFF               0x4003
+#define ZCL_ATTR_ONOFF                         0x0000
+#define ZCL_ATTR_START_UP_ONOFF                0x4003
 
-#define ZCL_ATTR_ONOFF_INDICATOR_MODE         0xff01
-#define ZCL_ATTR_ONOFF_INDICATOR_STATE        0xff02
-#define ZCL_ATTR_ONOFF_PHYSICAL_RELAY_MODE    0xff03
+#define ZCL_ATTR_ONOFF_INDICATOR_MODE          0xff01
+#define ZCL_ATTR_ONOFF_INDICATOR_STATE         0xff02
+#define ZCL_ATTR_ONOFF_PHYSICAL_RELAY_MODE     0xff03
 #define ZCL_ATTR_ONOFF_BINDING_INTENT_STATE    0xff04
 
 // OnOff configuration cluster
@@ -140,9 +140,9 @@
 #define ZCL_ONOFF_INDICATOR_MODE_OPPOSITE             0x01
 #define ZCL_ONOFF_INDICATOR_MODE_MANUAL               0x02
 // New values are appended; 0/1/2 remain ABI-compatible with deployed firmware.
-#define ZCL_ONOFF_INDICATOR_MODE_PHYSICAL_OUTPUT       0x03
-#define ZCL_ONOFF_INDICATOR_MODE_BINDING_INTENT        0x04
-#define ZCL_ONOFF_INDICATOR_MODE_MAX                   ZCL_ONOFF_INDICATOR_MODE_BINDING_INTENT
+#define ZCL_ONOFF_INDICATOR_MODE_PHYSICAL_OUTPUT      0x03
+#define ZCL_ONOFF_INDICATOR_MODE_BINDING_INTENT       0x04
+#define ZCL_ONOFF_INDICATOR_MODE_MAX                  ZCL_ONOFF_INDICATOR_MODE_BINDING_INTENT
 
 #define ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED        0x00
 #define ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON     0x01

@@ -101,8 +101,8 @@ static hal_zigbee_cmd_result_t device_config_commit(
         return HAL_ZIGBEE_MALFORMED_COMMAND;
     }
 
-    const uint8_t transaction = payload[0];
-    const uint8_t total_len   = payload[1];
+    const uint8_t  transaction  = payload[0];
+    const uint8_t  total_len    = payload[1];
     const uint16_t expected_crc =
         (uint16_t)payload[2] | ((uint16_t)payload[3] << 8);
 
@@ -145,9 +145,11 @@ static hal_zigbee_cmd_result_t basic_cluster_callback(
     case ZCL_CMD_BASIC_DEVICE_CONFIG_STAGE:
         return device_config_stage_chunk((const uint8_t *)cmd_payload,
                                          cmd_payload_len);
+
     case ZCL_CMD_BASIC_DEVICE_CONFIG_COMMIT:
         return device_config_commit((const uint8_t *)cmd_payload,
                                     cmd_payload_len);
+
     default:
         return HAL_ZIGBEE_CMD_SKIPPED;
     }
@@ -232,8 +234,8 @@ void basic_cluster_add_to_endpoint(zigbee_basic_cluster *cluster,
     endpoint->clusters[endpoint->cluster_count].cluster_id      = ZCL_CLUSTER_BASIC;
     endpoint->clusters[endpoint->cluster_count].attribute_count =
         network_indicator.has_dedicated_led ? 14 : 13;
-    endpoint->clusters[endpoint->cluster_count].attributes = cluster->attr_infos;
-    endpoint->clusters[endpoint->cluster_count].is_server  = 1;
+    endpoint->clusters[endpoint->cluster_count].attributes   = cluster->attr_infos;
+    endpoint->clusters[endpoint->cluster_count].is_server    = 1;
     endpoint->clusters[endpoint->cluster_count].cmd_callback =
         basic_cluster_callback_trampoline;
     endpoint->cluster_count++;
