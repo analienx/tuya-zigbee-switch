@@ -33,20 +33,22 @@ def main() -> int:
         failures.append("v5 overlay must not contain a bare zigbeeModel fallback")
 
     required = (
-        '"Logical relay state"',
-        '"Mains power behavior"',
-        '"LED shows"',
+        'channelLabel(feature.endpoint || expose.endpoint) + " — Logical state"',
+        'channelLabel(endpointName) + " — Mains power"',
+        'channelLabel(endpointName) + " — LED shows"',
         "logical_state: 0",
         "inverse_logical_state: 1",
         "manual: 2",
         "physical_output: 3",
         "binding_status: 4",
-        '"Bound light state (tracked)"',
+        'channelLabel(endpointName) + " — Bound light (tracked)"',
         "not remote-state confirmation",
         "sends no command",
         "changes no binding",
-        '"Advanced hardware configuration"',
-        '"Enable advanced editing"',
+        '.withLabel("Advanced — Hardware configuration")',
+        '.withLabel("Advanced — Enable editing")',
+        '.withEndpoint("advanced")',
+        "advanced: 1",
         'exposes.enum("device_config_unlock", ea.SET, ["enable_editing"])',
         "DEVICE_CONFIG_UNLOCK_MS = 60_000",
         "requireDeviceConfigUnlock(meta)",
@@ -57,7 +59,7 @@ def main() -> int:
         "relays.length !== 3",
         "indicators.length !== 3",
         "GPIO pin(s) assigned more than once",
-        'access: "ALL"',
+        ".text(name, ea.ALL)",
         "DEVICE_CONFIG_CHUNK_MAX = 24",
         '"deviceConfigStage"',
         '"deviceConfigCommit"',
@@ -117,7 +119,7 @@ def main() -> int:
             "binding_status": 4,
         },
         "deviceConfig": {
-            "editable": 'access: "ALL"' in config_block,
+            "editable": ".text(name, ea.ALL)" in config_block,
             "clickToUnlock": "requireDeviceConfigUnlock(meta)" in config_block,
             "unlockWindowMs": 60_000,
             "boardStructureValidation": "switches.length !== 3" in text and "GPIO pin(s) assigned more than once" in text,
@@ -125,6 +127,18 @@ def main() -> int:
             "directAttributeWrite": ".write(" in config_block,
             "legacyReadProperty": '.read("genBasic", [0xff00]' in config_block,
         },
+        "channelLabelsSelfIdentify": all(
+            marker in text
+            for marker in (
+                'switch_left: "Left"',
+                'switch_middle: "Middle"',
+                'switch_right: "Right"',
+                'relay_left: "Left"',
+                'relay_middle: "Middle"',
+                'relay_right: "Right"',
+            )
+        ),
+        "advancedEndpointAlias": "advanced: 1" in text,
         "zeroTopologyMutationSurface": not any(
             marker in text
             for marker in (
