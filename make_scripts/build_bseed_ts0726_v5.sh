@@ -58,6 +58,7 @@ build_image() {
         MANUFACTURER_ID="$MANUFACTURER_CODE"
         BIN_FILE="$bin"
         MIGRATION_FROM_CONFIG="$SWAPPED"
+        DEVICE_CONFIG_GUARD=BSEED_TS0726_3GANG
     )
     if [[ "$revert" == "1" ]]; then
         args+=(MIGRATION_REVERT=1)
@@ -78,6 +79,7 @@ build_image() {
         OTA_IMAGE_TYPE="$IMAGE_TYPE"
         OTA_VERSION="$file_version"
         MIGRATION_FROM_CONFIG="$SWAPPED"
+        DEVICE_CONFIG_GUARD=BSEED_TS0726_3GANG
     )
     if [[ "$revert" == "1" ]]; then
         ota_args+=(MIGRATION_REVERT=1)
