@@ -231,8 +231,8 @@ function verifyContract(definition, exposes, execution) {
     if (deviceConfig.endpoint !== 'advanced' || deviceConfig.property !== 'device_config') {
         die(`device_config must use dedicated advanced endpoint while preserving property: ${JSON.stringify(deviceConfig)}`);
     }
-    if (deviceConfig.category !== 'diagnostic') {
-        die(`device_config must remain advanced/diagnostic, got category=${JSON.stringify(deviceConfig.category)}`);
+    if (deviceConfig.category !== 'config') {
+        die(`editable device_config must be category=config, got category=${JSON.stringify(deviceConfig.category)}`);
     }
     if ((deviceConfig.access & 2) === 0) {
         die(`device_config must be editable in v5, got access=${JSON.stringify(deviceConfig.access)}`);
