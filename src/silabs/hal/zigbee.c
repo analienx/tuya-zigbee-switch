@@ -295,6 +295,20 @@ static void fill_cmd(const hal_zigbee_cmd *c) {
     }
 }
 
+bool hal_zigbee_has_binding(uint8_t endpoint, uint16_t cluster_id) {
+    uint8_t count = sl_zigbee_get_binding_table_size();
+
+    for (uint8_t i = 0; i < count; i++) {
+        sl_zigbee_binding_table_entry_t entry;
+        if (sl_zigbee_get_binding(i, &entry) == SL_STATUS_OK &&
+            entry.type != SL_ZIGBEE_UNUSED_BINDING &&
+            entry.local == endpoint && entry.clusterId == cluster_id) {
+            return true;
+        }
+    }
+    return false;
+}
+
 hal_zigbee_status_t hal_zigbee_send_cmd_to_bindings(const hal_zigbee_cmd *cmd) {
     if (!cmd)
         return HAL_ZIGBEE_ERR_BAD_ARG;
