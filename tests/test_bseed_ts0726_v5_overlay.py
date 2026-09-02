@@ -102,6 +102,15 @@ def test_advanced_editor_validates_this_exact_board_before_transport() -> None:
     assert "GPIO pin(s) assigned more than once" in js
 
 
+def test_transport_extends_builtin_basic_without_shadow_cluster() -> None:
+    js = source()
+    assert 'deviceAddCustomCluster("genBasic"' in js
+    assert 'name: "genBasic"' in js
+    assert '"bseedBasicTransport"' not in js
+    assert '"deviceConfigStage"' in js
+    assert '"deviceConfigCommit"' in js
+
+
 def test_device_config_is_editable_but_uses_chunked_transport_not_direct_write() -> None:
     js = source()
     assert 'deviceConfigEditable("device_config")' in js
