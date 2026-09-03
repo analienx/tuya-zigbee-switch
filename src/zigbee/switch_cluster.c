@@ -532,8 +532,8 @@ static void switch_cluster_store_binding_command_mode(
 
 static void switch_cluster_load_binding_command_mode(
     zigbee_switch_cluster *cluster) {
-    uint8_t stored = ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_TOGGLE;
-    hal_nvm_status_t st = hal_nvm_read(
+    uint8_t          stored = ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_TOGGLE;
+    hal_nvm_status_t st     = hal_nvm_read(
         NV_ITEM_SWITCH_BINDING_COMMAND_MODE(cluster->switch_idx),
         sizeof(stored), &stored);
 
