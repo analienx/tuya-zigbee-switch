@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import pathlib
 
 import pytest
 
@@ -18,6 +19,7 @@ from tests.zcl_consts import (
     ZCL_CLUSTER_MULTISTATE_INPUT_BASIC,
     ZCL_CLUSTER_ON_OFF_SWITCH_CONFIG,
     ZCL_ONOFF_CONFIGURATION_BINDED_MODE_SHORT,
+    ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_MATCH_LOCAL_STATE,
     ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_TOGGLE,
     ZCL_ONOFF_CONFIGURATION_RELAY_MODE_SHORT,
     ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SIMPLE,
@@ -155,3 +157,52 @@ def test_switch_cluster_attributes_preserved_via_nvm() -> None:
             assert actual_value == expected_value, (
                 f"Attribute {attr_id:04x} not preserved via NVM: expected {expected_value}, got {actual_value}"
             )
+
+
+
+def test_legacy_extended_switch_action_migrates_to_custom_binding_policy() -> None:
+    """Old BSEED action=3 becomes custom binding mode 3 while standard action normalizes to Toggle."""
+
+    device_config = "A;B;SA0u;RA0;"
+    endpoint = 1
+
+    # Seed a normal legacy switch-cluster NVM record.
+    with StubProc(device_config=device_config) as proc:
+        device = Device(proc)
+        device.write_zigbee_attr(
+            endpoint,
+            ZCL_CLUSTER_ON_OFF_SWITCH_CONFIG,
+            ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_ACTIONS,
+            ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SIMPLE,
+        )
+
+    legacy_item = pathlib.Path("stub_nvm_data") / "item_04.bin"
+    raw = bytearray(legacy_item.read_bytes())
+    assert len(raw) >= 2
+    # zigbee_switch_cluster_config starts mode, action; emulate pre-v6 NVM
+    # where BSEED stored Match-local-state directly in standard action.
+    raw[1] = ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_MATCH_LOCAL_STATE
+    legacy_item.write_bytes(raw)
+
+    custom_item = pathlib.Path("stub_nvm_data") / "item_2e.bin"
+    if custom_item.exists():
+        custom_item.unlink()
+
+    with StubProc(device_config=device_config) as proc:
+        device = Device(proc)
+        assert (
+            device.read_zigbee_attr(
+                endpoint,
+                ZCL_CLUSTER_ON_OFF_SWITCH_CONFIG,
+                ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_ACTIONS,
+            )
+            == str(ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SIMPLE)
+        )
+        assert (
+            device.read_zigbee_attr(
+                endpoint,
+                ZCL_CLUSTER_ON_OFF_SWITCH_CONFIG,
+                ZCL_ATTR_ONOFF_CONFIGURATION_BINDING_COMMAND_MODE,
+            )
+            == str(ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_MATCH_LOCAL_STATE)
+        )
