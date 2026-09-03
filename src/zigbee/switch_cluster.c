@@ -471,12 +471,22 @@ void switch_cluster_on_write_attr(zigbee_switch_cluster *cluster,
         return;
     }
 
-    // Standard Zigbee SwitchActions is 0..2. Older BSEED builds used 3/4
-    // here; normalize any such write/readback to Toggle and keep extended
-    // behavior exclusively in the custom binding-command attribute.
-    if (attribute_id == ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_ACTIONS &&
-        cluster->action > ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SIMPLE) {
-        cluster->action = ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SIMPLE;
+    if (attribute_id == ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_ACTIONS) {
+        // Preserve the historical/generic contract: standard action writes
+        // 0..2 also choose the same direct-binding command policy. If an old
+        // BSEED client writes legacy 3/4, retain that intent in custom 0xff06
+        // while normalizing standard SwitchActions back to Toggle.
+        const uint8_t requested_action = cluster->action;
+        if (requested_action <=
+            ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_MAX) {
+            cluster->binding_command_mode = requested_action;
+            switch_cluster_store_binding_command_mode(cluster);
+        }
+        if (cluster->action >
+            ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SIMPLE) {
+            cluster->action =
+                ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SIMPLE;
+        }
     }
 
     if (attribute_id == ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_RELAY_INDEX) {
@@ -560,6 +570,10 @@ void switch_cluster_load_attrs_from_nv(zigbee_switch_cluster *cluster) {
 
     if (st != HAL_NVM_SUCCESS) {
         printf("No switch config in NV, using defaults\r\n");
+        // Preserve parser-provided relay_index/relay_mode defaults exactly as
+        // older firmware did; only initialize the new independent policy.
+        switch_cluster_load_binding_command_mode(cluster);
+        return;
     } else {
         cluster->action      = nv_config_buffer.action;
         cluster->mode        = nv_config_buffer.mode;
