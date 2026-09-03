@@ -1,0 +1,198 @@
+name: Build exact BSEED v6 final
+
+on:
+  push:
+    branches:
+      - supervisor/build-v6-final
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout frozen v6 source
+        uses: actions/checkout@v6
+        with:
+          ref: 182c0195a8bb781abd7c4f1e2508278079b7b119
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make python3 python3-venv python3-yaml yq unzip wget gcc-arm-none-eabi
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Cache Telink tools
+        uses: actions/cache@v4
+        with:
+          path: telink_tools
+          key: telink-tools-v3.7.2.0
+
+      - name: Cache Python environment
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: python-venv-${{ hashFiles('requirements.txt') }}
+
+      - name: Install v6 toolchain
+        run: make setup
+
+      - name: Build frozen v6 forward image
+        run: |
+          source .venv/bin/activate
+          bash make_scripts/build_bseed_ts0726_v6.sh release/v6
+          cp release/v6/forward.bin release/forward.bin
+          cp release/v6/forward.ota release/forward.ota
+
+      - name: Checkout frozen proven v5 source for rollback
+        uses: actions/checkout@v6
+        with:
+          ref: 69a4775c4cb4c87f2e948a8aa5b6f099df703ba5
+          path: v5
+          fetch-depth: 0
+
+      - name: Reuse the exact Telink toolchain for v5 rollback
+        run: |
+          rm -rf v5/telink_tools
+          ln -s "$GITHUB_WORKSPACE/telink_tools" v5/telink_tools
+
+      - name: Build canonical v5 rollback at higher OTA version
+        run: |
+          set -euo pipefail
+          CANONICAL='iedhxgyi;TS0726-3-BS;LC4;SB1u;RC2;IC0;SB7u;RC3;ID7;SB4u;RD2;IB5;M;'
+          SWAPPED='iedhxgyi;TS0726-3-BS;LC4;SB1u;RC0;IC2;SB7u;RD7;IC3;SB4u;RD2;IB5;M;'
+          BIN="$GITHUB_WORKSPACE/release/recovery.bin"
+          OTA="$GITHUB_WORKSPACE/release/recovery.ota"
+          cd v5
+          make -C src/telink clean
+          make -C src/telink build \
+            VERSION_STR='1.1.5-bseedv5' \
+            FILE_VERSION='0x11023008' \
+            DEVICE_TYPE=router \
+            CONFIG_STR="$CANONICAL" \
+            IMAGE_TYPE=45577 \
+            MANUFACTURER_ID=4417 \
+            BIN_FILE="$BIN" \
+            MIGRATION_FROM_CONFIG="$SWAPPED" \
+            DEVICE_CONFIG_GUARD=BSEED_TS0726_3GANG
+          make -C src/telink ota \
+            VERSION_STR='1.1.5-bseedv5' \
+            FILE_VERSION='0x11023008' \
+            DEVICE_TYPE=router \
+            CONFIG_STR="$CANONICAL" \
+            IMAGE_TYPE=45577 \
+            MANUFACTURER_ID=4417 \
+            BIN_FILE="$BIN" \
+            OTA_FILE="$OTA" \
+            OTA_MANUFACTURER_ID=4417 \
+            OTA_IMAGE_TYPE=45577 \
+            OTA_VERSION='0x11023008' \
+            MIGRATION_FROM_CONFIG="$SWAPPED" \
+            DEVICE_CONFIG_GUARD=BSEED_TS0726_3GANG
+
+      - name: Verify OTA headers and create combined manifest
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import pathlib
+          import struct
+
+          root = pathlib.Path("release")
+          expected = {
+              "forward": {
+                  "sourceCommit": "182c0195a8bb781abd7c4f1e2508278079b7b119",
+                  "swBuildId": "1.1.6-bseedv6",
+                  "fileVersion": 285356039,
+                  "manufacturerCode": 4417,
+                  "imageType": 45577,
+                  "strategy": "clean-v6-forward",
+              },
+              "recovery": {
+                  "sourceCommit": "69a4775c4cb4c87f2e948a8aa5b6f099df703ba5",
+                  "swBuildId": "1.1.5-bseedv5",
+                  "fileVersion": 285356040,
+                  "manufacturerCode": 4417,
+                  "imageType": 45577,
+                  "strategy": "proven-v5-canonical-no-revert",
+              },
+          }
+
+          def parse_ota(path):
+              data = path.read_bytes()
+              if len(data) < 56:
+                  raise SystemExit(f"{path}: OTA too short")
+              ident, header_version, header_length, field_control, manufacturer, image_type, file_version, stack_version = struct.unpack_from(
+                  "<IHHHHHIH", data, 0
+              )
+              if ident != 0x0BEEF11E:
+                  raise SystemExit(f"{path}: bad OTA identifier {ident:#x}")
+              if header_version != 0x0100 or header_length < 56:
+                  raise SystemExit(f"{path}: bad OTA header version/length")
+              return {
+                  "identifier": ident,
+                  "headerVersion": header_version,
+                  "headerLength": header_length,
+                  "fieldControl": field_control,
+                  "manufacturerCode": manufacturer,
+                  "imageType": image_type,
+                  "fileVersion": file_version,
+                  "stackVersion": stack_version,
+              }
+
+          images = {}
+          for role, meta in expected.items():
+              images[role] = dict(meta)
+              for suffix in ("bin", "ota"):
+                  path = root / f"{role}.{suffix}"
+                  data = path.read_bytes()
+                  images[role][suffix] = {
+                      "fileName": path.name,
+                      "bytes": len(data),
+                      "sha256": hashlib.sha256(data).hexdigest(),
+                      "sha512": hashlib.sha512(data).hexdigest(),
+                  }
+              header = parse_ota(root / f"{role}.ota")
+              for key in ("manufacturerCode", "imageType", "fileVersion"):
+                  if header[key] != meta[key]:
+                      raise SystemExit(
+                          f"{role}: {key} header={header[key]} expected={meta[key]}"
+                      )
+              images[role]["otaHeader"] = header
+
+          manifest = {
+              "schema": 1,
+              "board": "SWITCH_BSEED_TS0726_3GANG",
+              "canonicalConfig": "iedhxgyi;TS0726-3-BS;LC4;SB1u;RC2;IC0;SB7u;RC3;ID7;SB4u;RD2;IB5;M;",
+              "migrationFromConfig": "iedhxgyi;TS0726-3-BS;LC4;SB1u;RC0;IC2;SB7u;RD7;IC3;SB4u;RD2;IB5;M;",
+              "recoveryChangesPinMap": False,
+              "images": images,
+          }
+          (root / "manifest.json").write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(manifest, indent=2, sort_keys=True))
+          PY
+          sha256sum release/forward.bin release/forward.ota release/recovery.bin release/recovery.ota
+          sha512sum release/forward.ota release/recovery.ota
+
+      - name: Upload frozen v6 release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseed-ts0726-v6-final
+          path: |
+            release/forward.bin
+            release/forward.ota
+            release/recovery.bin
+            release/recovery.ota
+            release/manifest.json
+          if-no-files-found: error
+          retention-days: 30
