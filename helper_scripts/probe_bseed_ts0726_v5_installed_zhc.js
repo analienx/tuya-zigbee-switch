@@ -294,16 +294,19 @@ function verifyContract(definition, exposes, execution) {
     }
 
     // deviceAddCustomCluster is local decoder metadata registration, not a
-    // Zigbee mutation. It is expected exactly once for the v5 chunk protocol.
+    // Zigbee mutation. v5.2 requires two target-local extensions:
+    // - genBasic: protected device_config transport/decoder
+    // - genOnOffSwitchCfg: same on-wire switchActions ID 0x0010, but this
+    //   firmware extends its valid range from standard 0..2 to 0..4.
     const clusterRegistrations = execution.events.filter((event) => event.op === 'addCustomCluster');
-    if (clusterRegistrations.length !== 1) {
-        die(`expected one local custom-cluster registration, got ${clusterRegistrations.length}`);
+    if (clusterRegistrations.length !== 2) {
+        die(`expected two local custom-cluster registrations, got ${clusterRegistrations.length}`);
     }
-    if (clusterRegistrations[0].args?.[0] !== 'genBasic' ||
-        clusterRegistrations[0].args?.[1]?.ID !== 0x0000) {
-        die(`v5 transport must extend built-in genBasic instead of shadowing ID 0: ${JSON.stringify(clusterRegistrations[0])}`);
+    const basicRegistration = clusterRegistrations.find((event) => event.args?.[0] === 'genBasic');
+    if (!basicRegistration || basicRegistration.args?.[1]?.ID !== 0x0000) {
+        die(`v5 transport must extend built-in genBasic instead of shadowing ID 0: ${JSON.stringify(clusterRegistrations)}`);
     }
-    const addedDefinition = clusterRegistrations[0].args?.[1] || {};
+    const addedDefinition = basicRegistration.args?.[1] || {};
     const addedCommands = addedDefinition.commands || {};
     if (addedCommands.deviceConfigStage?.ID !== 0xf0 || addedCommands.deviceConfigCommit?.ID !== 0xf1) {
         die(`genBasic extension is missing v5 transport commands: ${JSON.stringify(addedCommands)}`);
@@ -311,6 +314,15 @@ function verifyContract(definition, exposes, execution) {
     const deviceConfigAttr = addedDefinition.attributes?.deviceConfig;
     if (deviceConfigAttr?.ID !== 0xff00 || deviceConfigAttr?.type !== 0x44 || deviceConfigAttr?.write !== true) {
         die(`genBasic extension is missing writable LONG_CHAR_STR deviceConfig decoder: ${JSON.stringify(deviceConfigAttr)}`);
+    }
+
+    const switchCfgRegistration = clusterRegistrations.find((event) => event.args?.[0] === 'genOnOffSwitchCfg');
+    const switchCfgDefinition = switchCfgRegistration?.args?.[1];
+    const switchActions = switchCfgDefinition?.attributes?.switchActions;
+    if (!switchCfgRegistration || switchCfgDefinition?.ID !== 0x0007 ||
+        switchActions?.ID !== 0x0010 || switchActions?.type !== 0x30 ||
+        switchActions?.write !== true || switchActions?.min !== 0 || switchActions?.max !== 4) {
+        die(`genOnOffSwitchCfg extension must override switchActions as writable ENUM8 0..4: ${JSON.stringify(switchCfgRegistration)}`);
     }
     const mutations = execution.events.filter((event) =>
         ['bind', 'unbind', 'configureReporting', 'write', 'command'].includes(event.op),
