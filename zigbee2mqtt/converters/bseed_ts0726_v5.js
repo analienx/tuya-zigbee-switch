@@ -1,12 +1,12 @@
 'use strict';
 
 /**
- * BSEED TS0726-3-BS v5 canary overlay.
+ * BSEED TS0726-3-BS V5→V6 transition overlay.
  *
  * Deployment:
  *   - keep the exact historical fleet converter (ef79...) unchanged;
  *   - load this file beside it;
- *   - this definition wins only for forward firmware 1.1.5-bseedv5.
+ *   - this single definition wins only for frozen BSEED V5/V6 firmware identities.
  *
  * No configure callback below creates bindings or reporting.
  */
@@ -296,26 +296,84 @@ const buttonType = (name, endpointName) =>
         entityCategory: "config",
     });
 
-const buttonCommandBehavior = (name, endpointName) =>
-    pinnedEnum({
-        name,
+const V5_SW_BUILD = "1.1.5-bseedv5";
+const V6_SW_BUILD = "1.1.6-bseedv6";
+
+const directBindingTransport = (meta) => {
+    const swBuild = meta?.device?.softwareBuildID;
+    if (swBuild === V5_SW_BUILD) {
+        return {attribute: "switchActions", max: 2};
+    }
+    if (swBuild === V6_SW_BUILD) {
+        return {attribute: {ID: 0xff06, type: 0x30}, max: 4};
+    }
+    throw new Error(`Direct-binding command is not enabled for firmware ${JSON.stringify(swBuild)}`);
+};
+
+const buttonCommandBehavior = (name, endpointName) => {
+    const endpointId = ENDPOINT_IDS[endpointName];
+    const lookup = {
+        "On then off": 0,
+        "Off then on": 1,
+        "Toggle": 2,
+        "Match local state": 3,
+        "Opposite local state": 4,
+    };
+    const reverse = new Map(Object.entries(lookup).map(([key, value]) => [String(value), key]));
+    const expose = decorateExpose(
+        e.enum(name, ea.ALL, Object.keys(lookup)),
         endpointName,
-        lookup: {
-            "On then off": 0,
-            "Off then on": 1,
-            "Toggle": 2,
-            "Match local state": 3,
-            "Opposite local state": 4,
-        },
-        cluster: "genOnOffSwitchCfg",
-        attribute: {ID: 0x0010, type: 0x30},
-        label: channelLabel(endpointName) + " — Direct-binding command",
-        description:
-            "Chooses the On/Off command sent directly to bound lights. Toggle is the simplest choice and does not depend on local state. " +
+        name,
+        channelLabel(endpointName) + " — Direct-binding command",
+        "Chooses the On/Off command sent directly to bound lights. Toggle is the simplest choice and does not depend on local state. " +
             "Match local state sends explicit On/Off to match this channel; Opposite local state sends the inverse. " +
-            "On then off and Off then on are mainly useful with maintained rocker inputs.",
-        entityCategory: "config",
-    });
+            "On then off and Off then on are mainly useful with maintained rocker inputs. Extended Match/Opposite modes require V6 firmware.",
+        "config",
+    );
+
+    return {
+        isModernExtend: true,
+        exposes: [expose],
+        fromZigbee: [{
+            cluster: "genOnOffSwitchCfg",
+            type: ["attributeReport", "readResponse"],
+            convert: (model, msg) => {
+                if (msg.endpoint.ID !== endpointId) return;
+                let raw = rawAttributeValue(msg, {ID: 0xff06, type: 0x30});
+                if (raw === undefined) raw = rawAttributeValue(msg, "switchActions");
+                if (raw === undefined) raw = msg.data[0x0010] ?? msg.data["16"];
+                const value = reverse.get(String(raw));
+                if (value !== undefined) return {[name]: value};
+            },
+        }],
+        toZigbee: [{
+            key: [name],
+            convertSet: async (entity, key, value, meta) => {
+                if (!Object.prototype.hasOwnProperty.call(lookup, value)) {
+                    throw new Error(`${name}: unsupported value ${JSON.stringify(value)}`);
+                }
+                const raw = lookup[value];
+                const transport = directBindingTransport(meta);
+                if (raw > transport.max) {
+                    throw new Error(`${name}: ${value} requires firmware ${V6_SW_BUILD}`);
+                }
+                const payload = typeof transport.attribute === "string"
+                    ? {[transport.attribute]: raw}
+                    : {[transport.attribute.ID]: {value: raw, type: transport.attribute.type}};
+                await pinnedEndpoint(meta, endpointName).write("genOnOffSwitchCfg", payload);
+                return {state: {[key]: value}};
+            },
+            convertGet: async (entity, key, meta) => {
+                const transport = directBindingTransport(meta);
+                const attributeKey = typeof transport.attribute === "string"
+                    ? transport.attribute
+                    : transport.attribute.ID;
+                await pinnedEndpoint(meta, endpointName).read("genOnOffSwitchCfg", [attributeKey]);
+            },
+        }],
+        configure: [],
+    };
+};
 
 const localRelayTrigger = (name, endpointName) =>
     pinnedEnum({
@@ -766,7 +824,13 @@ module.exports = [
             {
                 manufacturerName: "iedhxgyi",
                 modelID: "TS0726-3-BS",
-                softwareBuildID: "1.1.5-bseedv5",
+                softwareBuildID: V5_SW_BUILD,
+                priority: 100,
+            },
+            {
+                manufacturerName: "iedhxgyi",
+                modelID: "TS0726-3-BS",
+                softwareBuildID: V6_SW_BUILD,
                 priority: 100,
             },
         ],
