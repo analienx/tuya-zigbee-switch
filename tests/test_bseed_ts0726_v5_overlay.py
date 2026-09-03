@@ -248,6 +248,21 @@ def test_javascript_syntax_and_behavioral_probes_when_node_is_available() -> Non
     assert '"status": "PASS"' in action.stdout
     assert '"action": "switch_0_press"' in action.stdout
 
+    endpoint_routing = subprocess.run(
+        [
+            "node",
+            "helper_scripts/probe_bseed_ts0726_v51_endpoint_routing.js",
+            str(OVERLAY),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert '"status": "PASS"' in endpoint_routing.stdout
+    assert '"allSetEndpointsPinned": true' in endpoint_routing.stdout
+    assert '"allGetEndpointsPinned": true' in endpoint_routing.stdout
+    assert '"deviceConfigReadback": true' in endpoint_routing.stdout
+
     transport = subprocess.run(
         [
             "node",
