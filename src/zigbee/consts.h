@@ -78,7 +78,7 @@
 #define ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_BINDING_MODE       0xff05
 // BSEED/extended direct-binding policy. Kept separate from the standard
 // SwitchActions attribute (0x0010), whose Zigbee-defined domain is 0..2.
-#define ZCL_ATTR_ONOFF_CONFIGURATION_BINDING_COMMAND_MODE       0xff06
+#define ZCL_ATTR_ONOFF_CONFIGURATION_BINDING_COMMAND_MODE      0xff06
 
 
 // Multistate cluster
@@ -165,22 +165,22 @@
 
 // Direct-binding command policy. 0..2 intentionally mirror standard
 // SwitchActions; 3/4 are BSEED extensions carried only by custom 0xff06.
-#define ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_ONOFF                  0x00
-#define ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_OFFON                  0x01
-#define ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_TOGGLE                 0x02
-#define ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_MATCH_LOCAL_STATE      0x03
-#define ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_OPPOSITE_LOCAL_STATE   0x04
+#define ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_ONOFF                   0x00
+#define ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_OFFON                   0x01
+#define ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_TOGGLE                  0x02
+#define ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_MATCH_LOCAL_STATE       0x03
+#define ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_OPPOSITE_LOCAL_STATE    0x04
 #define ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_MAX \
         ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_OPPOSITE_LOCAL_STATE
 
-#define ZCL_ONOFF_CONFIGURATION_RELAY_MODE_DETACHED                    0x00
-#define ZCL_ONOFF_CONFIGURATION_RELAY_MODE_RISE                        0x01
-#define ZCL_ONOFF_CONFIGURATION_RELAY_MODE_LONG                        0x02
-#define ZCL_ONOFF_CONFIGURATION_RELAY_MODE_SHORT                       0x03
+#define ZCL_ONOFF_CONFIGURATION_RELAY_MODE_DETACHED                     0x00
+#define ZCL_ONOFF_CONFIGURATION_RELAY_MODE_RISE                         0x01
+#define ZCL_ONOFF_CONFIGURATION_RELAY_MODE_LONG                         0x02
+#define ZCL_ONOFF_CONFIGURATION_RELAY_MODE_SHORT                        0x03
 
-#define ZCL_ONOFF_CONFIGURATION_BINDED_MODE_RISE                       0x01
-#define ZCL_ONOFF_CONFIGURATION_BINDED_MODE_LONG                       0x02
-#define ZCL_ONOFF_CONFIGURATION_BINDED_MODE_SHORT                      0x03
+#define ZCL_ONOFF_CONFIGURATION_BINDED_MODE_RISE                        0x01
+#define ZCL_ONOFF_CONFIGURATION_BINDED_MODE_LONG                        0x02
+#define ZCL_ONOFF_CONFIGURATION_BINDED_MODE_SHORT                       0x03
 
 
 // Level cluster
