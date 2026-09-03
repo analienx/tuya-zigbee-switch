@@ -24,6 +24,9 @@ const simpleExpose = (name, access = 7, values = undefined) => ({
     withLabel(label) { this.label = label; return this; },
     withDescription(description) { this.description = description; return this; },
     withCategory(category) { this.category = category; return this; },
+    withUnit(unit) { this.unit = unit; return this; },
+    withValueMin(value) { this.value_min = value; return this; },
+    withValueMax(value) { this.value_max = value; return this; },
 });
 const exposeAction = (values) => simpleExpose('action', 1, values);
 Module._load = function(request, parent, isMain) {
@@ -40,14 +43,19 @@ Module._load = function(request, parent, isMain) {
     }
     if (request === 'zigbee-herdsman-converters/lib/exposes') {
         return {
-            presets: {action: exposeAction},
-            access: {STATE: 1, SET: 2, GET: 4, ALL: 7},
+            presets: {
+                action: exposeAction,
+                enum: (name, access, values) => simpleExpose(name, access, values),
+                binary: (name, access, valueOn, valueOff) => ({...simpleExpose(name, access), value_on: valueOn, value_off: valueOff}),
+                numeric: (name, access) => simpleExpose(name, access),
+            },
+            access: {STATE: 1, SET: 2, GET: 4, STATE_GET: 5, STATE_SET: 3, ALL: 7},
             enum: (name, access, values) => simpleExpose(name, access, values),
             text: (name, access) => simpleExpose(name, access),
         };
     }
     if (request === 'zigbee-herdsman') {
-        return {Zcl: {BuffaloZclDataType: {LIST_UINT8: 0x1001}}};
+        return {Zcl: {BuffaloZclDataType: {LIST_UINT8: 0x1001}, DataType: {LONG_CHAR_STR: 0x44}}};
     }
     return originalLoad.call(this, request, parent, isMain);
 };
