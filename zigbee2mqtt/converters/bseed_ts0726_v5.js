@@ -42,6 +42,205 @@ const CHANNEL_LABELS = {
 };
 const channelLabel = (endpointName) => CHANNEL_LABELS[endpointName] || endpointName || "Channel";
 
+const ENDPOINT_IDS = {
+    switch_left: 1,
+    switch_middle: 2,
+    switch_right: 3,
+    relay_left: 4,
+    relay_middle: 5,
+    relay_right: 6,
+    advanced: 1,
+};
+
+const pinnedEndpoint = (meta, endpointName) => {
+    const id = ENDPOINT_IDS[endpointName];
+    if (!id) throw new Error(`Unknown endpoint ${endpointName}`);
+    const endpoint = meta?.device?.getEndpoint?.(id);
+    if (!endpoint) throw new Error(`Endpoint ${endpointName} (EP${id}) is unavailable`);
+    return endpoint;
+};
+
+const rawAttributeValue = (msg, attribute) => {
+    if (typeof attribute === "string") return msg.data?.[attribute];
+    return msg.data?.[attribute.ID] ?? msg.data?.[String(attribute.ID)] ?? (attribute.name ? msg.data?.[attribute.name] : undefined);
+};
+
+const decorateExpose = (expose, endpointName, property, label, description, category) => {
+    expose.withEndpoint?.(endpointName);
+    expose.withProperty?.(property);
+    if (label) expose.withLabel?.(label);
+    if (description) expose.withDescription?.(description);
+    if (category) expose.withCategory?.(category);
+    return expose;
+};
+
+const pinnedEnum = ({
+    name,
+    endpointName,
+    lookup,
+    cluster,
+    attribute,
+    label,
+    description,
+    access = "ALL",
+    entityCategory,
+}) => {
+    const endpointId = ENDPOINT_IDS[endpointName];
+    const expose = decorateExpose(
+        e.enum(name, ea[access], Object.keys(lookup)),
+        endpointName,
+        name,
+        label,
+        description,
+        entityCategory,
+    );
+    const reverse = new Map(Object.entries(lookup).map(([key, value]) => [String(value), key]));
+    const attributeKey = typeof attribute === "string" ? attribute : attribute.ID;
+
+    return {
+        isModernExtend: true,
+        exposes: [expose],
+        fromZigbee: [{
+            cluster,
+            type: ["attributeReport", "readResponse"],
+            convert: (model, msg) => {
+                if (msg.endpoint.ID !== endpointId) return;
+                const raw = rawAttributeValue(msg, attribute);
+                const value = reverse.get(String(raw));
+                if (value !== undefined) return {[name]: value};
+            },
+        }],
+        toZigbee: [{
+            key: [name],
+            convertSet: ea[access] & ea.SET ? async (entity, key, value, meta) => {
+                if (!Object.prototype.hasOwnProperty.call(lookup, value)) {
+                    throw new Error(`${name}: unsupported value ${JSON.stringify(value)}`);
+                }
+                const raw = lookup[value];
+                const payload = typeof attribute === "string"
+                    ? {[attribute]: raw}
+                    : {[attribute.ID]: {value: raw, type: attribute.type}};
+                await pinnedEndpoint(meta, endpointName).write(cluster, payload);
+                return {state: {[key]: value}};
+            } : undefined,
+            convertGet: ea[access] & ea.GET ? async (entity, key, meta) => {
+                await pinnedEndpoint(meta, endpointName).read(cluster, [attributeKey]);
+            } : undefined,
+        }],
+        configure: [],
+    };
+};
+
+const pinnedBinary = ({
+    name,
+    endpointName,
+    valueOn,
+    valueOff,
+    cluster,
+    attribute,
+    label,
+    description,
+    access = "ALL",
+    entityCategory,
+}) => {
+    const endpointId = ENDPOINT_IDS[endpointName];
+    const expose = decorateExpose(
+        e.binary(name, ea[access], valueOn[0], valueOff[0]),
+        endpointName,
+        name,
+        label,
+        description,
+        entityCategory,
+    );
+    const attributeKey = typeof attribute === "string" ? attribute : attribute.ID;
+
+    return {
+        isModernExtend: true,
+        exposes: [expose],
+        fromZigbee: [{
+            cluster,
+            type: ["attributeReport", "readResponse"],
+            convert: (model, msg) => {
+                if (msg.endpoint.ID !== endpointId) return;
+                const raw = rawAttributeValue(msg, attribute);
+                if (raw === valueOn[1]) return {[name]: valueOn[0]};
+                if (raw === valueOff[1]) return {[name]: valueOff[0]};
+            },
+        }],
+        toZigbee: [{
+            key: [name],
+            convertSet: ea[access] & ea.SET ? async (entity, key, value, meta) => {
+                let raw;
+                if (value === valueOn[0] || value === valueOn[1]) raw = valueOn[1];
+                else if (value === valueOff[0] || value === valueOff[1]) raw = valueOff[1];
+                else throw new Error(`${name}: expected ${valueOn[0]} or ${valueOff[0]}`);
+                const payload = typeof attribute === "string"
+                    ? {[attribute]: raw}
+                    : {[attribute.ID]: {value: raw, type: attribute.type}};
+                await pinnedEndpoint(meta, endpointName).write(cluster, payload);
+                return {state: {[key]: raw === valueOn[1] ? valueOn[0] : valueOff[0]}};
+            } : undefined,
+            convertGet: ea[access] & ea.GET ? async (entity, key, meta) => {
+                await pinnedEndpoint(meta, endpointName).read(cluster, [attributeKey]);
+            } : undefined,
+        }],
+        configure: [],
+    };
+};
+
+const pinnedNumeric = ({
+    name,
+    endpointName,
+    cluster,
+    attribute,
+    label,
+    description,
+    unit,
+    valueMin,
+    valueMax,
+    access = "ALL",
+    entityCategory,
+}) => {
+    const endpointId = ENDPOINT_IDS[endpointName];
+    let expose = e.numeric(name, ea[access]);
+    expose = decorateExpose(expose, endpointName, name, label, description, entityCategory);
+    if (unit) expose.withUnit?.(unit);
+    if (valueMin !== undefined) expose.withValueMin?.(valueMin);
+    if (valueMax !== undefined) expose.withValueMax?.(valueMax);
+    const attributeKey = typeof attribute === "string" ? attribute : attribute.ID;
+
+    return {
+        isModernExtend: true,
+        exposes: [expose],
+        fromZigbee: [{
+            cluster,
+            type: ["attributeReport", "readResponse"],
+            convert: (model, msg) => {
+                if (msg.endpoint.ID !== endpointId) return;
+                const raw = rawAttributeValue(msg, attribute);
+                if (typeof raw === "number") return {[name]: raw};
+            },
+        }],
+        toZigbee: [{
+            key: [name],
+            convertSet: ea[access] & ea.SET ? async (entity, key, value, meta) => {
+                if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`${name}: expected a number`);
+                if (valueMin !== undefined && value < valueMin) throw new Error(`${name}: minimum is ${valueMin}`);
+                if (valueMax !== undefined && value > valueMax) throw new Error(`${name}: maximum is ${valueMax}`);
+                const payload = typeof attribute === "string"
+                    ? {[attribute]: value}
+                    : {[attribute.ID]: {value, type: attribute.type}};
+                await pinnedEndpoint(meta, endpointName).write(cluster, payload);
+                return {state: {[key]: value}};
+            } : undefined,
+            convertGet: ea[access] & ea.GET ? async (entity, key, meta) => {
+                await pinnedEndpoint(meta, endpointName).read(cluster, [attributeKey]);
+            } : undefined,
+        }],
+        configure: [],
+    };
+};
+
 const logicalOnOff = (endpointNames) => {
     const result = onOff({endpointNames, configureReporting: false});
     for (const expose of result.exposes || []) {
@@ -67,8 +266,8 @@ const logicalOnOff = (endpointNames) => {
     return result;
 };
 
-const physicalRelayMode = (name, endpointName) => {
-    const result = enumLookup({
+const physicalRelayMode = (name, endpointName) =>
+    pinnedEnum({
         name,
         endpointName,
         lookup: {"Follow logical state": 0, "Always on": 1, "Always off": 2},
@@ -77,17 +276,14 @@ const physicalRelayMode = (name, endpointName) => {
         label: channelLabel(endpointName) + " — Mains power",
         description:
             "Controls the actual electrical output for this channel. For smart bulbs and smart dimmers choose Always on " +
-            "so they stay powered while logical state changes. Follow state is for a load this device should physically switch. " +
+            "so they stay powered while logical state changes. Follow logical state is for a load this device should physically switch. " +
             "Always off keeps the output de-energized. Changing this can affect power immediately, so verify the connected load first. " +
             "The choice survives restart.",
         entityCategory: "config",
     });
-    for (const expose of result.exposes || []) expose.withProperty?.(name);
-    return result;
-};
 
 const buttonType = (name, endpointName) =>
-    enumLookup({
+    pinnedEnum({
         name,
         endpointName,
         lookup: {"Rocker / toggle": 0, "Push button": 1, "Push button (normally closed)": 2},
@@ -101,7 +297,7 @@ const buttonType = (name, endpointName) =>
     });
 
 const buttonCommandBehavior = (name, endpointName) =>
-    enumLookup({
+    pinnedEnum({
         name,
         endpointName,
         lookup: {
@@ -112,7 +308,7 @@ const buttonCommandBehavior = (name, endpointName) =>
             "Opposite local state": 4,
         },
         cluster: "genOnOffSwitchCfg",
-        attribute: {ID: 0x0010, type: 0x30, required: true, write: true, min: 0, max: 4},
+        attribute: {ID: 0x0010, type: 0x30},
         label: channelLabel(endpointName) + " — Direct-binding command",
         description:
             "Chooses the On/Off command sent directly to bound lights. Toggle is the simplest choice and does not depend on local state. " +
@@ -122,7 +318,7 @@ const buttonCommandBehavior = (name, endpointName) =>
     });
 
 const localRelayTrigger = (name, endpointName) =>
-    enumLookup({
+    pinnedEnum({
         name,
         endpointName,
         lookup: {"Never (detached)": 0, "On press": 1, "Short press": 3, "Long press": 2},
@@ -137,7 +333,7 @@ const localRelayTrigger = (name, endpointName) =>
     });
 
 const localRelayIndex = (name, endpointName) =>
-    enumLookup({
+    pinnedEnum({
         name,
         endpointName,
         lookup: {Left: 1, Middle: 2, Right: 3},
@@ -151,7 +347,7 @@ const localRelayIndex = (name, endpointName) =>
     });
 
 const boundDeviceTrigger = (name, endpointName) =>
-    enumLookup({
+    pinnedEnum({
         name,
         endpointName,
         lookup: {"On press": 1, "Short press": 3, "Long press": 2},
@@ -165,9 +361,9 @@ const boundDeviceTrigger = (name, endpointName) =>
     });
 
 const longPressThreshold = (name, endpointName) =>
-    numeric({
+    pinnedNumeric({
         name,
-        endpointNames: [endpointName],
+        endpointName,
         cluster: "genOnOffSwitchCfg",
         attribute: {ID: 0xff03, type: 0x21},
         label: channelLabel(endpointName) + " — Hold threshold",
@@ -179,9 +375,9 @@ const longPressThreshold = (name, endpointName) =>
     });
 
 const holdDimmingSpeed = (name, endpointName) =>
-    numeric({
+    pinnedNumeric({
         name,
-        endpointNames: [endpointName],
+        endpointName,
         cluster: "genOnOffSwitchCfg",
         attribute: {ID: 0xff04, type: 0x20},
         label: channelLabel(endpointName) + " — Dimming speed",
@@ -193,7 +389,7 @@ const holdDimmingSpeed = (name, endpointName) =>
     });
 
 const indicatorBehavior = (name, endpointName) =>
-    enumLookup({
+    pinnedEnum({
         name,
         endpointName,
         lookup: {
@@ -216,7 +412,7 @@ const indicatorBehavior = (name, endpointName) =>
     });
 
 const bindingIntentState = (name, endpointName) =>
-    binary({
+    pinnedBinary({
         name,
         endpointName,
         valueOn: ["ON", 1],
@@ -229,12 +425,11 @@ const bindingIntentState = (name, endpointName) =>
             "and Home Assistant can correct it from the real light state. Use it with LED shows = Binding status. " +
             "It is not remote-state confirmation by itself. Changing this only corrects the local tracker: it sends no command, " +
             "changes no binding and never changes electrical power.",
-        access: "ALL",
         entityCategory: "config",
     });
 
 const indicatorState = (name, endpointName) =>
-    binary({
+    pinnedBinary({
         name,
         endpointName,
         valueOn: ["ON", 1],
@@ -243,16 +438,15 @@ const indicatorState = (name, endpointName) =>
         attribute: {ID: 0xff02, type: 0x10},
         label: channelLabel(endpointName) + " — Manual LED",
         description: "Turns the panel LED on or off when LED shows is Manual. It has no effect in other LED modes and never controls power.",
-        access: "ALL",
         entityCategory: "config",
     });
 
 const lastButtonAction = (name, endpointName) =>
-    enumLookup({
+    pinnedEnum({
         name,
         endpointName,
         access: "STATE_GET",
-        lookup: {released: 0, press: 1, long_press: 2, position_on: 3, position_off: 4},
+        lookup: {Released: 0, Press: 1, "Long press": 2, "Position on": 3, "Position off": 4},
         cluster: "genMultistateInput",
         attribute: "presentValue",
         label: channelLabel(endpointName) + " — Last button input",
@@ -261,7 +455,7 @@ const lastButtonAction = (name, endpointName) =>
     });
 
 const networkIndicator = (name, endpointName) =>
-    binary({
+    pinnedBinary({
         name,
         endpointName,
         valueOn: ["ON", 1],
@@ -270,14 +464,13 @@ const networkIndicator = (name, endpointName) =>
         attribute: {ID: 0xff01, type: 0x10},
         label: "Network LED",
         description: "Controls the separate network-status LED. This is independent of the three channel LEDs.",
-        access: "ALL",
         entityCategory: "config",
     });
 
 const multiPressResetCount = (name, endpointName) =>
-    numeric({
+    pinnedNumeric({
         name,
-        endpointNames: [endpointName],
+        endpointName,
         cluster: "genBasic",
         attribute: {ID: 0xff02, type: 0x20},
         label: "Factory-reset press count",
@@ -343,7 +536,9 @@ const configTransportCluster = () =>
     deviceAddCustomCluster("genBasic", {
         name: "genBasic",
         ID: 0x0000,
-        attributes: {},
+        attributes: {
+            deviceConfig: {name: "deviceConfig", ID: 0xff00, type: Zcl.DataType.LONG_CHAR_STR, write: true},
+        },
         commands: {
             deviceConfigStage: {
                 name: "deviceConfigStage",
@@ -448,7 +643,7 @@ const deviceConfigEditable = (name) => {
                 type: ["attributeReport", "readResponse"],
                 convert: (model, msg) => {
                     if (msg.endpoint.ID !== 1) return;
-                    const value = msg.data[0xff00] ?? msg.data["65280"];
+                    const value = msg.data.deviceConfig ?? msg.data[0xff00] ?? msg.data["65280"];
                     if (value !== undefined) return {[name]: value};
                 },
             },
@@ -457,7 +652,7 @@ const deviceConfigEditable = (name) => {
             {
                 key: [name],
                 convertGet: async (entity, key, meta) => {
-                    await meta.device.getEndpoint(1).read("genBasic", [0xff00], {timeout: 30_000});
+                    await meta.device.getEndpoint(1).read("genBasic", ["deviceConfig"], {timeout: 30_000});
                 },
                 convertSet: async (entity, key, value, meta) => {
                     const bytes = validateDeviceConfig(value);
