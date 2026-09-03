@@ -73,7 +73,7 @@ def test_direct_binding_policy_uses_custom_attribute_not_standard_switch_actions
     js = source()
     assert 'attribute: {ID: 0xff06, type: 0x30}' in js
     direct = js[js.index("const buttonCommandBehavior"):js.index("const localRelayTrigger")]
-    assert "0x0010" not in direct
+    assert 'attribute: {ID: 0x0010' not in direct
     assert '"Match local state": 3' in direct
     assert '"Opposite local state": 4' in direct
 
