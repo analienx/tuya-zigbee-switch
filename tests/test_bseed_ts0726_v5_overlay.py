@@ -111,6 +111,19 @@ def test_advanced_editor_validates_this_exact_board_before_transport() -> None:
     assert '/^D[0-9]+$/' in js
 
 
+def test_extended_switch_actions_uses_named_custom_cluster_override() -> None:
+    js = source()
+    assert 'deviceAddCustomCluster("genOnOffSwitchCfg"' in js
+    assert 'ID: 0x0007' in js
+    assert 'switchActions: {' in js
+    assert 'ID: 0x0010' in js
+    assert 'type: Zcl.DataType.ENUM8' in js
+    assert 'write: true' in js
+    assert 'max: 4' in js
+    assert 'attribute: "switchActions"' in js
+    assert 'attribute: {ID: 0x0010, type: 0x30}' not in js
+
+
 def test_transport_extends_builtin_basic_without_shadow_cluster() -> None:
     js = source()
     assert 'deviceAddCustomCluster("genBasic"' in js
