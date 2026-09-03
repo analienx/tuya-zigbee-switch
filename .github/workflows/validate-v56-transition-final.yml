@@ -1,0 +1,86 @@
+name: Validate final V5-V6 transition overlay
+
+on:
+  push:
+    branches:
+      - supervisor/validate-v56-transition
+
+permissions:
+  contents: read
+
+jobs:
+  exact-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 7d649cbac2224c2ecbe73a022011434aaa133898
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Install exact Z2M 2.13 frontend/converter packages
+        run: |
+          mkdir -p /tmp/bseed-runtime-check
+          cd /tmp/bseed-runtime-check
+          npm init -y
+          npm install --no-audit --no-fund             zigbee-herdsman-converters@26.90.0             zigbee2mqtt-windfront@2.14.0
+      - name: Materialize frozen proven V5.1 converter
+        run: |
+          git show d0ec7c1b3b67cf8265244b768b76684e44691374:zigbee2mqtt/converters/bseed_ts0726_v5.js             > /tmp/bseed-runtime-check/proven-v51.js
+      - name: Validate transition with exact installed ZHC
+        run: |
+          cd /tmp/bseed-runtime-check
+          node "$GITHUB_WORKSPACE/helper_scripts/probe_bseed_ts0726_v56_installed_zhc.js"             "$GITHUB_WORKSPACE/zigbee2mqtt/converters/bseed_ts0726_v5.js"             > transition.json
+          cat transition.json
+      - name: Validate proven V5.1 with same exact ZHC
+        run: |
+          cd /tmp/bseed-runtime-check
+          node "$GITHUB_WORKSPACE/helper_scripts/probe_bseed_ts0726_v5_installed_zhc.js"             /tmp/bseed-runtime-check/proven-v51.js             > proven-v51.json
+      - name: Prove frontend-visible expose payload unchanged
+        run: |
+          cd /tmp/bseed-runtime-check
+          node - <<'NODE'
+          const fs = require('fs');
+          const a = JSON.parse(fs.readFileSync('proven-v51.json', 'utf8'));
+          const b = JSON.parse(fs.readFileSync('transition.json', 'utf8'));
+          const ja = JSON.stringify(a.exposes);
+          const jb = JSON.stringify(b.exposes);
+          if (ja !== jb) {
+            console.error('Processed expose payload drifted between proven V5.1 and transition');
+            console.error('V5.1:', ja);
+            console.error('V5→V6:', jb);
+            process.exit(2);
+          }
+          if (a.configure.localCustomClusterRegistrationCount !== 1 ||
+              b.configure.localCustomClusterRegistrationCount !== 1) {
+            throw new Error('expected exactly one local Basic custom-cluster registration');
+          }
+          console.log(JSON.stringify({
+            status: 'PASS',
+            frontendExposePayloadByteIdentical: true,
+            v51ExposeCount: a.exposes.length,
+            transitionExposeCount: b.exposes.length,
+            customClusterRegistrations: 1,
+          }, null, 2));
+          NODE
+      - name: Validate V5/V6 transport switch and fail-closed behavior
+        run: |
+          node helper_scripts/probe_bseed_ts0726_v56_transition.js             zigbee2mqtt/converters/bseed_ts0726_v5.js
+      - name: Validate protected config transport and historical action API
+        run: |
+          node helper_scripts/probe_bseed_ts0726_v5_config_transport.js             zigbee2mqtt/converters/bseed_ts0726_v5.js
+          node helper_scripts/probe_bseed_ts0726_action_contract.js             zigbee2mqtt/converters/bseed_ts0726_v5.js
+      - name: Validate WindFront package itself loads
+        run: |
+          cd /tmp/bseed-runtime-check
+          node - <<'NODE'
+          (async () => {
+            const wf = await import('zigbee2mqtt-windfront');
+            if (!wf.default || typeof wf.default.getPath !== 'function') {
+              throw new Error('WindFront 2.14.0 does not expose default.getPath()');
+            }
+            const p = wf.default.getPath();
+            console.log(JSON.stringify({status:'PASS', windfront:'2.14.0', path:p}));
+          })().catch((e) => { console.error(e); process.exit(2); });
+          NODE
