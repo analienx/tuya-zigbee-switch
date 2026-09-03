@@ -8,6 +8,15 @@ def test_v5_release_build_enables_board_specific_config_guard() -> None:
     assert build.count("DEVICE_CONFIG_GUARD=BSEED_TS0726_3GANG") == 2
 
 
+def test_v6_release_build_has_clean_identity_and_guard() -> None:
+    build = Path("make_scripts/build_bseed_ts0726_v6.sh").read_text(encoding="utf-8")
+    assert "1.1.6-bseedv6" in build
+    assert "0x11023007" in build
+    assert "285356039" in build
+    assert build.count("DEVICE_CONFIG_GUARD=BSEED_TS0726_3GANG") == 2
+    assert "MIGRATION_REVERT" not in build
+
+
 def test_telink_makefile_maps_guard_to_compile_time_define() -> None:
     makefile = Path("src/telink/Makefile").read_text(encoding="utf-8")
     assert "-DDEVICE_CONFIG_GUARD_$(DEVICE_CONFIG_GUARD)" in makefile
