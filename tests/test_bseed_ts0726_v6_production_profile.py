@@ -3,44 +3,56 @@
 from pathlib import Path
 
 
-OVERLAY = Path("zigbee2mqtt/converters/bseed_ts0726_v5.js")
+PRODUCTION = Path("zigbee2mqtt/converters/bseed_ts0726_v6_production.js")
+BASE = Path("zigbee2mqtt/converter_lib/bseed_ts0726_v56_hardened.js")
 
 
-def _source() -> str:
-    return OVERLAY.read_text(encoding="utf-8")
+def test_production_wrapper_reuses_frozen_hardened_definition() -> None:
+    js = PRODUCTION.read_text(encoding="utf-8")
+    assert "require('../converter_lib/bseed_ts0726_v56_hardened.js')" in js
+    assert "definitions.length !== 1" in js
+    assert "module.exports = definitions" in js
 
 
-def _bound_trigger_block(js: str) -> str:
-    start = js.index("const boundDeviceTrigger")
-    end = js.index("const longPressThreshold", start)
-    return js[start:end]
+def test_hardened_library_is_exact_production_base() -> None:
+    # The production branch vendors the proven hardened blob at a non-auto-load
+    # path so Z2M sees one definition only (the wrapper), while recovery to V5
+    # stays supported by the same two-fingerprint base definition.
+    base = BASE.read_text(encoding="utf-8")
+    assert 'const V5_SW_BUILD = "1.1.5-bseedv5"' in base
+    assert 'const V6_SW_BUILD = "1.1.6-bseedv6"' in base
+    assert base.count("priority: 100") == 2
+    assert "zigbeeModel:" not in base
+    assert "Direct-binding command cannot verify firmware identity" in base
 
 
 def test_bound_light_control_has_explicit_disabled_mode() -> None:
-    block = _bound_trigger_block(_source())
-    assert '"Never (disabled)": 0' in block
-    assert '"On press": 1' in block
-    assert '"Long press": 2' in block
-    assert '"Short press": 3' in block
-    assert "sends no direct-binding command" in block
+    js = PRODUCTION.read_text(encoding="utf-8")
+    assert "'Never (disabled)': 0" in js
+    assert "'On press': 1" in js
+    assert "'Long press': 2" in js
+    assert "'Short press': 3" in js
+    assert "sends no direct-binding command" in js
+    assert "does not create, remove or rewrite bindings" in js
 
 
-def test_disabled_bound_control_is_distinct_from_local_state_control() -> None:
-    js = _source()
-    bound = _bound_trigger_block(js)
-    local_start = js.index("const localRelayTrigger")
-    local_end = js.index("const localRelayIndex", local_start)
-    local = js[local_start:local_end]
+def test_disabled_trigger_is_endpoint_pinned_and_non_topology_mutating() -> None:
+    js = PRODUCTION.read_text(encoding="utf-8")
+    assert "endpointId: 1" in js
+    assert "endpointId: 2" in js
+    assert "endpointId: 3" in js
+    assert "meta?.device?.getEndpoint?.(endpointId)" in js
+    assert "[0xff05]: {value: LOOKUP[value], type: 0x30}" in js
+    assert "endpoint.read('genOnOffSwitchCfg', [0xff05])" in js
+    assert ".bind(" not in js
+    assert ".unbind(" not in js
 
-    assert 'attribute: {ID: 0xff05, type: 0x30}' in bound
-    assert 'attribute: {ID: 0xff01, type: 0x30}' in local
-    assert '"Never (disabled)": 0' in bound
-    assert '"Never (detached)": 0' in local
 
-
-def test_production_right_profile_is_representable_without_raw_writes() -> None:
-    js = _source()
-    assert '"Follow logical state": 0' in js
-    assert '"Physical output": 3' in js
-    assert 'lookup: {Left: 1, Middle: 2, Right: 3}' in js
-    assert 'boundDeviceTrigger("switch_right_binded_mode", "switch_right")' in js
+def test_production_right_profile_is_representable_without_raw_operator_writes() -> None:
+    base = BASE.read_text(encoding="utf-8")
+    prod = PRODUCTION.read_text(encoding="utf-8")
+    assert '"Follow logical state": 0' in base
+    assert '"Physical output": 3' in base
+    assert 'lookup: {Left: 1, Middle: 2, Right: 3}' in base
+    assert "switch_right_binded_mode" in prod
+    assert "'Never (disabled)': 0" in prod
