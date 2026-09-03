@@ -50,7 +50,7 @@ Module._load = function(request, parent, isMain) {
         };
     }
     if (request === 'zigbee-herdsman') {
-        return {Zcl: {BuffaloZclDataType: {LIST_UINT8: 0x1001}, DataType: {LONG_CHAR_STR: 0x44}}};
+        return {Zcl: {BuffaloZclDataType: {LIST_UINT8: 0x1001}, DataType: {LONG_CHAR_STR: 0x44, ENUM8: 0x30}}};
     }
     return originalLoad.call(this, request, parent, isMain);
 };
