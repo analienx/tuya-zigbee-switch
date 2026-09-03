@@ -303,9 +303,14 @@ function verifyContract(definition, exposes, execution) {
         clusterRegistrations[0].args?.[1]?.ID !== 0x0000) {
         die(`v5 transport must extend built-in genBasic instead of shadowing ID 0: ${JSON.stringify(clusterRegistrations[0])}`);
     }
-    const addedCommands = clusterRegistrations[0].args?.[1]?.commands || {};
+    const addedDefinition = clusterRegistrations[0].args?.[1] || {};
+    const addedCommands = addedDefinition.commands || {};
     if (addedCommands.deviceConfigStage?.ID !== 0xf0 || addedCommands.deviceConfigCommit?.ID !== 0xf1) {
         die(`genBasic extension is missing v5 transport commands: ${JSON.stringify(addedCommands)}`);
+    }
+    const deviceConfigAttr = addedDefinition.attributes?.deviceConfig;
+    if (deviceConfigAttr?.ID !== 0xff00 || deviceConfigAttr?.type !== 0x44 || deviceConfigAttr?.write !== true) {
+        die(`genBasic extension is missing writable LONG_CHAR_STR deviceConfig decoder: ${JSON.stringify(deviceConfigAttr)}`);
     }
     const mutations = execution.events.filter((event) =>
         ['bind', 'unbind', 'configureReporting', 'write', 'command'].includes(event.op),
