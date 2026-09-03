@@ -144,7 +144,14 @@ async function main() {
     } catch (error) {
         rejected = /requires firmware 1\.1\.6-bseedv6/.test(String(error));
     }
-    if (!rejected || events.length !== beforeReject) die('V5 extended mode must fail closed without Zigbee traffic');
+    if (!rejected || events.length !== beforeReject + 1) {
+        die('V5 extended mode must fail closed after exactly one Basic identity read');
+    }
+    const rejectEvent = events.at(-1);
+    if (rejectEvent.op !== 'read' || rejectEvent.endpoint !== 1 ||
+        rejectEvent.cluster !== 'genBasic' || rejectEvent.attributes?.[0] !== 'swBuildId') {
+        die(`V5 extended rejection emitted unexpected traffic: ${JSON.stringify(rejectEvent)}`);
+    }
     await converters.switch_middle_action_mode.convertGet(eps.get(1), 'switch_middle_action_mode', v5);
     event = events.at(-1);
     if (event.endpoint !== 2 || event.attributes?.[0] !== 'switchActions') {
