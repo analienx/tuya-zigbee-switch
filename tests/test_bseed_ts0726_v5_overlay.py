@@ -1,4 +1,4 @@
-"""Release-contract tests for the BSEED TS0726 v5 overlay."""
+"""Release-contract tests for the BSEED TS0726 V5→V6 transition overlay."""
 
 from __future__ import annotations
 
@@ -16,12 +16,15 @@ def source() -> str:
     return OVERLAY.read_text(encoding="utf-8")
 
 
-def test_exact_v5_fingerprint_only() -> None:
+def test_exact_v5_v6_fingerprints_only() -> None:
     js = source()
     assert 'manufacturerName: "iedhxgyi"' in js
     assert 'modelID: "TS0726-3-BS"' in js
-    assert 'softwareBuildID: "1.1.5-bseedv5"' in js
-    assert "priority: 100" in js
+    assert 'const V5_SW_BUILD = "1.1.5-bseedv5"' in js
+    assert 'const V6_SW_BUILD = "1.1.6-bseedv6"' in js
+    assert "softwareBuildID: V5_SW_BUILD" in js
+    assert "softwareBuildID: V6_SW_BUILD" in js
+    assert js.count("priority: 100") == 2
     assert "zigbeeModel:" not in js
     assert 'model: "EC-GL86ZPCS31"' in js
 
@@ -198,7 +201,7 @@ def test_fail_closed_static_audit() -> None:
     result = subprocess.run(
         [
             sys.executable,
-            "helper_scripts/audit_bseed_ts0726_v5_overlay.py",
+            "helper_scripts/audit_bseed_ts0726_v56_transition.py",
             str(OVERLAY),
         ],
         check=True,
@@ -206,10 +209,9 @@ def test_fail_closed_static_audit() -> None:
         text=True,
     )
     assert '"status": "PASS"' in result.stdout
-    assert '"clickToUnlock": true' in result.stdout
-    assert '"boardStructureValidation": true' in result.stdout
-    assert '"channelLabelsSelfIdentify": true' in result.stdout
-    assert '"advancedEndpointAlias": true' in result.stdout
+    assert '"singleDefinition": true' in result.stdout
+    assert '"singleBasicCustomExtension": true' in result.stdout
+    assert '"noCustomSwitchCfgExtension": true' in result.stdout
 
 
 def test_historical_action_api_is_preserved() -> None:
@@ -251,7 +253,7 @@ def test_javascript_syntax_and_behavioral_probes_when_node_is_available() -> Non
     endpoint_routing = subprocess.run(
         [
             "node",
-            "helper_scripts/probe_bseed_ts0726_v51_endpoint_routing.js",
+            "helper_scripts/probe_bseed_ts0726_v56_transition.js",
             str(OVERLAY),
         ],
         check=True,
@@ -259,9 +261,9 @@ def test_javascript_syntax_and_behavioral_probes_when_node_is_available() -> Non
         text=True,
     )
     assert '"status": "PASS"' in endpoint_routing.stdout
-    assert '"allSetEndpointsPinned": true' in endpoint_routing.stdout
-    assert '"allGetEndpointsPinned": true' in endpoint_routing.stdout
-    assert '"deviceConfigReadback": true' in endpoint_routing.stdout
+    assert '"extendedFailsClosed": true' in endpoint_routing.stdout
+    assert '"customAttribute": "0xff06"' in endpoint_routing.stdout
+    assert '"unknownFirmwareFailsClosed": true' in endpoint_routing.stdout
 
     transport = subprocess.run(
         [
