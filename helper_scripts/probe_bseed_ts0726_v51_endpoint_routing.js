@@ -49,7 +49,7 @@ Module._load = function(request, parent, isMain) {
         return {
             Zcl: {
                 BuffaloZclDataType: {LIST_UINT8: 0x1001},
-                DataType: {LONG_CHAR_STR: 0x44},
+                DataType: {LONG_CHAR_STR: 0x44, ENUM8: 0x30},
             },
         };
     }
@@ -117,9 +117,9 @@ async function main() {
         ['switch_middle_mode', 'Push button', 2, 'genOnOffSwitchCfg', 0xff00, 1],
         ['switch_right_mode', 'Push button', 3, 'genOnOffSwitchCfg', 0xff00, 1],
 
-        ['switch_left_action_mode', 'Match local state', 1, 'genOnOffSwitchCfg', 0x0010, 3],
-        ['switch_middle_action_mode', 'Match local state', 2, 'genOnOffSwitchCfg', 0x0010, 3],
-        ['switch_right_action_mode', 'Toggle', 3, 'genOnOffSwitchCfg', 0x0010, 2],
+        ['switch_left_action_mode', 'Match local state', 1, 'genOnOffSwitchCfg', 'switchActions', 3],
+        ['switch_middle_action_mode', 'Match local state', 2, 'genOnOffSwitchCfg', 'switchActions', 3],
+        ['switch_right_action_mode', 'Toggle', 3, 'genOnOffSwitchCfg', 'switchActions', 2],
 
         ['switch_left_relay_mode', 'Short press', 1, 'genOnOffSwitchCfg', 0xff01, 3],
         ['switch_middle_relay_mode', 'Short press', 2, 'genOnOffSwitchCfg', 0xff01, 3],
@@ -168,6 +168,9 @@ async function main() {
         if (write.cluster !== cluster) die(`${key}: SET cluster ${write.cluster}, expected ${cluster}`);
         const encoded = write.payload[attr]?.value ?? write.payload[attr];
         if (encoded !== raw) die(`${key}: SET raw ${encoded}, expected ${raw}`);
+        if (key.endsWith('_action_mode') && write.payload.switchActions !== raw) {
+            die(`${key}: SET must use primitive named switchActions payload: ${JSON.stringify(write.payload)}`);
+        }
 
         const beforeGet = events.length;
         await converter.convertGet(endpoints.get(1), key, meta);
@@ -213,7 +216,7 @@ async function main() {
         die(`LEFT raw report leaked into another channel: ${JSON.stringify(leftPhysical)}`);
     }
 
-    const middleAction = runFz('genOnOffSwitchCfg', 2, {16: 3});
+    const middleAction = runFz('genOnOffSwitchCfg', 2, {switchActions: 3});
     if (middleAction.switch_middle_action_mode !== 'Match local state') {
         die(`MIDDLE action readback did not map correctly: ${JSON.stringify(middleAction)}`);
     }
