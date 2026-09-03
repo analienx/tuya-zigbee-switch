@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "device": {
+    "friendly_name": "LivingRoomMainDimmer",
+    "ieee": "0xa4c13843a9d40f85",
+    "software_build_id": "1.1.6-bseedv6",
+    "file_version": 285356039,
+    "device_config": "iedhxgyi;TS0726-3-BS;LC4;SB1u;RC2;IC0;SB7u;RC3;ID7;SB4u;RD2;IB5;M;"
+  },
+  "channels": {
+    "left": {
+      "mains_power": "Always on",
+      "led_shows": "Binding status",
+      "direct_binding_command": "Match local state",
+      "update_local_state": "Short press",
+      "control_bound_light": "Short press",
+      "local_state_channel": "Left"
+    },
+    "middle": {
+      "mains_power": "Always on",
+      "led_shows": "Binding status",
+      "direct_binding_command": "Match local state",
+      "update_local_state": "Short press",
+      "control_bound_light": "Short press",
+      "local_state_channel": "Middle"
+    },
+    "right": {
+      "mains_power": "Follow logical state",
+      "led_shows": "Physical output",
+      "direct_binding_command": "Toggle",
+      "update_local_state": "Short press",
+      "control_bound_light": "Never (disabled)",
+      "local_state_channel": "Right"
+    }
+  },
+  "semantics": {
+    "left_middle": "Smart-light channels. Physical mains remain continuously energized; button actions update local logical state and send explicit bound On/Off matching that state. LED follows locally tracked binding intent.",
+    "right": "Pure local relay channel. Button updates RIGHT logical state; RIGHT physical mains follows that state; LED follows physical output. Direct-bound/group command transmission is disabled without deleting binding topology.",
+    "ha_reconciliation": "LEFT and MIDDLE only. RIGHT is excluded from downstream-light corrective synchronization."
+  },
+  "forbidden_during_profile_apply": [
+    "device_config write",
+    "bind mutation",
+    "unbind mutation",
+    "group mutation",
+    "interview",
+    "re-pair",
+    "coordinator mutation",
+    "firmware OTA"
+  ]
+}
