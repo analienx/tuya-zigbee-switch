@@ -327,7 +327,7 @@ const buttonCommandBehavior = (name, endpointName) => {
         channelLabel(endpointName) + " — Direct-binding command",
         "Chooses the On/Off command sent directly to bound lights. Toggle is the simplest choice and does not depend on local state. " +
             "Match local state sends explicit On/Off to match this channel; Opposite local state sends the inverse. " +
-            "On then off and Off then on are mainly useful with maintained rocker inputs. Extended Match/Opposite modes require V6 firmware.",
+            "On then off and Off then on are mainly useful with maintained rocker inputs.",
         "config",
     );
 
