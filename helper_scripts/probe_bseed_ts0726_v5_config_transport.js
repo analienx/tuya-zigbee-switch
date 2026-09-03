@@ -38,14 +38,19 @@ Module._load = function(request, parent, isMain) {
     }
     if (request === 'zigbee-herdsman-converters/lib/exposes') {
         return {
-            presets: {action: (values) => ({...makeExpose('action'), values})},
-            access: {STATE: 1, SET: 2, GET: 4, ALL: 7},
+            presets: {
+                action: (values) => ({...makeExpose('action'), values}),
+                enum: (name, access, values) => ({...makeExpose(name, access), values}),
+                binary: (name, access, valueOn, valueOff) => ({...makeExpose(name, access), value_on: valueOn, value_off: valueOff}),
+                numeric: (name, access) => makeExpose(name, access),
+            },
+            access: {STATE: 1, SET: 2, GET: 4, STATE_GET: 5, ALL: 7},
             enum: (name, access, values) => ({...makeExpose(name, access), values}),
             text: (name, access) => makeExpose(name, access),
         };
     }
     if (request === 'zigbee-herdsman') {
-        return {Zcl: {BuffaloZclDataType: {LIST_UINT8: 0x1001}}};
+        return {Zcl: {BuffaloZclDataType: {LIST_UINT8: 0x1001}, DataType: {LONG_CHAR_STR: 0x44}}};
     }
     return originalLoad.call(this, request, parent, isMain);
 };
@@ -203,7 +208,7 @@ async function main() {
     await converter.convertGet(endpoint, 'device_config', meta);
     const reads = events.filter((event) => event.op === 'read');
     if (reads.length !== 1) die(`expected one GET read, got ${reads.length}`);
-    if (reads[0].args[0] !== 'genBasic' || reads[0].args[1][0] !== 0xff00) die('GET did not read Basic 0xff00');
+    if (reads[0].args[0] !== 'genBasic' || reads[0].args[1][0] !== 'deviceConfig') die('GET did not read named Basic deviceConfig');
 
     process.stdout.write(JSON.stringify({
         status: 'PASS',
