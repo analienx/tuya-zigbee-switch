@@ -299,8 +299,20 @@ const buttonType = (name, endpointName) =>
 const V5_SW_BUILD = "1.1.5-bseedv5";
 const V6_SW_BUILD = "1.1.6-bseedv6";
 
-const directBindingTransport = (meta) => {
-    const swBuild = meta?.device?.softwareBuildID;
+const directBindingTransport = async (meta) => {
+    const endpoint = meta?.device?.getEndpoint?.(1);
+    if (!endpoint) throw new Error("Direct-binding command cannot read firmware identity: EP1 unavailable");
+
+    let result;
+    try {
+        result = await endpoint.read("genBasic", ["swBuildId"], {timeout: 30_000});
+    } catch (error) {
+        throw new Error(
+            "Direct-binding command cannot verify firmware identity; retry after the device responds to Basic/swBuildId",
+        );
+    }
+
+    const swBuild = result?.swBuildId;
     if (swBuild === V5_SW_BUILD) {
         return {attribute: "switchActions", max: 2};
     }
@@ -353,7 +365,7 @@ const buttonCommandBehavior = (name, endpointName) => {
                     throw new Error(`${name}: unsupported value ${JSON.stringify(value)}`);
                 }
                 const raw = lookup[value];
-                const transport = directBindingTransport(meta);
+                const transport = await directBindingTransport(meta);
                 if (raw > transport.max) {
                     throw new Error(`${name}: ${value} requires firmware ${V6_SW_BUILD}`);
                 }
@@ -364,7 +376,7 @@ const buttonCommandBehavior = (name, endpointName) => {
                 return {state: {[key]: value}};
             },
             convertGet: async (entity, key, meta) => {
-                const transport = directBindingTransport(meta);
+                const transport = await directBindingTransport(meta);
                 const attributeKey = typeof transport.attribute === "string"
                     ? transport.attribute
                     : transport.attribute.ID;
