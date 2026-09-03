@@ -70,13 +70,21 @@ function actionConverters(definition) {
     }));
 }
 
-function endpoints(events) {
+function endpoints(events, getActiveBuild) {
     const result = new Map();
     for (let id = 1; id <= 6; id++) {
         result.set(id, {
             ID: id,
             async write(cluster, payload) { events.push({op: 'write', endpoint: id, cluster, payload}); return {}; },
-            async read(cluster, attributes) { events.push({op: 'read', endpoint: id, cluster, attributes}); return {}; },
+            async read(cluster, attributes) {
+                events.push({op: 'read', endpoint: id, cluster, attributes});
+                if (id === 1 && cluster === 'genBasic' && attributes?.[0] === 'swBuildId') {
+                    const build = getActiveBuild();
+                    if (build === '__NO_RESPONSE__') throw new Error('simulated Basic read failure');
+                    return {swBuildId: build};
+                }
+                return {};
+            },
             async command(cluster, command, payload) { events.push({op: 'command', endpoint: id, cluster, command, payload}); return {}; },
         });
     }
@@ -106,19 +114,26 @@ async function main() {
 
     const converters = actionConverters(definition);
     const events = [];
-    const eps = endpoints(events);
-    const meta = (sw) => ({
+    let activeBuild = '1.1.5-bseedv5';
+    const eps = endpoints(events, () => activeBuild);
+    const meta = (cachedSw) => ({
         device: {
             ieeeAddr: '0xa4c13843a9d40f85',
-            softwareBuildID: sw,
+            softwareBuildID: cachedSw,
             getEndpoint(id) { return eps.get(id); },
         },
     });
 
     // V5: standard named attribute only. Extended values fail closed before traffic.
-    const v5 = meta('1.1.5-bseedv5');
+    activeBuild = '1.1.5-bseedv5';
+    const v5 = meta('stale-cache-value');
     await converters.switch_left_action_mode.convertSet(eps.get(1), 'switch_left_action_mode', 'Toggle', v5);
     let event = events.at(-1);
+    const v5IdentityRead = events.at(-2);
+    if (v5IdentityRead?.op !== 'read' || v5IdentityRead.endpoint !== 1 ||
+        v5IdentityRead.cluster !== 'genBasic' || v5IdentityRead.attributes?.[0] !== 'swBuildId') {
+        die(`V5 did not fresh-read Basic/swBuildId before transport choice: ${JSON.stringify(v5IdentityRead)}`);
+    }
     if (event.endpoint !== 1 || event.cluster !== 'genOnOffSwitchCfg' || event.payload.switchActions !== 2) {
         die(`V5 action route mismatch: ${JSON.stringify(event)}`);
     }
@@ -137,7 +152,8 @@ async function main() {
     }
 
     // V6: raw custom 0xff06, allowing Match/Opposite.
-    const v6 = meta('1.1.6-bseedv6');
+    activeBuild = '1.1.6-bseedv6';
+    const v6 = meta('1.1.5-bseedv5');
     await converters.switch_left_action_mode.convertSet(eps.get(1), 'switch_left_action_mode', 'Match local state', v6);
     event = events.at(-1);
     const encoded = event.payload?.[0xff06]?.value;
@@ -151,7 +167,8 @@ async function main() {
     }
 
     // Unknown firmware must never guess a transport.
-    const unknown = meta('future-build');
+    activeBuild = 'future-build';
+    const unknown = meta('1.1.6-bseedv6');
     const beforeUnknown = events.length;
     rejected = false;
     try {
@@ -159,7 +176,19 @@ async function main() {
     } catch (error) {
         rejected = /not enabled for firmware/.test(String(error));
     }
-    if (!rejected || events.length !== beforeUnknown) die('unknown firmware did not fail closed');
+    if (!rejected || events.length !== beforeUnknown + 1) die('unknown firmware did not fail closed after exactly one identity read');
+
+    activeBuild = '__NO_RESPONSE__';
+    const beforeNoResponse = events.length;
+    rejected = false;
+    try {
+        await converters.switch_right_action_mode.convertGet(eps.get(1), 'switch_right_action_mode', meta('1.1.6-bseedv6'));
+    } catch (error) {
+        rejected = /cannot verify firmware identity/.test(String(error));
+    }
+    if (!rejected || events.length !== beforeNoResponse + 1) {
+        die('firmware identity read failure must fail closed after one Basic read and no action-cluster traffic');
+    }
 
     // Decode both V5 named readback and V6 raw readback.
     const fz = definition.extend.flatMap((ext) => ext.fromZigbee || []).filter((item) => item.cluster === 'genOnOffSwitchCfg');
@@ -178,6 +207,9 @@ async function main() {
         v5: {standardAttribute: 'switchActions', extendedFailsClosed: true},
         v6: {customAttribute: '0xff06', matchLocalState: 3},
         unknownFirmwareFailsClosed: true,
+        freshFirmwareIdentityRead: true,
+        staleCacheIgnored: true,
+        identityReadFailureFailsClosed: true,
         readback: {v5Named: true, v6Raw: true},
     }, null, 2) + '\n');
 }
