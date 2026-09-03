@@ -266,6 +266,27 @@ const logicalOnOff = (endpointNames) => {
     return result;
 };
 
+const switchActionsExtendedCluster = () =>
+    deviceAddCustomCluster("genOnOffSwitchCfg", {
+        name: "genOnOffSwitchCfg",
+        ID: 0x0007,
+        attributes: {
+            // Standard Zigbee SwitchActions is constrained to 0..2 in ZHC.
+            // This firmware intentionally extends the same on-wire attribute
+            // with 3=Match local state and 4=Opposite local state.
+            switchActions: {
+                name: "switchActions",
+                ID: 0x0010,
+                type: Zcl.DataType.ENUM8,
+                write: true,
+                min: 0,
+                max: 4,
+            },
+        },
+        commands: {},
+        commandsResponse: {},
+    });
+
 const physicalRelayMode = (name, endpointName) =>
     pinnedEnum({
         name,
@@ -308,7 +329,10 @@ const buttonCommandBehavior = (name, endpointName) =>
             "Opposite local state": 4,
         },
         cluster: "genOnOffSwitchCfg",
-        attribute: {ID: 0x0010, type: 0x30},
+        // Use the named custom-cluster attribute, not raw numeric key 0x0010.
+        // Herdsman recognizes numeric ID 0x0010 as standard switchActions and
+        // otherwise treats the {value,type} raw wrapper as the attribute value.
+        attribute: "switchActions",
         label: channelLabel(endpointName) + " — Direct-binding command",
         description:
             "Chooses the On/Off command sent directly to bound lights. Toggle is the simplest choice and does not depend on local state. " +
@@ -775,6 +799,7 @@ module.exports = [
         description: "BSEED 3-gang smart-light controller — protected mains control, direct binding and advanced configuration",
         extend: [
             configTransportCluster(),
+            switchActionsExtendedCluster(),
             deviceEndpoints({
                 endpoints: {
                     switch_left: 1,
