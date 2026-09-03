@@ -118,6 +118,7 @@ def test_transport_extends_builtin_basic_without_shadow_cluster() -> None:
     assert '"bseedBasicTransport"' not in js
     assert '"deviceConfigStage"' in js
     assert '"deviceConfigCommit"' in js
+    assert 'deviceConfig: {name: "deviceConfig", ID: 0xff00, type: Zcl.DataType.LONG_CHAR_STR, write: true}' in js
 
 
 def test_device_config_is_editable_but_uses_chunked_transport_not_direct_write() -> None:
@@ -137,7 +138,7 @@ def test_device_config_is_editable_but_uses_chunked_transport_not_direct_write()
     # The custom SET path must not call endpoint.write().
     config_block = js[js.index("const deviceConfigEditable"):js.index("const legacyActionEvent")]
     assert ".write(" not in config_block
-    assert '.read("genBasic", [0xff00]' in config_block
+    assert '.read("genBasic", ["deviceConfig"]' in config_block
 
 
 def test_channel_labels_are_self_identifying_when_frontend_hides_endpoint_headings() -> None:
@@ -181,6 +182,17 @@ def test_advanced_config_is_a_dedicated_final_endpoint_group() -> None:
     advanced = js.index('deviceConfigEditable("device_config")')
     assert logical < physical < buttons < indicators < diagnostics < unlock < advanced
 
+
+
+
+def test_all_named_channel_controls_use_explicit_endpoint_pinning() -> None:
+    js = source()
+    assert "const pinnedEndpoint = (meta, endpointName)" in js
+    assert "meta?.device?.getEndpoint?.(id)" in js
+    assert "determineEndpoint(" not in js
+    # All configurable per-channel surfaces are built from pinned helpers.
+    for helper in ("pinnedEnum({", "pinnedBinary({", "pinnedNumeric({"):
+        assert helper in js
 
 def test_fail_closed_static_audit() -> None:
     result = subprocess.run(
