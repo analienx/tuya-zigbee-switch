@@ -78,6 +78,9 @@ def main() -> int:
         "legacyActionEvent()",
         "configure: async () => {}",
         "configureReporting: false",
+        "const pinnedEndpoint = (meta, endpointName)",
+        "meta?.device?.getEndpoint?.(id)",
+        'deviceConfig: {name: "deviceConfig", ID: 0xff00, type: Zcl.DataType.LONG_CHAR_STR, write: true}',
     )
     for marker in required:
         if marker not in text:
@@ -104,8 +107,8 @@ def main() -> int:
         config_block = text[config_start:config_end]
         if ".write(" in config_block:
             failures.append("device_config SET still contains direct attribute write")
-        if '.read("genBasic", [0xff00]' not in config_block:
-            failures.append("device_config GET no longer reads legacy Basic 0xff00")
+        if '.read("genBasic", ["deviceConfig"]' not in config_block:
+            failures.append("device_config GET no longer uses named Basic deviceConfig decoder")
 
     order = [
         'logicalOnOff(["relay_left", "relay_middle", "relay_right"])',
@@ -138,7 +141,7 @@ def main() -> int:
             "boardStructureValidation": "switches.length !== 3" in text and "GPIO pin(s) assigned more than once" in text,
             "chunkSize": 24,
             "directAttributeWrite": ".write(" in config_block,
-            "legacyReadProperty": '.read("genBasic", [0xff00]' in config_block,
+            "legacyReadProperty": '.read("genBasic", ["deviceConfig"]' in config_block,
         },
         "channelLabelsSelfIdentify": all(
             marker in text
@@ -152,6 +155,7 @@ def main() -> int:
             )
         ),
         "advancedEndpointAlias": "advanced: 1" in text,
+        "endpointPinnedControls": "const pinnedEndpoint = (meta, endpointName)" in text and "determineEndpoint(" not in text,
         "zeroTopologyMutationSurface": not any(
             marker in text
             for marker in (
