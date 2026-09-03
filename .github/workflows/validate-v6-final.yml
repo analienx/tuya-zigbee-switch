@@ -1,0 +1,43 @@
+name: Validate frozen v6 overlay against ZHC 26.90.0
+
+on:
+  push:
+    branches:
+      - supervisor/validate-v6-final
+
+permissions:
+  contents: read
+
+jobs:
+  exact-zhc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: e31221ff19ecb0f90651690a243f9afb28b71b70
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Install exact ZHC
+        run: |
+          mkdir -p /tmp/bseed-zhc-check
+          cd /tmp/bseed-zhc-check
+          npm init -y
+          npm install --no-audit --no-fund zigbee-herdsman-converters@26.90.0
+      - name: Validate processed exposes and Basic decoder
+        run: |
+          cd /tmp/bseed-zhc-check
+          node "$GITHUB_WORKSPACE/helper_scripts/probe_bseed_ts0726_v6_installed_zhc.js" \
+            "$GITHUB_WORKSPACE/zigbee2mqtt/converters/bseed_ts0726_v6.js"
+      - name: Reproduce ordinary unscoped endpoint routing
+        run: |
+          node helper_scripts/probe_bseed_ts0726_v6_endpoint_routing.js \
+            zigbee2mqtt/converters/bseed_ts0726_v6.js
+      - name: Validate protected config transport
+        run: |
+          node helper_scripts/probe_bseed_ts0726_v5_config_transport.js \
+            zigbee2mqtt/converters/bseed_ts0726_v6.js
+      - name: Validate historical action API
+        run: |
+          node helper_scripts/probe_bseed_ts0726_action_contract.js \
+            zigbee2mqtt/converters/bseed_ts0726_v6.js
