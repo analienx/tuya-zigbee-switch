@@ -42,4 +42,8 @@
 // Separate storage preserves the legacy relay-cluster NVM record ABI.
 #define NV_ITEM_RELAY_BINDING_INTENT(relay_idx)    (41 + (relay_idx))
 
+// Direct-binding command policy for switch indexes 0..4. Separate storage
+// keeps the legacy zigbee_switch_cluster_config ABI unchanged.
+#define NV_ITEM_SWITCH_BINDING_COMMAND_MODE(switch_idx)    (46 + (switch_idx))
+
 #endif /* DEVICE_CONFIG_NVM_ITEMS_H_ */
