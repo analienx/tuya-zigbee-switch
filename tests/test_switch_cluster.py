@@ -206,3 +206,62 @@ def test_legacy_extended_switch_action_migrates_to_custom_binding_policy() -> No
             )
             == str(ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_MATCH_LOCAL_STATE)
         )
+
+
+
+@pytest.mark.parametrize("standard_action", [0, 1, 2])
+def test_standard_switch_action_keeps_binding_policy_compatible(standard_action: int) -> None:
+    device_config = "A;B;SA0u;RA0;"
+    with StubProc(device_config=device_config) as proc:
+        device = Device(proc)
+        device.write_zigbee_attr(
+            1,
+            ZCL_CLUSTER_ON_OFF_SWITCH_CONFIG,
+            ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_ACTIONS,
+            standard_action,
+        )
+        assert (
+            device.read_zigbee_attr(
+                1,
+                ZCL_CLUSTER_ON_OFF_SWITCH_CONFIG,
+                ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_ACTIONS,
+            )
+            == str(standard_action)
+        )
+        assert (
+            device.read_zigbee_attr(
+                1,
+                ZCL_CLUSTER_ON_OFF_SWITCH_CONFIG,
+                ZCL_ATTR_ONOFF_CONFIGURATION_BINDING_COMMAND_MODE,
+            )
+            == str(standard_action)
+        )
+
+
+@pytest.mark.parametrize("legacy_action", [3, 4])
+def test_legacy_extended_action_write_moves_intent_to_custom_attribute(legacy_action: int) -> None:
+    device_config = "A;B;SA0u;RA0;"
+    with StubProc(device_config=device_config) as proc:
+        device = Device(proc)
+        device.write_zigbee_attr(
+            1,
+            ZCL_CLUSTER_ON_OFF_SWITCH_CONFIG,
+            ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_ACTIONS,
+            legacy_action,
+        )
+        assert (
+            device.read_zigbee_attr(
+                1,
+                ZCL_CLUSTER_ON_OFF_SWITCH_CONFIG,
+                ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_ACTIONS,
+            )
+            == str(ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SIMPLE)
+        )
+        assert (
+            device.read_zigbee_attr(
+                1,
+                ZCL_CLUSTER_ON_OFF_SWITCH_CONFIG,
+                ZCL_ATTR_ONOFF_CONFIGURATION_BINDING_COMMAND_MODE,
+            )
+            == str(legacy_action)
+        )
