@@ -34,7 +34,7 @@ def main() -> int:
     required = (
         'return {attribute: "switchActions", max: 2}',
         'return {attribute: {ID: 0xff06, type: 0x30}, max: 4}',
-        "const directBindingTransport = (meta) =>",
+        "const directBindingTransport = async (meta) =>",
         "requires firmware",
         'deviceConfigEditable("device_config")',
         "deviceConfigUnlock()",
