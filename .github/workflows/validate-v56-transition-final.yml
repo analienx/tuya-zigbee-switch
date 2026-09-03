@@ -3,7 +3,7 @@ name: Validate final V5-V6 transition overlay
 on:
   push:
     branches:
-      - supervisor/validate-v56-transition
+      - supervisor/validate-v56-transition-final
 
 permissions:
   contents: read
