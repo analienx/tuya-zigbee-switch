@@ -3,20 +3,21 @@
 /**
  * Production definition for the BSEED TS0726-3-BS controller.
  *
- * The proven hardened V5/V6 definition is kept as a library outside the
- * Zigbee2MQTT external_converters auto-load directory. This wrapper exports
- * exactly one definition and changes only the per-button "Control bound light"
- * surface so direct-binding transmission can be explicitly disabled with
- * raw value 0. The option is useful for a pure local-relay channel and does
- * not remove or rewrite any existing Zigbee binding/group topology.
+ * The proven hardened V5/V6 definition remains byte-stable in converter_lib.
+ * A narrow V7 compatibility overlay adds only the V7 fingerprint and V6-style
+ * 0xff06 direct-binding transport before this wrapper applies the production
+ * per-button "Control bound light" surface.
+ *
+ * This wrapper changes only the per-button "Control bound light" surface so
+ * direct-binding transmission can be explicitly disabled with raw value 0.
+ * The option is useful for a pure local-relay channel and does not remove or
+ * rewrite any existing Zigbee binding/group topology.
  *
  * IMPORTANT: SET is read-after-write verified. We publish the device's
  * authoritative 0xff05 readback, never the requested value optimistically.
- * This prevents retained MQTT/Z2M state from claiming "Never (disabled)" when
- * firmware or the ZCL layer did not actually retain raw value 0.
  */
 
-const definitions = require('../converter_lib/bseed_ts0726_v56_hardened.js');
+const definitions = require('../converter_lib/bseed_ts0726_v567_hardened.js');
 const exposes = require('zigbee-herdsman-converters/lib/exposes');
 const e = exposes.presets;
 const ea = exposes.access;
@@ -85,9 +86,6 @@ const productionBoundDeviceTrigger = ({name, endpointName, endpointId, label}) =
                 [0xff05]: {value: requestedRaw, type: 0x30},
             });
 
-            // Never trust the write request as state. Read back the attribute and
-            // publish only device truth. This is deliberately synchronous so a
-            // rejected/reverted write cannot poison retained Z2M/MQTT state.
             const response = await endpoint.read('genOnOffSwitchCfg', [0xff05]);
             const actual = decodeBoundMode(response, name);
             if (actual.raw !== requestedRaw) {
