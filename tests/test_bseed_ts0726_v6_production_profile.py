@@ -42,10 +42,19 @@ def test_disabled_trigger_is_endpoint_pinned_and_non_topology_mutating() -> None
     assert "endpointId: 2" in js
     assert "endpointId: 3" in js
     assert "meta?.device?.getEndpoint?.(endpointId)" in js
-    assert "[0xff05]: {value: LOOKUP[value], type: 0x30}" in js
+    assert "[0xff05]: {value: requestedRaw, type: 0x30}" in js
     assert "endpoint.read('genOnOffSwitchCfg', [0xff05])" in js
     assert ".bind(" not in js
     assert ".unbind(" not in js
+
+
+def test_bound_mode_set_publishes_authoritative_readback_not_request() -> None:
+    js = PRODUCTION.read_text(encoding="utf-8")
+    assert "const response = await endpoint.read('genOnOffSwitchCfg', [0xff05]);" in js
+    assert "const actual = decodeBoundMode(response, name);" in js
+    assert "publishing device truth" in js
+    assert "return {state: {[key]: actual.value}}" in js
+    assert "return {state: {[key]: value}}" not in js
 
 
 def test_production_right_profile_is_representable_without_raw_operator_writes() -> None:
