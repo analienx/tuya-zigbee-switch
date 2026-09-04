@@ -262,6 +262,10 @@ static bool switch_cluster_send_binding_onoff(
 
 static void switch_cluster_binding_action(
     zigbee_switch_cluster *cluster, bool position_on) {
+    if (cluster->binded_mode == ZCL_ONOFF_CONFIGURATION_BINDED_MODE_DISABLED) {
+        return;
+    }
+
     uint8_t cmd_id;
 
     switch (cluster->binding_command_mode) {
@@ -311,6 +315,9 @@ void switch_cluster_binding_action_off(zigbee_switch_cluster *cluster) {
 }
 
 void switch_cluster_level_stop(zigbee_switch_cluster *cluster) {
+    if (cluster->binded_mode == ZCL_ONOFF_CONFIGURATION_BINDED_MODE_DISABLED) {
+        return;
+    }
     if (hal_zigbee_get_network_status() != HAL_ZIGBEE_NETWORK_JOINED ||
         !hal_zigbee_has_binding(cluster->endpoint, ZCL_CLUSTER_LEVEL_CONTROL)) {
         return;
@@ -321,6 +328,9 @@ void switch_cluster_level_stop(zigbee_switch_cluster *cluster) {
 }
 
 void switch_cluster_level_control(zigbee_switch_cluster *cluster) {
+    if (cluster->binded_mode == ZCL_ONOFF_CONFIGURATION_BINDED_MODE_DISABLED) {
+        return;
+    }
     if (hal_zigbee_get_network_status() != HAL_ZIGBEE_NETWORK_JOINED ||
         !hal_zigbee_has_binding(cluster->endpoint, ZCL_CLUSTER_LEVEL_CONTROL)) {
         return;
