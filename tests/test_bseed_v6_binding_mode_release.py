@@ -1,4 +1,4 @@
-"""Release-contract checks for the BSEED v6 direct-binding policy split."""
+"""Release-contract checks for the BSEED v6/v7 direct-binding policy split."""
 
 from pathlib import Path
 
@@ -34,3 +34,38 @@ def test_legacy_action_values_are_migrated_not_reinterpreted_on_wire() -> None:
     assert "requested_action <=\n            ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_MAX" in source
     assert "cluster->binding_command_mode = requested_action;" in source
     assert "cluster->action =\n                ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SIMPLE;" in source
+
+
+def test_disabled_bound_mode_has_explicit_zero_abi() -> None:
+    consts = Path("src/zigbee/consts.h").read_text(encoding="utf-8")
+    assert "ZCL_ONOFF_CONFIGURATION_BINDED_MODE_DISABLED                    0x00" in consts
+    assert "ZCL_ONOFF_CONFIGURATION_BINDED_MODE_RISE                        0x01" in consts
+    assert "ZCL_ONOFF_CONFIGURATION_BINDED_MODE_LONG                        0x02" in consts
+    assert "ZCL_ONOFF_CONFIGURATION_BINDED_MODE_SHORT                       0x03" in consts
+
+
+def test_disabled_bound_mode_suppresses_onoff_and_level_transmission() -> None:
+    source = Path("src/zigbee/switch_cluster.c").read_text(encoding="utf-8")
+    guard = "cluster->binded_mode == ZCL_ONOFF_CONFIGURATION_BINDED_MODE_DISABLED"
+
+    # The guard is deliberately inside the common OnOff binding-action helper,
+    # so it also covers toggle switch mode, where callers invoke binding action
+    # unconditionally.
+    binding_action = source.split("static void switch_cluster_binding_action(", 1)[1].split(
+        "// Send OnOff command to bound device", 1
+    )[0]
+    assert guard in binding_action
+    assert binding_action.index(guard) < binding_action.index("switch (cluster->binding_command_mode)")
+
+    # Long-press dimming used to bypass binded_mode entirely. Disabled must
+    # suppress both Move and Stop even if an old Level binding still exists.
+    level_stop = source.split("void switch_cluster_level_stop(", 1)[1].split(
+        "void switch_cluster_level_control(", 1
+    )[0]
+    level_control = source.split("void switch_cluster_level_control(", 1)[1].split(
+        "void switch_cluster_on_button_press(", 1
+    )[0]
+    assert guard in level_stop
+    assert guard in level_control
+    assert level_stop.index(guard) < level_stop.index("hal_zigbee_has_binding")
+    assert level_control.index(guard) < level_control.index("hal_zigbee_has_binding")
