@@ -1,11 +1,11 @@
 """Behavioral tests for BSEED v7 pure-local-relay mode.
 
-These tests deliberately keep real OnOff and Level bindings installed.  The
+These tests deliberately keep real OnOff and Level bindings installed. The
 safety contract is firmware-side: binded_mode=0 must suppress every outbound
 bound command while local relay actuation remains functional.
 """
 
-from tests.conftest import Device, StubProc
+from tests.conftest import Device, StubProc, ensure_never_true, wait_for
 from tests.zcl_consts import (
     ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_BINDING_MODE,
     ZCL_CLUSTER_LEVEL_CONTROL,
@@ -18,10 +18,11 @@ from tests.zcl_consts import (
 
 DISABLED = 0
 SHORT_PRESS = 3
+NO_COMMAND_WINDOW_S = 0.20
 
 
 def _configured_device() -> tuple[StubProc, Device]:
-    # One momentary switch controlling one relay.  The distinct pins avoid
+    # One momentary switch controlling one relay. The distinct pins avoid
     # simulator ambiguity and mirror the BSEED logical shape at minimum size.
     proc = StubProc(device_config="A;B;SA0u;RB0;M;").start()
     device = Device(proc)
@@ -30,6 +31,27 @@ def _configured_device() -> tuple[StubProc, Device]:
     device.add_binding(1, ZCL_CLUSTER_ON_OFF)
     device.add_binding(1, ZCL_CLUSTER_LEVEL_CONTROL)
     return proc, device
+
+
+def _commands(device: Device, cluster: int):
+    return device.zcl_list_cmds(endpoint=1, cluster=cluster)
+
+
+def _assert_no_commands(device: Device, cluster: int) -> None:
+    # Command delivery to the Python event buffer is asynchronous. Merely
+    # checking the list immediately after a button action can false-pass before
+    # a bad command arrives, so observe a bounded quiet window instead.
+    ensure_never_true(
+        lambda: bool(_commands(device, cluster)), timeout=NO_COMMAND_WINDOW_S
+    )
+
+
+def _wait_for_command_count(device: Device, cluster: int, count: int) -> None:
+    wait_for(
+        lambda: len(_commands(device, cluster)) >= count,
+        timeout=1.0,
+        interval=0.01,
+    )
 
 
 def test_disabled_mode_persists_zero_across_restart() -> None:
@@ -64,12 +86,12 @@ def test_disabled_mode_blocks_onoff_but_keeps_local_relay_click() -> None:
         # Pure relay still acts locally.
         assert device.zcl_relay_get(2) == "1"
         # Existing topology is harmless: no bound OnOff command is emitted.
-        assert device.zcl_list_cmds(endpoint=1, cluster=ZCL_CLUSTER_ON_OFF) == []
+        _assert_no_commands(device, ZCL_CLUSTER_ON_OFF)
 
         device.clear_events()
         device.click_button("A0")
         assert device.zcl_relay_get(2) == "0"
-        assert device.zcl_list_cmds(endpoint=1, cluster=ZCL_CLUSTER_ON_OFF) == []
+        _assert_no_commands(device, ZCL_CLUSTER_ON_OFF)
     finally:
         proc.stop()
 
@@ -84,8 +106,8 @@ def test_disabled_mode_blocks_level_move_and_stop_on_long_press() -> None:
         # A hold must not mutate the local SHORT-mode relay and must emit no
         # Level Move/Stop even though a real Level binding is present.
         assert device.zcl_relay_get(2) == "0"
-        assert device.zcl_list_cmds(endpoint=1, cluster=ZCL_CLUSTER_LEVEL_CONTROL) == []
-        assert device.zcl_list_cmds(endpoint=1, cluster=ZCL_CLUSTER_ON_OFF) == []
+        _assert_no_commands(device, ZCL_CLUSTER_LEVEL_CONTROL)
+        _assert_no_commands(device, ZCL_CLUSTER_ON_OFF)
     finally:
         proc.stop()
 
@@ -98,12 +120,14 @@ def test_enabled_short_mode_still_sends_expected_onoff_and_level_commands() -> N
 
         device.clear_events()
         device.click_button("A0")
-        onoff = device.zcl_list_cmds(endpoint=1, cluster=ZCL_CLUSTER_ON_OFF)
+        _wait_for_command_count(device, ZCL_CLUSTER_ON_OFF, 1)
+        onoff = _commands(device, ZCL_CLUSTER_ON_OFF)
         assert [event.cmd for event in onoff] == [ZCL_CMD_ONOFF_TOGGLE]
 
         device.clear_events()
         device.long_click_button("A0", duration_ms=1000)
-        level = device.zcl_list_cmds(endpoint=1, cluster=ZCL_CLUSTER_LEVEL_CONTROL)
+        _wait_for_command_count(device, ZCL_CLUSTER_LEVEL_CONTROL, 2)
+        level = _commands(device, ZCL_CLUSTER_LEVEL_CONTROL)
         assert [event.cmd for event in level] == [
             ZCL_CMD_LEVEL_MOVE_WITH_ON_OFF,
             ZCL_CMD_LEVEL_STOP_WITH_ON_OFF,
