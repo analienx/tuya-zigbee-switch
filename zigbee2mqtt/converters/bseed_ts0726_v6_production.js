@@ -9,6 +9,11 @@
  * surface so direct-binding transmission can be explicitly disabled with
  * raw value 0. The option is useful for a pure local-relay channel and does
  * not remove or rewrite any existing Zigbee binding/group topology.
+ *
+ * IMPORTANT: SET is read-after-write verified. We publish the device's
+ * authoritative 0xff05 readback, never the requested value optimistically.
+ * This prevents retained MQTT/Z2M state from claiming "Never (disabled)" when
+ * firmware or the ZCL layer did not actually retain raw value 0.
  */
 
 const definitions = require('../converter_lib/bseed_ts0726_v56_hardened.js');
@@ -32,6 +37,15 @@ const REVERSE = new Map(Object.entries(LOOKUP).map(([key, value]) => [String(val
 
 const rawValue = (msg) =>
     msg.data?.[0xff05] ?? msg.data?.['65285'];
+
+const decodeBoundMode = (payload, name) => {
+    const raw = payload?.[0xff05] ?? payload?.['65285'];
+    const value = REVERSE.get(String(raw));
+    if (raw === undefined || value === undefined) {
+        throw new Error(`${name}: device returned invalid 0xff05 readback ${JSON.stringify(raw)}`);
+    }
+    return {raw: Number(raw), value};
+};
 
 const productionBoundDeviceTrigger = ({name, endpointName, endpointId, label}) => ({
     isModernExtend: true,
@@ -65,10 +79,24 @@ const productionBoundDeviceTrigger = ({name, endpointName, endpointId, label}) =
             }
             const endpoint = meta?.device?.getEndpoint?.(endpointId);
             if (!endpoint) throw new Error(`${name}: EP${endpointId} is unavailable`);
+
+            const requestedRaw = LOOKUP[value];
             await endpoint.write('genOnOffSwitchCfg', {
-                [0xff05]: {value: LOOKUP[value], type: 0x30},
+                [0xff05]: {value: requestedRaw, type: 0x30},
             });
-            return {state: {[key]: value}};
+
+            // Never trust the write request as state. Read back the attribute and
+            // publish only device truth. This is deliberately synchronous so a
+            // rejected/reverted write cannot poison retained Z2M/MQTT state.
+            const response = await endpoint.read('genOnOffSwitchCfg', [0xff05]);
+            const actual = decodeBoundMode(response, name);
+            if (actual.raw !== requestedRaw) {
+                meta?.logger?.error?.(
+                    `${name}: requested 0xff05=${requestedRaw} (${value}) but device readback is ` +
+                    `0xff05=${actual.raw} (${actual.value}); publishing device truth`,
+                );
+            }
+            return {state: {[key]: actual.value}};
         },
         convertGet: async (entity, key, meta) => {
             const endpoint = meta?.device?.getEndpoint?.(endpointId);
