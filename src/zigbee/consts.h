@@ -178,6 +178,9 @@
 #define ZCL_ONOFF_CONFIGURATION_RELAY_MODE_LONG                         0x02
 #define ZCL_ONOFF_CONFIGURATION_RELAY_MODE_SHORT                        0x03
 
+// Bound-control mode. Raw 0 is a first-class disabled state: no OnOff command
+// and no Level Move/Stop may leave this switch endpoint while disabled.
+#define ZCL_ONOFF_CONFIGURATION_BINDED_MODE_DISABLED                    0x00
 #define ZCL_ONOFF_CONFIGURATION_BINDED_MODE_RISE                        0x01
 #define ZCL_ONOFF_CONFIGURATION_BINDED_MODE_LONG                        0x02
 #define ZCL_ONOFF_CONFIGURATION_BINDED_MODE_SHORT                       0x03
