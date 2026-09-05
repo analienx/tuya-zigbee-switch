@@ -7,31 +7,13 @@ NVM_MIGRATIONS_VERSION ?= 1
 
 CONFIG ?= X;Y;BA0u;LA1;SA2u;RA3;IA4;
 
-# Default target
 help:
 	@echo "Stub Device Build System"
 	@echo "========================"
-	@echo ""
-	@echo "Build Targets:"
 	@echo "  build              - Compile the stub device binary for host testing"
-	@echo ""
-	@echo "Run Targets:"
 	@echo "  run                - Build and run the stub device in interactive mode"
-	@echo ""
-	@echo "Cleanup:"
 	@echo "  clean              - Remove build artifacts and NVM data"
-	@echo ""
-	@echo "About:"
-	@echo "  The stub device provides a host-native simulation environment"
-	@echo "  for testing Zigbee device functionality without hardware."
-	@echo "  It includes a REPL interface and Python test integration."
-	@echo ""
-	@echo "Usage Example:"
-	@echo "  make build         # Compile the stub device"
-	@echo "  make run           # Run interactively"
-	@echo ""
 
-# Source files for stub build
 SOURCES := \
 	$(SRC_DIR)/app.c \
 	$(SRC_DIR)/zigbee/poll_control_cluster.c \
@@ -53,12 +35,15 @@ SOURCES := \
 	$(SRC_DIR)/base_components/button.c \
 	$(SRC_DIR)/base_components/battery.c \
 	$(SRC_DIR)/base_components/network_indicator.c \
+	$(SRC_DIR)/base_components/overload_protection.c \
+	$(SRC_DIR)/base_components/energy_measurement/hlw8012.c \
 	$(SRC_DIR)/device_config/config_parser.c \
 	$(SRC_DIR)/device_config/config_nv.c \
 	$(SRC_DIR)/device_config/device_params_nv.c \
 	$(SRC_DIR)/device_config/reset.c \
 	$(SRC_DIR)/device_config/nvm_migrations.c \
 	$(SRC_DIR)/device_config/device_migration.c \
+	$(SRC_DIR)/device_config/pm_legacy_migration.c \
 	$(SRC_DIR)/zigbee/basic_cluster.c \
 	$(SRC_DIR)/zigbee/relay_cluster.c \
 	$(SRC_DIR)/zigbee/switch_cluster.c \
@@ -66,7 +51,9 @@ SOURCES := \
 	$(SRC_DIR)/zigbee/general_commands.c \
 	$(SRC_DIR)/zigbee/cover_switch_cluster.c \
 	$(SRC_DIR)/zigbee/cover_cluster.c \
-	$(SRC_DIR)/zigbee/battery_cluster.c
+	$(SRC_DIR)/zigbee/battery_cluster.c \
+	$(SRC_DIR)/zigbee/electrical_measurement_cluster.c \
+	$(SRC_DIR)/zigbee/metering_cluster.c
 
 INCLUDES := \
 	-I$(SRC_DIR) \
@@ -77,10 +64,6 @@ CFLAGS := -Wall -Wno-unused-parameter -Wno-unused-variable -g -O0 \
 	-DNVM_MIGRATIONS_VERSION=$(NVM_MIGRATIONS_VERSION) \
 	-std=c99
 
-# Optional device-specific one-shot config migration (device_migration.c).
-# MIGRATION_FROM_CONFIG enables it; the migration fires only when the stored
-# config matches that string exactly and no marker is present. Values are
-# taken from the environment or the command line (quote semicolons in shells).
 MIGRATION_FROM_CONFIG ?=
 MIGRATION_TO_CONFIG   ?=
 MIGRATION_REVERT      ?=
@@ -94,9 +77,31 @@ CFLAGS += -DDEVICE_MIGRATION_REVERT
 endif
 endif
 
+# Dedicated unified BSEED PM target flags. Generic stub builds keep these off.
+BSEED_PM_B28WRPVX ?=
+BSEED_PM_B28WRPVX_PROTECTION ?=
+HLW8012_VOLTAGE_MULTIPLIER ?=
+HLW8012_CURRENT_MULTIPLIER ?=
+HLW8012_POWER_MULTIPLIER ?=
+
+ifeq ($(strip $(BSEED_PM_B28WRPVX)),1)
+CFLAGS += -DBSEED_PM_B28WRPVX
+endif
+ifeq ($(strip $(BSEED_PM_B28WRPVX_PROTECTION)),1)
+CFLAGS += -DBSEED_PM_B28WRPVX_PROTECTION
+endif
+ifneq ($(strip $(HLW8012_VOLTAGE_MULTIPLIER)),)
+CFLAGS += -DHLW8012_VOLTAGE_MULTIPLIER=$(HLW8012_VOLTAGE_MULTIPLIER)
+endif
+ifneq ($(strip $(HLW8012_CURRENT_MULTIPLIER)),)
+CFLAGS += -DHLW8012_CURRENT_MULTIPLIER=$(HLW8012_CURRENT_MULTIPLIER)
+endif
+ifneq ($(strip $(HLW8012_POWER_MULTIPLIER)),)
+CFLAGS += -DHLW8012_POWER_MULTIPLIER=$(HLW8012_POWER_MULTIPLIER)
+endif
+
 LDFLAGS := -lpthread
 
-# Build targets
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
