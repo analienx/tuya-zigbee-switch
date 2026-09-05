@@ -1,4 +1,5 @@
 #include "config_nv.h"
+#include "hal/gpio.h"
 #include "hal/nvm.h"
 #include "hal/printf_selector.h"
 #include "nvm_items.h"
@@ -46,6 +47,29 @@ static bool config_token_equals(const uint8_t *data, uint16_t start,
 
     return len == expected_len &&
            memcmp(&data[start], expected, expected_len) == 0;
+}
+
+static bool config_pin_is_valid(const uint8_t *data, uint16_t start) {
+    char pin[3] = { (char)data[start], (char)data[start + 1], '\0' };
+
+    return hal_gpio_parse_pin(pin) != HAL_INVALID_PIN;
+}
+
+static bool config_pull_is_valid(uint8_t pull) {
+    switch (pull) {
+    case 'u':
+    case 'U':
+    case 'd':
+    case 'D':
+    case 'f':
+    case 'F':
+    case 'n':
+    case 'N':
+        return true;
+
+    default:
+        return false;
+    }
 }
 
 static bool config_structurally_valid(const uint8_t *data, uint16_t size) {
@@ -167,7 +191,14 @@ bool device_config_resources_are_safe(const uint8_t *data, uint16_t size) {
         }
 
         uint16_t len = cursor - token_start;
-        if (token_index >= 2) {
+        if (token_index < 2) {
+            // ZCL Basic cluster stores manufacturer/model as 1-byte-length
+            // strings backed by fixed 32-byte arrays. Reject before parse_config
+            // can copy an oversized value into those buffers.
+            if (len == 0 || len > 31) {
+                return false;
+            }
+        } else {
             uint8_t kind = data[token_start];
 
             if (config_token_equals(data, token_start, len, "SLP") ||
@@ -181,43 +212,57 @@ bool device_config_resources_are_safe(const uint8_t *data, uint16_t size) {
             } else if (kind == 'B' && len >= 2 &&
                        data[token_start + 1] == 'T') {
                 // Battery token: BT<pin>, e.g. BTC5.
-                if (len != 4) {
+                if (len != 4 ||
+                    !config_pin_is_valid(data, token_start + 2)) {
                     return false;
                 }
                 battery_tokens++;
             } else if (kind == 'B') {
-                if (len != 4) {
+                if (len != 4 ||
+                    !config_pin_is_valid(data, token_start + 1) ||
+                    !config_pull_is_valid(data[token_start + 3])) {
                     return false;
                 }
                 buttons++;
             } else if (kind == 'L' || kind == 'I') {
                 if ((len != 3 && len != 4) ||
+                    !config_pin_is_valid(data, token_start + 1) ||
                     (len == 4 && data[token_start + 3] != 'i')) {
                     return false;
                 }
                 leds++;
             } else if (kind == 'S') {
-                if (len != 4) {
+                if (len != 4 ||
+                    !config_pin_is_valid(data, token_start + 1) ||
+                    !config_pull_is_valid(data[token_start + 3])) {
                     return false;
                 }
                 buttons++;
                 switch_clusters++;
             } else if (kind == 'R') {
-                if (len != 3 && len != 5) {
+                if ((len != 3 && len != 5) ||
+                    !config_pin_is_valid(data, token_start + 1) ||
+                    (len == 5 &&
+                     !config_pin_is_valid(data, token_start + 3))) {
                     return false;
                 }
                 relays++;
                 relay_clusters++;
             } else if (kind == 'X') {
                 // X<open-pin><close-pin><pull>: two buttons, one endpoint.
-                if (len != 6) {
+                if (len != 6 ||
+                    !config_pin_is_valid(data, token_start + 1) ||
+                    !config_pin_is_valid(data, token_start + 3) ||
+                    !config_pull_is_valid(data[token_start + 5])) {
                     return false;
                 }
                 buttons += 2;
                 cover_switch_clusters++;
             } else if (kind == 'C') {
                 // C<open-pin><close-pin>: two relays, one endpoint.
-                if (len != 5) {
+                if (len != 5 ||
+                    !config_pin_is_valid(data, token_start + 1) ||
+                    !config_pin_is_valid(data, token_start + 3)) {
                     return false;
                 }
                 relays += 2;
