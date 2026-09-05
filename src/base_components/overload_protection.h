@@ -3,11 +3,11 @@
 
 #include <stdint.h>
 
-#define OVERLOAD_HARD_POWER_W       3680u
-#define OVERLOAD_HARD_CURRENT_MA    16000u
-#define OVERLOAD_MAX_RETRIES        5u
-#define OVERLOAD_NOMINAL_VOLTAGE_V  230u
-#define OVERLOAD_VOLTAGE_FLOOR_CV   5000u
+#define OVERLOAD_HARD_POWER_W         3680u
+#define OVERLOAD_HARD_CURRENT_MA      16000u
+#define OVERLOAD_MAX_RETRIES          5u
+#define OVERLOAD_NOMINAL_VOLTAGE_V    230u
+#define OVERLOAD_VOLTAGE_FLOOR_CV     5000u
 
 typedef enum {
     OVERLOAD_ALARM_NONE         = 0,

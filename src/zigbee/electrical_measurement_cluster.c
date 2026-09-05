@@ -21,7 +21,7 @@ static uint32_t isqrt_u32(uint32_t x) {
         bit >>= 2;
     while (bit != 0) {
         if (x >= res + bit) {
-            x -= res + bit;
+            x  -= res + bit;
             res = (res >> 1) + bit;
         } else {
             res >>= 1;
@@ -38,12 +38,13 @@ void elec_meas_derive_power(uint16_t voltage_cv, uint16_t current_ma,
                             int8_t *out_power_factor) {
     uint32_t s_va =
         (uint32_t)voltage_cv * (uint32_t)current_ma / 100000u;
+
     if (s_va > 0xFFFFu)
         s_va = 0xFFFFu;
 
-    int32_t p = active_power_w;
+    int32_t p     = active_power_w;
     int32_t p_abs = p < 0 ? -p : p;
-    int8_t pf = 0;
+    int8_t  pf    = 0;
     if (s_va > 0) {
         int32_t pf32 = p * 100 / (int32_t)s_va;
         if (pf32 > 100)
@@ -54,8 +55,8 @@ void elec_meas_derive_power(uint16_t voltage_cv, uint16_t current_ma,
     }
 
     uint32_t q_var = 0;
-    uint32_t s2 = s_va * s_va;
-    uint32_t p2 = (uint32_t)(p_abs * p_abs);
+    uint32_t s2    = s_va * s_va;
+    uint32_t p2    = (uint32_t)(p_abs * p_abs);
     if (s2 > p2)
         q_var = isqrt_u32(s2 - p2);
     if (q_var > 0x7FFFu)
@@ -87,22 +88,24 @@ static void elec_meas_run_overload_protection(
 static void elec_meas_save_calibration(
     electrical_measurement_cluster_t *cluster) {
     energy_meter_calibration_t cal;
+
     energy_meter_get_calibration(cluster->meter, &cal);
     elec_meas_cal_nv_t nv = {
-        .magic = ELEC_MEAS_CAL_NV_MAGIC,
+        .magic              = ELEC_MEAS_CAL_NV_MAGIC,
         .voltage_multiplier = cal.voltage_multiplier,
         .current_multiplier = cal.current_multiplier,
-        .power_multiplier = cal.power_multiplier,
+        .power_multiplier   = cal.power_multiplier,
     };
     hal_nvm_write(NV_ITEM_ENERGY_CALIBRATION, sizeof(nv), (uint8_t *)&nv);
 }
 
 static uint8_t append_u32_dec(char *str, uint8_t pos, uint32_t value) {
-    char digits[10];
+    char    digits[10];
     uint8_t n = 0;
+
     do {
         digits[n++] = (char)('0' + (value % 10u));
-        value /= 10u;
+        value      /= 10u;
     } while (value != 0);
     while (n > 0)
         str[pos++] = digits[--n];
@@ -113,6 +116,7 @@ static void elec_meas_refresh_calibration_values(
     electrical_measurement_cluster_t *cluster) {
     energy_meter_calibration_t cal;
     uint8_t pos = 0;
+
     energy_meter_get_calibration(cluster->meter, &cal);
     cluster->calibration_values.str[pos++] = 'V';
     pos = append_u32_dec(cluster->calibration_values.str, pos,
@@ -128,9 +132,9 @@ static void elec_meas_refresh_calibration_values(
 
 static void elec_meas_apply_calibration_values(
     electrical_measurement_cluster_t *cluster) {
-    const char *str = cluster->calibration_values.str;
-    uint8_t len = cluster->calibration_values.len;
-    uint32_t mults[3] = { 0, 0, 0 };
+    const char *str      = cluster->calibration_values.str;
+    uint8_t     len      = cluster->calibration_values.len;
+    uint32_t    mults[3] = { 0, 0, 0 };
 
     if (len >= sizeof(cluster->calibration_values.str))
         len = sizeof(cluster->calibration_values.str) - 1;
@@ -162,6 +166,7 @@ static void elec_meas_overload_clamp(overload_config_t *c) {
     uint16_t hp = c->hard_power_w ? c->hard_power_w : OVERLOAD_HARD_POWER_W;
     uint16_t hc = c->hard_current_ma ? c->hard_current_ma
                                       : OVERLOAD_HARD_CURRENT_MA;
+
     if (c->power_limit_w > hp)
         c->power_limit_w = hp;
     if (c->current_limit_ma > hc)
@@ -172,11 +177,11 @@ static void elec_meas_overload_clamp(overload_config_t *c) {
 
 static void elec_meas_overload_mirror_to_attrs(
     electrical_measurement_cluster_t *cluster) {
-    cluster->overload_power_limit = cluster->overload.cfg.power_limit_w;
-    cluster->overload_current_limit = cluster->overload.cfg.current_limit_ma;
-    cluster->overload_trip_delay = cluster->overload.cfg.trip_delay_s;
-    cluster->overvoltage_warn = cluster->overload.cfg.overvoltage_cv;
-    cluster->undervoltage_warn = cluster->overload.cfg.undervoltage_cv;
+    cluster->overload_power_limit     = cluster->overload.cfg.power_limit_w;
+    cluster->overload_current_limit   = cluster->overload.cfg.current_limit_ma;
+    cluster->overload_trip_delay      = cluster->overload.cfg.trip_delay_s;
+    cluster->overvoltage_warn         = cluster->overload.cfg.overvoltage_cv;
+    cluster->undervoltage_warn        = cluster->overload.cfg.undervoltage_cv;
     cluster->overload_reconnect_delay =
         cluster->overload.cfg.reconnect_delay_s;
     cluster->overload_alarm = (uint8_t)cluster->overload.alarm;
@@ -191,25 +196,25 @@ static void elec_meas_overload_save(
 static void elec_meas_overload_load(
     electrical_measurement_cluster_t *cluster) {
     overload_config_t nv;
-    uint16_t hard_power = cluster->overload.cfg.hard_power_w;
-    uint16_t hard_current = cluster->overload.cfg.hard_current_ma;
+    uint16_t          hard_power   = cluster->overload.cfg.hard_power_w;
+    uint16_t          hard_current = cluster->overload.cfg.hard_current_ma;
 
     if (hal_nvm_read(NV_ITEM_OVERLOAD_CONFIG, sizeof(nv), (uint8_t *)&nv) ==
         HAL_NVM_SUCCESS) {
         cluster->overload.cfg = nv;
     }
-    cluster->overload.cfg.hard_power_w = hard_power;
+    cluster->overload.cfg.hard_power_w    = hard_power;
     cluster->overload.cfg.hard_current_ma = hard_current;
     elec_meas_overload_clamp(&cluster->overload.cfg);
 }
 
 static void elec_meas_overload_apply_attrs(
     electrical_measurement_cluster_t *cluster) {
-    cluster->overload.cfg.power_limit_w = cluster->overload_power_limit;
-    cluster->overload.cfg.current_limit_ma = cluster->overload_current_limit;
-    cluster->overload.cfg.trip_delay_s = cluster->overload_trip_delay;
-    cluster->overload.cfg.overvoltage_cv = cluster->overvoltage_warn;
-    cluster->overload.cfg.undervoltage_cv = cluster->undervoltage_warn;
+    cluster->overload.cfg.power_limit_w     = cluster->overload_power_limit;
+    cluster->overload.cfg.current_limit_ma  = cluster->overload_current_limit;
+    cluster->overload.cfg.trip_delay_s      = cluster->overload_trip_delay;
+    cluster->overload.cfg.overvoltage_cv    = cluster->overvoltage_warn;
+    cluster->overload.cfg.undervoltage_cv   = cluster->undervoltage_warn;
     cluster->overload.cfg.reconnect_delay_s =
         cluster->overload_reconnect_delay;
     elec_meas_overload_clamp(&cluster->overload.cfg);
@@ -229,15 +234,15 @@ void electrical_measurement_cluster_init(
         return;
 
     memset(cluster, 0, sizeof(*cluster));
-    cluster->meter = meter;
+    cluster->meter            = meter;
     cluster->measurement_type = MEAS_TYPE_AC_ACTIVE | MEAS_TYPE_AC_REACTIVE |
                                 MEAS_TYPE_AC_APPARENT | MEAS_TYPE_PHASE_A;
     cluster->ac_voltage_multiplier = 1;
-    cluster->ac_voltage_divisor = 100;
+    cluster->ac_voltage_divisor    = 100;
     cluster->ac_current_multiplier = 1;
-    cluster->ac_current_divisor = 1000;
-    cluster->ac_power_multiplier = 1;
-    cluster->ac_power_divisor = 1;
+    cluster->ac_current_divisor    = 1000;
+    cluster->ac_power_multiplier   = 1;
+    cluster->ac_power_divisor      = 1;
 
     overload_protection_init(&cluster->overload);
     elec_meas_overload_mirror_to_attrs(cluster);
@@ -327,11 +332,11 @@ void electrical_measurement_cluster_add_to_endpoint(
     endpoint->clusters[endpoint->cluster_count].cluster_id =
         ZCL_CLUSTER_ELECTRICAL_MEASUREMENT;
     endpoint->clusters[endpoint->cluster_count].attribute_count = 27;
-    endpoint->clusters[endpoint->cluster_count].attributes = cluster->attr_infos;
-    endpoint->clusters[endpoint->cluster_count].is_server = 1;
+    endpoint->clusters[endpoint->cluster_count].attributes      = cluster->attr_infos;
+    endpoint->clusters[endpoint->cluster_count].is_server       = 1;
     endpoint->cluster_count++;
     cluster->endpoint = endpoint->endpoint;
-    g_elec_cluster = cluster;
+    g_elec_cluster    = cluster;
 
     electrical_measurement_cluster_load_calibration(cluster);
     elec_meas_refresh_calibration_values(cluster);
@@ -360,6 +365,7 @@ void electrical_measurement_cluster_load_calibration(
 void electrical_measurement_cluster_callback_attr_write_trampoline(
     uint8_t endpoint, uint16_t attribute_id) {
     electrical_measurement_cluster_t *cluster = g_elec_cluster;
+
     if (!cluster || cluster->endpoint != endpoint || !cluster->meter)
         return;
 
@@ -387,6 +393,7 @@ void electrical_measurement_cluster_callback_attr_write_trampoline(
         elec_meas_apply_calibration_values(cluster);
         elec_meas_refresh_calibration_values(cluster);
         return;
+
     case ZCL_ATTR_ELEC_MEAS_CUST_OVERLOAD_POWER_LIMIT:
     case ZCL_ATTR_ELEC_MEAS_CUST_OVERLOAD_CURRENT_LIMIT:
     case ZCL_ATTR_ELEC_MEAS_CUST_OVERLOAD_TRIP_DELAY:
@@ -395,6 +402,7 @@ void electrical_measurement_cluster_callback_attr_write_trampoline(
     case ZCL_ATTR_ELEC_MEAS_CUST_OVERLOAD_RECONNECT_DELAY:
         elec_meas_overload_apply_attrs(cluster);
         return;
+
     default:
         return;
     }
@@ -414,12 +422,12 @@ void electrical_measurement_cluster_update(
     memset(&data, 0, sizeof(data));
     energy_meter_get_data(cluster->meter, &data);
     if (data.valid) {
-        cluster->rms_voltage = data.voltage;
-        cluster->rms_current = data.current;
+        cluster->rms_voltage  = data.voltage;
+        cluster->rms_current  = data.current;
         cluster->active_power = data.power;
-        cluster->freq_cf = data.freq_cf;
-        cluster->freq_cf1 = data.freq_cf1;
-        cluster->sel_state = data.sel_state;
+        cluster->freq_cf      = data.freq_cf;
+        cluster->freq_cf1     = data.freq_cf1;
+        cluster->sel_state    = data.sel_state;
         elec_meas_derive_power(data.voltage, data.current, data.power,
                                &cluster->apparent_power,
                                &cluster->reactive_power,
@@ -434,10 +442,11 @@ static void elec_meas_run_overload_protection(
     const energy_meter_data_t *data) {
     zigbee_relay_cluster *relay =
         (zigbee_relay_cluster *)cluster->protected_relay;
+
     if (!relay || !data->valid)
         return;
 
-    int32_t power = energy_meter_get_instant_power(cluster->meter);
+    int32_t           power  = energy_meter_get_instant_power(cluster->meter);
     overload_action_t action = overload_protection_check(
         &cluster->overload, hal_millis(), data->voltage, data->current,
         power, relay->relay->on, relay->startup_mode);

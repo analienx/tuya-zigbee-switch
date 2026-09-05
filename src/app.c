@@ -18,7 +18,7 @@
 
 void process_device_type_change() {
     enum device_type_t stored_device_type;
-    hal_nvm_status_t st =
+    hal_nvm_status_t   st =
         hal_nvm_read(NV_ITEM_DEVICE_TYPE, sizeof(stored_device_type),
                      (uint8_t *)&stored_device_type);
 

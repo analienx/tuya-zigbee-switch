@@ -31,13 +31,13 @@ void overload_protection_set_current_limits(overload_protection_t *op,
 
     if (soft_current_ma) {
         op->cfg.current_limit_ma = soft_current_ma;
-        op->cfg.power_limit_w =
+        op->cfg.power_limit_w    =
             (uint16_t)((uint32_t)soft_current_ma * OVERLOAD_NOMINAL_VOLTAGE_V /
                        1000u);
     }
     if (hard_current_ma) {
         op->cfg.hard_current_ma = hard_current_ma;
-        op->cfg.hard_power_w =
+        op->cfg.hard_power_w    =
             (uint16_t)((uint32_t)hard_current_ma * OVERLOAD_NOMINAL_VOLTAGE_V /
                        1000u);
     }

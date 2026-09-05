@@ -10,10 +10,10 @@
 #include <string.h>
 
 #ifdef BSEED_PM_B28WRPVX
-#define LEGACY_PM_ENERGY_EP1       40
-#define LEGACY_PM_CALIBRATION      44
-#define LEGACY_PM_OVERLOAD_CONFIG  51
-#define PM_IDENTITY_PREFIX         "b28wrpvx;TS011F-BS-PM;"
+#define LEGACY_PM_ENERGY_EP1         40
+#define LEGACY_PM_CALIBRATION        44
+#define LEGACY_PM_OVERLOAD_CONFIG    51
+#define PM_IDENTITY_PREFIX           "b28wrpvx;TS011F-BS-PM;"
 
 typedef struct {
     uint64_t accumulated_energy_wh;
@@ -32,6 +32,7 @@ static bool copy_item_if_destination_absent(uint16_t legacy_item,
                                             uint8_t *buffer,
                                             const char *name) {
     hal_nvm_status_t dst = hal_nvm_read(destination_item, size, buffer);
+
     if (dst == HAL_NVM_SUCCESS) {
         return true; // already migrated / unified state owns this item
     }
@@ -74,6 +75,7 @@ static bool copy_item_if_destination_absent(uint16_t legacy_item,
            name);
     return true;
 }
+
 #endif
 
 bool migrate_legacy_bseed_pm_nvm(void) {

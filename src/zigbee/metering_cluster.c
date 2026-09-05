@@ -23,11 +23,11 @@ void metering_cluster_init(metering_cluster_t *cluster,
         return;
 
     memset(cluster, 0, sizeof(*cluster));
-    cluster->meter = meter;
-    cluster->status = 0x00;
-    cluster->unit_of_measure = UNIT_OF_MEASURE_KWH;
-    cluster->multiplier = 1;
-    cluster->divisor = 1000;
+    cluster->meter                = meter;
+    cluster->status               = 0x00;
+    cluster->unit_of_measure      = UNIT_OF_MEASURE_KWH;
+    cluster->multiplier           = 1;
+    cluster->divisor              = 1000;
     cluster->summation_formatting = 0x2B;
     cluster->metering_device_type = METERING_DEVICE_TYPE_ELECTRIC;
 }
@@ -37,7 +37,7 @@ void metering_cluster_add_to_endpoint(metering_cluster_t *cluster,
     if (!cluster || !endpoint)
         return;
 
-    cluster->endpoint = endpoint->endpoint;
+    cluster->endpoint  = endpoint->endpoint;
     g_metering_cluster = cluster;
     metering_cluster_load_energy(cluster);
 
@@ -62,10 +62,10 @@ void metering_cluster_add_to_endpoint(metering_cluster_t *cluster,
                ZCL_DATA_TYPE_UINT8, ATTR_WRITABLE,
                cluster->reset_trigger);
 
-    endpoint->clusters[endpoint->cluster_count].cluster_id = ZCL_CLUSTER_METERING;
+    endpoint->clusters[endpoint->cluster_count].cluster_id      = ZCL_CLUSTER_METERING;
     endpoint->clusters[endpoint->cluster_count].attribute_count = 8;
-    endpoint->clusters[endpoint->cluster_count].attributes = cluster->attr_infos;
-    endpoint->clusters[endpoint->cluster_count].is_server = 1;
+    endpoint->clusters[endpoint->cluster_count].attributes      = cluster->attr_infos;
+    endpoint->clusters[endpoint->cluster_count].is_server       = 1;
     endpoint->cluster_count++;
     printf("Metering: Added to endpoint %d, energy=%llu Wh\r\n",
            endpoint->endpoint,
@@ -105,17 +105,17 @@ void metering_cluster_load_energy(metering_cluster_t *cluster) {
         return;
 
     metering_nv_data_t nv_data;
-    hal_nvm_status_t status = hal_nvm_read(
+    hal_nvm_status_t   status = hal_nvm_read(
         NV_ITEM_ENERGY_ACCUMULATION(cluster->endpoint), sizeof(nv_data),
         (uint8_t *)&nv_data);
     if (status == HAL_NVM_SUCCESS) {
         cluster->current_summation_delivered = nv_data.accumulated_energy_wh;
-        cluster->last_reported_energy = nv_data.accumulated_energy_wh;
+        cluster->last_reported_energy        = nv_data.accumulated_energy_wh;
         printf("Metering: Loaded energy %llu Wh from NVM\r\n",
                (unsigned long long)cluster->current_summation_delivered);
     } else {
         cluster->current_summation_delivered = 0;
-        cluster->last_reported_energy = 0;
+        cluster->last_reported_energy        = 0;
         printf("Metering: No energy in NVM, starting from 0\r\n");
     }
 }
@@ -136,8 +136,8 @@ void metering_cluster_reset_energy(metering_cluster_t *cluster) {
         return;
 
     cluster->current_summation_delivered = 0;
-    cluster->last_energy_value = 0;
-    cluster->last_reported_energy = 0;
+    cluster->last_energy_value           = 0;
+    cluster->last_reported_energy        = 0;
     if (cluster->meter)
         energy_meter_reset_energy(cluster->meter);
     metering_cluster_save_energy(cluster);

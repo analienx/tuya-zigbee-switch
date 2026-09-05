@@ -74,13 +74,13 @@ battery_t battery = {
     .voltage_max =            3000,
 };
 
-static hlw8012_t hlw8012_device;
+static hlw8012_t       hlw8012_device;
 static energy_meter_t *energy_meter = NULL;
 static electrical_measurement_cluster_t elec_meas_cluster;
 static metering_cluster_t metering_cluster_inst;
-static uint8_t energy_monitoring_enabled = 0;
-static uint8_t energy_monitoring_endpoint = 1;
-static uint8_t energy_monitoring_protect_relay = 0;
+static uint8_t            energy_monitoring_enabled       = 0;
+static uint8_t            energy_monitoring_endpoint      = 1;
+static uint8_t            energy_monitoring_protect_relay = 0;
 
 uint32_t parse_int(const char *s);
 char *seek_until(char *cursor, char needle);
@@ -140,7 +140,7 @@ void parse_config() {
     bool has_explicit_energy_token =
         strstr((const char *)device_config_str.data, ";EP") != NULL;
 
-    char *cursor = (char *)device_config_str.data;
+    char *      cursor          = (char *)device_config_str.data;
     const char *zb_manufacturer = extract_next_entry(&cursor);
 
     basic_cluster.manuName[0] = strlen(zb_manufacturer);
@@ -161,9 +161,9 @@ void parse_config() {
 
 #ifdef BSEED_PM_B28WRPVX
     /* Hardware-proven compatibility path for already-converted sockets. It
-     * changes no NVM config bytes and is compiled only into the dedicated PM
-     * target. The production campaign proved CF=A1, CF1=C2, SEL=B1 and the
-     * non-inverted selector interpretation used by the accepted overlay. */
+    * changes no NVM config bytes and is compiled only into the dedicated PM
+    * target. The production campaign proved CF=A1, CF1=C2, SEL=B1 and the
+    * non-inverted selector interpretation used by the accepted overlay. */
     if (!has_explicit_energy_token && strcmp(zb_manufacturer, "b28wrpvx") == 0 &&
         strcmp(zb_model, "TS011F-BS-PM") == 0) {
         hal_gpio_pin_t cf_pin  = hal_gpio_parse_pin("A1");
@@ -273,7 +273,7 @@ void parse_config() {
                 ZCL_ONOFF_CONFIGURATION_BINDED_MODE_SHORT;
             switch_clusters[switch_clusters_cnt].relay_index =
                 switch_clusters_cnt + 1;
-            switch_clusters[switch_clusters_cnt].button = &buttons[buttons_cnt];
+            switch_clusters[switch_clusters_cnt].button          = &buttons[buttons_cnt];
             switch_clusters[switch_clusters_cnt].level_move_rate = 50;
             buttons_cnt++;
             switch_clusters_cnt++;
@@ -350,14 +350,14 @@ void parse_config() {
                     ZCL_ONOFF_CONFIGURATION_SWITCH_TYPE_MOMENTARY;
             }
         } else if (entry[0] == 'E' && entry[1] == 'P') {
-            hal_gpio_pin_t cf_pin  = hal_gpio_parse_pin(entry + 2);
-            hal_gpio_pin_t cf1_pin = hal_gpio_parse_pin(entry + 4);
-            hal_gpio_pin_t sel_pin = hal_gpio_parse_pin(entry + 6);
-            const char *cal = entry + 8;
-            const char *v = seek_until((char *)cal, 'V');
-            const char *a = seek_until((char *)cal, 'A');
-            const char *w = seek_until((char *)cal, 'W');
-            uint8_t inverted =
+            hal_gpio_pin_t cf_pin   = hal_gpio_parse_pin(entry + 2);
+            hal_gpio_pin_t cf1_pin  = hal_gpio_parse_pin(entry + 4);
+            hal_gpio_pin_t sel_pin  = hal_gpio_parse_pin(entry + 6);
+            const char *   cal      = entry + 8;
+            const char *   v        = seek_until((char *)cal, 'V');
+            const char *   a        = seek_until((char *)cal, 'A');
+            const char *   w        = seek_until((char *)cal, 'W');
+            uint8_t        inverted =
                 *seek_until((char *)cal, 'I') == 'I' ? 1 : 0;
 
             if (init_hlw8012_energy_meter(
@@ -533,6 +533,7 @@ char *seek_until(char *cursor, char needle) {
 
 char *extract_next_entry(char **cursor) {
     char *end = seek_until(*cursor, ';');
+
     *end = '\0';
     char *res = *cursor;
     *cursor = end + 1;
@@ -568,6 +569,7 @@ void energy_monitoring_tick(void) {
         return;
 
     energy_meter_tick(energy_meter);
+
     /* Keep measurement/protection and energy persistence alive even while the
      * Zigbee network is offline. Reporting remains controlled by Zigbee's
      * configured reporting once joined. */

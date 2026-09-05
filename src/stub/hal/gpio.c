@@ -111,7 +111,7 @@ hal_gpio_pin_t hal_gpio_parse_pin(const char *s) {
     }
 
     char port = s[0];
-    int pin = atoi(&s[1]);
+    int  pin  = atoi(&s[1]);
     if (port < 'A' || port > 'Z' || pin < 0 || pin > 15) {
         io_log("GPIO", "Error: Invalid GPIO pin format: '%s'", s);
         return HAL_INVALID_PIN;
@@ -125,16 +125,21 @@ hal_gpio_pin_t hal_gpio_parse_pin(const char *s) {
 hal_gpio_pull_t hal_gpio_parse_pull(const char *pull_str) {
     if (!pull_str)
         return HAL_GPIO_PULL_INVALID;
+
     if (strcmp(pull_str, "") == 0 || strcmp(pull_str, "f") == 0 ||
         strcmp(pull_str, "F") == 0 || strcmp(pull_str, "n") == 0 ||
         strcmp(pull_str, "N") == 0)
         return HAL_GPIO_PULL_NONE;
+
     if (strcmp(pull_str, "u") == 0)
         return HAL_GPIO_PULL_UP;
+
     if (strcmp(pull_str, "U") == 0)
         return HAL_GPIO_PULL_UP_1M;
+
     if (strcmp(pull_str, "d") == 0 || strcmp(pull_str, "D") == 0)
         return HAL_GPIO_PULL_DOWN;
+
     return HAL_GPIO_PULL_INVALID;
 }
 
@@ -152,18 +157,21 @@ void stub_gpio_simulate_input(hal_gpio_pin_t gpio_pin, uint8_t value) {
 uint8_t stub_gpio_get_output(hal_gpio_pin_t gpio_pin) {
     if (gpio_pin >= MAX_GPIO_PINS)
         return 0;
+
     return gpio_pins[gpio_pin].value;
 }
 
 uint8_t stub_gpio_has_initial_output(hal_gpio_pin_t gpio_pin) {
     if (gpio_pin >= MAX_GPIO_PINS)
         return 0;
+
     return gpio_pins[gpio_pin].has_initial;
 }
 
 uint8_t stub_gpio_get_initial_output(hal_gpio_pin_t gpio_pin) {
     if (gpio_pin >= MAX_GPIO_PINS)
         return 0;
+
     return gpio_pins[gpio_pin].initial_value;
 }
 
@@ -229,6 +237,7 @@ hal_gpio_counter_t hal_gpio_counter_init(hal_gpio_pin_t gpio_pin,
 void hal_gpio_counter_deinit(hal_gpio_counter_t counter) {
     if (counter < 0 || counter >= MAX_GPIO_COUNTERS)
         return;
+
     gpio_counter[counter].initialized = 0;
     gpio_counter[counter].running     = 0;
     gpio_counter[counter].value       = 0;
@@ -239,6 +248,7 @@ uint32_t hal_gpio_counter_read(hal_gpio_counter_t counter) {
     if (counter < 0 || counter >= MAX_GPIO_COUNTERS ||
         !gpio_counter[counter].initialized)
         return 0;
+
     return gpio_counter[counter].value;
 }
 
@@ -246,6 +256,7 @@ void hal_gpio_counter_reset(hal_gpio_counter_t counter) {
     if (counter < 0 || counter >= MAX_GPIO_COUNTERS ||
         !gpio_counter[counter].initialized)
         return;
+
     gpio_counter[counter].value = 0;
 }
 
@@ -253,6 +264,7 @@ void hal_gpio_counter_start(hal_gpio_counter_t counter) {
     if (counter < 0 || counter >= MAX_GPIO_COUNTERS ||
         !gpio_counter[counter].initialized)
         return;
+
     gpio_counter[counter].running = 1;
 }
 
@@ -260,6 +272,7 @@ void hal_gpio_counter_stop(hal_gpio_counter_t counter) {
     if (counter < 0 || counter >= MAX_GPIO_COUNTERS ||
         !gpio_counter[counter].initialized)
         return;
+
     gpio_counter[counter].running = 0;
 }
 

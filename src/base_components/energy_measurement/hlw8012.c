@@ -39,9 +39,9 @@ int hlw8012_init(hlw8012_t *dev, hal_gpio_pin_t cf_pin,
     }
 
     memset(dev, 0, sizeof(*dev));
-    dev->cf_pin  = cf_pin;
-    dev->cf1_pin = cf1_pin;
-    dev->sel_pin = sel_pin;
+    dev->cf_pin      = cf_pin;
+    dev->cf1_pin     = cf1_pin;
+    dev->sel_pin     = sel_pin;
     dev->cf_counter  = HAL_GPIO_COUNTER_INVALID;
     dev->cf1_counter = HAL_GPIO_COUNTER_INVALID;
 
@@ -92,7 +92,7 @@ void hlw8012_set_sel_inverted(hlw8012_t *dev, uint8_t inverted) {
         return;
 
     dev->sel_inverted = inverted ? 1 : 0;
-    dev->meter.type = dev->sel_inverted ? ENERGY_METER_BL0937
+    dev->meter.type   = dev->sel_inverted ? ENERGY_METER_BL0937
                                          : ENERGY_METER_HLW8012;
     printf("HLW8012: SEL polarity %s\r\n",
            dev->sel_inverted ? "inverted (BL0937)" : "normal (HLW8012)");
@@ -119,7 +119,7 @@ int hlw8012_calibrate(hlw8012_t *dev, uint8_t channel, uint32_t reference) {
     if (!dev || reference == 0)
         return -1;
 
-    uint32_t pulses;
+    uint32_t  pulses;
     uint32_t *target;
     switch (channel) {
     case ENERGY_METER_CHANNEL_VOLTAGE:
@@ -156,6 +156,7 @@ static int hlw8012_meter_calibrate(void *ctx, energy_meter_channel_t channel,
 static void hlw8012_meter_get_calibration(void *ctx,
                                           energy_meter_calibration_t *cal) {
     hlw8012_t *dev = (hlw8012_t *)ctx;
+
     if (!dev || !cal)
         return;
 
@@ -173,11 +174,12 @@ static void hlw8012_meter_set_calibration(void *ctx, uint32_t voltage_mult,
 
 static void update_measurement_handler(void *arg) {
     hlw8012_t *dev = (hlw8012_t *)arg;
+
     if (!dev || !dev->initialized)
         return;
 
-    uint32_t now = hal_millis();
-    uint32_t cf_pulses = hal_gpio_counter_read_and_reset(dev->cf_counter);
+    uint32_t now        = hal_millis();
+    uint32_t cf_pulses  = hal_gpio_counter_read_and_reset(dev->cf_counter);
     uint32_t cf1_pulses = hal_gpio_counter_read_and_reset(dev->cf1_counter);
 
     if (cf_pulses > HLW8012_MAX_SANE_PULSES)
@@ -187,7 +189,7 @@ static void update_measurement_handler(void *arg) {
 
     dev->data.freq_cf  = pulses_to_frequency(cf_pulses);
     dev->data.freq_cf1 = pulses_to_frequency(cf1_pulses);
-    dev->data.power =
+    dev->data.power    =
         (int16_t)(((uint32_t)cf_pulses * dev->cal.power_multiplier +
                    HLW8012_FIXED_POINT_SCALE / 2) /
                   HLW8012_FIXED_POINT_SCALE);
@@ -220,11 +222,11 @@ static void update_measurement_handler(void *arg) {
             dev->data.no_load_samples++;
         if (dev->data.no_load_samples == HLW8012_NO_LOAD_CONFIRM_SAMPLES) {
             dev->data.no_load_suppressed = 1;
-            dev->data.current = 0;
+            dev->data.current            = 0;
             dev->data.power = 0;
         }
     } else {
-        dev->data.no_load_samples = 0;
+        dev->data.no_load_samples    = 0;
         dev->data.no_load_suppressed = 0;
     }
 
@@ -273,6 +275,7 @@ void hlw8012_reset_energy(hlw8012_t *dev) {
 
 static int32_t hlw8012_meter_get_instant_power(void *ctx) {
     hlw8012_t *dev = (hlw8012_t *)ctx;
+
     if (!dev || !dev->initialized || !dev->data.valid)
         return dev ? dev->data.power : 0;
 
@@ -280,7 +283,7 @@ static int32_t hlw8012_meter_get_instant_power(void *ctx) {
     if (elapsed < 1000u)
         return dev->data.power;
 
-    uint32_t partial = hal_gpio_counter_read(dev->cf_counter);
+    uint32_t partial     = hal_gpio_counter_read(dev->cf_counter);
     uint32_t pulses_full =
         (partial * HLW8012_SAMPLE_INTERVAL_MS) / elapsed;
     if (pulses_full > HLW8012_MAX_SANE_PULSES)
@@ -292,11 +295,13 @@ static int32_t hlw8012_meter_get_instant_power(void *ctx) {
                   HLW8012_FIXED_POINT_SCALE);
     if (dev->data.no_load_suppressed && power <= HLW8012_NO_LOAD_POWER_W)
         return 0;
+
     return power;
 }
 
 static void hlw8012_meter_get_data(void *ctx, energy_meter_data_t *data) {
     hlw8012_t *dev = (hlw8012_t *)ctx;
+
     if (!dev || !data)
         return;
 
@@ -321,6 +326,7 @@ static void hlw8012_meter_tick(void *ctx) {
 energy_meter_t *hlw8012_as_energy_meter(hlw8012_t *dev) {
     if (!dev || !dev->initialized)
         return NULL;
+
     return &dev->meter;
 }
 

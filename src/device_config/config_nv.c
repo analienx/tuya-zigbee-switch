@@ -114,11 +114,11 @@ static bool config_pulse_meter_token_valid(const uint8_t *data, uint16_t start,
         return false;
     }
 
-    bool seen_i = false;
-    bool seen_v = false;
-    bool seen_a = false;
-    bool seen_w = false;
-    uint16_t pos = 8;
+    bool     seen_i = false;
+    bool     seen_v = false;
+    bool     seen_a = false;
+    bool     seen_w = false;
+    uint16_t pos    = 8;
 
     while (pos < len) {
         uint8_t marker = data[start + pos++];
@@ -167,12 +167,12 @@ static bool config_overload_token_valid(const uint8_t *data, uint16_t start,
         return false;
     }
 
-    bool seen_c = false;
-    bool seen_p = false;
-    uint16_t pos = 2;
+    bool     seen_c = false;
+    bool     seen_p = false;
+    uint16_t pos    = 2;
     while (pos < len) {
         uint8_t marker = data[start + pos++];
-        bool *seen = NULL;
+        bool *  seen   = NULL;
         if (marker == 'C') {
             seen = &seen_c;
         } else if (marker == 'P') {
@@ -416,6 +416,7 @@ bool device_config_resources_are_safe(const uint8_t *data, uint16_t size) {
                     return false;
                 }
                 overload_tokens++;
+
                 /* OL is order-sensitive in parse_config. An explicit meter
                  * must precede it, except for the exact dedicated BSEED PM
                  * build where the implicit meter is initialized before tokens. */
