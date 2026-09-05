@@ -428,21 +428,21 @@ void parse_config() {
                                          battery.pin != HAL_INVALID_PIN);
 #endif
 
+    /* Metering belongs to the configured endpoint (BSEED uses EP1). Add it
+     * before allocating any later endpoint's cluster pointer so EP1's cluster
+     * count is final before shared-pool pointer arithmetic begins. */
+    if (energy_monitoring_enabled && energy_monitoring_endpoint == 1) {
+        electrical_measurement_cluster_add_to_endpoint(&elec_meas_cluster,
+                                                       &endpoints[0]);
+        metering_cluster_add_to_endpoint(&metering_cluster_inst, &endpoints[0]);
+    }
+
     for (int index = 0; index < switch_clusters_cnt; index++) {
         if (index != 0) {
             cluster_ptr += endpoints[index - 1].cluster_count;
             endpoints[index].clusters = cluster_ptr;
         }
         switch_cluster_add_to_endpoint(&switch_clusters[index], &endpoints[index]);
-    }
-
-    /* Metering belongs to the configured endpoint (BSEED uses EP1). Add it
-     * before the relay loop so subsequent cluster_ptr arithmetic sees EP1's
-     * final cluster count. V8 preflight already reserved both cluster slots. */
-    if (energy_monitoring_enabled && energy_monitoring_endpoint == 1) {
-        electrical_measurement_cluster_add_to_endpoint(&elec_meas_cluster,
-                                                       &endpoints[0]);
-        metering_cluster_add_to_endpoint(&metering_cluster_inst, &endpoints[0]);
     }
 
     for (int index = 0; index < relay_clusters_cnt; index++) {
