@@ -3,6 +3,7 @@
 #include "device_config/device_migration.h"
 #include "device_config/device_type.h"
 #include "device_config/nvm_items.h"
+#include "device_config/pm_legacy_migration.h"
 #include "device_config/reset.h"
 #include "hal/nvm.h"
 #include "hal/printf_selector.h"
@@ -16,17 +17,12 @@
 #endif
 
 void process_device_type_change() {
-    // If device was updated from router to end device or vice versa,
-    // we need to do a reset, as the network settings stored by SDK in NVM
-    // are not compatible between these device types.
-    // Read device type from NVM and compare with current configuration.
     enum device_type_t stored_device_type;
-    hal_nvm_status_t   st =
+    hal_nvm_status_t st =
         hal_nvm_read(NV_ITEM_DEVICE_TYPE, sizeof(stored_device_type),
                      (uint8_t *)&stored_device_type);
 
     if (st != HAL_NVM_SUCCESS) {
-        // Unable to read device type from NVM, possibly first boot.
         stored_device_type = CURRENT_DEVICE_TYPE;
         hal_nvm_write(NV_ITEM_DEVICE_TYPE, sizeof(stored_device_type),
                       (uint8_t *)&stored_device_type);
@@ -35,11 +31,9 @@ void process_device_type_change() {
     if (stored_device_type != CURRENT_DEVICE_TYPE) {
         printf("Device type change detected: %d -> %d\r\n", stored_device_type,
                CURRENT_DEVICE_TYPE);
-        // Device type has changed, update NVM and reset device.
         stored_device_type = CURRENT_DEVICE_TYPE;
         hal_nvm_write(NV_ITEM_DEVICE_TYPE, sizeof(stored_device_type),
                       (uint8_t *)&stored_device_type);
-        // Perform a factory reset to clear incompatible network settings.
         hal_factory_reset();
         schedule_reboot(2000);
     }
@@ -47,24 +41,26 @@ void process_device_type_change() {
 
 void app_init(void) {
     handle_version_changes();
+
+    /* The historical BSEED PM fork used NVM 40/44/51 for accepted runtime
+     * metering state. Unified V8 reserves 40..50 for dimmer state, so the PM
+     * target copies those legacy records into its new 64+ namespace before any
+     * parser or device-specific migration can interpret the old slots. */
+    if (!migrate_legacy_bseed_pm_nvm()) {
+        printf("PM NVM migration: blocking init, scheduling recovery reboot\r\n");
+        schedule_reboot(DEFAULT_RESET_DELAY_MS);
+        return;
+    }
+
     if (handle_device_specific_migrations() == DEVICE_MIGRATION_BLOCK_INIT) {
-        // The pin-map / NVM combination is not proven safe: never parse a
-        // config in this state. Reboot and let the transaction resume from
-        // its marker; the contacts stay at power-on defaults until then.
         printf("Device migration: blocking init, scheduling recovery "
                "reboot\r\n");
         schedule_reboot(DEFAULT_RESET_DELAY_MS);
         return;
     }
 
-    // Migration classification must see raw stored bytes. Only after that
-    // state machine declares the NVM safe to continue do we enable the parser
-    // resource preflight. parse_config() performs its normal read, but any
-    // oversized/malformed resource topology is then replaced in RAM before a
-    // GPIO or Zigbee array can be touched.
     device_config_enable_parser_preflight();
-    parse_config(); // Does most of the setup, including all callbacks
-                    // registration
+    parse_config();
     hal_zigbee_init_ota();
     init_global_attr_write_callback();
 
@@ -74,11 +70,14 @@ void app_init(void) {
 static bool boot_announce_sent = false;
 
 void app_task() {
+    /* Meter sampling/protection/persistence is intentionally independent of
+     * network join state. */
+    energy_monitoring_tick();
+
 #ifdef END_DEVICE
     poll_control_cluster_update();
 #endif
 
-    // TODO: add jitter to avoid all devices trying to join at once
     if (hal_zigbee_get_network_status() != HAL_ZIGBEE_NETWORK_JOINED &&
         hal_zigbee_get_network_status() != HAL_ZIGBEE_NETWORK_JOINING) {
         hal_zigbee_start_network_steering();
@@ -86,6 +85,7 @@ void app_task() {
     if (!boot_announce_sent &&
         hal_zigbee_get_network_status() == HAL_ZIGBEE_NETWORK_JOINED) {
         hal_zigbee_send_announce();
+        init_energy_reporting();
         boot_announce_sent = true;
     }
 }
