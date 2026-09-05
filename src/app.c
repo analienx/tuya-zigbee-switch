@@ -1,3 +1,4 @@
+#include "device_config/config_nv.h"
 #include "device_config/config_parser.h"
 #include "device_config/device_migration.h"
 #include "device_config/device_type.h"
@@ -55,6 +56,13 @@ void app_init(void) {
         schedule_reboot(DEFAULT_RESET_DELAY_MS);
         return;
     }
+
+    // Migration classification must see raw stored bytes. Only after that
+    // state machine declares the NVM safe to continue do we enable the parser
+    // resource preflight. parse_config() performs its normal read, but any
+    // oversized/malformed resource topology is then replaced in RAM before a
+    // GPIO or Zigbee array can be touched.
+    device_config_enable_parser_preflight();
     parse_config(); // Does most of the setup, including all callbacks
                     // registration
     hal_zigbee_init_ota();
