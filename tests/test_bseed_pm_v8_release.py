@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -64,3 +65,12 @@ def test_pm_validator_proves_same_sha_pm_and_ts0726_builds():
     assert '"fileVersion": 285356042' in text
     assert '"imageType": 45577' in text
     assert "device flash" in text
+
+
+def test_release_handoff_scripts_parse_before_executor_use():
+    subprocess.run(["bash", "-n", str(BUILD)], cwd=ROOT, check=True)
+    compile(
+        VALIDATOR.read_text(encoding="utf-8"),
+        str(VALIDATOR),
+        "exec",
+    )
