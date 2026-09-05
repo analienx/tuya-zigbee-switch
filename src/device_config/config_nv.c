@@ -23,6 +23,7 @@ const char default_config_data[] = STRINGIFY(DEFAULT_CONFIG);
 static const char emergency_config_data[] = "unknown;TS0012-CUSTOM;";
 
 device_config_str_t device_config_str;
+static bool parser_preflight_enabled = false;
 
 static bool config_digits_only(const uint8_t *data, uint16_t start,
                                uint16_t len) {
@@ -125,9 +126,14 @@ void device_config_read_raw_from_nv() {
     }
 }
 
+void device_config_enable_parser_preflight(void) {
+    parser_preflight_enabled = true;
+}
+
 void device_config_read_from_nv() {
     device_config_read_raw_from_nv();
-    if (!device_config_prepare_for_parse()) {
+
+    if (parser_preflight_enabled && !device_config_prepare_for_parse()) {
         // The emergency minimal config is intentionally constructed to fit;
         // this branch is defensive only and leaves parsing with zero GPIO
         // resources rather than an unsafe candidate.
