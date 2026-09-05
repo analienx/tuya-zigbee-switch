@@ -7,13 +7,31 @@ NVM_MIGRATIONS_VERSION ?= 1
 
 CONFIG ?= X;Y;BA0u;LA1;SA2u;RA3;IA4;
 
+# Default target
 help:
 	@echo "Stub Device Build System"
 	@echo "========================"
+	@echo ""
+	@echo "Build Targets:"
 	@echo "  build              - Compile the stub device binary for host testing"
+	@echo ""
+	@echo "Run Targets:"
 	@echo "  run                - Build and run the stub device in interactive mode"
+	@echo ""
+	@echo "Cleanup:"
 	@echo "  clean              - Remove build artifacts and NVM data"
+	@echo ""
+	@echo "About:"
+	@echo "  The stub device provides a host-native simulation environment"
+	@echo "  for testing Zigbee device functionality without hardware."
+	@echo "  It includes a REPL interface and Python test integration."
+	@echo ""
+	@echo "Usage Example:"
+	@echo "  make build         # Compile the stub device"
+	@echo "  make run           # Run interactively"
+	@echo ""
 
+# Source files for stub build
 SOURCES := \
 	$(SRC_DIR)/app.c \
 	$(SRC_DIR)/zigbee/poll_control_cluster.c \
@@ -64,6 +82,10 @@ CFLAGS := -Wall -Wno-unused-parameter -Wno-unused-variable -g -O0 \
 	-DNVM_MIGRATIONS_VERSION=$(NVM_MIGRATIONS_VERSION) \
 	-std=c99
 
+# Optional device-specific one-shot config migration (device_migration.c).
+# MIGRATION_FROM_CONFIG enables it; the migration fires only when the stored
+# config matches that string exactly and no marker is present. Values are
+# taken from the environment or the command line (quote semicolons in shells).
 MIGRATION_FROM_CONFIG ?=
 MIGRATION_TO_CONFIG   ?=
 MIGRATION_REVERT      ?=
@@ -102,6 +124,7 @@ endif
 
 LDFLAGS := -lpthread
 
+# Build targets
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
