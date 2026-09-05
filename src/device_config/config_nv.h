@@ -8,13 +8,13 @@
 // in config_parser.c, not the wider NVM slot reservation. A candidate that
 // exceeds the parser's current runtime capacity is rejected before parsing;
 // increasing capacity is a separate compatibility decision.
-#define DEVICE_CONFIG_MAX_LEDS              5
-#define DEVICE_CONFIG_MAX_BUTTONS           11
-#define DEVICE_CONFIG_MAX_RELAYS            10
-#define DEVICE_CONFIG_MAX_SWITCH_CLUSTERS   4
-#define DEVICE_CONFIG_MAX_RELAY_CLUSTERS    4
-#define DEVICE_CONFIG_MAX_ENDPOINTS         10
-#define DEVICE_CONFIG_CLUSTER_POOL_SIZE     32
+#define DEVICE_CONFIG_MAX_LEDS               5
+#define DEVICE_CONFIG_MAX_BUTTONS            11
+#define DEVICE_CONFIG_MAX_RELAYS             10
+#define DEVICE_CONFIG_MAX_SWITCH_CLUSTERS    4
+#define DEVICE_CONFIG_MAX_RELAY_CLUSTERS     4
+#define DEVICE_CONFIG_MAX_ENDPOINTS          10
+#define DEVICE_CONFIG_CLUSTER_POOL_SIZE      32
 
 // Following structure (2 byte length, data follows) is ZCL LONG_STRING format.
 // This way it allows us to use it directly inside Basic cluster
