@@ -61,7 +61,7 @@ def test_same_boundary_fails_closed_for_end_device_poll_cluster() -> None:
     config = (
         "StubManufacturer;StubDevice;LC0;"
         "SA0u;SA1u;SA2u;SA3u;"
-        "RB0;RB1u;RB2;RB3;"
+        "RB0;RB1;RB2;RB3;"
         "CC0C1;CC2C3;"
     )
     output = _assert_fallback_preserves_nvm(config, END_DEVICE)
