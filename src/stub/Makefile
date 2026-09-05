@@ -2,7 +2,8 @@
 HOST_CC            ?= gcc
 SRC_DIR            := ..
 BUILD_DIR          := ../../build/stub
-BINARY             := $(BUILD_DIR)/stub_device
+BINARY             ?= $(BUILD_DIR)/stub_device
+NVM_MIGRATIONS_VERSION ?= 1
 
 CONFIG ?= X;Y;BA0u;LA1;SA2u;RA3;IA4;
 
@@ -26,7 +27,7 @@ help:
 	@echo "  It includes a REPL interface and Python test integration."
 	@echo ""
 	@echo "Usage Example:"
-	@echo "  make build         # Compile stub device"
+	@echo "  make build         # Compile the stub device"
 	@echo "  make run           # Run interactively"
 	@echo ""
 
@@ -73,7 +74,7 @@ INCLUDES := \
 
 CFLAGS := -Wall -Wno-unused-parameter -Wno-unused-variable -g -O0 \
     -DHAL_STUB -DSTACK_BUILD=1001 -D_DEFAULT_SOURCE -DVERSION_STR="0.0.0" \
-	-DNVM_MIGRATIONS_VERSION=1 \
+	-DNVM_MIGRATIONS_VERSION=$(NVM_MIGRATIONS_VERSION) \
 	-std=c99
 
 # Optional device-specific one-shot config migration (device_migration.c).
