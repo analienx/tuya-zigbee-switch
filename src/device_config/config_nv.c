@@ -111,7 +111,7 @@ void device_config_write_to_nv() {
     }
 }
 
-void device_config_read_from_nv() {
+void device_config_read_raw_from_nv() {
     hal_nvm_status_t st = 0;
 
     st = hal_nvm_read(NV_ITEM_DEVICE_CONFIG, sizeof(device_config_str),
@@ -123,6 +123,17 @@ void device_config_read_from_nv() {
                st, device_config_str.size);
         load_config_copy(default_config_data);
     }
+}
+
+void device_config_read_from_nv() {
+    device_config_read_raw_from_nv();
+    if (!device_config_prepare_for_parse()) {
+        // The emergency minimal config is intentionally constructed to fit;
+        // this branch is defensive only and leaves parsing with zero GPIO
+        // resources rather than an unsafe candidate.
+        printf("Unable to prepare a parser-safe device config\r\n");
+        load_config_copy(emergency_config_data);
+    }
 
     printf("Using config: %d chars from\r\n%s\r\n", device_config_str.size,
            device_config_str.data);
@@ -133,16 +144,16 @@ bool device_config_resources_are_safe(const uint8_t *data, uint16_t size) {
         return false;
     }
 
-    uint16_t buttons              = 0;
-    uint16_t leds                 = 0;
-    uint16_t relays               = 0;
-    uint16_t switch_clusters      = 0;
-    uint16_t relay_clusters       = 0;
+    uint16_t buttons               = 0;
+    uint16_t leds                  = 0;
+    uint16_t relays                = 0;
+    uint16_t switch_clusters       = 0;
+    uint16_t relay_clusters        = 0;
     uint16_t cover_switch_clusters = 0;
-    uint16_t cover_clusters       = 0;
-    uint16_t battery_tokens       = 0;
-    uint16_t token_start          = 0;
-    uint16_t token_index          = 0;
+    uint16_t cover_clusters        = 0;
+    uint16_t battery_tokens        = 0;
+    uint16_t token_start           = 0;
+    uint16_t token_index           = 0;
 
     for (uint16_t cursor = 0; cursor < size; cursor++) {
         if (data[cursor] != ';') {
@@ -226,8 +237,8 @@ bool device_config_resources_are_safe(const uint8_t *data, uint16_t size) {
         buttons > DEVICE_CONFIG_MAX_BUTTONS ||
         leds > DEVICE_CONFIG_MAX_LEDS ||
         relays > DEVICE_CONFIG_MAX_RELAYS ||
-        switch_clusters > MAX_SWITCHES ||
-        relay_clusters > MAX_RELAYS ||
+        switch_clusters > DEVICE_CONFIG_MAX_SWITCH_CLUSTERS ||
+        relay_clusters > DEVICE_CONFIG_MAX_RELAY_CLUSTERS ||
         cover_switch_clusters > MAX_COVER_SWITCHES ||
         cover_clusters > MAX_COVERS) {
         return false;
