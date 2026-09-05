@@ -19,6 +19,8 @@ help:
 	@echo ""
 	@echo "  Development Utilities:"
 	@echo "    unused_image_type      - Show next available firmware image type ID"
+	@echo "    check_image_types_all  - Report/fail on every firmware image-type collision"
+	@echo "    check_image_types_changed BASE=<git-ref> - Reject new/changed collisions"
 	@echo ""
 
 
@@ -59,3 +61,12 @@ freeze_ota_links:
 
 unused_image_type:
 	@yq '[.[] | .firmware_image_type] | max + 1' device_db.yaml
+
+
+check_image_types_all:
+	python3 helper_scripts/check_image_types.py device_db.yaml --all
+
+
+check_image_types_changed:
+	@test -n "$(BASE)" || (echo "BASE=<git-ref> is required" >&2; exit 2)
+	python3 helper_scripts/check_image_types.py device_db.yaml --changed-base "$(BASE)"
