@@ -42,6 +42,15 @@ def _run(binary: Path, commands: str = "q\n", env=None):
     )
 
 
+def _define_value(text: str, name: str) -> str:
+    """Return a preprocessor define value without depending on alignment."""
+    for line in text.splitlines():
+        parts = line.strip().split(None, 2)
+        if len(parts) == 3 and parts[0] == "#define" and parts[1] == name:
+            return parts[2]
+    raise AssertionError(f"missing #define {name}")
+
+
 @pytest.fixture(scope="module")
 def pm_stub():
     subprocess.run(
@@ -67,12 +76,18 @@ def pm_stub():
 
 def test_pm_nvm_namespace_is_disjoint_from_v8_dimmer_state():
     text = (ROOT / "src/device_config/nvm_items.h").read_text()
-    assert "NV_ITEM_MIGRATION_MARKER    40" in text
-    assert "NV_ITEM_RELAY_BINDING_INTENT(relay_idx)    (41 + (relay_idx))" in text
-    assert "NV_ITEM_SWITCH_BINDING_COMMAND_MODE(switch_idx)    (46 + (switch_idx))" in text
-    assert "NV_ITEM_ENERGY_ACCUMULATION(endpoint)    (64 + (endpoint) - 1)" in text
-    assert "NV_ITEM_ENERGY_CALIBRATION               68" in text
-    assert "NV_ITEM_OVERLOAD_CONFIG                  69" in text
+    assert _define_value(text, "NV_ITEM_MIGRATION_MARKER") == "40"
+    assert _define_value(
+        text, "NV_ITEM_RELAY_BINDING_INTENT(relay_idx)"
+    ) == "(41 + (relay_idx))"
+    assert _define_value(
+        text, "NV_ITEM_SWITCH_BINDING_COMMAND_MODE(switch_idx)"
+    ) == "(46 + (switch_idx))"
+    assert _define_value(
+        text, "NV_ITEM_ENERGY_ACCUMULATION(endpoint)"
+    ) == "(64 + (endpoint) - 1)"
+    assert _define_value(text, "NV_ITEM_ENERGY_CALIBRATION") == "68"
+    assert _define_value(text, "NV_ITEM_OVERLOAD_CONFIG") == "69"
 
 
 def test_legacy_pm_state_migrates_byte_exactly_and_sources_are_preserved(pm_stub):
@@ -137,13 +152,16 @@ def test_pm_target_short_config_gets_meter_clusters_without_nvm_config_rewrite(p
 
     result = _run(
         pm_stub,
+        "machine on\n"
         "zcl_read 1 0b04 0505\n"  # Electrical Measurement / rmsVoltage
         "zcl_read 1 0702 0000\n"  # Metering / currentSummDelivered
         "q\n",
     )
     assert "Config: implicit b28wrpvx BL0937 meter CF=A1 CF1=C2 SEL=B1" in result.stdout
-    assert "attr_not_found ep=1 cluster=0x0B04" not in result.stdout
-    assert "attr_not_found ep=1 cluster=0x0702" not in result.stdout
+    assert "RES OK ep=1 cluster=0x0B04 attr=0x0505" in result.stdout
+    assert "RES OK ep=1 cluster=0x0702 attr=0x0000" in result.stdout
+    assert "RES ERR attr_not_found ep=1 cluster=0x0B04" not in result.stdout
+    assert "RES ERR attr_not_found ep=1 cluster=0x0702" not in result.stdout
     assert _item(2).read_bytes() == before
 
 
@@ -154,13 +172,14 @@ def test_generic_v8_build_does_not_enable_implicit_bseed_metering():
 
     result = _run(
         GENERIC_BIN,
+        "machine on\n"
         "zcl_read 1 0b04 0505\n"
         "zcl_read 1 0702 0000\n"
         "q\n",
     )
     assert "Config: implicit b28wrpvx BL0937 meter" not in result.stdout
-    assert "attr_not_found ep=1 cluster=0x0B04" in result.stdout
-    assert "attr_not_found ep=1 cluster=0x0702" in result.stdout
+    assert "RES ERR attr_not_found ep=1 cluster=0x0B04 attr=0x0505" in result.stdout
+    assert "RES ERR attr_not_found ep=1 cluster=0x0702 attr=0x0000" in result.stdout
 
 
 def test_proven_bseed_no_load_filter_is_before_energy_accumulation():
