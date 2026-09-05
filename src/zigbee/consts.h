@@ -1,11 +1,9 @@
 #ifndef ZIGBEE_CONSTS_H_
 #define ZIGBEE_CONSTS_H_
 
-
 #define ZCL_HA_PROFILE    0x0104
 
 // Clusters
-
 #define ZCL_CLUSTER_BASIC                     0
 #define ZCL_CLUSTER_POWER_CFG                 1
 #define ZCL_CLUSTER_ON_OFF                    6
@@ -16,16 +14,13 @@
 #define ZCL_CLUSTER_OTA_BOOTLOAD              0x0019
 #define ZCL_CLUSTER_WINDOW_COVERING           0x0102
 #define ZCL_CLUSTER_COVER_SWITCH_CONFIG       0xFC01
-
+#define ZCL_CLUSTER_ELECTRICAL_MEASUREMENT    0x0B04
+#define ZCL_CLUSTER_METERING                  0x0702
 
 // Attributes
-
-// Global
-
 #define ZCL_ATTR_GLOBAL_CLUSTER_REVISION    0xFFFD
 
 // Basic cluster
-
 #define ZCL_ATTR_BASIC_ZCL_VER                    0x0000
 #define ZCL_ATTR_BASIC_APP_VER                    0x0001
 #define ZCL_ATTR_BASIC_STACK_VER                  0x0002
@@ -40,34 +35,28 @@
 #define ZCL_ATTR_BASIC_ALARM_MASK                 0x0013
 #define ZCL_ATTR_BASIC_DISABLE_LOCAL_CFG          0x0014
 #define ZCL_ATTR_BASIC_SW_BUILD_ID                0x4000
-
 #define ZCL_ATTR_BASIC_DEVICE_CONFIG              0xff00
 #define ZCL_ATTR_BASIC_STATUS_LED_STATE           0xff01
 #define ZCL_ATTR_BASIC_MULTI_PRESS_RESET_COUNT    0xff02
 
 // Power Configuration cluster
-
 #define ZCL_ATTR_POWER_CFG_BATTERY_VOLTAGE       0x0020
 #define ZCL_ATTR_POWER_CFG_BATTERY_PERCENTAGE    0x0021
 
-// Power source values
 #define POWER_SOURCE_UNKNOWN                     0x00
 #define POWER_SOURCE_MAINS_1_PHASE               0x01
 #define POWER_SOURCE_BATTERY                     0x03
 #define POWER_SOURCE_DC                          0x04
 
 // OnOff cluster
-
 #define ZCL_ATTR_ONOFF                         0x0000
 #define ZCL_ATTR_START_UP_ONOFF                0x4003
-
 #define ZCL_ATTR_ONOFF_INDICATOR_MODE          0xff01
 #define ZCL_ATTR_ONOFF_INDICATOR_STATE         0xff02
 #define ZCL_ATTR_ONOFF_PHYSICAL_RELAY_MODE     0xff03
 #define ZCL_ATTR_ONOFF_BINDING_INTENT_STATE    0xff04
 
 // OnOff configuration cluster
-
 #define ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_TYPE               0x0000
 #define ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_ACTIONS            0x0010
 #define ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_MODE               0xff00
@@ -76,21 +65,15 @@
 #define ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_LONG_PRESS_DUR     0xff03
 #define ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_LEVEL_MOVE_RATE    0xff04
 #define ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_BINDING_MODE       0xff05
-// BSEED/extended direct-binding policy. Kept separate from the standard
-// SwitchActions attribute (0x0010), whose Zigbee-defined domain is 0..2.
 #define ZCL_ATTR_ONOFF_CONFIGURATION_BINDING_COMMAND_MODE      0xff06
 
-
 // Multistate cluster
-
 #define ZCL_ATTR_MULTISTATE_INPUT_NUMBER_OF_STATES    0x004A
 #define ZCL_ATTR_MULTISTATE_INPUT_OUT_OF_SERVICE      0x0051
 #define ZCL_ATTR_MULTISTATE_INPUT_PRESENT_VALUE       0x0055
 #define ZCL_ATTR_MULTISTATE_INPUT_STATUS_FLAGS        0x006F
 
-
 // Groups cluster
-
 #define ZCL_ATTR_GROUP_NAME_SUPPORT                                  0x0000
 
 // WindowCovering cluster
@@ -109,15 +92,51 @@
 
 // Poll Control cluster
 #define ZCL_CLUSTER_POLL_CONTROL                                     0x0020
-
-// Poll Control attributes
 #define ZCL_ATTR_POLL_CTRL_CHECK_IN_INTERVAL                         0x0000
 #define ZCL_ATTR_POLL_CTRL_LONG_POLL_INTERVAL                        0x0001
 #define ZCL_ATTR_POLL_CTRL_SHORT_POLL_INTERVAL                       0x0002
 #define ZCL_ATTR_POLL_CTRL_FAST_POLL_TIMEOUT                         0x0003
 
-// OTA cluster
+// Electrical Measurement cluster (0x0B04)
+#define ZCL_ATTR_ELEC_MEAS_MEASUREMENT_TYPE                          0x0000
+#define ZCL_ATTR_ELEC_MEAS_RMS_VOLTAGE                               0x0505
+#define ZCL_ATTR_ELEC_MEAS_RMS_CURRENT                               0x0508
+#define ZCL_ATTR_ELEC_MEAS_ACTIVE_POWER                              0x050B
+#define ZCL_ATTR_ELEC_MEAS_REACTIVE_POWER                            0x050E
+#define ZCL_ATTR_ELEC_MEAS_APPARENT_POWER                            0x050F
+#define ZCL_ATTR_ELEC_MEAS_POWER_FACTOR                              0x0510
+#define ZCL_ATTR_ELEC_MEAS_AC_VOLTAGE_MULTIPLIER                     0x0600
+#define ZCL_ATTR_ELEC_MEAS_AC_VOLTAGE_DIVISOR                        0x0601
+#define ZCL_ATTR_ELEC_MEAS_AC_CURRENT_MULTIPLIER                     0x0602
+#define ZCL_ATTR_ELEC_MEAS_AC_CURRENT_DIVISOR                        0x0603
+#define ZCL_ATTR_ELEC_MEAS_AC_POWER_MULTIPLIER                       0x0604
+#define ZCL_ATTR_ELEC_MEAS_AC_POWER_DIVISOR                          0x0605
+#define ZCL_ATTR_ELEC_MEAS_CUST_FREQUENCY_CF                         0xFF00
+#define ZCL_ATTR_ELEC_MEAS_CUST_FREQUENCY_CF1                        0xFF01
+#define ZCL_ATTR_ELEC_MEAS_CUST_FREQUENCY_SEL_STATE                  0xFF02
+#define ZCL_ATTR_ELEC_MEAS_CUST_CALIBRATE_VOLTAGE                    0xFF10
+#define ZCL_ATTR_ELEC_MEAS_CUST_CALIBRATE_CURRENT                    0xFF11
+#define ZCL_ATTR_ELEC_MEAS_CUST_CALIBRATE_POWER                      0xFF12
+#define ZCL_ATTR_ELEC_MEAS_CUST_CALIBRATION_VALUES                   0xFF20
+#define ZCL_ATTR_ELEC_MEAS_CUST_OVERLOAD_POWER_LIMIT                 0xFF30
+#define ZCL_ATTR_ELEC_MEAS_CUST_OVERLOAD_CURRENT_LIMIT               0xFF31
+#define ZCL_ATTR_ELEC_MEAS_CUST_OVERLOAD_TRIP_DELAY                  0xFF32
+#define ZCL_ATTR_ELEC_MEAS_CUST_OVERVOLTAGE_WARN                     0xFF33
+#define ZCL_ATTR_ELEC_MEAS_CUST_UNDERVOLTAGE_WARN                    0xFF34
+#define ZCL_ATTR_ELEC_MEAS_CUST_OVERLOAD_RECONNECT_DELAY             0xFF35
+#define ZCL_ATTR_ELEC_MEAS_CUST_OVERLOAD_ALARM                       0xFF36
 
+// Metering cluster (0x0702)
+#define ZCL_ATTR_METERING_CURRENT_SUMMATION_DELIVERED                0x0000
+#define ZCL_ATTR_METERING_STATUS                                     0x0200
+#define ZCL_ATTR_METERING_UNIT_OF_MEASURE                            0x0300
+#define ZCL_ATTR_METERING_MULTIPLIER                                 0x0301
+#define ZCL_ATTR_METERING_DIVISOR                                    0x0302
+#define ZCL_ATTR_METERING_SUMMATION_FORMATTING                       0x0303
+#define ZCL_ATTR_METERING_METERING_DEVICE_TYPE                       0x0306
+#define ZCL_ATTR_METERING_CUST_RESET_ENERGY                          0xF000
+
+// OTA cluster
 #define ZCL_ATTR_OTA_UPGRADE_SERVER_ID                  0x0000
 #define ZCL_ATTR_OTA_FILE_OFFSET                        0x0001
 #define ZCL_ATTR_OTA_CURRENT_FILE_VERSION               0x0002
@@ -131,9 +150,6 @@
 #define ZCL_ATTR_OTA_IMAGE_STAMP                        0x000A
 
 // Attr values
-
-// OnOff cluster
-
 #define ZCL_START_UP_ONOFF_SET_ONOFF_TO_OFF           0x00
 #define ZCL_START_UP_ONOFF_SET_ONOFF_TO_ON            0x01
 #define ZCL_START_UP_ONOFF_SET_ONOFF_TOGGLE           0x02
@@ -142,7 +158,6 @@
 #define ZCL_ONOFF_INDICATOR_MODE_SAME                 0x00
 #define ZCL_ONOFF_INDICATOR_MODE_OPPOSITE             0x01
 #define ZCL_ONOFF_INDICATOR_MODE_MANUAL               0x02
-// New values are appended; 0/1/2 remain ABI-compatible with deployed firmware.
 #define ZCL_ONOFF_INDICATOR_MODE_PHYSICAL_OUTPUT      0x03
 #define ZCL_ONOFF_INDICATOR_MODE_BINDING_INTENT       0x04
 #define ZCL_ONOFF_INDICATOR_MODE_MAX                  ZCL_ONOFF_INDICATOR_MODE_BINDING_INTENT
@@ -151,20 +166,14 @@
 #define ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON     0x01
 #define ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_OFF    0x02
 
-// OnOff configuration cluster
-
 #define ZCL_ONOFF_CONFIGURATION_SWITCH_TYPE_TOGGLE                     0x00
 #define ZCL_ONOFF_CONFIGURATION_SWITCH_TYPE_MOMENTARY                  0x01
 #define ZCL_ONOFF_CONFIGURATION_SWITCH_TYPE_MOMENTARY_NC               0x02
-
 #define ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_ONOFF                    0x00
 #define ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_OFFON                    0x01
 #define ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SIMPLE            0x02
 #define ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SMART_SYNC        0x03
 #define ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SMART_OPPOSITE    0x04
-
-// Direct-binding command policy. 0..2 intentionally mirror standard
-// SwitchActions; 3/4 are BSEED extensions carried only by custom 0xff06.
 #define ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_ONOFF                   0x00
 #define ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_OFFON                   0x01
 #define ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_TOGGLE                  0x02
@@ -172,50 +181,32 @@
 #define ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_OPPOSITE_LOCAL_STATE    0x04
 #define ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_MAX \
         ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_OPPOSITE_LOCAL_STATE
-
 #define ZCL_ONOFF_CONFIGURATION_RELAY_MODE_DETACHED                     0x00
 #define ZCL_ONOFF_CONFIGURATION_RELAY_MODE_RISE                         0x01
 #define ZCL_ONOFF_CONFIGURATION_RELAY_MODE_LONG                         0x02
 #define ZCL_ONOFF_CONFIGURATION_RELAY_MODE_SHORT                        0x03
-
-// Bound-control mode. Raw 0 is a first-class disabled state: no OnOff command
-// and no Level Move/Stop may leave this switch endpoint while disabled.
 #define ZCL_ONOFF_CONFIGURATION_BINDED_MODE_DISABLED                    0x00
 #define ZCL_ONOFF_CONFIGURATION_BINDED_MODE_RISE                        0x01
 #define ZCL_ONOFF_CONFIGURATION_BINDED_MODE_LONG                        0x02
 #define ZCL_ONOFF_CONFIGURATION_BINDED_MODE_SHORT                       0x03
 
-
-// Level cluster
-
 #define ZCL_LEVEL_MOVE_UP      0x00
 #define ZCL_LEVEL_MOVE_DOWN    0x01
-
-// WindowCovering cluster
 
 #define ZCL_ATTR_WINDOW_COVERING_MOVING_STOPPED    0x00
 #define ZCL_ATTR_WINDOW_COVERING_MOVING_OPENING    0x01
 #define ZCL_ATTR_WINDOW_COVERING_MOVING_CLOSING    0x02
 
-// Cover Switch Configuration cluster
-
 #define ZCL_COVER_SWITCH_TYPE_TOGGLE         0x00
 #define ZCL_COVER_SWITCH_TYPE_MOMENTARY      0x01
-
 #define ZCL_COVER_SWITCH_MODE_IMMEDIATE      0x00
 #define ZCL_COVER_SWITCH_MODE_SHORT_PRESS    0x01
 #define ZCL_COVER_SWITCH_MODE_LONG_PRESS     0x02
 #define ZCL_COVER_SWITCH_MODE_HYBRID         0x03
 
 // Commands
-
-// Basic cluster - target-safe chunked device_config transport.
-// These are cluster-specific commands carried on genBasic so each APS frame
-// remains comfortably below the unfragmented payload limit.
 #define ZCL_CMD_BASIC_DEVICE_CONFIG_STAGE     0xF0
 #define ZCL_CMD_BASIC_DEVICE_CONFIG_COMMIT    0xF1
-
-// OnOff Cluster
 
 #define ZCL_CMD_ONOFF_OFF                      0x00
 #define ZCL_CMD_ONOFF_ON                       0x01
@@ -223,8 +214,6 @@
 #define ZCL_CMD_OFF_WITH_EFFECT                0x40
 #define ZCL_CMD_ON_WITH_RECALL_GLOBAL_SCENE    0x41
 #define ZCL_CMD_ON_WITH_TIMED_OFF              0x42
-
-// Level Cluster
 
 #define ZCL_CMD_LEVEL_MOVE_TO_LEVEL                0x00
 #define ZCL_CMD_LEVEL_MOVE                         0x01
@@ -235,13 +224,9 @@
 #define ZCL_CMD_LEVEL_STEP_WITH_ON_OFF             0x06
 #define ZCL_CMD_LEVEL_STOP_WITH_ON_OFF             0x07
 
-// WindowCovering Cluster
-
 #define ZCL_CMD_WINDOW_COVERING_UP_OPEN       0x00
 #define ZCL_CMD_WINDOW_COVERING_DOWN_CLOSE    0x01
 #define ZCL_CMD_WINDOW_COVERING_STOP          0x02
-
-// OTA Cluster
 
 #define ZCL_CMD_OTA_IMAGE_NOTIFY                           0x00
 #define ZCL_CMD_OTA_QUERY_NEXT_IMAGE_REQUEST               0x01
@@ -254,17 +239,13 @@
 #define ZCL_CMD_OTA_QUERY_DEVICE_SPECIFIC_FILE_REQUEST     0x08
 #define ZCL_CMD_OTA_QUERY_DEVICE_SPECIFIC_FILE_RESPONSE    0x09
 
-// Poll Control Cluster (client -> server)
 #define ZCL_CMD_POLL_CTRL_CHECK_IN_RSP                     0x00
 #define ZCL_CMD_POLL_CTRL_FAST_POLL_STOP                   0x01
 #define ZCL_CMD_POLL_CTRL_SET_LONG_POLL_INTERVAL           0x02
 #define ZCL_CMD_POLL_CTRL_SET_SHORT_POLL_INTERVAL          0x03
-
-// Poll Control Cluster (server -> client)
 #define ZCL_CMD_POLL_CTRL_CHECK_IN                         0x00
 
 // Data types
-
 #define ZCL_DATA_TYPE_NO_DATA            0x00
 #define ZCL_DATA_TYPE_DATA8              0x08
 #define ZCL_DATA_TYPE_DATA16             0x09
@@ -321,7 +302,5 @@
 #define ZCL_DATA_TYPE_IEEE_ADDR          0xf0
 #define ZCL_DATA_TYPE_128_BIT_SEC_KEY    0xf1
 #define ZCL_DATA_TYPE_UNKNOWN            0xff
-
-
 
 #endif /* ZIGBEE_CONSTS_H_ */
