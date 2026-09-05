@@ -28,12 +28,14 @@ extern device_config_str_t device_config_str;
 void device_config_write_to_nv();
 void device_config_remove_from_nv();
 
-// Raw read is reserved for migration classification: it must not replace a
-// foreign/corrupt stored value before the migration state machine has inspected
-// it. Normal parser callers use device_config_read_from_nv(), which preflights
-// resources and falls back in RAM before any hardware side effect.
+// Raw reads are needed during the migration-classification phase: foreign or
+// corrupt stored bytes must remain visible to that state machine. app_init()
+// enables parser preflight only after migrations have declared the NVM safe to
+// continue. Subsequent device_config_read_from_nv() calls then fail closed to
+// the compiled default before parse_config can touch GPIOs/Zigbee structures.
 void device_config_read_raw_from_nv();
 void device_config_read_from_nv();
+void device_config_enable_parser_preflight(void);
 
 // Safe replacement used by the chunked Zigbee transport. The candidate is
 // validated before this call; the NVM write is read back byte-for-byte before
@@ -50,8 +52,7 @@ bool device_config_is_valid(const uint8_t *data, uint16_t size);
 bool device_config_resources_are_safe(const uint8_t *data, uint16_t size);
 
 // If the stored config is structurally/resource unsafe, use the compiled board
-// default for this boot (without overwriting the suspect NVM). This is called
-// automatically by device_config_read_from_nv().
+// default for this boot (without overwriting the suspect NVM).
 bool device_config_prepare_for_parse(void);
 
 void handle_version_changes();
