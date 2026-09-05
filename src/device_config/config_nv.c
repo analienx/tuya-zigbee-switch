@@ -23,7 +23,7 @@ const char default_config_data[] = STRINGIFY(DEFAULT_CONFIG);
 static const char emergency_config_data[] = "unknown;TS0012-CUSTOM;";
 
 device_config_str_t device_config_str;
-static bool parser_preflight_enabled = false;
+static bool         parser_preflight_enabled = false;
 
 static bool config_digits_only(const uint8_t *data, uint16_t start,
                                uint16_t len) {
@@ -454,6 +454,7 @@ bool device_config_is_valid(const uint8_t *data, uint16_t size) {
 
 bool device_config_replace_verified(const uint8_t *data, uint16_t size) {
     if (!device_config_is_valid(data, size)) {
+        printf("Rejecting invalid/unsafe device config candidate\r\n");
         return false;
     }
 
@@ -464,18 +465,22 @@ bool device_config_replace_verified(const uint8_t *data, uint16_t size) {
 
     if (hal_nvm_write(NV_ITEM_DEVICE_CONFIG, sizeof(desired),
                       (uint8_t *)&desired) != HAL_NVM_SUCCESS) {
+        printf("Failed to write replacement device config\r\n");
         return false;
     }
 
     device_config_str_t readback;
     if (hal_nvm_read(NV_ITEM_DEVICE_CONFIG, sizeof(readback),
-                     (uint8_t *)&readback) != HAL_NVM_SUCCESS) {
-        return false;
-    }
-    if (memcmp(&readback, &desired, sizeof(desired)) != 0) {
+                     (uint8_t *)&readback) != HAL_NVM_SUCCESS ||
+        memcmp(&readback, &desired, sizeof(desired)) != 0) {
+        printf("Replacement device config verification failed\r\n");
         return false;
     }
 
     memcpy(&device_config_str, &desired, sizeof(desired));
     return true;
+}
+
+void device_config_remove_from_nv() {
+    hal_nvm_delete(NV_ITEM_DEVICE_CONFIG);
 }
