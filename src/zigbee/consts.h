@@ -161,7 +161,7 @@
 #define ZCL_ONOFF_INDICATOR_MODE_PHYSICAL_OUTPUT                        0x03
 #define ZCL_ONOFF_INDICATOR_MODE_BINDING_INTENT                         0x04
 #define ZCL_ONOFF_INDICATOR_MODE_MAX \
-                                                                        ZCL_ONOFF_INDICATOR_MODE_BINDING_INTENT
+        ZCL_ONOFF_INDICATOR_MODE_BINDING_INTENT
 
 #define ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED                          0x00
 #define ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON                       0x01
