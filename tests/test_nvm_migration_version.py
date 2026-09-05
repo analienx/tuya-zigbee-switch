@@ -7,7 +7,8 @@ import subprocess
 from pathlib import Path
 
 
-BINARY = Path("build/stub/stub_device")
+BINARY_V1 = Path("build/stub/stub_device")
+BINARY_V2 = Path("build/stub/stub_device_schema_v2")
 NVM_DIR = Path("stub_nvm_data")
 VERSION_ITEM = NVM_DIR / "item_01.bin"
 
@@ -21,9 +22,26 @@ def _read_version() -> int:
     return struct.unpack("<H", VERSION_ITEM.read_bytes())[0]
 
 
-def _run() -> str:
+def _build_v2_stub() -> None:
+    subprocess.run(
+        [
+            "make",
+            "-C",
+            "src/stub",
+            "build",
+            "BINARY=../../build/stub/stub_device_schema_v2",
+            "NVM_MIGRATIONS_VERSION=2",
+        ],
+        text=True,
+        capture_output=True,
+        timeout=60,
+        check=True,
+    )
+
+
+def _run(binary: Path = BINARY_V1) -> str:
     proc = subprocess.run(
-        [str(BINARY), "--device-config", "Stub;Stub;", "--freeze-time"],
+        [str(binary), "--device-config", "Stub;Stub;", "--freeze-time"],
         input="q\n",
         text=True,
         capture_output=True,
@@ -41,15 +59,33 @@ def test_unknown_schema_establishes_current_version() -> None:
     assert _read_version() == 1
 
 
-def test_noncurrent_schema_converges_to_current_version() -> None:
-    # The stub compiles NVM_MIGRATIONS_VERSION=1. Use a non-zero, non-current
-    # value so handle_version_changes() takes the migration path rather than
-    # the first-boot baseline path.
+def test_successful_forward_migration_advances_once_and_converges() -> None:
+    _build_v2_stub()
+    _write_version(1)
+
+    first = _run(BINARY_V2)
+    assert "Old version: 1" in first
+    assert "Current version: 2" in first
+    assert _read_version() == 2
+
+    before = VERSION_ITEM.stat().st_mtime_ns
+    second = _run(BINARY_V2)
+    after = VERSION_ITEM.stat().st_mtime_ns
+
+    assert "Old version: 2" in second
+    assert "Current version: 2" in second
+    assert _read_version() == 2
+    assert after == before
+
+
+def test_newer_schema_is_never_implicitly_downgraded() -> None:
     _write_version(2)
-    output = _run()
+    output = _run(BINARY_V1)
+
     assert "Old version: 2" in output
     assert "Current version: 1" in output
-    assert _read_version() == 1
+    assert "refusing schema downgrade" in output
+    assert _read_version() == 2
 
 
 def test_current_schema_does_not_rewrite_version_item() -> None:
