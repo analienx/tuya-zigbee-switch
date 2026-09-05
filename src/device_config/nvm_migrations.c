@@ -69,6 +69,16 @@ void handle_version_changes() {
         return;
     }
 
+    if (oldVersion > currentVersion) {
+        // Never rewrite a schema marker created by newer firmware. Downgrades
+        // need an explicit, separately reviewed reverse-migration path; simply
+        // pretending newer NVM is older can make subsequent upgrades unsafe.
+        printf("NVM schema %d is newer than firmware schema %d; refusing "
+               "schema downgrade\r\n",
+               oldVersion, currentVersion);
+        return;
+    }
+
     if (!run_pending_migrations(oldVersion)) {
         printf("NVM migration failed; keeping schema version %d\r\n", oldVersion);
         return;
