@@ -1,0 +1,52 @@
+name: BSEED PM reproducibility
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+jobs:
+  validate-unified-pm:
+    # This is the integration-branch release gate. The workflow remains
+    # dispatchable after merge for explicit future reproducibility checks.
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'assistant/v8-unified-pm'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make python3 python3-pytest python3-yaml curl wget unzip bzip2
+
+      - name: Cache Telink SDK and toolchain
+        uses: actions/cache@v4
+        with:
+          path: telink_tools
+          key: telink-tools-v3.7.2.0
+
+      - name: Install Telink build dependencies only
+        run: make -C src/telink -f tools.mk sdk toolchain
+
+      - name: Validate unified PM and TS0726 from same SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 make_scripts/validate_bseed_ts011f_pm_v8.py 2>&1 | tee pm-validator-output.log
+
+      - name: Upload deterministic build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseed-pm-v8-reproducibility
+          path: |
+            pm-validator-output.log
+            build/bseed-ts011f-pm-v8/forward.bin
+            build/bseed-ts011f-pm-v8/forward.ota
+            build/bseed-ts011f-pm-v8/manifest.json
+            build/bseed-ts0726-v8/forward.bin
+            build/bseed-ts0726-v8/forward.ota
+            build/bseed-ts0726-v8/manifest.json
+          if-no-files-found: warn
