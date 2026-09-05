@@ -1,4 +1,4 @@
-"""Release wiring checks for the BSEED TS0726 v5 device_config guard."""
+"""Release wiring checks for the BSEED TS0726 device_config guard."""
 
 from pathlib import Path
 
@@ -15,6 +15,19 @@ def test_v6_release_build_has_clean_identity_and_guard() -> None:
     assert "285356039" in build
     assert build.count("DEVICE_CONFIG_GUARD=BSEED_TS0726_3GANG") == 2
     assert "MIGRATION_REVERT" not in build
+
+
+def test_v8_build_preserves_accepted_identity_and_guard() -> None:
+    build = Path("make_scripts/build_bseed_ts0726_v8.sh").read_text(encoding="utf-8")
+    assert "1.1.8-bseedv8" in build
+    assert "0x1102300A" in build
+    assert "285356042" in build
+    assert "IMAGE_TYPE=45577" in build
+    assert "MANUFACTURER_CODE=4417" in build
+    assert build.count("DEVICE_CONFIG_GUARD=BSEED_TS0726_3GANG") == 2
+    assert "MIGRATION_REVERT" not in build
+    assert "flash:" not in build
+    assert "make -C src/telink flash" not in build
 
 
 def test_telink_makefile_maps_guard_to_compile_time_define() -> None:
