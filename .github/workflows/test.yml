@@ -34,17 +34,25 @@ jobs:
             exit 0
           fi
 
-          # Make formatting failures actionable and retain the exact patch as a
-          # CI artifact so supervisors can diagnose without mutating source.
+          # The runner copy is disposable. Format it to produce both an exact
+          # patch and the canonical full source files for supervisor-owned
+          # remediation; nothing is pushed from CI.
           uncrustify -c uncrustify.cfg --replace --no-backup "${files[@]}"
           git diff -- "${files[@]}" | tee lint-diff.patch
+          mkdir -p lint-formatted
+          for file in "${files[@]}"; do
+            mkdir -p "lint-formatted/$(dirname "$file")"
+            cp "$file" "lint-formatted/$file"
+          done
           exit 1
       - name: Upload lint diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: lint-diagnostics
-          path: lint-diff.patch
+          path: |
+            lint-diff.patch
+            lint-formatted/
           if-no-files-found: ignore
 
   image-type-identity:
