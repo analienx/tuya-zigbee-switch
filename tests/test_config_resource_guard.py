@@ -98,10 +98,25 @@ def test_button_storage_n_and_n_plus_one() -> None:
     _assert_fallback_preserves_nvm(unsafe)
 
 
+def test_basic_cluster_string_bound_is_checked_before_copy() -> None:
+    manufacturer_31 = "M" * 31
+    model_31 = "D" * 31
+    output = _run(f"{manufacturer_31};{model_31};")
+    assert "Stored device config is unsafe" not in output
+
+    _assert_fallback_preserves_nvm(f"{'M' * 32};Stub;")
+    _assert_fallback_preserves_nvm(f"Stub;{'D' * 32};")
+
+
 def test_malformed_known_token_is_rejected_before_hardware_parse() -> None:
     _assert_fallback_preserves_nvm("Stub;Stub;Dnot-a-number;SA0u;")
     _assert_fallback_preserves_nvm("Stub;Stub;SA0;")
     _assert_fallback_preserves_nvm("Stub;Stub;RA0A1X;")
+    _assert_fallback_preserves_nvm("Stub;Stub;S?0u;")
+    _assert_fallback_preserves_nvm("Stub;Stub;SA0x;")
+    _assert_fallback_preserves_nvm("Stub;Stub;BT?0;")
+    _assert_fallback_preserves_nvm("Stub;Stub;XA0?0u;")
+    _assert_fallback_preserves_nvm("Stub;Stub;CA0?0;")
 
 
 def test_source_contract_preflights_only_after_device_migration() -> None:
@@ -140,5 +155,9 @@ def test_runtime_capacity_constants_match_concrete_parser_arrays() -> None:
     for macro, (declaration, value) in expected.items():
         assert declaration in parser
         assert f"#define {macro}" in header
-        line = next(line for line in header.splitlines() if line.startswith(f"#define {macro}"))
+        line = next(
+            line
+            for line in header.splitlines()
+            if line.startswith(f"#define {macro}")
+        )
         assert line.split()[-1] == value
