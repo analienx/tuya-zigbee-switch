@@ -1,5 +1,9 @@
 """Unit tests for the migration-safe image-type collision policy."""
 
+from pathlib import Path
+
+import yaml
+
 from helper_scripts.check_image_types import (
     all_collisions,
     changed_image_type_boards,
@@ -76,8 +80,14 @@ def test_unique_new_image_type_passes_changed_mode() -> None:
 
 
 def test_bseed_deployed_image_type_is_not_renumbered_by_this_policy() -> None:
-    # The live TS0726 V7 OTA identity is 45577. This test makes the preservation
-    # rule explicit: an unchanged deployed ID is not classified as a change.
+    # The live TS0726 V7 OTA identity is 45577. This synthetic pair proves the
+    # changed-only policy does not turn historical identity debt into a forced
+    # migration when the deployed ID itself is untouched.
     base = _db(SWITCH_BSEED_TS0726_3GANG={"firmware_image_type": 45577})
     current = _db(SWITCH_BSEED_TS0726_3GANG={"firmware_image_type": 45577})
     assert changed_image_type_boards(base, current) == set()
+
+
+def test_real_bseed_device_database_identity_remains_45577() -> None:
+    database = yaml.safe_load(Path("device_db.yaml").read_text(encoding="utf-8"))
+    assert database["SWITCH_BSEED_TS0726_3GANG"]["firmware_image_type"] == 45577
