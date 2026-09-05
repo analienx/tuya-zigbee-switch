@@ -11,14 +11,12 @@
 #include "silabs/hal/silabs_gpio_utils.h"
 #include <stdio.h>
 
-// Get container structure from embedded member pointer
 #define container_of(ptr, type, member) \
         ((type *)((char *)(ptr) - offsetof(type, member)))
 
 #define LINE_MISSING     0xFF
 #define MAX_INT_LINES    16
 
-// ------ One-time init guards ------
 static bool s_gpio_clock_enabled = false;
 static bool s_gpio_inited        = false;
 
@@ -36,7 +34,6 @@ static void hal_gpio_ensure_gpio_init(void) {
     }
 }
 
-// ------ Per-interrupt bookkeeping ------
 typedef struct {
     bool               in_use;
     hal_gpio_pin_t     hal_pin;
@@ -46,7 +43,7 @@ typedef struct {
     sli_zigbee_event_t af_event;
 } int_slot_t;
 
-static int_slot_t s_slots[MAX_INT_LINES]; // 16 EXTI lines total
+static int_slot_t s_slots[MAX_INT_LINES];
 
 static int32_t alloc_int_slot(void) {
     for (uint8_t i = 0; i < 16; i++) {
@@ -65,7 +62,6 @@ static void free_int_slot(int32_t slot_no) {
     }
 }
 
-// Dispatchers, e.g. IRQ routinues
 static void _dispatch_regular(uint8_t intNo, void *ctx) {
     (void)intNo;
     int_slot_t *slot = (int_slot_t *)ctx;
@@ -75,7 +71,6 @@ static void _dispatch_regular(uint8_t intNo, void *ctx) {
 }
 
 static void _af_event_handler(sl_zigbee_af_event_t *event) {
-    // Get int_slot_t from embedded af_event field
     int_slot_t *slot = container_of(event, int_slot_t, af_event);
 
     if (slot->user_cb) {
@@ -83,7 +78,6 @@ static void _af_event_handler(sl_zigbee_af_event_t *event) {
     }
 }
 
-// API
 void hal_gpio_init(hal_gpio_pin_t gpio_pin, uint8_t is_input,
                    hal_gpio_pull_t pull_direction) {
     hal_gpio_ensure_clock();
@@ -93,25 +87,18 @@ void hal_gpio_init(hal_gpio_pin_t gpio_pin, uint8_t is_input,
     if (is_input) {
         switch (pull_direction) {
         case HAL_GPIO_PULL_UP:
-            sl_gpio_set_pin_mode(&sl_gpio, SL_GPIO_MODE_INPUT_PULL,
-                                 1); // DOUT=1 => pull-up
+            sl_gpio_set_pin_mode(&sl_gpio, SL_GPIO_MODE_INPUT_PULL, 1);
             break;
         case HAL_GPIO_PULL_DOWN:
-            sl_gpio_set_pin_mode(&sl_gpio, SL_GPIO_MODE_INPUT_PULL,
-                                 0); // DOUT=0 => pull-down
+            sl_gpio_set_pin_mode(&sl_gpio, SL_GPIO_MODE_INPUT_PULL, 0);
             break;
         default:
             sl_gpio_set_pin_mode(&sl_gpio, SL_GPIO_MODE_INPUT, 0);
             break;
         }
     } else {
-        // Output: push-pull, initial low
         sl_gpio_set_pin_mode(&sl_gpio, SL_GPIO_MODE_PUSH_PULL, 0);
     }
-
-    // Optional: store pull direction for interrupt polarity later.
-    // We don’t keep a global pin map; polarity is picked at registration time
-    // by looking up the slot when the user calls hal_gpio_int_callback.
 }
 
 void hal_gpio_init_output(hal_gpio_pin_t gpio_pin, hal_gpio_pull_t pull,
@@ -120,48 +107,33 @@ void hal_gpio_init_output(hal_gpio_pin_t gpio_pin, hal_gpio_pull_t pull,
     hal_gpio_ensure_clock();
 
     const sl_gpio_t sl_gpio = silabs_hal_gpio_to_sl_gpio(gpio_pin);
-
-    // Push-pull output whose first driven level is already `initial_value`
-    // (the Silicon Labs API sets DOUT in the same operation as the mode).
     sl_gpio_set_pin_mode(&sl_gpio, SL_GPIO_MODE_PUSH_PULL,
                          initial_value ? 1 : 0);
 }
 
 void hal_gpio_set(hal_gpio_pin_t gpio_pin) {
     const sl_gpio_t sl_gpio = silabs_hal_gpio_to_sl_gpio(gpio_pin);
-
     sl_gpio_set_pin(&sl_gpio);
 }
 
 void hal_gpio_clear(hal_gpio_pin_t gpio_pin) {
     const sl_gpio_t sl_gpio = silabs_hal_gpio_to_sl_gpio(gpio_pin);
-
     sl_gpio_clear_pin(&sl_gpio);
 }
 
 uint8_t hal_gpio_read(hal_gpio_pin_t gpio_pin) {
     const sl_gpio_t sl_gpio = silabs_hal_gpio_to_sl_gpio(gpio_pin);
     bool            value   = 0;
-
     sl_gpio_get_pin_input(&sl_gpio, &value);
     return value;
 }
 
-// Register an interrupt that also attempts EM4 wake-up.
-// - Wakes from EM2/EM3 via normal EXTI (edge-sensitive).
-// - Wakes from EM4 if the pin supports EM4WU (level-sensitive).
-//   Polarity rule:
-//     * If input has pull-up  -> active-low (wake on low level).
-//     * If input has pull-down-> active-high (wake on high level).
-//     * Otherwise default to rising+falling EXTI and active-low EM4WU.
 void hal_gpio_callback(hal_gpio_pin_t gpio_pin, gpio_callback_t callback,
                        void *arg) {
     hal_gpio_ensure_clock();
     hal_gpio_ensure_gpio_init();
 
     const sl_gpio_t sl_gpio = silabs_hal_gpio_to_sl_gpio(gpio_pin);
-
-    // Allocate a regular EXTI line (for edge interrupts while awake)
     int32_t slot_no = alloc_int_slot();
     if (slot_no == LINE_MISSING) {
         printf("hal_gpio_callback: no free EXTI lines\r\n");
@@ -173,8 +145,6 @@ void hal_gpio_callback(hal_gpio_pin_t gpio_pin, gpio_callback_t callback,
     slot->arg     = arg;
     sl_zigbee_af_isr_event_init(&slot->af_event, _af_event_handler);
 
-    // Register regular edge-sensitive callback (both edges)
-
     sl_status_t status = sl_gpio_configure_external_interrupt(
         &sl_gpio, &slot->line, SL_GPIO_INTERRUPT_RISING_FALLING_EDGE,
         (sl_gpio_irq_callback_t)_dispatch_regular, slot);
@@ -182,8 +152,6 @@ void hal_gpio_callback(hal_gpio_pin_t gpio_pin, gpio_callback_t callback,
            (unsigned long)status);
 }
 
-// (Optional) helper to unregister an interrupt if you add
-// hal_gpio_int_disable() later
 void hal_gpio_unreg_callback(hal_gpio_pin_t gpio_pin) {
     printf("hal_gpio_unreg_callback pin %02X\r\n", gpio_pin);
 
@@ -205,14 +173,33 @@ hal_gpio_pin_t hal_gpio_parse_pin(const char *s) {
 }
 
 hal_gpio_pull_t hal_gpio_parse_pull(const char *pull_str) {
-    if (pull_str[0] == 'u' || pull_str[0] == 'U') {
+    if (pull_str[0] == 'u' || pull_str[0] == 'U')
         return HAL_GPIO_PULL_UP;
-    }
-    if (pull_str[0] == 'd') {
+    if (pull_str[0] == 'd' || pull_str[0] == 'D')
         return HAL_GPIO_PULL_DOWN;
-    }
-    if (pull_str[0] == 'f') {
+    if (pull_str[0] == 'f' || pull_str[0] == 'F' ||
+        pull_str[0] == 'n' || pull_str[0] == 'N')
         return HAL_GPIO_PULL_NONE;
-    }
     return HAL_GPIO_PULL_INVALID;
 }
+
+/* Pulse counting is currently hardware-proven only on Telink. Keep the common
+ * HAL contract linkable on Silabs and fail meter initialization explicitly
+ * rather than pretending to measure. */
+hal_gpio_counter_t hal_gpio_counter_init(hal_gpio_pin_t gpio_pin,
+                                         hal_gpio_counter_edge_t edge,
+                                         hal_gpio_pull_t pull) {
+    (void)gpio_pin;
+    (void)edge;
+    (void)pull;
+    return HAL_GPIO_COUNTER_INVALID;
+}
+
+void hal_gpio_counter_deinit(hal_gpio_counter_t counter) { (void)counter; }
+uint32_t hal_gpio_counter_read(hal_gpio_counter_t counter) {
+    (void)counter;
+    return 0;
+}
+void hal_gpio_counter_reset(hal_gpio_counter_t counter) { (void)counter; }
+void hal_gpio_counter_start(hal_gpio_counter_t counter) { (void)counter; }
+void hal_gpio_counter_stop(hal_gpio_counter_t counter) { (void)counter; }
