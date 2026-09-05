@@ -1,0 +1,42 @@
+name: apply-pm-format-once
+
+on:
+  push:
+    branches:
+      - assistant/v8-unified-pm
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: contains(github.event.head_commit.message, '[apply-pm-format]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install uncrustify
+        run: sudo apt-get update && sudo apt-get install -y uncrustify
+      - name: Apply canonical formatter to PM diff only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin supervisor/ts0726-v7-pure-relay-disable
+          base='origin/supervisor/ts0726-v7-pure-relay-disable'
+          mapfile -t files < <(git diff --name-only "$base"...HEAD -- src | grep -E '\.(c|h)$' || true)
+          if (( ${#files[@]} == 0 )); then
+            echo 'No PM C/H files require formatting'
+            exit 0
+          fi
+          uncrustify -c uncrustify.cfg --replace --no-backup "${files[@]}"
+          git diff --check
+          if git diff --quiet -- "${files[@]}"; then
+            echo 'Already formatted'
+            exit 0
+          fi
+          git config user.name 'BSEED Supervisor'
+          git config user.email 'jakub.holasek@live.com'
+          git add -- "${files[@]}"
+          git commit -m 'style: apply canonical uncrustify to unified PM diff'
+          git push origin HEAD:assistant/v8-unified-pm
