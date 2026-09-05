@@ -3,17 +3,34 @@
 from pathlib import Path
 
 
+def _define_value(text: str, name: str) -> str:
+    """Return a preprocessor define value without depending on alignment."""
+    for line in text.splitlines():
+        parts = line.strip().split(None, 2)
+        if len(parts) == 3 and parts[0] == "#define" and parts[1] == name:
+            return parts[2]
+    raise AssertionError(f"missing #define {name}")
+
+
 def test_custom_binding_attribute_uses_next_free_switch_config_id() -> None:
     consts = Path("src/zigbee/consts.h").read_text(encoding="utf-8")
-    assert "ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_BINDING_MODE       0xff05" in consts
-    assert "ZCL_ATTR_ONOFF_CONFIGURATION_BINDING_COMMAND_MODE      0xff06" in consts
+    assert _define_value(
+        consts, "ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_BINDING_MODE"
+    ) == "0xff05"
+    assert _define_value(
+        consts, "ZCL_ATTR_ONOFF_CONFIGURATION_BINDING_COMMAND_MODE"
+    ) == "0xff06"
 
 
 def test_binding_policy_nvm_range_is_disjoint_from_existing_v5_state() -> None:
     nvm = Path("src/device_config/nvm_items.h").read_text(encoding="utf-8")
-    assert "NV_ITEM_MIGRATION_MARKER    40" in nvm
-    assert "NV_ITEM_RELAY_BINDING_INTENT(relay_idx)    (41 + (relay_idx))" in nvm
-    assert "NV_ITEM_SWITCH_BINDING_COMMAND_MODE(switch_idx)    (46 + (switch_idx))" in nvm
+    assert _define_value(nvm, "NV_ITEM_MIGRATION_MARKER") == "40"
+    assert _define_value(
+        nvm, "NV_ITEM_RELAY_BINDING_INTENT(relay_idx)"
+    ) == "(41 + (relay_idx))"
+    assert _define_value(
+        nvm, "NV_ITEM_SWITCH_BINDING_COMMAND_MODE(switch_idx)"
+    ) == "(46 + (switch_idx))"
     # Five relay-intent slots are 41..45; five switch-policy slots are 46..50.
     assert 41 + 4 < 46
 
@@ -38,10 +55,18 @@ def test_legacy_action_values_are_migrated_not_reinterpreted_on_wire() -> None:
 
 def test_disabled_bound_mode_has_explicit_zero_abi() -> None:
     consts = Path("src/zigbee/consts.h").read_text(encoding="utf-8")
-    assert "ZCL_ONOFF_CONFIGURATION_BINDED_MODE_DISABLED                    0x00" in consts
-    assert "ZCL_ONOFF_CONFIGURATION_BINDED_MODE_RISE                        0x01" in consts
-    assert "ZCL_ONOFF_CONFIGURATION_BINDED_MODE_LONG                        0x02" in consts
-    assert "ZCL_ONOFF_CONFIGURATION_BINDED_MODE_SHORT                       0x03" in consts
+    assert _define_value(
+        consts, "ZCL_ONOFF_CONFIGURATION_BINDED_MODE_DISABLED"
+    ) == "0x00"
+    assert _define_value(
+        consts, "ZCL_ONOFF_CONFIGURATION_BINDED_MODE_RISE"
+    ) == "0x01"
+    assert _define_value(
+        consts, "ZCL_ONOFF_CONFIGURATION_BINDED_MODE_LONG"
+    ) == "0x02"
+    assert _define_value(
+        consts, "ZCL_ONOFF_CONFIGURATION_BINDED_MODE_SHORT"
+    ) == "0x03"
 
 
 def test_disabled_bound_mode_suppresses_onoff_and_level_transmission() -> None:
