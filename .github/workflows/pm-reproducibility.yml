@@ -15,6 +15,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # pull_request normally checks out GitHub's synthetic merge ref. This
+          # gate instead proves the immutable candidate commit itself.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install host dependencies
         run: |
@@ -34,6 +37,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          TC32=./telink_tools/toolchain/tc32/bin/tc32-elf-gcc
           {
             echo "head=$(git rev-parse HEAD)"
             echo "status_begin"
@@ -41,8 +45,8 @@ jobs:
             echo "status_end"
             echo "python=$(python3 --version 2>&1)"
             echo "make=$(make --version | head -1)"
-            ./telink_tools/toolchain/bin/tc32-elf-gcc --version | head -1 || true
-            sha256sum telink_tools/downloads/tc32_gcc_v2.0.tar.bz2 || true
+            "$TC32" --version | head -1
+            sha256sum telink_tools/downloads/tc32_gcc_v2.0.tar.bz2
           } > "$RUNNER_TEMP/pm-build-environment.txt"
 
       - name: Validate unified PM and TS0726 from same SHA
