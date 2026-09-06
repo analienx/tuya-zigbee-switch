@@ -87,7 +87,7 @@ bool migrate_legacy_bseed_pm_nvm(void) {
      * with the TS0726 migration marker, while making the migration a complete
      * no-op for every other identity. */
     device_config_read_raw_from_nv();
-    const size_t prefix_len = strlen(PM_IDENTITY_PREFIX);
+    const uint16_t prefix_len = (uint16_t)(sizeof(PM_IDENTITY_PREFIX) - 1u);
     if (device_config_str.size < prefix_len ||
         memcmp(device_config_str.data, PM_IDENTITY_PREFIX, prefix_len) != 0) {
         return true;
