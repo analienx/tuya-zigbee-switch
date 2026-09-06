@@ -6,8 +6,6 @@
 
 #include <stdint.h>
 
-extern GPIO_PullTypeDef hal_to_telink_pull(hal_gpio_pull_t pull);
-
 #define MAX_GPIO_COUNTERS    2
 
 typedef struct {
@@ -18,6 +16,25 @@ typedef struct {
 
 static gpio_counter_state_t counter_state[MAX_GPIO_COUNTERS];
 static uint8_t counters_initialized = 0;
+
+static GPIO_PullTypeDef counter_to_telink_pull(hal_gpio_pull_t pull) {
+    switch (pull) {
+    case HAL_GPIO_PULL_NONE:
+        return PM_PIN_UP_DOWN_FLOAT;
+
+    case HAL_GPIO_PULL_UP:
+        return PM_PIN_PULLUP_10K;
+
+    case HAL_GPIO_PULL_UP_1M:
+        return PM_PIN_PULLUP_1M;
+
+    case HAL_GPIO_PULL_DOWN:
+        return PM_PIN_PULLDOWN_100K;
+
+    default:
+        return PM_PIN_UP_DOWN_FLOAT;
+    }
+}
 
 static void init_counter_state(void) {
     if (!counters_initialized) {
@@ -61,7 +78,7 @@ hal_gpio_counter_t hal_gpio_counter_init(hal_gpio_pin_t gpio_pin,
         drv_gpio_irq_risc1_en(telink_pin);
     }
 
-    gpio_setup_up_down_resistor(telink_pin, hal_to_telink_pull(pull));
+    gpio_setup_up_down_resistor(telink_pin, counter_to_telink_pull(pull));
     timer_set_mode(slot->timer_idx, TIMER_MODE_GPIO_TRIGGER);
     timer_set_init_tick(slot->timer_idx, 0);
     timer_set_cap_tick(slot->timer_idx, 0xFFFFFFFF);
