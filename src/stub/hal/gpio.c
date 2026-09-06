@@ -12,8 +12,8 @@ typedef struct {
     uint8_t         initialized;
     uint8_t         is_input;
     uint8_t         value;
-    uint8_t         initial_value; // Level present when the pin was first enabled
-    uint8_t         has_initial;   // 1 once an output-enable level was recorded
+    uint8_t         initial_value;
+    uint8_t         has_initial;
     hal_gpio_pull_t pull;
     gpio_callback_t callback;
     void *          callback_arg;
@@ -50,8 +50,6 @@ void hal_gpio_init_output(hal_gpio_pin_t gpio_pin, hal_gpio_pull_t pull,
     if (gpio_pin >= MAX_GPIO_PINS)
         return;
 
-    // Record the FIRST enabled level so tests can distinguish
-    // "enabled ON" from "enabled LOW then set HIGH" (the latter is a glitch).
     gpio_pins[gpio_pin].initialized   = 1;
     gpio_pins[gpio_pin].is_input      = 0;
     gpio_pins[gpio_pin].pull          = pull;
@@ -69,7 +67,6 @@ void hal_gpio_init_output(hal_gpio_pin_t gpio_pin, hal_gpio_pull_t pull,
 
 void hal_gpio_set(hal_gpio_pin_t gpio_pin) {
     ensure_valid_output_pin(gpio_pin);
-
     gpio_pins[gpio_pin].value = 1;
     io_log("GPIO", "Set pin %d = 1", gpio_pin);
     io_evt("gpio pin=%d value=%d", gpio_pin, 1);
@@ -77,7 +74,6 @@ void hal_gpio_set(hal_gpio_pin_t gpio_pin) {
 
 void hal_gpio_clear(hal_gpio_pin_t gpio_pin) {
     ensure_valid_output_pin(gpio_pin);
-
     gpio_pins[gpio_pin].value = 0;
     io_log("GPIO", "Clear pin %d = 0", gpio_pin);
     io_evt("gpio pin=%d value=%d", gpio_pin, 0);
@@ -85,7 +81,6 @@ void hal_gpio_clear(hal_gpio_pin_t gpio_pin) {
 
 uint8_t hal_gpio_read(hal_gpio_pin_t gpio_pin) {
     ensure_valid_input_pin(gpio_pin);
-
     io_log("GPIO", "Read pin %d = %d", gpio_pin, gpio_pins[gpio_pin].value);
     return gpio_pins[gpio_pin].value;
 }
@@ -93,7 +88,6 @@ uint8_t hal_gpio_read(hal_gpio_pin_t gpio_pin) {
 void hal_gpio_callback(hal_gpio_pin_t gpio_pin, gpio_callback_t callback,
                        void *arg) {
     ensure_valid_input_pin(gpio_pin);
-
     gpio_pins[gpio_pin].callback     = callback;
     gpio_pins[gpio_pin].callback_arg = arg;
     io_log("GPIO", "Set callback for pin %d", gpio_pin);
@@ -101,7 +95,6 @@ void hal_gpio_callback(hal_gpio_pin_t gpio_pin, gpio_callback_t callback,
 
 void hal_gpio_unreg_callback(hal_gpio_pin_t gpio_pin) {
     ensure_valid_output_pin(gpio_pin);
-
     gpio_pins[gpio_pin].callback     = NULL;
     gpio_pins[gpio_pin].callback_arg = NULL;
     io_log("GPIO", "Unregistered callback for pin %d", gpio_pin);
@@ -112,8 +105,6 @@ hal_gpio_pin_t hal_gpio_parse_pin(const char *s) {
         io_log("GPIO", "Error: NULL string passed to hal_parse_gpio_pin");
         return HAL_INVALID_PIN;
     }
-
-    // Simple parsing: expect format like "PA5" or "PB10"
     if (strlen(s) < 2) {
         io_log("GPIO", "Error: Invalid GPIO pin format: '%s'", s);
         return HAL_INVALID_PIN;
@@ -121,7 +112,6 @@ hal_gpio_pin_t hal_gpio_parse_pin(const char *s) {
 
     char port = s[0];
     int  pin  = atoi(&s[1]);
-
     if (port < 'A' || port > 'Z' || pin < 0 || pin > 15) {
         io_log("GPIO", "Error: Invalid GPIO pin format: '%s'", s);
         return HAL_INVALID_PIN;
@@ -133,65 +123,57 @@ hal_gpio_pin_t hal_gpio_parse_pin(const char *s) {
 }
 
 hal_gpio_pull_t hal_gpio_parse_pull(const char *pull_str) {
-    if (!pull_str) {
-        io_log("GPIO", "Error: NULL string passed to hal_parse_gpio_pull");
+    if (!pull_str)
         return HAL_GPIO_PULL_INVALID;
-    }
 
-    if (strcmp(pull_str, "") == 0)
+    if (strcmp(pull_str, "") == 0 || strcmp(pull_str, "f") == 0 ||
+        strcmp(pull_str, "F") == 0 || strcmp(pull_str, "n") == 0 ||
+        strcmp(pull_str, "N") == 0)
         return HAL_GPIO_PULL_NONE;
 
     if (strcmp(pull_str, "u") == 0)
         return HAL_GPIO_PULL_UP;
 
-    if (strcmp(pull_str, "d") == 0)
+    if (strcmp(pull_str, "U") == 0)
+        return HAL_GPIO_PULL_UP_1M;
+
+    if (strcmp(pull_str, "d") == 0 || strcmp(pull_str, "D") == 0)
         return HAL_GPIO_PULL_DOWN;
 
-    io_log("GPIO", "Error: Invalid GPIO pull string: '%s'", pull_str);
     return HAL_GPIO_PULL_INVALID;
 }
 
-// Stub-specific functions for testing
-
 void stub_gpio_simulate_input(hal_gpio_pin_t gpio_pin, uint8_t value) {
-    if (gpio_pin >= MAX_GPIO_PINS) {
-        io_log("GPIO", "Error: Invalid input pin %d for simulation", gpio_pin);
+    if (gpio_pin >= MAX_GPIO_PINS)
         return;
-    }
 
     uint8_t old_value = gpio_pins[gpio_pin].value;
     gpio_pins[gpio_pin].value = value;
-
-    if (old_value != value && gpio_pins[gpio_pin].callback) {
+    if (old_value != value && gpio_pins[gpio_pin].callback)
         gpio_pins[gpio_pin].callback(gpio_pin, gpio_pins[gpio_pin].callback_arg);
-    }
-
     io_log("GPIO", "Simulated input pin %d = %d", gpio_pin, value);
 }
 
 uint8_t stub_gpio_get_output(hal_gpio_pin_t gpio_pin) {
-    if (gpio_pin >= MAX_GPIO_PINS) {
-        io_log("GPIO", "Error: Invalid GPIO pin %d for output", gpio_pin);
+    if (gpio_pin >= MAX_GPIO_PINS)
         return 0;
-    }
+
     return gpio_pins[gpio_pin].value;
 }
 
 uint8_t stub_gpio_has_initial_output(hal_gpio_pin_t gpio_pin) {
-    if (gpio_pin >= MAX_GPIO_PINS) {
+    if (gpio_pin >= MAX_GPIO_PINS)
         return 0;
-    }
+
     return gpio_pins[gpio_pin].has_initial;
 }
 
 uint8_t stub_gpio_get_initial_output(hal_gpio_pin_t gpio_pin) {
-    if (gpio_pin >= MAX_GPIO_PINS) {
+    if (gpio_pin >= MAX_GPIO_PINS)
         return 0;
-    }
+
     return gpio_pins[gpio_pin].initial_value;
 }
-
-// Helper funcs
 
 void ensure_valid_pin(hal_gpio_pin_t gpio_pin) {
     if (gpio_pin >= MAX_GPIO_PINS) {
@@ -219,5 +201,87 @@ void ensure_valid_output_pin(hal_gpio_pin_t gpio_pin) {
         io_log("GPIO", "Error: Attempt to use input GPIO pin %d as output",
                gpio_pin);
         exit(1);
+    }
+}
+
+#define MAX_GPIO_COUNTERS    2
+
+typedef struct {
+    uint8_t        initialized;
+    uint8_t        running;
+    uint32_t       value;
+    hal_gpio_pin_t gpio_pin;
+} stub_gpio_counter_t;
+
+static stub_gpio_counter_t gpio_counter[MAX_GPIO_COUNTERS];
+
+hal_gpio_counter_t hal_gpio_counter_init(hal_gpio_pin_t gpio_pin,
+                                         hal_gpio_counter_edge_t edge,
+                                         hal_gpio_pull_t pull) {
+    (void)edge;
+    (void)pull;
+    for (int i = 0; i < MAX_GPIO_COUNTERS; i++) {
+        if (!gpio_counter[i].initialized) {
+            gpio_counter[i].initialized = 1;
+            gpio_counter[i].running     = 1;
+            gpio_counter[i].value       = 0;
+            gpio_counter[i].gpio_pin    = gpio_pin;
+            io_log("GPIO", "Initialized GPIO counter %d on pin %d", i,
+                   gpio_pin);
+            return (hal_gpio_counter_t)i;
+        }
+    }
+    return HAL_GPIO_COUNTER_INVALID;
+}
+
+void hal_gpio_counter_deinit(hal_gpio_counter_t counter) {
+    if (counter < 0 || counter >= MAX_GPIO_COUNTERS)
+        return;
+
+    gpio_counter[counter].initialized = 0;
+    gpio_counter[counter].running     = 0;
+    gpio_counter[counter].value       = 0;
+    gpio_counter[counter].gpio_pin    = HAL_INVALID_PIN;
+}
+
+uint32_t hal_gpio_counter_read(hal_gpio_counter_t counter) {
+    if (counter < 0 || counter >= MAX_GPIO_COUNTERS ||
+        !gpio_counter[counter].initialized)
+        return 0;
+
+    return gpio_counter[counter].value;
+}
+
+void hal_gpio_counter_reset(hal_gpio_counter_t counter) {
+    if (counter < 0 || counter >= MAX_GPIO_COUNTERS ||
+        !gpio_counter[counter].initialized)
+        return;
+
+    gpio_counter[counter].value = 0;
+}
+
+void hal_gpio_counter_start(hal_gpio_counter_t counter) {
+    if (counter < 0 || counter >= MAX_GPIO_COUNTERS ||
+        !gpio_counter[counter].initialized)
+        return;
+
+    gpio_counter[counter].running = 1;
+}
+
+void hal_gpio_counter_stop(hal_gpio_counter_t counter) {
+    if (counter < 0 || counter >= MAX_GPIO_COUNTERS ||
+        !gpio_counter[counter].initialized)
+        return;
+
+    gpio_counter[counter].running = 0;
+}
+
+void stub_set_pulse_counter(hal_gpio_pin_t gpio_pin, uint32_t value) {
+    for (int i = 0; i < MAX_GPIO_COUNTERS; i++) {
+        if (gpio_counter[i].initialized &&
+            gpio_counter[i].gpio_pin == gpio_pin) {
+            gpio_counter[i].value = value;
+            return;
+        }
     }
 }

@@ -46,4 +46,14 @@
 // keeps the legacy zigbee_switch_cluster_config ABI unchanged.
 #define NV_ITEM_SWITCH_BINDING_COMMAND_MODE(switch_idx)    (46 + (switch_idx))
 
+/* Unified V8 metering NVM region.
+ *
+ * The historical metering fork used 40..44 (and later 51 for protection).
+ * Those IDs overlap V7/V8 BSEED dimmer state and MUST NOT be reused by the
+ * unified firmware. Four endpoint accumulation slots leave room for generic
+ * multi-endpoint devices while the BSEED PM socket uses endpoint 1. */
+#define NV_ITEM_ENERGY_ACCUMULATION(endpoint)              (64 + (endpoint) - 1)
+#define NV_ITEM_ENERGY_CALIBRATION    68
+#define NV_ITEM_OVERLOAD_CONFIG       69
+
 #endif /* DEVICE_CONFIG_NVM_ITEMS_H_ */

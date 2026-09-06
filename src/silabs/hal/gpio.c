@@ -208,11 +208,45 @@ hal_gpio_pull_t hal_gpio_parse_pull(const char *pull_str) {
     if (pull_str[0] == 'u' || pull_str[0] == 'U') {
         return HAL_GPIO_PULL_UP;
     }
-    if (pull_str[0] == 'd') {
+    if (pull_str[0] == 'd' || pull_str[0] == 'D') {
         return HAL_GPIO_PULL_DOWN;
     }
-    if (pull_str[0] == 'f') {
+    if (pull_str[0] == 'f' || pull_str[0] == 'F' ||
+        pull_str[0] == 'n' || pull_str[0] == 'N') {
         return HAL_GPIO_PULL_NONE;
     }
     return HAL_GPIO_PULL_INVALID;
+}
+
+/* Pulse counting is currently hardware-proven only on Telink. Keep the common
+ * HAL contract linkable on Silicon Labs and fail meter initialization
+ * explicitly rather than pretending to measure. */
+hal_gpio_counter_t hal_gpio_counter_init(hal_gpio_pin_t gpio_pin,
+                                         hal_gpio_counter_edge_t edge,
+                                         hal_gpio_pull_t pull) {
+    (void)gpio_pin;
+    (void)edge;
+    (void)pull;
+    return HAL_GPIO_COUNTER_INVALID;
+}
+
+void hal_gpio_counter_deinit(hal_gpio_counter_t counter) {
+    (void)counter;
+}
+
+uint32_t hal_gpio_counter_read(hal_gpio_counter_t counter) {
+    (void)counter;
+    return 0;
+}
+
+void hal_gpio_counter_reset(hal_gpio_counter_t counter) {
+    (void)counter;
+}
+
+void hal_gpio_counter_start(hal_gpio_counter_t counter) {
+    (void)counter;
+}
+
+void hal_gpio_counter_stop(hal_gpio_counter_t counter) {
+    (void)counter;
 }
