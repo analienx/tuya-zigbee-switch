@@ -30,11 +30,26 @@ jobs:
       - name: Install Telink build dependencies only
         run: make -C src/telink -f tools.mk sdk toolchain
 
+      - name: Record build environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "head=$(git rev-parse HEAD)"
+            echo "status_begin"
+            git status --porcelain
+            echo "status_end"
+            echo "python=$(python3 --version 2>&1)"
+            echo "make=$(make --version | head -1)"
+            ./telink_tools/toolchain/bin/tc32-elf-gcc --version | head -1 || true
+            sha256sum telink_tools/downloads/tc32_gcc_v2.0.tar.bz2 || true
+          } > "$RUNNER_TEMP/pm-build-environment.txt"
+
       - name: Validate unified PM and TS0726 from same SHA
         shell: bash
         run: |
           set -euo pipefail
-          python3 make_scripts/validate_bseed_ts011f_pm_v8.py 2>&1 | tee pm-validator-output.log
+          python3 make_scripts/validate_bseed_ts011f_pm_v8.py 2>&1 | tee "$RUNNER_TEMP/pm-validator-output.log"
 
       - name: Upload deterministic build evidence
         if: always()
@@ -42,7 +57,8 @@ jobs:
         with:
           name: bseed-pm-v8-reproducibility
           path: |
-            pm-validator-output.log
+            ${{ runner.temp }}/pm-validator-output.log
+            ${{ runner.temp }}/pm-build-environment.txt
             build/bseed-ts011f-pm-v8/forward.bin
             build/bseed-ts011f-pm-v8/forward.ota
             build/bseed-ts011f-pm-v8/manifest.json
