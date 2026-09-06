@@ -7,7 +7,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "make_scripts" / "build_bseed_ts011f_pm_v8.sh"
 VALIDATOR = ROOT / "make_scripts" / "validate_bseed_ts011f_pm_v8.py"
-BOARD = "OUTLET_BSEED_PM_TS011F_b28wrpvx"
+BOARD = "OUTLET_BSEED_PM_TS011F"
 CONFIG = "b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;"
 
 
@@ -25,7 +25,7 @@ def test_pm_device_db_identity_is_the_hardware_proven_target():
 
 def test_pm_build_pins_proven_meter_and_next_normal_ota_version():
     text = BUILD.read_text(encoding="utf-8")
-    assert "BOARD='OUTLET_BSEED_PM_TS011F_b28wrpvx'" in text
+    assert "BOARD='OUTLET_BSEED_PM_TS011F'" in text
     assert f"CANONICAL='{CONFIG}'" in text
     assert "MANUFACTURER_CODE=4417" in text
     assert "IMAGE_TYPE=43556" in text
@@ -56,10 +56,13 @@ def test_pm_validator_proves_same_sha_pm_and_ts0726_builds():
     text = VALIDATOR.read_text(encoding="utf-8")
     assert 'PM_INTEGRATION_BASE = "8ed8ddfcf5892f0b801d19df4882a145a42aa3b1"' in text
     assert '"tests/test_unified_pm_v8.py"' in text
+    assert '"tests/test_pm_cluster_layout_guard.py"' in text
+    assert '"tests/test_bseed_pm_v8_release.py"' in text
     assert '"tests/test_nvm_migration_version.py"' in text
     assert '"tests/test_config_resource_guard.py"' in text
     assert 'run(["bash", "make_scripts/build_bseed_ts011f_pm_v8.sh"])' in text
     assert 'run(["bash", "make_scripts/build_bseed_ts0726_v8.sh"])' in text
+    assert '"board": "OUTLET_BSEED_PM_TS011F"' in text
     assert '"fileVersion": 302329858' in text
     assert '"imageType": 43556' in text
     assert '"fileVersion": 285356042' in text
