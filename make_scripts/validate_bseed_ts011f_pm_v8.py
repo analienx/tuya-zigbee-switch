@@ -19,6 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 PM_INTEGRATION_BASE = "8ed8ddfcf5892f0b801d19df4882a145a42aa3b1"
 FOCUSED = [
     "tests/test_unified_pm_v8.py",
+    "tests/test_pm_cluster_layout_guard.py",
+    "tests/test_bseed_pm_v8_release.py",
     "tests/test_nvm_migration_version.py",
     "tests/test_config_resource_guard.py",
     "tests/test_bseed_v6_binding_mode_release.py",
@@ -110,7 +112,7 @@ def main() -> int:
         {
             "sourceCommit": head,
             "sourceDirty": False,
-            "board": "OUTLET_BSEED_PM_TS011F_b28wrpvx",
+            "board": "OUTLET_BSEED_PM_TS011F",
             "swBuildId": "1.2.5-bseedv8u1",
             "fileVersion": 302329858,
             "manufacturerCode": 4417,
