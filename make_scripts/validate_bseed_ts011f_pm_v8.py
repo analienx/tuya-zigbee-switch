@@ -99,8 +99,6 @@ def main() -> int:
         )
     )
 
-    # Build the new PM target first, then rebuild the accepted TS0726 V8 target
-    # from the exact same source SHA to catch common-core/toolchain regressions.
     steps.append(run(["bash", "make_scripts/build_bseed_ts011f_pm_v8.sh"]))
     steps.append(run(["bash", "make_scripts/build_bseed_ts0726_v8.sh"]))
 
@@ -113,8 +111,8 @@ def main() -> int:
             "sourceCommit": head,
             "sourceDirty": False,
             "board": "OUTLET_BSEED_PM_TS011F",
-            "swBuildId": "1.2.5-bseedv8u1",
-            "fileVersion": 302329858,
+            "swBuildId": "1.2.5-bseedv8u2",
+            "fileVersion": 302329860,
             "manufacturerCode": 4417,
             "imageType": 43556,
             "canonicalConfig": "b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;",
@@ -132,6 +130,7 @@ def main() -> int:
         "currentMultiplier": 144679,
         "powerMultiplier": 16989,
         "protectionEnabled": True,
+        "samplingSemantics": "hardware-proven-8b8cc492",
     }.items():
         if meter.get(key) != value:
             raise SystemExit(f"PM meter manifest mismatch for {key}")
