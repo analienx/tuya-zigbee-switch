@@ -1,6 +1,7 @@
 #include "hal/nvm.h"
 #include "stub/machine_io.h"
 #include <errno.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,6 +11,91 @@
 
 #define MAX_NVM_ITEMS    256
 #define NVM_DATA_DIR     "./stub_nvm_data"
+
+// ---- test-only fault injection --------------------------------------------
+// Environment variables (used by tests to simulate NVM failures at precise
+// durable-write boundaries):
+//   STUB_NVM_FAIL_WRITE=ITEM@N[,...]   fail the Nth write to ITEM (1-based)
+//   STUB_NVM_FAIL_DELETE=ITEM@N[,...]  fail the Nth delete of ITEM (1-based)
+#define MAX_FAIL_RULES    16
+
+typedef struct {
+    uint8_t item;
+    int     occurrence; // which matching call fails (1-based)
+    int     seen;       // matching calls so far
+    bool    used;       // failure already injected
+} nvm_fail_rule_t;
+
+static nvm_fail_rule_t write_fail_rules[MAX_FAIL_RULES];
+static int             write_fail_rule_cnt = -1;
+static nvm_fail_rule_t delete_fail_rules[MAX_FAIL_RULES];
+static int             delete_fail_rule_cnt = -1;
+
+static int parse_fail_rules(const char *spec, nvm_fail_rule_t *rules) {
+    int cnt = 0;
+
+    if (!spec) {
+        return 0;
+    }
+
+    const char *cursor = spec;
+    while (*cursor != '\0' && cnt < MAX_FAIL_RULES) {
+        char *end  = NULL;
+        long  item = strtol(cursor, &end, 0);
+        if (end == cursor) {
+            break;
+        }
+        cursor = end;
+        if (*cursor != '@') {
+            break;
+        }
+        cursor++;
+        long occurrence = strtol(cursor, &end, 10);
+        if (end == cursor) {
+            break;
+        }
+        cursor = end;
+
+        rules[cnt].item       = (uint8_t)item;
+        rules[cnt].occurrence = (int)occurrence;
+        rules[cnt].seen       = 0;
+        rules[cnt].used       = false;
+        cnt++;
+
+        if (*cursor == ',') {
+            cursor++;
+        }
+    }
+
+    return cnt;
+}
+
+static void init_fail_rules(void) {
+    if (write_fail_rule_cnt >= 0) {
+        return;
+    }
+
+    write_fail_rule_cnt = parse_fail_rules(getenv("STUB_NVM_FAIL_WRITE"),
+                                           write_fail_rules);
+    delete_fail_rule_cnt = parse_fail_rules(getenv("STUB_NVM_FAIL_DELETE"),
+                                            delete_fail_rules);
+}
+
+static bool should_inject_failure(nvm_fail_rule_t *rules, int rule_cnt,
+                                  uint8_t item_id) {
+    for (int i = 0; i < rule_cnt; i++) {
+        if (rules[i].item == item_id && !rules[i].used) {
+            rules[i].seen++;
+            if (rules[i].seen == rules[i].occurrence) {
+                rules[i].used = true;
+                io_log("NVM", "Injected failure for item %02x", item_id);
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
 
 static void ensure_nvm_dir(void) {
     struct stat st = { 0 };
@@ -42,6 +128,12 @@ hal_nvm_status_t hal_nvm_write(uint8_t item_id, uint16_t size, uint8_t *data) {
     if (size == 0) {
         io_log("NVM", "Error: Zero size passed to hal_nvm_write for item %02x",
                item_id);
+        return HAL_NVM_ERROR;
+    }
+
+    init_fail_rules();
+    if (should_inject_failure(write_fail_rules, write_fail_rule_cnt,
+                              item_id)) {
         return HAL_NVM_ERROR;
     }
 
@@ -91,6 +183,12 @@ hal_nvm_status_t hal_nvm_read(uint8_t item_id, uint16_t size, uint8_t *data) {
 }
 
 hal_nvm_status_t hal_nvm_delete(uint8_t item_id) {
+    init_fail_rules();
+    if (should_inject_failure(delete_fail_rules, delete_fail_rule_cnt,
+                              item_id)) {
+        return HAL_NVM_ERROR;
+    }
+
     char *filename = get_item_filename(item_id);
 
     if (unlink(filename) != 0) {

@@ -154,6 +154,13 @@ typedef enum {
 hal_zigbee_status_t hal_zigbee_send_cmd_to_bindings(const hal_zigbee_cmd *cmd);
 
 /**
+ * Return true when at least one local APS binding entry exists for the
+ * source endpoint and cluster. Used to avoid advancing locally tracked
+ * binding intent when a command has no configured recipient.
+ */
+bool hal_zigbee_has_binding(uint8_t endpoint, uint16_t cluster_id);
+
+/**
  * Send attribute report to bound devices (notify of state changes)
  * @param endpoint Source endpoint
  * @param cluster_id Cluster containing the attribute

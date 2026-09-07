@@ -28,4 +28,32 @@
 #define NV_ITEM_MULTI_PRESS_RESET_COUNT    33
 #define NV_ITEM_POLL_CONTROL_CONFIG        34
 
+// Physical relay mode is stored separately from the legacy relay-cluster
+// structure so older NVM data remains binary-compatible. Five slots are
+// reserved for relay indexes 0..4.
+#define NV_ITEM_RELAY_PHYSICAL_MODE(relay_idx)    (35 + (relay_idx))
+
+// Device-specific one-shot migration marker (device_migration.c). Written
+// only after every other change the migration makes is complete, so a crash
+// mid-migration simply re-runs it on the next boot.
+#define NV_ITEM_MIGRATION_MARKER    40
+
+// Locally tracked/intended On/Off state of each switch's binding target.
+// Separate storage preserves the legacy relay-cluster NVM record ABI.
+#define NV_ITEM_RELAY_BINDING_INTENT(relay_idx)    (41 + (relay_idx))
+
+// Direct-binding command policy for switch indexes 0..4. Separate storage
+// keeps the legacy zigbee_switch_cluster_config ABI unchanged.
+#define NV_ITEM_SWITCH_BINDING_COMMAND_MODE(switch_idx)    (46 + (switch_idx))
+
+/* Unified V8 metering NVM region.
+ *
+ * The historical metering fork used 40..44 (and later 51 for protection).
+ * Those IDs overlap V7/V8 BSEED dimmer state and MUST NOT be reused by the
+ * unified firmware. Four endpoint accumulation slots leave room for generic
+ * multi-endpoint devices while the BSEED PM socket uses endpoint 1. */
+#define NV_ITEM_ENERGY_ACCUMULATION(endpoint)              (64 + (endpoint) - 1)
+#define NV_ITEM_ENERGY_CALIBRATION    68
+#define NV_ITEM_OVERLOAD_CONFIG       69
+
 #endif /* DEVICE_CONFIG_NVM_ITEMS_H_ */

@@ -32,3 +32,27 @@ int atoi(const char *str) {
 
     return result * sign;
 }
+
+/* The pinned Telink libc does not provide strstr(). Keep this implementation
+ * deliberately dependency-free so common parser code can use the standard
+ * interface without pulling host-libc assumptions into the firmware. */
+char *strstr(const char *haystack, const char *needle) {
+    if (*needle == '\0') {
+        return (char *)haystack;
+    }
+
+    for (; *haystack != '\0'; haystack++) {
+        const char *h = haystack;
+        const char *n = needle;
+
+        while (*h != '\0' && *n != '\0' && *h == *n) {
+            h++;
+            n++;
+        }
+        if (*n == '\0') {
+            return (char *)haystack;
+        }
+    }
+
+    return 0;
+}

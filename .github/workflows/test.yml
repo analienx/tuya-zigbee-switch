@@ -7,11 +7,75 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
       - name: Install uncrustify
         run: sudo apt-get update && sudo apt-get install -y uncrustify
-      - name: Check code formatting
+      - name: Check changed C code formatting
+        shell: bash
         run: |
-          find src -name '*.c' -o -name '*.h' | xargs uncrustify -c uncrustify.cfg --check
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            base='${{ github.event.pull_request.base.sha }}'
+          else
+            base='${{ github.event.before }}'
+            if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+              base="HEAD^"
+            fi
+          fi
+
+          mapfile -t files < <(git diff --name-only "$base" HEAD -- src | grep -E '\.(c|h)$' || true)
+          if (( ${#files[@]} == 0 )); then
+            echo "No changed C/header files to lint"
+            exit 0
+          fi
+
+          if uncrustify -c uncrustify.cfg --check "${files[@]}"; then
+            exit 0
+          fi
+
+          # The runner copy is disposable. Format it to produce both an exact
+          # patch and the canonical full source files for supervisor-owned
+          # remediation; nothing is pushed from CI.
+          uncrustify -c uncrustify.cfg --replace --no-backup "${files[@]}"
+          git diff -- "${files[@]}" | tee lint-diff.patch
+          mkdir -p lint-formatted
+          for file in "${files[@]}"; do
+            mkdir -p "lint-formatted/$(dirname "$file")"
+            cp "$file" "lint-formatted/$file"
+          done
+          exit 1
+      - name: Upload lint diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-diagnostics
+          path: |
+            lint-diff.patch
+            lint-formatted/
+          if-no-files-found: ignore
+
+  image-type-identity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Install YAML parser
+        run: sudo apt-get update && sudo apt-get install -y python3-yaml
+      - name: Reject new or changed firmware image-type collisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            base='${{ github.event.pull_request.base.sha }}'
+          else
+            base='${{ github.event.before }}'
+            if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+              base="HEAD^"
+            fi
+          fi
+          python3 helper_scripts/check_image_types.py device_db.yaml --changed-base "$base"
 
   test:
     runs-on: ubuntu-latest
@@ -20,6 +84,16 @@ jobs:
       - name: Install pytests
         run: |
           sudo apt-get update
-          sudo apt-get install -y make python3 python3-pytest
+          sudo apt-get install -y make python3 python3-pytest python3-yaml
       - name: Run tests
-        run: make tests
+        shell: bash
+        run: |
+          set -o pipefail
+          make tests 2>&1 | tee test-output.log
+      - name: Upload test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-diagnostics
+          path: test-output.log
+          if-no-files-found: error

@@ -13,17 +13,27 @@ typedef struct {
     uint8_t          on_high;        // 1 if "on" is HIGH, 0 if "on" is LOW
     uint8_t          on;             // Current state (0 = off, 1 = on)
     uint8_t          is_latching;    // 1 if latching relay, 0 if normal relay
+    uint8_t          pending_on;     // Physical target for a pending latching pulse
     hal_task_t       latching_task;  // Task to clear pulse for latching relays
     relay_callback_t on_change;      // Optional callback for state change
     void *           callback_param; // Parameter passed to callback
 } relay_t;
 
 /**
- * @brief      Initialize relay (set initial state)
+ * @brief      Initialize relay outputs. The relay GPIOs are enabled HERE —
+ *             with the first driven level already equal to the desired
+ *             electrical state — so the persisted physical policy must be
+ *             known before calling this (see relay_cluster /
+ *             cover_cluster). Never enable at the inactive level and flip
+ *             afterwards: that is a boot glitch.
  * @param      *relay - Relay to use
+ * @param      initial_physical_state - Electrical state at first enable
+ *             (0 = off, 1 = on). For latching relays both coil pins
+ *             initialize inactive regardless; the policy pulse, if any, is
+ *             issued by the relay cluster when it applies the policy.
  * @return     none
  */
-void relay_init(relay_t *relay);
+void relay_init(relay_t *relay, uint8_t initial_physical_state);
 
 /**
  * @brief      Turn on relay
@@ -45,5 +55,13 @@ void relay_off(relay_t *relay);
  * @return     none
  */
 void relay_toggle(relay_t *relay);
+
+/**
+ * @brief      Drive the physical relay without changing its virtual state
+ * @param      *relay - Relay to use
+ * @param      state - Physical target state (0 = off, 1 = on)
+ * @return     none
+ */
+void relay_drive_physical(relay_t *relay, uint8_t state);
 
 #endif

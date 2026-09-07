@@ -3,6 +3,7 @@ import pytest
 from tests.conftest import DEBOUNCE_MS, Device, RelayButtonPair
 from tests.zcl_consts import (
     ZCL_ATTR_ONOFF,
+    ZCL_ATTR_ONOFF_CONFIGURATION_BINDING_COMMAND_MODE,
     ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_ACTIONS,
     ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_MODE,
     ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_RELAY_MODE,
@@ -14,6 +15,11 @@ from tests.zcl_consts import (
     ZCL_ONOFF_CONFIGURATION_BINDED_MODE_LONG,
     ZCL_ONOFF_CONFIGURATION_BINDED_MODE_RISE,
     ZCL_ONOFF_CONFIGURATION_BINDED_MODE_SHORT,
+    ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_MATCH_LOCAL_STATE,
+    ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_OFFON,
+    ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_ONOFF,
+    ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_OPPOSITE_LOCAL_STATE,
+    ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_TOGGLE,
     ZCL_ONOFF_CONFIGURATION_RELAY_MODE_DETACHED,
     ZCL_ONOFF_CONFIGURATION_RELAY_MODE_LONG,
     ZCL_ONOFF_CONFIGURATION_RELAY_MODE_RISE,
@@ -167,8 +173,8 @@ def test_toggle_mode_toggle_actions_commands(
     toggle_device.write_zigbee_attr(
         relay_button_pair.switch_endpoint,
         ZCL_CLUSTER_ON_OFF_SWITCH_CONFIG,
-        ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_ACTIONS,
-        ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SIMPLE,
+        ZCL_ATTR_ONOFF_CONFIGURATION_BINDING_COMMAND_MODE,
+        ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_TOGGLE,
     )
     toggle_device.zcl_switch_binding_mode_set(
         relay_button_pair.switch_endpoint, binded_mode
@@ -198,8 +204,8 @@ def test_toggle_mode_onoff_actions_commands(
     toggle_device.write_zigbee_attr(
         relay_button_pair.switch_endpoint,
         ZCL_CLUSTER_ON_OFF_SWITCH_CONFIG,
-        ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_ACTIONS,
-        ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_ONOFF,
+        ZCL_ATTR_ONOFF_CONFIGURATION_BINDING_COMMAND_MODE,
+        ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_ONOFF,
     )
 
     toggle_device.press_button(relay_button_pair.button_pin)
@@ -221,8 +227,8 @@ def test_toggle_mode_offon_actions_commands(
     toggle_device.write_zigbee_attr(
         relay_button_pair.switch_endpoint,
         ZCL_CLUSTER_ON_OFF_SWITCH_CONFIG,
-        ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_ACTIONS,
-        ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_OFFON,
+        ZCL_ATTR_ONOFF_CONFIGURATION_BINDING_COMMAND_MODE,
+        ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_OFFON,
     )
 
     toggle_device.press_button(relay_button_pair.button_pin)
@@ -244,8 +250,8 @@ def test_toggle_mode_smart_sync_actions_commands(
     toggle_device.write_zigbee_attr(
         relay_button_pair.switch_endpoint,
         ZCL_CLUSTER_ON_OFF_SWITCH_CONFIG,
-        ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_ACTIONS,
-        ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SMART_SYNC,
+        ZCL_ATTR_ONOFF_CONFIGURATION_BINDING_COMMAND_MODE,
+        ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_MATCH_LOCAL_STATE,
     )
 
     toggle_device.zcl_relay_on(relay_button_pair.relay_endpoint)
@@ -270,8 +276,8 @@ def test_toggle_mode_smart_opposite_actions_commands(
     toggle_device.write_zigbee_attr(
         relay_button_pair.switch_endpoint,
         ZCL_CLUSTER_ON_OFF_SWITCH_CONFIG,
-        ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_ACTIONS,
-        ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SMART_OPPOSITE,
+        ZCL_ATTR_ONOFF_CONFIGURATION_BINDING_COMMAND_MODE,
+        ZCL_ONOFF_CONFIGURATION_BINDING_COMMAND_OPPOSITE_LOCAL_STATE,
     )
 
     toggle_device.zcl_relay_on(relay_button_pair.relay_endpoint)

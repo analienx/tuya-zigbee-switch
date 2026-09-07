@@ -114,6 +114,19 @@ void hal_gpio_init(hal_gpio_pin_t gpio_pin, uint8_t is_input,
     // by looking up the slot when the user calls hal_gpio_int_callback.
 }
 
+void hal_gpio_init_output(hal_gpio_pin_t gpio_pin, hal_gpio_pull_t pull,
+                          uint8_t initial_value) {
+    (void)pull;
+    hal_gpio_ensure_clock();
+
+    const sl_gpio_t sl_gpio = silabs_hal_gpio_to_sl_gpio(gpio_pin);
+
+    // Push-pull output whose first driven level is already `initial_value`
+    // (the Silicon Labs API sets DOUT in the same operation as the mode).
+    sl_gpio_set_pin_mode(&sl_gpio, SL_GPIO_MODE_PUSH_PULL,
+                         initial_value ? 1 : 0);
+}
+
 void hal_gpio_set(hal_gpio_pin_t gpio_pin) {
     const sl_gpio_t sl_gpio = silabs_hal_gpio_to_sl_gpio(gpio_pin);
 
@@ -195,11 +208,45 @@ hal_gpio_pull_t hal_gpio_parse_pull(const char *pull_str) {
     if (pull_str[0] == 'u' || pull_str[0] == 'U') {
         return HAL_GPIO_PULL_UP;
     }
-    if (pull_str[0] == 'd') {
+    if (pull_str[0] == 'd' || pull_str[0] == 'D') {
         return HAL_GPIO_PULL_DOWN;
     }
-    if (pull_str[0] == 'f') {
+    if (pull_str[0] == 'f' || pull_str[0] == 'F' ||
+        pull_str[0] == 'n' || pull_str[0] == 'N') {
         return HAL_GPIO_PULL_NONE;
     }
     return HAL_GPIO_PULL_INVALID;
+}
+
+/* Pulse counting is currently hardware-proven only on Telink. Keep the common
+ * HAL contract linkable on Silicon Labs and fail meter initialization
+ * explicitly rather than pretending to measure. */
+hal_gpio_counter_t hal_gpio_counter_init(hal_gpio_pin_t gpio_pin,
+                                         hal_gpio_counter_edge_t edge,
+                                         hal_gpio_pull_t pull) {
+    (void)gpio_pin;
+    (void)edge;
+    (void)pull;
+    return HAL_GPIO_COUNTER_INVALID;
+}
+
+void hal_gpio_counter_deinit(hal_gpio_counter_t counter) {
+    (void)counter;
+}
+
+uint32_t hal_gpio_counter_read(hal_gpio_counter_t counter) {
+    (void)counter;
+    return 0;
+}
+
+void hal_gpio_counter_reset(hal_gpio_counter_t counter) {
+    (void)counter;
+}
+
+void hal_gpio_counter_start(hal_gpio_counter_t counter) {
+    (void)counter;
+}
+
+void hal_gpio_counter_stop(hal_gpio_counter_t counter) {
+    (void)counter;
 }
