@@ -12,12 +12,12 @@ BOARD='OUTLET_BSEED_PM_TS011F'
 CANONICAL='b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;'
 MANUFACTURER_CODE=4417
 IMAGE_TYPE=43556
-SW_BUILD='1.2.5-bseedv8u2'
-# The recovered known-good predecessor is now installed as 0x12053003.
-# V8 PM fix1 is the next normal OTA version and does not rely on a forced
-# 0xffffffff wrapper.
-FILE_VERSION_HEX='0x12053004'
-FILE_VERSION_DEC=302329860
+SW_BUILD='1.2.5-bseedv8u3'
+# 0x12053004 is the accepted V8 PM fix1 canary. 0x12053005 is permanently
+# reserved for the sealed known-good rollback, so the next normal release
+# candidate advances to 0x12053006.
+FILE_VERSION_HEX='0x12053006'
+FILE_VERSION_DEC=302329862
 VOLTAGE_MULTIPLIER=161460
 CURRENT_MULTIPLIER=144679
 POWER_MULTIPLIER=16989
