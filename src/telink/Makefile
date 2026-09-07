@@ -15,10 +15,9 @@ FIRMWARE_BASENAME ?= tlc_switch
 DEVICE_TYPE ?= router
 DEBUG ?= 0
 CONFIG_STR ?= ja5osu5g;TS004F-Loginovo;IC4i;SC2u;BTB5;M;
-# CONFIG_STR ?= jl7qyupf;TS0012-custom;BA0f;LD7;SC2f;RC0;SC3f;RB4;
 MANUFACTURER_ID ?= 4417
 IMAGE_TYPE ?= 43521
-OTA_VERSION ?= 
+OTA_VERSION ?=
 OTA_MANUFACTURER_ID ?= ${MANUFACTURER_ID}
 OTA_IMAGE_TYPE ?= ${IMAGE_TYPE}
 
@@ -34,11 +33,9 @@ OBJCOPY := $(TC32_PATH)/tc32-elf-objcopy
 OBJDUMP := $(TC32_PATH)/tc32-elf-objdump
 SIZE := $(TC32_PATH)/tc32-elf-size
 
-# Flash tool configuration
 TLSRPGM_TTY ?= /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
 TLSRPGM_TOOL := $(TELINK_TOOLS_DIR)/tlsrpgm/TlsrPgm.py
 
-# Chip and library configuration with Zigbee libraries
 ifeq ($(DEVICE_TYPE), router)
 	TEL_CHIP := -DMCU_CORE_8258=1 -DROUTER=1 -DMCU_STARTUP_8258=1
 	LIBS := -ldrivers_8258 -lzb_router
@@ -49,8 +46,6 @@ ifeq ($(DEVICE_TYPE), end_device)
 	LIBS := -ldrivers_8258 -lzb_ed
 endif
 
-
-# Compiler and linker flags
 GCC_FLAGS := \
 	-O2 \
 	-ffunction-sections \
@@ -67,7 +62,7 @@ GCC_FLAGS := \
 	-MMD \
 	-MP
 
-LNK_FLAGS := --gc-sections -nostartfiles 
+LNK_FLAGS := --gc-sections -nostartfiles
 
 ASM_FLAGS := \
 	-fomit-frame-pointer \
@@ -81,7 +76,6 @@ ASM_FLAGS := \
 	-fno-rtti \
 	-fno-threadsafe-statics
 
-# Device definitions
 DEVICE_DEFS := \
     -DVERSION_STR="$(VERSION_STR)" \
 	-DFILE_VERSION=$(FILE_VERSION) \
@@ -89,19 +83,12 @@ DEVICE_DEFS := \
 	-DDEFAULT_CONFIG="$(CONFIG_STR)" \
 	-DIMAGE_TYPE=$(IMAGE_TYPE) \
 	-DHAL_TELINK \
-	$(TEL_CHIP) 
+	$(TEL_CHIP)
 
 ifeq ($(DEBUG), 1)
 	DEVICE_DEFS := $(DEVICE_DEFS) -DUART_PRINTF_MODE=1
 endif
 
-# Optional device-specific one-shot config migration (device_migration.c).
-# MIGRATION_FROM_CONFIG enables it for devices whose stored config may still
-# hold the known-swapped form; it fires only on an exact stored-config match
-# with no migration marker present. The canonical target is CONFIG_STR.
-# MIGRATION_REVERT=1 builds the recovery image that undoes the migration
-# instead of applying it. Both variables come from the environment or the
-# command line.
 MIGRATION_DEFINES :=
 ifneq ($(strip $(MIGRATION_FROM_CONFIG)),)
 MIGRATION_DEFINES += \
@@ -114,14 +101,34 @@ endif
 
 DEVICE_DEFS := $(DEVICE_DEFS) $(MIGRATION_DEFINES)
 
-# Optional compile-time guard for device_config writes. The guard is enabled
-# only by target-specific release builds; generic/upstream boards keep the
-# existing permissive parser behavior.
 ifneq ($(strip $(DEVICE_CONFIG_GUARD)),)
 DEVICE_DEFS := $(DEVICE_DEFS) -DDEVICE_CONFIG_GUARD_$(DEVICE_CONFIG_GUARD)
 endif
 
-# Include paths (SDK paths first to avoid conflicts)
+# Unified PM target options. They are explicit build inputs rather than global
+# firmware behavior, so TS0726 and every existing board remain unchanged.
+BSEED_PM_B28WRPVX ?=
+BSEED_PM_B28WRPVX_PROTECTION ?=
+HLW8012_VOLTAGE_MULTIPLIER ?=
+HLW8012_CURRENT_MULTIPLIER ?=
+HLW8012_POWER_MULTIPLIER ?=
+
+ifeq ($(strip $(BSEED_PM_B28WRPVX)),1)
+DEVICE_DEFS += -DBSEED_PM_B28WRPVX
+endif
+ifeq ($(strip $(BSEED_PM_B28WRPVX_PROTECTION)),1)
+DEVICE_DEFS += -DBSEED_PM_B28WRPVX_PROTECTION
+endif
+ifneq ($(strip $(HLW8012_VOLTAGE_MULTIPLIER)),)
+DEVICE_DEFS += -DHLW8012_VOLTAGE_MULTIPLIER=$(HLW8012_VOLTAGE_MULTIPLIER)
+endif
+ifneq ($(strip $(HLW8012_CURRENT_MULTIPLIER)),)
+DEVICE_DEFS += -DHLW8012_CURRENT_MULTIPLIER=$(HLW8012_CURRENT_MULTIPLIER)
+endif
+ifneq ($(strip $(HLW8012_POWER_MULTIPLIER)),)
+DEVICE_DEFS += -DHLW8012_POWER_MULTIPLIER=$(HLW8012_POWER_MULTIPLIER)
+endif
+
 INCLUDE_PATHS := \
 	-I. \
 	-Iconfigs \
@@ -143,10 +150,8 @@ INCLUDE_PATHS := \
 	-I$(SDK_PATH)/zigbee/zcl \
 	-I$(SDK_PATH)/zigbee/zdo
 
-# Library paths
 LIBRARY_PATHS := -L$(SDK_PATH)/zigbee/lib/tc32 -L$(SDK_PATH)/platform/lib
 
-# Source files
 TELINK_SOURCES := \
 	main.c \
 	ota_reformating/ensure_ota_scheme.c \
@@ -155,6 +160,7 @@ TELINK_SOURCES := \
 	hal/timer.c \
 	hal/tasks.c \
 	hal/gpio.c \
+	hal/gpio_counter.c \
 	hal/gpio_interrupts.c \
 	hal/nvm.c \
 	hal/zigbee.c \
@@ -168,7 +174,6 @@ TELINK_SOURCES := \
 	custom_zcl/zcl_cover_switch_config.c \
 	patch_sdk/drv_nv.c
 
-# Common source files (shared with Silicon Labs build)
 COMMON_SOURCES := \
 	$(SRC_DIR)/app.c \
 	$(SRC_DIR)/zigbee/poll_control_cluster.c \
@@ -177,12 +182,15 @@ COMMON_SOURCES := \
 	$(SRC_DIR)/base_components/network_indicator.c \
 	$(SRC_DIR)/base_components/relay.c \
 	$(SRC_DIR)/base_components/battery.c \
+	$(SRC_DIR)/base_components/overload_protection.c \
+	$(SRC_DIR)/base_components/energy_measurement/hlw8012.c \
 	$(SRC_DIR)/device_config/config_nv.c \
 	$(SRC_DIR)/device_config/device_params_nv.c \
 	$(SRC_DIR)/device_config/reset.c \
 	$(SRC_DIR)/device_config/config_parser.c \
 	$(SRC_DIR)/device_config/nvm_migrations.c \
 	$(SRC_DIR)/device_config/device_migration.c \
+	$(SRC_DIR)/device_config/pm_legacy_migration.c \
 	$(SRC_DIR)/zigbee/basic_cluster.c \
 	$(SRC_DIR)/zigbee/general_commands.c \
 	$(SRC_DIR)/zigbee/group_cluster.c \
@@ -190,89 +198,73 @@ COMMON_SOURCES := \
 	$(SRC_DIR)/zigbee/switch_cluster.c \
 	$(SRC_DIR)/zigbee/cover_switch_cluster.c \
 	$(SRC_DIR)/zigbee/cover_cluster.c \
-	$(SRC_DIR)/zigbee/battery_cluster.c 
+	$(SRC_DIR)/zigbee/battery_cluster.c \
+	$(SRC_DIR)/zigbee/electrical_measurement_cluster.c \
+	$(SRC_DIR)/zigbee/metering_cluster.c
 
-# All application sources
 ALL_TELINK_SOURCES := $(TELINK_SOURCES) $(COMMON_SOURCES)
 
-# Include SDK build rules
 include sdk.mk
 
-# Application object files  
 TELINK_OBJS := $(TELINK_SOURCES:%.c=$(BUILD_DIR)/telink/%.o)
 COMMON_OBJS := $(COMMON_SOURCES:$(SRC_DIR)/%.c=$(BUILD_DIR)/common/%.o)
 ALL_APP_OBJS := $(TELINK_OBJS) $(COMMON_OBJS)
 
-# Dependency files for application sources
 TELINK_DEPS := $(TELINK_SOURCES:%.c=$(BUILD_DIR)/telink/%.d)
 COMMON_DEPS := $(COMMON_SOURCES:$(SRC_DIR)/%.c=$(BUILD_DIR)/common/%.d)
 ALL_APP_DEPS := $(TELINK_DEPS) $(COMMON_DEPS)
 
-# All object files (application + common + SDK)
 ALL_OBJS := $(ALL_APP_OBJS) $(SDK_OBJS)
 
-# Linker script
 LINKER_SCRIPT := $(SDK_PATH)/platform/boot/8258/boot_8258.link
 
-# Output files
 ELF_FILE := $(BUILD_DIR)/$(FIRMWARE_BASENAME).elf
 LST_FILE := $(BUILD_DIR)/$(FIRMWARE_BASENAME).lst
 BIN_FILE := $(BIN_DIR)/$(FIRMWARE_BASENAME).bin
 OTA_FILE := $(BIN_DIR)/$(FIRMWARE_BASENAME).ota
 SIZEDUMMY := $(BUILD_DIR)/sizedummy
 
-# Default target
 all: $(BIN_FILE) $(LST_FILE)
 	@echo "Build complete: $(BIN_FILE)"
 
-# Build main ELF file
 $(ELF_FILE): $(ALL_APP_OBJS) sdk-build
 	@echo "Linking $(ELF_FILE)"
 	@$(LD) $(LNK_FLAGS) -T$(LINKER_SCRIPT) $(LIBRARY_PATHS) -o $@ $(ALL_APP_OBJS) $(SDK_OBJS) $(LIBS)
 
-
 $(LST_FILE): $(ELF_FILE)
 	@echo 'Invoking: TC32 Create Extended Listing'
-	@$(OBJDUMP) -x -D -l -S  $(ELF_FILE)  > $(LST_FILE)
+	@$(OBJDUMP) -x -D -l -S $(ELF_FILE) > $(LST_FILE)
 
-# Create binary file
 $(BIN_FILE): $(ELF_FILE)
 	@echo "Creating binary $(BIN_FILE)"
 	@mkdir -p $(dir $@)
 	@$(OBJCOPY) -O binary $< $@
 	@$(SIZE) $<
 
-# Compile Telink-specific C files
 $(BUILD_DIR)/telink/%.o: %.c
 	@echo "Compiling $<"
 	@mkdir -p $(dir $@)
 	@$(CC) $(GCC_FLAGS) $(DEVICE_DEFS) $(INCLUDE_PATHS) -c -o $@ $<
 
-# Compile common C files
 $(BUILD_DIR)/common/%.o: $(SRC_DIR)/%.c
 	@echo "Compiling $<"
 	@mkdir -p $(dir $@)
 	@$(CC) $(GCC_FLAGS) $(DEVICE_DEFS) $(INCLUDE_PATHS) -c -o $@ $<
 
-# SDK compilation rules are in sdk.mk
-
-
-# Build with tools check
 build: all
 
 ifdef OTA_VERSION
 OTA_VERSION_ARG := --file-version $(OTA_VERSION)
 endif
 
-# Make an ota file
 ota: $(BIN_FILE)
 	@if [ -z "$(OTA_MANUFACTURER_ID)" ] || [ "$(OTA_MANUFACTURER_ID)" = "null" ] || \
-      [ -z "$(OTA_IMAGE_TYPE)" ]      || [ "$(OTA_IMAGE_TYPE)" = "null" ]; then \
+      [ -z "$(OTA_IMAGE_TYPE)" ] || [ "$(OTA_IMAGE_TYPE)" = "null" ]; then \
         echo "Skipping OTA file generation: missing arguments"; \
         echo " "; \
     else \
 	    echo 'Creating OTA file $(OTA_FILE)'; \
-			echo ' '; \
+		echo ' '; \
 	    mkdir -p $(dir $(OTA_FILE)); \
 	    python3 $(SRC_DIR)/telink/make_ota.py create-ota \
 	      --manufacturer-id $(OTA_MANUFACTURER_ID) \
@@ -282,40 +274,32 @@ ota: $(BIN_FILE)
 	    echo ''; \
 	fi
 
-# Flash binary to device
 flash: $(BIN_FILE)
 	@echo "Flashing $(BIN_FILE) to device via $(TLSRPGM_TTY)"
 	@python3 $(TLSRPGM_TOOL) -p$(TLSRPGM_TTY) -t25 -a 20 --mrst we 0 $(BIN_FILE)
 
-# Restart device
 restart:
 	@echo "Restarting device via $(TLSRPGM_TTY)"
-	@python3 $(TLSRPGM_TOOL) -p$(TLSRPGM_TTY)  -t25 -a 20 --mrst
+	@python3 $(TLSRPGM_TOOL) -p$(TLSRPGM_TTY) -t25 -a 20 --mrst
 
-# Wipe device
-wipe: 
+wipe:
 	@echo "Wiping device via $(TLSRPGM_TTY)"
 	@python3 $(TLSRPGM_TOOL) -p$(TLSRPGM_TTY) -t25 -a 20 ea
 
 flasher:
 	@python3 $(TLSRPGM_TOOL) -p$(TLSRPGM_TTY) $(ARGS)
 
-# Include dependency files (if they exist)
 -include $(ALL_APP_DEPS)
 
-# Clean build artifacts
 clean: sdk-clean
 	@echo "Cleaning Telink build artifacts..."
 	@rm -rf $(BUILD_DIR)/telink
 	@rm -rf $(BUILD_DIR)/common
 	@rm -rf $(BIN_DIR)
 
-
-# Delegate tools targets to tools.mk
 tools/%:
 	$(MAKE) -f tools.mk $*
 
-# Help target
 help:
 	@echo "Telink Build System"
 	@echo "=================="
@@ -346,17 +330,10 @@ help:
 	@echo "  flasher             - Run programmer tool with custom ARGS"
 	@echo ""
 	@echo "Configuration Variables:"
-	@echo "  APP_RELEASE         - Application release version (default: $(APP_RELEASE))"
-	@echo "  APP_BUILD           - Application build version (default: $(APP_BUILD))"
-	@echo "  STACK_RELEASE       - Stack release version (default: $(STACK_RELEASE))"
-	@echo "  STACK_BUILD         - Stack build version (default: $(STACK_BUILD))"
 	@echo "  DEVICE_TYPE         - router or end_device (default: $(DEVICE_TYPE))"
 	@echo "  CONFIG_STR          - Device pin configuration string"
 	@echo "  DEBUG               - Enable debug output (0/1, default: $(DEBUG))"
 	@echo "  TLSRPGM_TTY         - Programmer serial port (default: $(TLSRPGM_TTY))"
-	@echo ""
-	@echo "Help Targets:"
-	@echo "  help                - Show this help"
 	@echo ""
 	@echo "Output Files:"
 	@echo "  ELF: $(ELF_FILE)"

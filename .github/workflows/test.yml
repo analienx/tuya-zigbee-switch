@@ -34,11 +34,26 @@ jobs:
             exit 0
           fi
 
-          # Make formatting failures actionable in the log. The runner copy is
-          # disposable; this does not modify the branch.
+          # The runner copy is disposable. Format it to produce both an exact
+          # patch and the canonical full source files for supervisor-owned
+          # remediation; nothing is pushed from CI.
           uncrustify -c uncrustify.cfg --replace --no-backup "${files[@]}"
-          git diff -- "${files[@]}"
+          git diff -- "${files[@]}" | tee lint-diff.patch
+          mkdir -p lint-formatted
+          for file in "${files[@]}"; do
+            mkdir -p "lint-formatted/$(dirname "$file")"
+            cp "$file" "lint-formatted/$file"
+          done
           exit 1
+      - name: Upload lint diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-diagnostics
+          path: |
+            lint-diff.patch
+            lint-formatted/
+          if-no-files-found: ignore
 
   image-type-identity:
     runs-on: ubuntu-latest
@@ -71,4 +86,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y make python3 python3-pytest python3-yaml
       - name: Run tests
-        run: make tests
+        shell: bash
+        run: |
+          set -o pipefail
+          make tests 2>&1 | tee test-output.log
+      - name: Upload test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-diagnostics
+          path: test-output.log
+          if-no-files-found: error

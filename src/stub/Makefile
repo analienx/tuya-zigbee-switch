@@ -53,12 +53,15 @@ SOURCES := \
 	$(SRC_DIR)/base_components/button.c \
 	$(SRC_DIR)/base_components/battery.c \
 	$(SRC_DIR)/base_components/network_indicator.c \
+	$(SRC_DIR)/base_components/overload_protection.c \
+	$(SRC_DIR)/base_components/energy_measurement/hlw8012.c \
 	$(SRC_DIR)/device_config/config_parser.c \
 	$(SRC_DIR)/device_config/config_nv.c \
 	$(SRC_DIR)/device_config/device_params_nv.c \
 	$(SRC_DIR)/device_config/reset.c \
 	$(SRC_DIR)/device_config/nvm_migrations.c \
 	$(SRC_DIR)/device_config/device_migration.c \
+	$(SRC_DIR)/device_config/pm_legacy_migration.c \
 	$(SRC_DIR)/zigbee/basic_cluster.c \
 	$(SRC_DIR)/zigbee/relay_cluster.c \
 	$(SRC_DIR)/zigbee/switch_cluster.c \
@@ -66,7 +69,9 @@ SOURCES := \
 	$(SRC_DIR)/zigbee/general_commands.c \
 	$(SRC_DIR)/zigbee/cover_switch_cluster.c \
 	$(SRC_DIR)/zigbee/cover_cluster.c \
-	$(SRC_DIR)/zigbee/battery_cluster.c
+	$(SRC_DIR)/zigbee/battery_cluster.c \
+	$(SRC_DIR)/zigbee/electrical_measurement_cluster.c \
+	$(SRC_DIR)/zigbee/metering_cluster.c
 
 INCLUDES := \
 	-I$(SRC_DIR) \
@@ -92,6 +97,29 @@ CFLAGS += \
 ifeq ($(strip $(MIGRATION_REVERT)), 1)
 CFLAGS += -DDEVICE_MIGRATION_REVERT
 endif
+endif
+
+# Dedicated unified BSEED PM target flags. Generic stub builds keep these off.
+BSEED_PM_B28WRPVX ?=
+BSEED_PM_B28WRPVX_PROTECTION ?=
+HLW8012_VOLTAGE_MULTIPLIER ?=
+HLW8012_CURRENT_MULTIPLIER ?=
+HLW8012_POWER_MULTIPLIER ?=
+
+ifeq ($(strip $(BSEED_PM_B28WRPVX)),1)
+CFLAGS += -DBSEED_PM_B28WRPVX
+endif
+ifeq ($(strip $(BSEED_PM_B28WRPVX_PROTECTION)),1)
+CFLAGS += -DBSEED_PM_B28WRPVX_PROTECTION
+endif
+ifneq ($(strip $(HLW8012_VOLTAGE_MULTIPLIER)),)
+CFLAGS += -DHLW8012_VOLTAGE_MULTIPLIER=$(HLW8012_VOLTAGE_MULTIPLIER)
+endif
+ifneq ($(strip $(HLW8012_CURRENT_MULTIPLIER)),)
+CFLAGS += -DHLW8012_CURRENT_MULTIPLIER=$(HLW8012_CURRENT_MULTIPLIER)
+endif
+ifneq ($(strip $(HLW8012_POWER_MULTIPLIER)),)
+CFLAGS += -DHLW8012_POWER_MULTIPLIER=$(HLW8012_POWER_MULTIPLIER)
 endif
 
 LDFLAGS := -lpthread
