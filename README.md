@@ -22,10 +22,12 @@ This fork keeps those capabilities and adds the BSEED-specific pieces that matte
 | **Physical relay behavior independent of Zigbee state** | Each relay can `follow_state`, stay `always_on`, or stay `always_off` while its logical Zigbee On/Off state remains independently controllable. This is especially useful with smart bulbs, remote-only buttons and safety/override use cases. | **Fork addition.** Upstream detached mode controls whether a local button operates the relay, but does not provide this separate pinned-output policy on `main`. |
 | **Working BL0937 power monitoring on the BSEED TS011F PM socket** | Standard voltage, current, active power and cumulative energy reporting instead of using the socket as relay-only hardware. | **Implemented and hardware-validated here.** Upstream currently lists power monitoring as work in progress. |
 | **BSEED TS0726 canonical migration** | Existing devices can move from the historical swapped-pin workaround to the canonical BSEED mapping without throwing away the stored configuration/state model. | **BSEED-specific.** This migration is not part of generic upstream firmware. |
-| **Per-channel indicator LED control** | Indicator LEDs can follow the logical relay state, show the inverse, or run in `manual` mode where the LED state is controlled separately. | The generic LED primitive already exists upstream; **this fork makes it part of the tested BSEED mapping/UX instead of advertising it as a new upstream invention.** |
-| **BSEED-focused Zigbee2MQTT UX** | Controls are presented in human terms: logical state, physical relay behavior, button behavior, indicator behavior/state and advanced hardware configuration, with Left/Middle/Right semantics instead of requiring endpoint decoding. | **BSEED integration work.** Upstream exposes the generic controls, but its generic Exposes page can be much more technical. |
+| **Per-channel indicator LED control** | Indicator LEDs can follow the logical relay state, show the inverse, or run in `manual` mode where the LED state is controlled separately. | The generic LED primitive already exists upstream; **this fork validates it on the canonical BSEED mapping and uses it as part of the BSEED control model.** |
+| **BSEED-focused Zigbee2MQTT UX** | The tested BSEED deployment layout uses human terms and ordering: logical state → physical relay behavior → button behavior → indicator behavior/state → advanced hardware configuration, with Left/Middle/Right semantics instead of endpoint decoding. | **Target-specific BSEED integration work.** The generic generated converter in this repository remains upstream-compatible, so not every deployment-level label/layout improvement has been folded into the generic converter yet. |
 | **Exact stock-Tuya conversion packages** | The two supported stock identities have dedicated, validated `from_tuya` wrappers and a small BSEED-only OTA index. | Upstream has the generic conversion mechanism; **this fork adds exact BSEED packaging, validation and index hygiene.** |
 | **Release-grade reproducibility** | Deployable images come only from GitHub Actions, both BSEED targets are built from the same SHA, OTA identities are checked and PM output is rebuilt byte-for-byte. | **Fork-specific release policy and CI.** |
+
+The comparison above is intentionally conservative: this project reuses upstream features when upstream already has them instead of relabeling them as fork inventions.
 
 ### The smart-bulb / remote-control use case
 
@@ -38,10 +40,10 @@ physical relay behavior = always_on
 logical relay state     = independently controlled by Zigbee
 button action           = sends commands/events to bound smart lights
 indicator LED behavior  = manual
-indicator LED state     = follows whatever status you want to show
+indicator LED state     = controlled separately when desired
 ```
 
-That means a smart bulb can stay permanently powered while the wall control still behaves like a proper Zigbee remote, and the panel LED does not have to be tied to the electrical relay.
+That means a smart bulb can stay permanently powered while the wall control still behaves like a proper Zigbee remote, and the panel LED does not have to be tied to the electrical relay. In `manual` LED mode the firmware deliberately leaves LED state independent; synchronizing it to a remote light can then be done explicitly if desired.
 
 This is different from ordinary `detached` mode: detached mode only decides whether the **local button press** drives a relay. The physical relay policy decides whether the **electrical output itself** follows logical state or is pinned ON/OFF.
 
