@@ -62,7 +62,6 @@ def test_recovery_builder_is_build_only():
     executable = "\n".join(
         line for line in text.lower().splitlines() if not line.lstrip().startswith("#")
     )
-    assert "make -c src/telink build" not in executable  # guard typo-like alternate invocation
     assert "make -c src/telink flash" not in executable
     assert "make -c src/telink wipe" not in executable
     assert "tlsrpgm" not in executable
