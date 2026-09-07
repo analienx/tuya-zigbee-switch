@@ -21,9 +21,14 @@
 #define HLW8012_SAMPLE_INTERVAL_MS           5000
 #define HLW8012_MAX_SANE_PULSES              30000
 
-/* Hardware-proven BSEED b28wrpvx no-load envelope. Three consecutive low
- * samples are required before residual BL0937 pulses are suppressed. */
-#define HLW8012_NO_LOAD_POWER_W              2
+/* Recovery contract: the hardware-proven 8b8cc492 PM implementation did not
+ * suppress low nonzero CF pulses. Keep V8's metering/platform implementation
+ * intact, but make the later V8 no-load predicate unreachable for every sane
+ * nonnegative active-power sample. This restores predecessor pulse/energy
+ * semantics without changing the V8 Telink HAL, OTA stack or Zigbee clusters.
+ * Zero-pulse samples already contribute zero energy, so no separate idle
+ * suppression is required for this recovery image. */
+#define HLW8012_NO_LOAD_POWER_W              (-1)
 #define HLW8012_NO_LOAD_CURRENT_MA           50
 #define HLW8012_NO_LOAD_CONFIRM_SAMPLES      3
 
