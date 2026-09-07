@@ -1,0 +1,172 @@
+name: BSEED OTA distribution
+
+on:
+  push:
+    branches:
+      - supervisor/bseed-tuya-conversion
+    paths-ignore:
+      - 'zigbee2mqtt/ota/bseed/**'
+      - 'zigbee2mqtt/ota/index_bseed.json'
+      - 'zigbee2mqtt/ota/index_router.json'
+      - 'zigbee2mqtt/ota/index_router-FORCE.json'
+      - 'device_db.yaml'
+      - 'docs/supported_devices.md'
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build-bseed-distribution:
+    if: github.event_name == 'push' || github.head_ref == 'supervisor/bseed-tuya-conversion'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make python3 python3-pytest python3-yaml python3-jinja2 curl wget unzip bzip2
+
+      - name: Cache Telink SDK and toolchain
+        uses: actions/cache@v4
+        with:
+          path: telink_tools
+          key: telink-tools-v3.7.2.0
+
+      - name: Install pinned Telink build dependencies
+        run: make -C src/telink -f tools.mk sdk toolchain
+
+      - name: Run conversion/index contract tests
+        run: python3 -m pytest -q tests/test_bseed_tuya_conversion_release.py
+
+      - name: Build PM and TS0726 normal plus from-Tuya images
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash make_scripts/build_bseed_ts011f_pm_v8.sh
+          bash make_scripts/build_bseed_ts0726_v8.sh
+
+      - name: Stage BSEED public OTA files and exact index
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p zigbee2mqtt/ota/bseed
+          cp build/bseed-ts011f-pm-v8/forward.ota \
+            zigbee2mqtt/ota/bseed/ts011f-pm-v12053006.ota
+          cp build/bseed-ts011f-pm-v8/from_tuya.ota \
+            zigbee2mqtt/ota/bseed/ts011f-pm-v12053006-from_tuya.ota
+          cp build/bseed-ts0726-v8/forward.ota \
+            zigbee2mqtt/ota/bseed/ts0726-v1102300a.ota
+          cp build/bseed-ts0726-v8/from_tuya.ota \
+            zigbee2mqtt/ota/bseed/ts0726-v1102300a-from_tuya.ota
+
+          python3 make_scripts/make_bseed_ota_index.py \
+            --pm-dir build/bseed-ts011f-pm-v8 \
+            --ts0726-dir build/bseed-ts0726-v8 \
+            --output zigbee2mqtt/ota/index_bseed.json
+
+          python3 make_scripts/merge_bseed_ota_indexes.py \
+            --bseed-index zigbee2mqtt/ota/index_bseed.json \
+            --router-index zigbee2mqtt/ota/index_router.json \
+            --force-index zigbee2mqtt/ota/index_router-FORCE.json
+
+      - name: Update supported-device status from exact target block
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('device_db.yaml')
+          text = path.read_text(encoding='utf-8')
+          start = text.index('OUTLET_BSEED_PM_TS011F:\n')
+          end = text.index('\nOUTLET_BSEED_PM_TS011F_1:', start)
+          section = text[start:end]
+          old = '  status: in_progress\n  info: Power monitoring not implemented\n'
+          new = '  status: fully_supported\n  info: Supported (BL0937 power monitoring)\n'
+          if old not in section:
+              if new not in section:
+                  raise SystemExit('unexpected OUTLET_BSEED_PM_TS011F status block')
+          else:
+              section = section.replace(old, new, 1)
+              text = text[:start] + section + text[end:]
+              path.write_text(text, encoding='utf-8')
+          PY
+          python3 helper_scripts/make_supported_devices.py device_db.yaml > docs/supported_devices.md
+
+      - name: Validate staged distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          import yaml
+
+          entries = json.loads(Path('zigbee2mqtt/ota/index_bseed.json').read_text())
+          assert len(entries) == 4
+          expected = {
+              ('b28wrpvx', 43556, 0x12053006),
+              ('_TZ3000_b28wrpvx', 54179, 0xFFFFFFFF),
+              ('iedhxgyi', 45577, 0x1102300A),
+              ('_TZ3002_iedhxgyi', 54179, 0xFFFFFFFF),
+          }
+          actual = {(e['manufacturerName'][0], e['imageType'], e['fileVersion']) for e in entries}
+          assert actual == expected
+          for entry in entries:
+              path = Path('zigbee2mqtt/ota/bseed') / entry['fileName']
+              data = path.read_bytes()
+              assert len(data) == entry['fileSize']
+              assert hashlib.sha512(data).hexdigest() == entry['sha512']
+              assert entry['url'].endswith('/' + entry['fileName'])
+          db = yaml.safe_load(Path('device_db.yaml').read_text())
+          pm = db['OUTLET_BSEED_PM_TS011F']
+          assert pm['status'] == 'fully_supported'
+          assert pm['stock_manufacturer_name'] == '_TZ3000_b28wrpvx'
+          assert pm['stock_image_type'] == 54179
+          assert pm['firmware_image_type'] == 43556
+          PY
+
+      - name: Upload immutable distribution evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseed-v8u3-ota-distribution
+          path: |
+            build/bseed-ts011f-pm-v8/forward.bin
+            build/bseed-ts011f-pm-v8/forward.ota
+            build/bseed-ts011f-pm-v8/from_tuya.ota
+            build/bseed-ts011f-pm-v8/manifest.json
+            build/bseed-ts0726-v8/forward.bin
+            build/bseed-ts0726-v8/forward.ota
+            build/bseed-ts0726-v8/from_tuya.ota
+            build/bseed-ts0726-v8/manifest.json
+            zigbee2mqtt/ota/index_bseed.json
+            zigbee2mqtt/ota/bseed/
+          if-no-files-found: error
+
+      - name: Commit only Actions-built public distribution files
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            device_db.yaml \
+            docs/supported_devices.md \
+            zigbee2mqtt/ota/bseed \
+            zigbee2mqtt/ota/index_bseed.json \
+            zigbee2mqtt/ota/index_router.json \
+            zigbee2mqtt/ota/index_router-FORCE.json
+          if git diff --cached --quiet; then
+            echo 'No generated distribution changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Publish Actions-built BSEED OTA distribution'
+          git push origin HEAD:supervisor/bseed-tuya-conversion

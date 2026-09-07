@@ -24,7 +24,21 @@ def test_v8_build_preserves_accepted_identity_and_guard() -> None:
     assert "285356042" in build
     assert "IMAGE_TYPE=45577" in build
     assert "MANUFACTURER_CODE=4417" in build
-    assert build.count("DEVICE_CONFIG_GUARD=BSEED_TS0726_3GANG") == 2
+
+    # V8 deliberately centralizes the guard in COMMON_ARGS instead of
+    # duplicating it in individual build/OTA invocations. All three artifacts
+    # (BIN, normal OTA and stock-conversion OTA) must consume that same guarded
+    # argument set.
+    assert build.count("DEVICE_CONFIG_GUARD=BSEED_TS0726_3GANG") == 1
+    common_start = build.index("COMMON_ARGS=(")
+    common_end = build.index("\n)\n", common_start)
+    common_args = build[common_start:common_end]
+    assert "DEVICE_CONFIG_GUARD=BSEED_TS0726_3GANG" in common_args
+    assert build.count('"${COMMON_ARGS[@]}"') == 3
+    assert 'BIN_FILE="$BIN"' in build
+    assert 'OTA_FILE="$OTA"' in build
+    assert 'OTA_FILE="$FROM_TUYA_OTA"' in build
+
     assert "MIGRATION_REVERT" not in build
     assert "flash:" not in build
     assert "make -C src/telink flash" not in build

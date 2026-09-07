@@ -9,7 +9,7 @@ on:
 
 jobs:
   validate-unified-pm:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.head_ref == 'supervisor/v8-release-v12053006' || github.head_ref == 'assistant/v8-unified-pm'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.head_ref == 'supervisor/v8-release-v12053006' || github.head_ref == 'assistant/v8-unified-pm' || github.head_ref == 'supervisor/bseed-tuya-conversion'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact source

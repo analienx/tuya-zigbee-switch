@@ -12,6 +12,8 @@ BOARD='OUTLET_BSEED_PM_TS011F'
 CANONICAL='b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;'
 MANUFACTURER_CODE=4417
 IMAGE_TYPE=43556
+STOCK_MANUFACTURER_NAME='_TZ3000_b28wrpvx'
+STOCK_IMAGE_TYPE=54179
 SW_BUILD='1.2.5-bseedv8u3'
 # 0x12053004 is the accepted V8 PM fix1 canary. 0x12053005 is permanently
 # reserved for the sealed known-good rollback, so the next normal release
@@ -39,6 +41,8 @@ entry = db[board]
 print(entry["config_str"])
 print(entry["firmware_image_type"])
 print(entry["stock_manufacturer_id"])
+print(entry["stock_image_type"])
+print(entry["stock_manufacturer_name"])
 print(entry["device_type"])
 print(entry["mcu_family"])
 print(entry["mcu"])
@@ -48,9 +52,11 @@ PY
 db_config="${db_values[0]}"
 db_image_type="${db_values[1]}"
 db_manufacturer="${db_values[2]}"
-db_device_type="${db_values[3]}"
-db_mcu_family="${db_values[4]}"
-db_mcu="${db_values[5]}"
+db_stock_image_type="${db_values[3]}"
+db_stock_manufacturer_name="${db_values[4]}"
+db_device_type="${db_values[5]}"
+db_mcu_family="${db_values[6]}"
+db_mcu="${db_values[7]}"
 
 [[ "$db_config" == "$CANONICAL" ]] || {
     echo "ERROR: PM device_db canonical config drifted" >&2
@@ -64,6 +70,14 @@ db_mcu="${db_values[5]}"
 }
 [[ "$db_manufacturer" == "$MANUFACTURER_CODE" ]] || {
     echo "ERROR: PM manufacturer code drifted: expected $MANUFACTURER_CODE, got $db_manufacturer" >&2
+    exit 2
+}
+[[ "$db_stock_image_type" == "$STOCK_IMAGE_TYPE" ]] || {
+    echo "ERROR: PM stock image type drifted: expected $STOCK_IMAGE_TYPE, got $db_stock_image_type" >&2
+    exit 2
+}
+[[ "$db_stock_manufacturer_name" == "$STOCK_MANUFACTURER_NAME" ]] || {
+    echo "ERROR: PM stock manufacturer drifted: expected $STOCK_MANUFACTURER_NAME, got $db_stock_manufacturer_name" >&2
     exit 2
 }
 [[ "$db_device_type" == "router" ]] || {
@@ -81,6 +95,7 @@ db_mcu="${db_values[5]}"
 
 BIN="$OUT_DIR/forward.bin"
 OTA="$OUT_DIR/forward.ota"
+FROM_TUYA_OTA="$OUT_DIR/from_tuya.ota"
 
 COMMON_ARGS=(
     VERSION_STR="$SW_BUILD"
@@ -102,6 +117,7 @@ make -C src/telink build \
     "${COMMON_ARGS[@]}" \
     BIN_FILE="$BIN"
 
+# Normal custom -> custom OTA identity.
 make -C src/telink ota \
     "${COMMON_ARGS[@]}" \
     BIN_FILE="$BIN" \
@@ -110,8 +126,19 @@ make -C src/telink ota \
     OTA_IMAGE_TYPE="$IMAGE_TYPE" \
     OTA_VERSION="$FILE_VERSION_HEX"
 
+# Stock Tuya -> custom conversion wrapper. The compiled Telink payload is the
+# exact same BIN; only the outer Zigbee OTA identity/version is stock-facing.
+make -C src/telink ota \
+    "${COMMON_ARGS[@]}" \
+    BIN_FILE="$BIN" \
+    OTA_FILE="$FROM_TUYA_OTA" \
+    OTA_MANUFACTURER_ID="$MANUFACTURER_CODE" \
+    OTA_IMAGE_TYPE="$STOCK_IMAGE_TYPE" \
+    OTA_VERSION=0xFFFFFFFF
+
 python3 - "$OUT_DIR" "$BOARD" "$SW_BUILD" "$FILE_VERSION_DEC" \
-    "$MANUFACTURER_CODE" "$IMAGE_TYPE" "$NVM_SCHEMA" "$CANONICAL" \
+    "$MANUFACTURER_CODE" "$IMAGE_TYPE" "$STOCK_MANUFACTURER_NAME" \
+    "$STOCK_IMAGE_TYPE" "$NVM_SCHEMA" "$CANONICAL" \
     "$VOLTAGE_MULTIPLIER" "$CURRENT_MULTIPLIER" "$POWER_MULTIPLIER" <<'PY'
 from __future__ import annotations
 
@@ -129,6 +156,8 @@ import sys
     file_version,
     manufacturer,
     image_type,
+    stock_manufacturer_name,
+    stock_image_type,
     nvm_schema,
     canonical,
     voltage_multiplier,
@@ -139,6 +168,7 @@ out = pathlib.Path(out_dir)
 file_version = int(file_version)
 manufacturer = int(manufacturer)
 image_type = int(image_type)
+stock_image_type = int(stock_image_type)
 nvm_schema = int(nvm_schema)
 voltage_multiplier = int(voltage_multiplier)
 current_multiplier = int(current_multiplier)
@@ -146,34 +176,73 @@ power_multiplier = int(power_multiplier)
 
 bin_path = out / "forward.bin"
 ota_path = out / "forward.ota"
-for path in (bin_path, ota_path):
+from_tuya_path = out / "from_tuya.ota"
+for path in (bin_path, ota_path, from_tuya_path):
     if not path.is_file() or path.stat().st_size == 0:
         raise SystemExit(f"missing/empty artifact: {path}")
 
-header = struct.unpack("<I5HIH32sI", ota_path.read_bytes()[:56])
-(
-    magic,
-    hdr_version,
-    hdr_len,
-    field_ctrl,
-    ota_mfr,
-    ota_type,
-    ota_version,
-    stack_ver,
-    _,
-    total,
-) = header
-if magic != 0x0BEEF11E:
-    raise SystemExit(f"bad OTA magic: 0x{magic:08x}")
-if ota_mfr != manufacturer:
-    raise SystemExit(f"OTA manufacturer mismatch: {ota_mfr} != {manufacturer}")
-if ota_type != image_type:
-    raise SystemExit(f"OTA image type mismatch: {ota_type} != {image_type}")
-if ota_version != file_version:
-    raise SystemExit(f"OTA file version mismatch: {ota_version} != {file_version}")
-if total != ota_path.stat().st_size:
+
+def parse_header(path: pathlib.Path) -> dict[str, int]:
+    header = struct.unpack("<I5HIH32sI", path.read_bytes()[:56])
+    (
+        magic,
+        hdr_version,
+        hdr_len,
+        field_ctrl,
+        ota_mfr,
+        ota_type,
+        ota_version,
+        stack_ver,
+        _,
+        total,
+    ) = header
+    if magic != 0x0BEEF11E:
+        raise SystemExit(f"bad OTA magic in {path.name}: 0x{magic:08x}")
+    if total != path.stat().st_size:
+        raise SystemExit(
+            f"OTA total_image_size mismatch in {path.name}: {total} != {path.stat().st_size}"
+        )
+    return {
+        "headerVersion": hdr_version,
+        "headerLength": hdr_len,
+        "fieldControl": field_ctrl,
+        "manufacturerCode": ota_mfr,
+        "imageType": ota_type,
+        "fileVersion": ota_version,
+        "zigbeeStackVersion": stack_ver,
+        "totalImageSize": total,
+    }
+
+
+normal_header = parse_header(ota_path)
+stock_header = parse_header(from_tuya_path)
+if normal_header["manufacturerCode"] != manufacturer:
+    raise SystemExit("normal OTA manufacturer mismatch")
+if normal_header["imageType"] != image_type:
+    raise SystemExit("normal OTA image type mismatch")
+if normal_header["fileVersion"] != file_version:
+    raise SystemExit("normal OTA file version mismatch")
+if stock_header["manufacturerCode"] != manufacturer:
+    raise SystemExit("from-Tuya OTA manufacturer mismatch")
+if stock_header["imageType"] != stock_image_type:
+    raise SystemExit("from-Tuya OTA stock image type mismatch")
+if stock_header["fileVersion"] != 0xFFFFFFFF:
+    raise SystemExit("from-Tuya OTA version must be 0xFFFFFFFF")
+
+normal_bytes = ota_path.read_bytes()
+stock_bytes = from_tuya_path.read_bytes()
+if len(normal_bytes) != len(stock_bytes):
+    raise SystemExit("normal/from-Tuya OTA sizes differ")
+if normal_bytes[56:] != stock_bytes[56:]:
+    raise SystemExit("from-Tuya wrapper changed bytes after the 56-byte OTA header")
+diff_offsets = [
+    i for i, (normal, stock) in enumerate(zip(normal_bytes, stock_bytes))
+    if normal != stock
+]
+expected_offsets = list(range(12, 18))
+if diff_offsets != expected_offsets:
     raise SystemExit(
-        f"OTA total_image_size mismatch: {total} != {ota_path.stat().st_size}"
+        f"unexpected from-Tuya wrapper diff offsets: {diff_offsets}; expected {expected_offsets}"
     )
 
 source_commit = subprocess.check_output(
@@ -184,7 +253,7 @@ source_dirty = bool(
 )
 
 manifest = {
-    "schema": 1,
+    "schema": 2,
     "sourceCommit": source_commit,
     "sourceDirty": source_dirty,
     "board": board,
@@ -211,21 +280,21 @@ manifest = {
         "destinationItems": {"energyEndpoint1": 64, "calibration": 68, "overload": 69},
         "copyOnly": True,
     },
-    "artifacts": {},
-    "otaHeader": {
-        "headerVersion": hdr_version,
-        "headerLength": hdr_len,
-        "fieldControl": field_ctrl,
-        "manufacturerCode": ota_mfr,
-        "imageType": ota_type,
-        "fileVersion": ota_version,
-        "zigbeeStackVersion": stack_ver,
-        "totalImageSize": total,
+    "stockConversion": {
+        "stockManufacturerName": stock_manufacturer_name,
+        "stockManufacturerCode": manufacturer,
+        "stockImageType": stock_image_type,
+        "wrapperFileVersion": 0xFFFFFFFF,
+        "headerDiffOffsets": diff_offsets,
+        "payloadFromByte56Identical": True,
     },
+    "artifacts": {},
+    "otaHeader": normal_header,
+    "fromTuyaOtaHeader": stock_header,
     "note": "BUILD ONLY; no publication, device-config write, or device flash performed",
 }
 
-for path in (bin_path, ota_path):
+for path in (bin_path, ota_path, from_tuya_path):
     data = path.read_bytes()
     manifest["artifacts"][path.name] = {
         "bytes": len(data),

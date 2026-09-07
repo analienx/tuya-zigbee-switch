@@ -1,0 +1,54 @@
+[
+  {
+    "fileName": "ts011f-pm-v12053006.ota",
+    "fileVersion": 302329862,
+    "fileSize": 195314,
+    "url": "https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/ota/bseed/ts011f-pm-v12053006.ota",
+    "imageType": 43556,
+    "manufacturerCode": 4417,
+    "sha512": "327a40e5faf9cb3bd72d8bdb8066e5a122a945d40ba405a0fb7992cfbee409992496f94772f950be7832e17807ba85e8ea821b15c3f82d960a3221c82cc67327",
+    "otaHeaderString": "Telink OTA Image\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
+    "manufacturerName": [
+      "b28wrpvx"
+    ]
+  },
+  {
+    "fileName": "ts011f-pm-v12053006-from_tuya.ota",
+    "fileVersion": 4294967295,
+    "fileSize": 195314,
+    "url": "https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/ota/bseed/ts011f-pm-v12053006-from_tuya.ota",
+    "imageType": 54179,
+    "manufacturerCode": 4417,
+    "sha512": "486a0676aa9d66bb1efd6e5d91ee851de2c76b83efac023678bdf55bb85fdf12758e395427ad1a955e1f4ae290b93e185be1be63957087fcf33960d7d7d70f87",
+    "otaHeaderString": "Telink OTA Image\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
+    "manufacturerName": [
+      "_TZ3000_b28wrpvx"
+    ]
+  },
+  {
+    "fileName": "ts0726-v1102300a.ota",
+    "fileVersion": 285356042,
+    "fileSize": 197058,
+    "url": "https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/ota/bseed/ts0726-v1102300a.ota",
+    "imageType": 45577,
+    "manufacturerCode": 4417,
+    "sha512": "bd2dbc3bd12f2395bd1ef76c654b59377211c7ce2eb34831e58e76227c84bde9d721e413841e6c28b5e9c8ee2e312662f47e897afe49865fb6074cb66444354b",
+    "otaHeaderString": "Telink OTA Image\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
+    "manufacturerName": [
+      "iedhxgyi"
+    ]
+  },
+  {
+    "fileName": "ts0726-v1102300a-from_tuya.ota",
+    "fileVersion": 4294967295,
+    "fileSize": 197058,
+    "url": "https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/ota/bseed/ts0726-v1102300a-from_tuya.ota",
+    "imageType": 54179,
+    "manufacturerCode": 4417,
+    "sha512": "b413c7728f605472c572cbc02d8845f17245c5a6365ebcfb77306fec62b3005195372c1e0a1ebbc516c4c1014725ea0d61f896cbd4b74e8dbf079ef75ce801a5",
+    "otaHeaderString": "Telink OTA Image\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
+    "manufacturerName": [
+      "_TZ3002_iedhxgyi"
+    ]
+  }
+]
