@@ -23,14 +23,15 @@ def test_pm_device_db_identity_is_the_hardware_proven_target():
     assert entry["mcu"] == "TLSR8258"
 
 
-def test_pm_build_pins_proven_meter_and_next_normal_ota_version():
+def test_pm_build_pins_proven_meter_and_recovery_ota_version():
     text = BUILD.read_text(encoding="utf-8")
     assert "BOARD='OUTLET_BSEED_PM_TS011F'" in text
     assert f"CANONICAL='{CONFIG}'" in text
     assert "MANUFACTURER_CODE=4417" in text
     assert "IMAGE_TYPE=43556" in text
-    assert "FILE_VERSION_HEX='0x12053002'" in text
-    assert "FILE_VERSION_DEC=302329858" in text
+    assert "SW_BUILD='1.2.5-bseed-pm-recovery1'" in text
+    assert "FILE_VERSION_HEX='0x12053003'" in text
+    assert "FILE_VERSION_DEC=302329859" in text
     assert "VOLTAGE_MULTIPLIER=161460" in text
     assert "CURRENT_MULTIPLIER=144679" in text
     assert "POWER_MULTIPLIER=16989" in text
@@ -52,9 +53,10 @@ def test_pm_build_is_build_only_and_verifies_ota_header_and_hashes():
     )
 
 
-def test_pm_validator_proves_same_sha_pm_and_ts0726_builds():
+def test_pm_validator_proves_same_sha_recovery_and_ts0726_builds():
     text = VALIDATOR.read_text(encoding="utf-8")
     assert 'PM_INTEGRATION_BASE = "8ed8ddfcf5892f0b801d19df4882a145a42aa3b1"' in text
+    assert '"tests/test_pm_recovery_contract.py"' in text
     assert '"tests/test_unified_pm_v8.py"' in text
     assert '"tests/test_pm_cluster_layout_guard.py"' in text
     assert '"tests/test_bseed_pm_v8_release.py"' in text
@@ -63,7 +65,7 @@ def test_pm_validator_proves_same_sha_pm_and_ts0726_builds():
     assert 'run(["bash", "make_scripts/build_bseed_ts011f_pm_v8.sh"])' in text
     assert 'run(["bash", "make_scripts/build_bseed_ts0726_v8.sh"])' in text
     assert '"board": "OUTLET_BSEED_PM_TS011F"' in text
-    assert '"fileVersion": 302329858' in text
+    assert '"fileVersion": 302329859' in text
     assert '"imageType": 43556' in text
     assert '"fileVersion": 285356042' in text
     assert '"imageType": 45577' in text
@@ -72,8 +74,4 @@ def test_pm_validator_proves_same_sha_pm_and_ts0726_builds():
 
 def test_release_handoff_scripts_parse_before_executor_use():
     subprocess.run(["bash", "-n", str(BUILD)], cwd=ROOT, check=True)
-    compile(
-        VALIDATOR.read_text(encoding="utf-8"),
-        str(VALIDATOR),
-        "exec",
-    )
+    compile(VALIDATOR.read_text(encoding="utf-8"), str(VALIDATOR), "exec")
