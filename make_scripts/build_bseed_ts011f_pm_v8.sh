@@ -12,12 +12,12 @@ BOARD='OUTLET_BSEED_PM_TS011F'
 CANONICAL='b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;'
 MANUFACTURER_CODE=4417
 IMAGE_TYPE=43556
-SW_BUILD='1.2.5-bseedv8u1'
-# Hardware-proven predecessor is 0x12053001 / 302329857. Use the immediately
-# following normal version so an accepted PM unit can take this image without
-# relying on a forced 0xffffffff OTA wrapper.
-FILE_VERSION_HEX='0x12053002'
-FILE_VERSION_DEC=302329858
+SW_BUILD='1.2.5-bseedv8u2'
+# The recovered known-good predecessor is now installed as 0x12053003.
+# V8 PM fix1 is the next normal OTA version and does not rely on a forced
+# 0xffffffff wrapper.
+FILE_VERSION_HEX='0x12053004'
+FILE_VERSION_DEC=302329860
 VOLTAGE_MULTIPLIER=161460
 CURRENT_MULTIPLIER=144679
 POWER_MULTIPLIER=16989
@@ -150,7 +150,6 @@ for path in (bin_path, ota_path):
     if not path.is_file() or path.stat().st_size == 0:
         raise SystemExit(f"missing/empty artifact: {path}")
 
-# Zigbee OTA header: <I5HIH32sI (56 bytes).
 header = struct.unpack("<I5HIH32sI", ota_path.read_bytes()[:56])
 (
     magic,
@@ -205,6 +204,7 @@ manifest = {
         "currentMultiplier": current_multiplier,
         "powerMultiplier": power_multiplier,
         "protectionEnabled": True,
+        "samplingSemantics": "hardware-proven-8b8cc492",
     },
     "legacyPmNvmMigration": {
         "sourceItems": {"energy": 40, "calibration": 44, "overload": 51},
