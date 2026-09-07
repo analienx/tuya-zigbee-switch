@@ -168,5 +168,5 @@ jobs:
             echo 'No generated distribution changes to commit.'
             exit 0
           fi
-          git commit -m 'Publish Actions-built BSEED OTA distribution [skip ci]'
+          git commit -m 'Publish Actions-built BSEED OTA distribution'
           git push origin HEAD:supervisor/bseed-tuya-conversion
