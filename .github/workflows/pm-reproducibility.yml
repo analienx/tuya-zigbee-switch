@@ -1,22 +1,21 @@
-name: BSEED PM reproducibility
+name: BSEED PM recovery reproducibility
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - supervisor/pm-recovery-v12053003
   pull_request:
 
 jobs:
-  validate-unified-pm:
-    # This is the integration-branch release gate. The workflow remains
-    # dispatchable after merge for explicit future reproducibility checks.
-    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'assistant/v8-unified-pm'
+  validate-pm-recovery:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.head_ref == 'supervisor/pm-recovery-v12053003'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact source
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # pull_request normally checks out GitHub's synthetic merge ref. This
-          # gate instead proves the immutable candidate commit itself.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install host dependencies
@@ -47,25 +46,42 @@ jobs:
             echo "make=$(make --version | head -1)"
             "$TC32" --version | head -1
             sha256sum telink_tools/downloads/tc32_gcc_v2.0.tar.bz2
-          } > "$RUNNER_TEMP/pm-build-environment.txt"
+          } > "$RUNNER_TEMP/pm-recovery-build-environment.txt"
 
-      - name: Validate unified PM and TS0726 from same SHA
+      - name: Validate recovery and TS0726 from same SHA
         shell: bash
         run: |
           set -euo pipefail
-          python3 make_scripts/validate_bseed_ts011f_pm_v8.py 2>&1 | tee "$RUNNER_TEMP/pm-validator-output.log"
+          python3 make_scripts/validate_bseed_ts011f_pm_v8.py 2>&1 | tee "$RUNNER_TEMP/pm-recovery-validator-output.log"
 
-      - name: Upload deterministic build evidence
+      - name: Rebuild recovery a second time for byte reproducibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp build/bseed-ts011f-pm-recovery/forward.bin "$RUNNER_TEMP/recovery-first.bin"
+          cp build/bseed-ts011f-pm-recovery/forward.ota "$RUNNER_TEMP/recovery-first.ota"
+          rm -rf build/bseed-ts011f-pm-recovery
+          bash make_scripts/build_bseed_ts011f_pm_v8.sh
+          cmp "$RUNNER_TEMP/recovery-first.bin" build/bseed-ts011f-pm-recovery/forward.bin
+          cmp "$RUNNER_TEMP/recovery-first.ota" build/bseed-ts011f-pm-recovery/forward.ota
+          sha256sum build/bseed-ts011f-pm-recovery/forward.bin build/bseed-ts011f-pm-recovery/forward.ota \
+            > "$RUNNER_TEMP/pm-recovery-sha256.txt"
+          sha512sum build/bseed-ts011f-pm-recovery/forward.bin build/bseed-ts011f-pm-recovery/forward.ota \
+            > "$RUNNER_TEMP/pm-recovery-sha512.txt"
+
+      - name: Upload immutable recovery build evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bseed-pm-v8-reproducibility
+          name: bseed-pm-recovery-v12053003
           path: |
-            ${{ runner.temp }}/pm-validator-output.log
-            ${{ runner.temp }}/pm-build-environment.txt
-            build/bseed-ts011f-pm-v8/forward.bin
-            build/bseed-ts011f-pm-v8/forward.ota
-            build/bseed-ts011f-pm-v8/manifest.json
+            ${{ runner.temp }}/pm-recovery-validator-output.log
+            ${{ runner.temp }}/pm-recovery-build-environment.txt
+            ${{ runner.temp }}/pm-recovery-sha256.txt
+            ${{ runner.temp }}/pm-recovery-sha512.txt
+            build/bseed-ts011f-pm-recovery/forward.bin
+            build/bseed-ts011f-pm-recovery/forward.ota
+            build/bseed-ts011f-pm-recovery/manifest.json
             build/bseed-ts0726-v8/forward.bin
             build/bseed-ts0726-v8/forward.ota
             build/bseed-ts0726-v8/manifest.json
