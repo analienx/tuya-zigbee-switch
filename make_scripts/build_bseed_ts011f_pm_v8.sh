@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Reproducible BSEED TS011F-BS-PM unified-V8 build.
+# Reproducible BSEED TS011F-BS-PM recovery build.
 # BUILD ONLY: this script never publishes, flashes, writes device config, or
 # performs any live-device action.
 
@@ -12,17 +12,14 @@ BOARD='OUTLET_BSEED_PM_TS011F'
 CANONICAL='b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;'
 MANUFACTURER_CODE=4417
 IMAGE_TYPE=43556
-SW_BUILD='1.2.5-bseedv8u1'
-# Hardware-proven predecessor is 0x12053001 / 302329857. Use the immediately
-# following normal version so an accepted PM unit can take this image without
-# relying on a forced 0xffffffff OTA wrapper.
-FILE_VERSION_HEX='0x12053002'
-FILE_VERSION_DEC=302329858
+SW_BUILD='1.2.5-bseed-pm-recovery1'
+FILE_VERSION_HEX='0x12053003'
+FILE_VERSION_DEC=302329859
 VOLTAGE_MULTIPLIER=161460
 CURRENT_MULTIPLIER=144679
 POWER_MULTIPLIER=16989
 
-OUT_DIR="${1:-build/bseed-ts011f-pm-v8}"
+OUT_DIR="${1:-build/bseed-ts011f-pm-recovery}"
 mkdir -p "$OUT_DIR"
 OUT_DIR="$(cd "$OUT_DIR" && pwd)"
 
@@ -52,32 +49,12 @@ db_device_type="${db_values[3]}"
 db_mcu_family="${db_values[4]}"
 db_mcu="${db_values[5]}"
 
-[[ "$db_config" == "$CANONICAL" ]] || {
-    echo "ERROR: PM device_db canonical config drifted" >&2
-    echo "expected: $CANONICAL" >&2
-    echo "actual:   $db_config" >&2
-    exit 2
-}
-[[ "$db_image_type" == "$IMAGE_TYPE" ]] || {
-    echo "ERROR: PM image type drifted: expected $IMAGE_TYPE, got $db_image_type" >&2
-    exit 2
-}
-[[ "$db_manufacturer" == "$MANUFACTURER_CODE" ]] || {
-    echo "ERROR: PM manufacturer code drifted: expected $MANUFACTURER_CODE, got $db_manufacturer" >&2
-    exit 2
-}
-[[ "$db_device_type" == "router" ]] || {
-    echo "ERROR: PM target is no longer router" >&2
-    exit 2
-}
-[[ "$db_mcu_family" == "Telink" ]] || {
-    echo "ERROR: PM target is no longer Telink" >&2
-    exit 2
-}
-[[ "$db_mcu" == "TLSR8258" ]] || {
-    echo "ERROR: PM MCU drifted: expected TLSR8258, got $db_mcu" >&2
-    exit 2
-}
+[[ "$db_config" == "$CANONICAL" ]] || { echo "ERROR: PM device_db canonical config drifted" >&2; exit 2; }
+[[ "$db_image_type" == "$IMAGE_TYPE" ]] || { echo "ERROR: PM image type drifted" >&2; exit 2; }
+[[ "$db_manufacturer" == "$MANUFACTURER_CODE" ]] || { echo "ERROR: PM manufacturer drifted" >&2; exit 2; }
+[[ "$db_device_type" == "router" ]] || { echo "ERROR: PM target is no longer router" >&2; exit 2; }
+[[ "$db_mcu_family" == "Telink" ]] || { echo "ERROR: PM target is no longer Telink" >&2; exit 2; }
+[[ "$db_mcu" == "TLSR8258" ]] || { echo "ERROR: PM MCU drifted" >&2; exit 2; }
 
 BIN="$OUT_DIR/forward.bin"
 OTA="$OUT_DIR/forward.ota"
@@ -98,94 +75,39 @@ COMMON_ARGS=(
 )
 
 make -C src/telink clean
-make -C src/telink build \
-    "${COMMON_ARGS[@]}" \
-    BIN_FILE="$BIN"
-
-make -C src/telink ota \
-    "${COMMON_ARGS[@]}" \
-    BIN_FILE="$BIN" \
-    OTA_FILE="$OTA" \
-    OTA_MANUFACTURER_ID="$MANUFACTURER_CODE" \
-    OTA_IMAGE_TYPE="$IMAGE_TYPE" \
-    OTA_VERSION="$FILE_VERSION_HEX"
+make -C src/telink build "${COMMON_ARGS[@]}" BIN_FILE="$BIN"
+make -C src/telink ota "${COMMON_ARGS[@]}" BIN_FILE="$BIN" OTA_FILE="$OTA" \
+    OTA_MANUFACTURER_ID="$MANUFACTURER_CODE" OTA_IMAGE_TYPE="$IMAGE_TYPE" OTA_VERSION="$FILE_VERSION_HEX"
 
 python3 - "$OUT_DIR" "$BOARD" "$SW_BUILD" "$FILE_VERSION_DEC" \
     "$MANUFACTURER_CODE" "$IMAGE_TYPE" "$NVM_SCHEMA" "$CANONICAL" \
     "$VOLTAGE_MULTIPLIER" "$CURRENT_MULTIPLIER" "$POWER_MULTIPLIER" <<'PY'
 from __future__ import annotations
-
-import hashlib
-import json
-import pathlib
-import struct
-import subprocess
-import sys
-
+import hashlib, json, pathlib, struct, subprocess, sys
 (
-    out_dir,
-    board,
-    sw_build,
-    file_version,
-    manufacturer,
-    image_type,
-    nvm_schema,
-    canonical,
-    voltage_multiplier,
-    current_multiplier,
-    power_multiplier,
+    out_dir, board, sw_build, file_version, manufacturer, image_type, nvm_schema,
+    canonical, voltage_multiplier, current_multiplier, power_multiplier,
 ) = sys.argv[1:]
 out = pathlib.Path(out_dir)
-file_version = int(file_version)
-manufacturer = int(manufacturer)
-image_type = int(image_type)
-nvm_schema = int(nvm_schema)
-voltage_multiplier = int(voltage_multiplier)
-current_multiplier = int(current_multiplier)
-power_multiplier = int(power_multiplier)
-
-bin_path = out / "forward.bin"
-ota_path = out / "forward.ota"
+file_version = int(file_version); manufacturer = int(manufacturer); image_type = int(image_type)
+nvm_schema = int(nvm_schema); voltage_multiplier = int(voltage_multiplier)
+current_multiplier = int(current_multiplier); power_multiplier = int(power_multiplier)
+bin_path = out / "forward.bin"; ota_path = out / "forward.ota"
 for path in (bin_path, ota_path):
     if not path.is_file() or path.stat().st_size == 0:
         raise SystemExit(f"missing/empty artifact: {path}")
-
-# Zigbee OTA header: <I5HIH32sI (56 bytes).
 header = struct.unpack("<I5HIH32sI", ota_path.read_bytes()[:56])
-(
-    magic,
-    hdr_version,
-    hdr_len,
-    field_ctrl,
-    ota_mfr,
-    ota_type,
-    ota_version,
-    stack_ver,
-    _,
-    total,
-) = header
-if magic != 0x0BEEF11E:
-    raise SystemExit(f"bad OTA magic: 0x{magic:08x}")
-if ota_mfr != manufacturer:
-    raise SystemExit(f"OTA manufacturer mismatch: {ota_mfr} != {manufacturer}")
-if ota_type != image_type:
-    raise SystemExit(f"OTA image type mismatch: {ota_type} != {image_type}")
-if ota_version != file_version:
-    raise SystemExit(f"OTA file version mismatch: {ota_version} != {file_version}")
-if total != ota_path.stat().st_size:
-    raise SystemExit(
-        f"OTA total_image_size mismatch: {total} != {ota_path.stat().st_size}"
-    )
-
-source_commit = subprocess.check_output(
-    ["git", "rev-parse", "HEAD"], text=True
-).strip()
-source_dirty = bool(
-    subprocess.check_output(["git", "status", "--porcelain"], text=True).strip()
-)
-
+magic, hdr_version, hdr_len, field_ctrl, ota_mfr, ota_type, ota_version, stack_ver, _, total = header
+if magic != 0x0BEEF11E: raise SystemExit(f"bad OTA magic: 0x{magic:08x}")
+if ota_mfr != manufacturer: raise SystemExit("OTA manufacturer mismatch")
+if ota_type != image_type: raise SystemExit("OTA image type mismatch")
+if ota_version != file_version: raise SystemExit("OTA file version mismatch")
+if total != ota_path.stat().st_size: raise SystemExit("OTA total_image_size mismatch")
+source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+source_dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], text=True).strip())
 manifest = {
-    "schema": 1,
+    "schema": 2,
+    "purpose": "V8-lineage recovery with hardware-proven predecessor PM sampling semantics",
     "sourceCommit": source_commit,
     "sourceDirty": source_dirty,
     "board": board,
@@ -196,15 +118,15 @@ manifest = {
     "nvmMigrationsVersion": nvm_schema,
     "canonicalConfig": canonical,
     "meter": {
-        "type": "BL0937",
-        "backend": "HLW8012-compatible pulse counter",
-        "cf": "PA1",
-        "cf1": "PC2",
-        "sel": "PB1",
+        "type": "BL0937", "backend": "HLW8012-compatible pulse counter",
+        "cf": "PA1", "cf1": "PC2", "sel": "PB1",
         "voltageMultiplier": voltage_multiplier,
         "currentMultiplier": current_multiplier,
         "powerMultiplier": power_multiplier,
         "protectionEnabled": True,
+        "samplingSemantics": "8b8cc492-compatible",
+        "noLoadSuppression": False,
+        "selStartup": "legacy-init-then-set",
     },
     "legacyPmNvmMigration": {
         "sourceItems": {"energy": 40, "calibration": 44, "overload": 51},
@@ -213,29 +135,18 @@ manifest = {
     },
     "artifacts": {},
     "otaHeader": {
-        "headerVersion": hdr_version,
-        "headerLength": hdr_len,
-        "fieldControl": field_ctrl,
-        "manufacturerCode": ota_mfr,
-        "imageType": ota_type,
-        "fileVersion": ota_version,
-        "zigbeeStackVersion": stack_ver,
-        "totalImageSize": total,
+        "headerVersion": hdr_version, "headerLength": hdr_len, "fieldControl": field_ctrl,
+        "manufacturerCode": ota_mfr, "imageType": ota_type, "fileVersion": ota_version,
+        "zigbeeStackVersion": stack_ver, "totalImageSize": total,
     },
-    "note": "BUILD ONLY; no publication, device-config write, or device flash performed",
+    "note": "BUILD ONLY; GitHub Actions artifact is authoritative; no live-device mutation",
 }
-
 for path in (bin_path, ota_path):
     data = path.read_bytes()
     manifest["artifacts"][path.name] = {
-        "bytes": len(data),
-        "sha256": hashlib.sha256(data).hexdigest(),
+        "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(),
         "sha512": hashlib.sha512(data).hexdigest(),
     }
-
-(out / "manifest.json").write_text(
-    json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-    encoding="utf-8",
-)
+(out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 print(json.dumps(manifest, indent=2, sort_keys=True))
 PY
