@@ -52,7 +52,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 make_scripts/validate_bseed_ts011f_pm_v8.py 2>&1 | tee "$RUNNER_TEMP/pm-recovery-validator-output.log"
+          python3 make_scripts/validate_bseed_ts011f_pm_v8.py 2>&1 | tee "$RUNNER_TEMP/pm-validator-output.log"
 
       - name: Rebuild recovery a second time for byte reproducibility
         shell: bash
@@ -75,7 +75,7 @@ jobs:
         with:
           name: bseed-pm-recovery-v12053003
           path: |
-            ${{ runner.temp }}/pm-recovery-validator-output.log
+            ${{ runner.temp }}/pm-validator-output.log
             ${{ runner.temp }}/pm-recovery-build-environment.txt
             ${{ runner.temp }}/pm-recovery-sha256.txt
             ${{ runner.temp }}/pm-recovery-sha512.txt
