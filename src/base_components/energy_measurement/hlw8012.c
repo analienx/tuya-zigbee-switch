@@ -3,6 +3,13 @@
 #include "hal/printf_selector.h"
 #include <string.h>
 
+/* Recovery semantics are deliberately coupled to the one recovery fileVersion.
+ * Normal V8 (0x12053002) therefore compiles exactly the normal path without a
+ * separate mutable build flag that could be forgotten or misapplied. */
+#if defined(BSEED_PM_B28WRPVX) && (FILE_VERSION == 0x12053003)
+#define BSEED_PM_RECOVERY_PREDECESSOR_SEMANTICS 1
+#endif
+
 static void hlw8012_meter_get_data(void *ctx, energy_meter_data_t *data);
 static void hlw8012_meter_reset_energy(void *ctx);
 static void hlw8012_meter_tick(void *ctx);
@@ -74,7 +81,7 @@ int hlw8012_init(hlw8012_t *dev, hal_gpio_pin_t cf_pin,
     hal_gpio_init(sel_pin, 0, HAL_GPIO_PULL_NONE);
     hal_gpio_set(sel_pin);
 #else
-    /* Normal V8 behavior remains byte/semantics compatible with ded91a1. */
+    /* Normal V8 behavior remains compatible with ded91a1. */
     hal_gpio_init_output(sel_pin, HAL_GPIO_PULL_NONE, 1);
 #endif
 
