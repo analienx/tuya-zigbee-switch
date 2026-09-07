@@ -21,12 +21,6 @@
 #define HLW8012_SAMPLE_INTERVAL_MS           5000
 #define HLW8012_MAX_SANE_PULSES              30000
 
-/* Hardware-proven BSEED b28wrpvx no-load envelope. Three consecutive low
- * samples are required before residual BL0937 pulses are suppressed. */
-#define HLW8012_NO_LOAD_POWER_W              2
-#define HLW8012_NO_LOAD_CURRENT_MA           50
-#define HLW8012_NO_LOAD_CONFIRM_SAMPLES      3
-
 #define HLW8012_ENERGY_WH_SUBUNIT            \
         (HLW8012_FIXED_POINT_SCALE * 3600u / \
          (HLW8012_SAMPLE_INTERVAL_MS / 1000u))
@@ -48,8 +42,6 @@ typedef struct {
     int16_t  power;
     uint32_t energy;
     uint32_t energy_acc;
-    uint8_t  no_load_samples;
-    uint8_t  no_load_suppressed;
     uint8_t  sel_state;
     uint8_t  valid;
     uint32_t freq_cf;
