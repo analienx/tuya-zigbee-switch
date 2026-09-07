@@ -1,0 +1,60 @@
+name: Feature request
+description: Propose a focused firmware, integration, or device-support improvement
+title: "[Feature]: "
+labels: []
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the user-facing limitation before proposing an implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Explain what should change and how users would interact with it.
+    validations:
+      required: true
+
+  - type: input
+    id: target
+    attributes:
+      label: Target identity, if hardware-specific
+      description: Provide the exact manufacturer/model/board rather than a retail product name alone.
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Preferred scope
+      options:
+        - Shared core behavior
+        - Target-specific guarded behavior
+        - Build / CI / release tooling
+        - OTA / Zigbee2MQTT integration
+        - Documentation / UX
+        - Unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and migration considerations
+      description: Note effects on NVM, configuration, OTA identity, existing binds, endpoints, clusters, or converters.
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Supporting evidence
+      description: Link upstream PRs/issues, device logs, hardware evidence, specifications, or prior implementations if relevant.
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Hardware safety
+      options:
+        - label: This request does not require unplanned mutation of unrelated or unidentified stock hardware.
+          required: true

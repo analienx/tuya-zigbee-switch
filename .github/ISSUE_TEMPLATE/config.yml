@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: BSEED unified V8 documentation
+    url: https://github.com/analienx/tuya-zigbee-switch/blob/main/docs/bseed_unified_v8.md
+    about: Read target identities, OTA conversion details, validation and recovery guidance before opening an issue.
+  - name: Upstream romasku project
+    url: https://github.com/romasku/tuya-zigbee-switch
+    about: Use upstream for issues that are not specific to this fork or its BSEED integration.
