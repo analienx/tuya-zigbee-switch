@@ -67,9 +67,16 @@ int hlw8012_init(hlw8012_t *dev, hal_gpio_pin_t cf_pin,
         return -1;
     }
 
-    /* V8 relay work established a first-driven-level GPIO contract. Reuse it
-     * for SEL so meter startup does not briefly select the wrong channel. */
+#ifdef BSEED_PM_RECOVERY_PREDECESSOR_SEMANTICS
+    /* Recovery-only compatibility mode: preserve the exact SEL startup
+     * sequence used by the hardware-proven 8b8cc492 PM implementation while
+     * retaining the V8 OTA/platform/toolchain lineage around it. */
+    hal_gpio_init(sel_pin, 0, HAL_GPIO_PULL_NONE);
+    hal_gpio_set(sel_pin);
+#else
+    /* Normal V8 behavior remains byte/semantics compatible with ded91a1. */
     hal_gpio_init_output(sel_pin, HAL_GPIO_PULL_NONE, 1);
+#endif
 
     dev->data.sel_state        = 1;
     dev->data.last_sample_time = hal_millis();
@@ -213,9 +220,17 @@ static void update_measurement_handler(void *arg) {
         }
     }
 
-    /* Proven b28wrpvx filter: do not let the calibrated idle pulse floor
-     * accumulate phantom energy or feed overload protection. A real load exits
-     * suppression immediately; voltage and raw pulse diagnostics remain live. */
+#ifdef BSEED_PM_RECOVERY_PREDECESSOR_SEMANTICS
+    /* Recovery mode deliberately restores the hardware-proven predecessor
+     * behavior: every valid CF sample contributes to energy and no low-load
+     * power/current values are suppressed. */
+    dev->data.energy_acc +=
+        (uint32_t)cf_pulses * dev->cal.power_multiplier;
+    while (dev->data.energy_acc >= HLW8012_ENERGY_WH_SUBUNIT) {
+        dev->data.energy_acc -= HLW8012_ENERGY_WH_SUBUNIT;
+        dev->data.energy++;
+    }
+#else
     if (dev->data.power <= HLW8012_NO_LOAD_POWER_W &&
         dev->data.current <= HLW8012_NO_LOAD_CURRENT_MA) {
         if (dev->data.no_load_samples < HLW8012_NO_LOAD_CONFIRM_SAMPLES)
@@ -223,7 +238,7 @@ static void update_measurement_handler(void *arg) {
         if (dev->data.no_load_samples == HLW8012_NO_LOAD_CONFIRM_SAMPLES) {
             dev->data.no_load_suppressed = 1;
             dev->data.current            = 0;
-            dev->data.power = 0;
+            dev->data.power              = 0;
         }
     } else {
         dev->data.no_load_samples    = 0;
@@ -238,6 +253,7 @@ static void update_measurement_handler(void *arg) {
             dev->data.energy++;
         }
     }
+#endif
 
     dev->data.valid            = 1;
     dev->data.last_sample_time = now;
@@ -293,8 +309,10 @@ static int32_t hlw8012_meter_get_instant_power(void *ctx) {
         (int32_t)((pulses_full * dev->cal.power_multiplier +
                    HLW8012_FIXED_POINT_SCALE / 2) /
                   HLW8012_FIXED_POINT_SCALE);
+#ifndef BSEED_PM_RECOVERY_PREDECESSOR_SEMANTICS
     if (dev->data.no_load_suppressed && power <= HLW8012_NO_LOAD_POWER_W)
         return 0;
+#endif
 
     return power;
 }
