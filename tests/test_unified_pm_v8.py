@@ -153,8 +153,8 @@ def test_pm_target_short_config_gets_meter_clusters_without_nvm_config_rewrite(p
     result = _run(
         pm_stub,
         "machine on\n"
-        "zcl_read 1 0b04 0505\n"  # Electrical Measurement / rmsVoltage
-        "zcl_read 1 0702 0000\n"  # Metering / currentSummDelivered
+        "zcl_read 1 0b04 0505\n"
+        "zcl_read 1 0702 0000\n"
         "q\n",
     )
     assert "Config: implicit b28wrpvx BL0937 meter CF=A1 CF1=C2 SEL=B1" in result.stdout
@@ -182,15 +182,15 @@ def test_generic_v8_build_does_not_enable_implicit_bseed_metering():
     assert "RES ERR attr_not_found ep=1 cluster=0x0702 attr=0x0000" in result.stdout
 
 
-def test_proven_bseed_no_load_filter_is_before_energy_accumulation():
+def test_v8_pm_fix_uses_proven_predecessor_sampling_semantics():
     header = (ROOT / "src/base_components/energy_measurement/hlw8012.h").read_text()
     source = (ROOT / "src/base_components/energy_measurement/hlw8012.c").read_text()
 
-    assert "HLW8012_NO_LOAD_POWER_W              2" in header
-    assert "HLW8012_NO_LOAD_CURRENT_MA           50" in header
-    assert "HLW8012_NO_LOAD_CONFIRM_SAMPLES      3" in header
-
-    suppression = source.index("dev->data.no_load_suppressed = 1")
-    accumulation = source.index("dev->data.energy_acc +=")
-    assert suppression < accumulation
-    assert "if (!dev->data.no_load_suppressed)" in source[suppression:accumulation + 200]
+    assert "HLW8012_NO_LOAD_POWER_W" not in header
+    assert "HLW8012_NO_LOAD_CURRENT_MA" not in header
+    assert "HLW8012_NO_LOAD_CONFIRM_SAMPLES" not in header
+    assert "no_load_suppressed" not in source
+    assert "no_load_samples" not in source
+    assert "hal_gpio_init(sel_pin, 0, HAL_GPIO_PULL_NONE);" in source
+    assert "hal_gpio_set(sel_pin);" in source
+    assert "dev->data.energy_acc +=" in source
