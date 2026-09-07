@@ -3017,8 +3017,8 @@ OUTLET_BSEED_PM_TS011F:
   stock_image_type: 54179
   firmware_image_type: 43556
   build: yes
-  status: in_progress
-  info: Power monitoring not implemented
+  status: fully_supported
+  info: Supported (BL0937 power monitoring)
   threads: https://github.com/romasku/tuya-zigbee-switch/issues/145
   store:
   - https://www.aliexpress.com/item/1005004402438527.html
