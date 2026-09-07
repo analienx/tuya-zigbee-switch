@@ -1,0 +1,101 @@
+name: Bug report
+description: Report a reproducible firmware, OTA, device, or integration problem
+title: "[Bug]: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please verify the exact hardware/Zigbee identity before reporting. Do not flash a conversion image onto a merely similar-looking device.
+
+  - type: dropdown
+    id: target
+    attributes:
+      label: Target
+      options:
+        - BSEED TS011F PM socket
+        - BSEED TS0726 3-gang
+        - Other supported target
+        - Unknown / not yet identified
+    validations:
+      required: true
+
+  - type: input
+    id: identity
+    attributes:
+      label: Zigbee manufacturer and model identity
+      description: Example: _TZ3000_b28wrpvx / TS011F
+      placeholder: manufacturer / model
+    validations:
+      required: true
+
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware build ID and file version
+      placeholder: 1.2.5-bseedv8u3 / 0x12053006
+    validations:
+      required: true
+
+  - type: input
+    id: config
+    attributes:
+      label: Device configuration string
+      description: If available, provide the exact device_config value.
+
+  - type: dropdown
+    id: origin
+    attributes:
+      label: Firmware origin
+      options:
+        - Updated from custom firmware
+        - Converted from stock Tuya firmware
+        - Locally flashed / development build
+        - Unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the failure and the expected behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: List the smallest sequence that reproduces the issue.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Include a focused time window. Remove credentials, tokens, private URLs and unrelated identifiers.
+      render: text
+
+  - type: input
+    id: environment
+    attributes:
+      label: Zigbee environment
+      description: Zigbee2MQTT/ZHA version, coordinator, and adapter stack if relevant.
+
+  - type: input
+    id: final_state
+    attributes:
+      label: Final relay/power state
+      description: Especially important for hardware/relay/OTA failures.
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: I matched the exact hardware/Zigbee identity rather than relying on appearance alone.
+          required: true
+        - label: I have not included secrets or private credentials in the report.
+          required: true
