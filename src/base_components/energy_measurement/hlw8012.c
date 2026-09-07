@@ -67,9 +67,10 @@ int hlw8012_init(hlw8012_t *dev, hal_gpio_pin_t cf_pin,
         return -1;
     }
 
-    /* V8 relay work established a first-driven-level GPIO contract. Reuse it
-     * for SEL so meter startup does not briefly select the wrong channel. */
-    hal_gpio_init_output(sel_pin, HAL_GPIO_PULL_NONE, 1);
+    /* V8 PM fix1 restores the hardware-proven predecessor SEL startup
+     * sequence while retaining the V8 counter/resource guards above. */
+    hal_gpio_init(sel_pin, 0, HAL_GPIO_PULL_NONE);
+    hal_gpio_set(sel_pin);
 
     dev->data.sel_state        = 1;
     dev->data.last_sample_time = hal_millis();
@@ -193,6 +194,16 @@ static void update_measurement_handler(void *arg) {
         (int16_t)(((uint32_t)cf_pulses * dev->cal.power_multiplier +
                    HLW8012_FIXED_POINT_SCALE / 2) /
                   HLW8012_FIXED_POINT_SCALE);
+
+    /* Hardware-proven predecessor semantics: every valid CF sample contributes
+     * to energy. PM fix1 intentionally contains no fundamental no-load
+     * suppression; filtering can be reconsidered only after metering is proven. */
+    dev->data.energy_acc +=
+        (uint32_t)cf_pulses * dev->cal.power_multiplier;
+    while (dev->data.energy_acc >= HLW8012_ENERGY_WH_SUBUNIT) {
+        dev->data.energy_acc -= HLW8012_ENERGY_WH_SUBUNIT;
+        dev->data.energy++;
+    }
     dev->data.cal_pulses_power = cf_pulses;
 
     if (dev->cycle_count != 0) {
@@ -210,32 +221,6 @@ static void update_measurement_handler(void *arg) {
                             dev->cal.current_multiplier) /
                            HLW8012_FIXED_POINT_SCALE);
             dev->data.cal_pulses_current = cf1_pulses;
-        }
-    }
-
-    /* Proven b28wrpvx filter: do not let the calibrated idle pulse floor
-     * accumulate phantom energy or feed overload protection. A real load exits
-     * suppression immediately; voltage and raw pulse diagnostics remain live. */
-    if (dev->data.power <= HLW8012_NO_LOAD_POWER_W &&
-        dev->data.current <= HLW8012_NO_LOAD_CURRENT_MA) {
-        if (dev->data.no_load_samples < HLW8012_NO_LOAD_CONFIRM_SAMPLES)
-            dev->data.no_load_samples++;
-        if (dev->data.no_load_samples == HLW8012_NO_LOAD_CONFIRM_SAMPLES) {
-            dev->data.no_load_suppressed = 1;
-            dev->data.current            = 0;
-            dev->data.power = 0;
-        }
-    } else {
-        dev->data.no_load_samples    = 0;
-        dev->data.no_load_suppressed = 0;
-    }
-
-    if (!dev->data.no_load_suppressed) {
-        dev->data.energy_acc +=
-            (uint32_t)cf_pulses * dev->cal.power_multiplier;
-        while (dev->data.energy_acc >= HLW8012_ENERGY_WH_SUBUNIT) {
-            dev->data.energy_acc -= HLW8012_ENERGY_WH_SUBUNIT;
-            dev->data.energy++;
         }
     }
 
@@ -289,14 +274,9 @@ static int32_t hlw8012_meter_get_instant_power(void *ctx) {
     if (pulses_full > HLW8012_MAX_SANE_PULSES)
         pulses_full = HLW8012_MAX_SANE_PULSES;
 
-    int32_t power =
-        (int32_t)((pulses_full * dev->cal.power_multiplier +
-                   HLW8012_FIXED_POINT_SCALE / 2) /
-                  HLW8012_FIXED_POINT_SCALE);
-    if (dev->data.no_load_suppressed && power <= HLW8012_NO_LOAD_POWER_W)
-        return 0;
-
-    return power;
+    return (int32_t)((pulses_full * dev->cal.power_multiplier +
+                      HLW8012_FIXED_POINT_SCALE / 2) /
+                     HLW8012_FIXED_POINT_SCALE);
 }
 
 static void hlw8012_meter_get_data(void *ctx, energy_meter_data_t *data) {
