@@ -182,15 +182,20 @@ def test_generic_v8_build_does_not_enable_implicit_bseed_metering():
     assert "RES ERR attr_not_found ep=1 cluster=0x0702 attr=0x0000" in result.stdout
 
 
-def test_proven_bseed_no_load_filter_is_before_energy_accumulation():
+def test_recovery_restores_predecessor_nonzero_pulse_semantics():
     header = (ROOT / "src/base_components/energy_measurement/hlw8012.h").read_text()
     source = (ROOT / "src/base_components/energy_measurement/hlw8012.c").read_text()
 
-    assert "HLW8012_NO_LOAD_POWER_W              2" in header
+    # The hardware-proven 8b8cc492 path did not suppress low nonzero CF pulses.
+    # V8 computes active power from sane, nonnegative pulse counts, so a -1 W
+    # threshold makes the later suppression predicate unreachable while leaving
+    # the accepted V8 code/ABI/HAL structure untouched.
+    assert "HLW8012_NO_LOAD_POWER_W              (-1)" in header
     assert "HLW8012_NO_LOAD_CURRENT_MA           50" in header
     assert "HLW8012_NO_LOAD_CONFIRM_SAMPLES      3" in header
 
     suppression = source.index("dev->data.no_load_suppressed = 1")
     accumulation = source.index("dev->data.energy_acc +=")
     assert suppression < accumulation
+    assert "dev->data.power <= HLW8012_NO_LOAD_POWER_W" in source
     assert "if (!dev->data.no_load_suppressed)" in source[suppression:accumulation + 200]
