@@ -1,24 +1,28 @@
 #!/usr/bin/env python3
 """Strict software/build gate for the V8-lineage BSEED PM recovery image.
 
-This validator is BUILD ONLY. It proves that normal V8 remains byte-identical to
-the accepted ded91a1 OTA, then produces recovery v0x12053003 twice and requires
-byte-for-byte reproducibility. It never publishes or flashes firmware.
+BUILD ONLY. The gate proves recovery-source isolation by building exact ded91a1
+and this branch's ordinary V8 image inside the same Actions job, with the same
+SDK/toolchain/date, and requiring BIN+OTA byte identity. It then produces
+recovery v0x12053003 twice and requires byte-for-byte reproducibility. It never
+publishes or flashes firmware.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pathlib
 import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ACCEPTED_V8_SHA = "ded91a1fb1cdeb320d0858c8f4bcabab32bf5564"
-ACCEPTED_V8_OTA_SHA256 = "c3ccb484c28d7ef08594acc306b2054aed3ba9fcfc9579643da339f7fcc9fe7c"
+HISTORICAL_ACCEPTED_V8_OTA_SHA256 = "c3ccb484c28d7ef08594acc306b2054aed3ba9fcfc9579643da339f7fcc9fe7c"
 RECOVERY_VERSION = 0x12053003
 RECOVERY_VERSION_DEC = 302329859
 MANUFACTURER = 4417
@@ -26,8 +30,10 @@ IMAGE_TYPE = 43556
 CANONICAL = "b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;"
 
 
-def run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
-    proc = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True)
+def run(
+    cmd: list[str], cwd: pathlib.Path = ROOT
+) -> subprocess.CompletedProcess[str]:
+    proc = subprocess.run(cmd, cwd=cwd, text=True, capture_output=True)
     if proc.returncode:
         print(proc.stdout)
         print(proc.stderr, file=sys.stderr)
@@ -35,8 +41,10 @@ def run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
     return proc
 
 
-def sha256(path: pathlib.Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def digest(path: pathlib.Path, algorithm: str = "sha256") -> str:
+    h = hashlib.new(algorithm)
+    h.update(path.read_bytes())
+    return h.hexdigest()
 
 
 def require_clean(label: str) -> None:
@@ -67,6 +75,45 @@ def parse_ota(path: pathlib.Path) -> dict[str, int]:
     }
 
 
+def require_byte_identical(label: str, left: pathlib.Path, right: pathlib.Path) -> None:
+    if not left.is_file() or not right.is_file():
+        raise SystemExit(f"{label}: missing comparison artifact")
+    if left.read_bytes() != right.read_bytes():
+        raise SystemExit(
+            f"{label}: byte identity failed: "
+            f"{digest(left)} != {digest(right)}"
+        )
+
+
+def build_exact_v8_base_same_job() -> pathlib.Path:
+    """Build ded91a1 with this job's exact toolchain/date for isolation proof."""
+    runner_temp = pathlib.Path(os.environ.get("RUNNER_TEMP", tempfile.gettempdir()))
+    worktree = runner_temp / "bseed-v8-base-ded91a1"
+    if worktree.exists():
+        shutil.rmtree(worktree)
+
+    run(["git", "worktree", "add", "--detach", str(worktree), ACCEPTED_V8_SHA])
+    try:
+        shared_tools = ROOT / "telink_tools"
+        if not shared_tools.is_dir():
+            raise SystemExit("same-job base comparison requires installed telink_tools")
+        (worktree / "telink_tools").symlink_to(shared_tools, target_is_directory=True)
+
+        out = worktree / "build/bseed-ts011f-pm-v8"
+        run(
+            [
+                "bash",
+                "make_scripts/build_bseed_ts011f_pm_v8.sh",
+                str(out),
+            ],
+            cwd=worktree,
+        )
+        return worktree
+    except BaseException:
+        run(["git", "worktree", "remove", "--force", str(worktree)])
+        raise
+
+
 def main() -> int:
     for tool in ("git", "make", "bash", "python3"):
         if shutil.which(tool) is None:
@@ -75,28 +122,57 @@ def main() -> int:
     require_clean("start")
     head = run(["git", "rev-parse", "HEAD"]).stdout.strip()
 
-    # First prove the full existing V8/TS0726 software contract from this exact
-    # source SHA. This also builds ordinary PM V8 at 0x12053002.
+    # Full current V8 + TS0726 regression/toolchain contract first. This builds
+    # ordinary PM V8 at 0x12053002 from the recovery branch with recovery mode
+    # excluded by the compile-time fileVersion gate.
     run([sys.executable, "make_scripts/validate_bseed_ts011f_pm_v8.py"])
 
-    baseline_ota = ROOT / "build/bseed-ts011f-pm-v8/forward.ota"
-    if not baseline_ota.is_file():
-        raise SystemExit("ordinary V8 validator did not produce baseline OTA")
-    baseline_sha = sha256(baseline_ota)
-    if baseline_sha != ACCEPTED_V8_OTA_SHA256:
-        raise SystemExit(
-            "normal V8 artifact drifted on recovery branch: "
-            f"{baseline_sha} != {ACCEPTED_V8_OTA_SHA256}"
-        )
-    baseline_header = parse_ota(baseline_ota)
-    if baseline_header["fileVersion"] != 0x12053002:
-        raise SystemExit("baseline V8 version drifted")
-    if baseline_header["manufacturerCode"] != MANUFACTURER or baseline_header["imageType"] != IMAGE_TYPE:
-        raise SystemExit("baseline V8 OTA identity drifted")
+    branch_v8_dir = ROOT / "build/bseed-ts011f-pm-v8"
+    branch_v8_bin = branch_v8_dir / "forward.bin"
+    branch_v8_ota = branch_v8_dir / "forward.ota"
+    if not branch_v8_bin.is_file() or not branch_v8_ota.is_file():
+        raise SystemExit("ordinary V8 validator did not produce PM BIN+OTA")
 
-    # Build recovery twice. The builder performs a real clean TC32 build each
-    # time; equality therefore proves deterministic output from the pinned
-    # source/toolchain rather than reuse of object files.
+    branch_v8_header = parse_ota(branch_v8_ota)
+    if branch_v8_header["fileVersion"] != 0x12053002:
+        raise SystemExit("ordinary branch V8 version drifted")
+    if (
+        branch_v8_header["manufacturerCode"] != MANUFACTURER
+        or branch_v8_header["imageType"] != IMAGE_TYPE
+    ):
+        raise SystemExit("ordinary branch V8 OTA identity drifted")
+
+    # The historical accepted artifact embeds __DATE__, so a whole-file hash
+    # from a different calendar day is not a valid source-isolation invariant.
+    # Instead build exact ded91a1 side-by-side under this same runner/toolchain/
+    # day and demand exact BIN+OTA equality with the branch's ordinary V8 build.
+    base_worktree = build_exact_v8_base_same_job()
+    try:
+        base_v8_dir = base_worktree / "build/bseed-ts011f-pm-v8"
+        base_v8_bin = base_v8_dir / "forward.bin"
+        base_v8_ota = base_v8_dir / "forward.ota"
+        base_v8_header = parse_ota(base_v8_ota)
+        if base_v8_header != branch_v8_header:
+            raise SystemExit(
+                f"same-job V8 OTA header drift: {base_v8_header} != {branch_v8_header}"
+            )
+        require_byte_identical(
+            "same-job exact-base vs recovery-branch ordinary V8 BIN",
+            base_v8_bin,
+            branch_v8_bin,
+        )
+        require_byte_identical(
+            "same-job exact-base vs recovery-branch ordinary V8 OTA",
+            base_v8_ota,
+            branch_v8_ota,
+        )
+        same_job_base_bin_sha = digest(base_v8_bin)
+        same_job_base_ota_sha = digest(base_v8_ota)
+    finally:
+        run(["git", "worktree", "remove", "--force", str(base_worktree)])
+
+    # Build recovery twice. Each builder invocation performs a clean real TC32
+    # build, so equality proves deterministic output rather than object reuse.
     out_a = ROOT / "build/bseed-ts011f-pm-recovery-a"
     out_b = ROOT / "build/bseed-ts011f-pm-recovery-b"
     run(["bash", "make_scripts/build_bseed_ts011f_pm_recovery.sh", str(out_a)])
@@ -106,16 +182,11 @@ def main() -> int:
     for name in ("forward.bin", "forward.ota"):
         a = out_a / name
         b = out_b / name
-        if not a.is_file() or not b.is_file():
-            raise SystemExit(f"missing recovery artifact {name}")
-        a_bytes = a.read_bytes()
-        b_bytes = b.read_bytes()
-        if a_bytes != b_bytes:
-            raise SystemExit(f"recovery reproducibility failure: {name} differs between clean builds")
+        require_byte_identical(f"recovery clean-build reproducibility {name}", a, b)
         artifacts[name] = {
-            "bytes": len(a_bytes),
-            "sha256": hashlib.sha256(a_bytes).hexdigest(),
-            "sha512": hashlib.sha512(a_bytes).hexdigest(),
+            "bytes": a.stat().st_size,
+            "sha256": digest(a),
+            "sha512": digest(a, "sha512"),
             "reproducedByteIdentical": True,
         }
 
@@ -128,14 +199,16 @@ def main() -> int:
         recovery_header["fileVersion"],
     )
     if actual_identity != expected_identity:
-        raise SystemExit(f"recovery OTA identity mismatch: {actual_identity} != {expected_identity}")
+        raise SystemExit(
+            f"recovery OTA identity mismatch: {actual_identity} != {expected_identity}"
+        )
 
     manifest = json.loads((out_a / "manifest.json").read_text(encoding="utf-8"))
     for key, expected in {
         "sourceCommit": head,
         "sourceDirty": False,
         "acceptedV8BaseSha": ACCEPTED_V8_SHA,
-        "acceptedV8OtaSha256": ACCEPTED_V8_OTA_SHA256,
+        "acceptedV8OtaSha256": HISTORICAL_ACCEPTED_V8_OTA_SHA256,
         "board": "OUTLET_BSEED_PM_TS011F",
         "swBuildId": "1.2.5-bseed-pm-recovery1",
         "fileVersion": RECOVERY_VERSION_DEC,
@@ -144,20 +217,24 @@ def main() -> int:
         "canonicalConfig": CANONICAL,
     }.items():
         if manifest.get(key) != expected:
-            raise SystemExit(f"recovery manifest mismatch {key}: {manifest.get(key)!r} != {expected!r}")
+            raise SystemExit(
+                f"recovery manifest mismatch {key}: "
+                f"{manifest.get(key)!r} != {expected!r}"
+            )
 
     semantics = manifest.get("recoverySemantics")
     if not isinstance(semantics, dict):
         raise SystemExit("missing recoverySemantics manifest section")
     if semantics.get("lowLoadSuppression") is not False:
         raise SystemExit("recovery low-load suppression must be disabled")
-    for key in ("v8PlatformRetained", "v8NvmMigrationRetained", "v8OtaStackRetained"):
+    for key in (
+        "v8PlatformRetained",
+        "v8NvmMigrationRetained",
+        "v8OtaStackRetained",
+    ):
         if semantics.get(key) is not True:
             raise SystemExit(f"recovery manifest missing retained invariant: {key}")
 
-    # Ensure exact production config is embedded in the built binary. One or
-    # more occurrences are acceptable because compiler/string pooling differs,
-    # but absence is a hard blocker.
     binary = (out_a / "forward.bin").read_bytes()
     if CANONICAL.encode("ascii") not in binary:
         raise SystemExit("canonical PM config is absent from recovery binary")
@@ -168,8 +245,13 @@ def main() -> int:
         "status": "PASS",
         "sourceCommit": head,
         "acceptedV8BaseSha": ACCEPTED_V8_SHA,
-        "baselineV8OtaSha256": baseline_sha,
-        "baselineV8ByteIdentityPreserved": True,
+        "historicalAcceptedV8OtaSha256": HISTORICAL_ACCEPTED_V8_OTA_SHA256,
+        "historicalHashNotUsedAsCrossDayEqualityGate": True,
+        "sameJobBaseV8BinSha256": same_job_base_bin_sha,
+        "sameJobBaseV8OtaSha256": same_job_base_ota_sha,
+        "branchOrdinaryV8BinSha256": digest(branch_v8_bin),
+        "branchOrdinaryV8OtaSha256": digest(branch_v8_ota),
+        "sameJobExactBaseVsBranchOrdinaryV8ByteIdentical": True,
         "recoveryVersion": RECOVERY_VERSION_DEC,
         "recoveryHeader": recovery_header,
         "recoveryArtifacts": artifacts,
@@ -178,7 +260,9 @@ def main() -> int:
         "note": "VALIDATE+BUILD only; no publication, config write, or device flash performed",
     }
     output = ROOT / "build/bseed-ts011f-pm-recovery-validation.json"
-    output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    output.write_text(
+        json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
