@@ -37,10 +37,9 @@ This page describes **converting** and **updating** supported devices **wireless
   ⤷ option missing from ZHA, remove and re-pair if needed  
 13. **Reconfigure** the device **`🗘`** 
 14. Be aware of [## Version update](#version-update) steps
-15. Read [faq.md](./faq.md) before reaching out for support
+15. Read [faq.md](./faq.md) and [../SUPPORT.md](../SUPPORT.md) before reaching out for support
 
-> Hopefully, you now have a working device with custom firmware! 😊  
-> *Consider yourself invited to our [Discord](/readme.md#discord) community!* 
+> Hopefully, you now have a working device with custom firmware! 😊
 
 ## Version update
 
@@ -106,6 +105,16 @@ zha:
 
 </details>
 
+### BSEED unified V8 index
+
+For the exact BSEED TS011F-PM and TS0726 identities documented in [bseed_unified_v8.md](./bseed_unified_v8.md), prefer the dedicated BSEED index:
+
+```text
+https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/ota/index_bseed.json
+```
+
+It contains only the current normal and stock-conversion paths for those two BSEED families. This avoids accidentally selecting historical generic BSEED entries.
+
 ### Choosing an index
 
 - You can install **Router** or **EndDevice** firmware
@@ -131,7 +140,7 @@ https://raw.githubusercontent.com/USER/REPO/refs/heads/BRANCH/zigbee2mqtt/ota/IN
 </details>
 <br>
 
-The available indexes **for the main branch** are:  
+The inherited generic indexes **for this fork's main branch** are:  
 
 <details>
 <summary> <code> index_router.json </code> </summary>  
@@ -139,7 +148,7 @@ The available indexes **for the main branch** are:
 - Both L and L+N switches get Router FW
 - Both stock and custom FW devices receive updates
 ```
-https://raw.githubusercontent.com/romasku/tuya-zigbee-switch/refs/heads/main/zigbee2mqtt/ota/index_router.json
+https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/refs/heads/main/zigbee2mqtt/ota/index_router.json
 ```
 </details>
 
@@ -147,11 +156,11 @@ https://raw.githubusercontent.com/romasku/tuya-zigbee-switch/refs/heads/main/zig
 <summary> <code> index_router-FORCE.json </code> </summary>  
 
 - Both L and L+N switches get Router FW
-- Allows (re-installing FW with the same version number
+- Allows re-installing FW with the same version number
 - Only custom FW devices receive updates
 - Useful for switching between operation modes or branches
 ```
-https://raw.githubusercontent.com/romasku/tuya-zigbee-switch/refs/heads/main/zigbee2mqtt/ota/index_router-FORCE.json
+https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/refs/heads/main/zigbee2mqtt/ota/index_router-FORCE.json
 ```
 </details>
 
@@ -162,7 +171,7 @@ https://raw.githubusercontent.com/romasku/tuya-zigbee-switch/refs/heads/main/zig
 - L+N switches do not get anything
 - Both stock and custom FW devices receive updates
 ```
-https://raw.githubusercontent.com/romasku/tuya-zigbee-switch/refs/heads/main/zigbee2mqtt/ota/index_end_device.json
+https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/refs/heads/main/zigbee2mqtt/ota/index_end_device.json
 ```
 </details>
 
@@ -175,7 +184,7 @@ https://raw.githubusercontent.com/romasku/tuya-zigbee-switch/refs/heads/main/zig
 - Only custom FW devices receive updates
 - Useful for switching between operation modes or branches
 ```
-https://raw.githubusercontent.com/romasku/tuya-zigbee-switch/refs/heads/main/zigbee2mqtt/ota/index_end_device-FORCE.json
+https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/refs/heads/main/zigbee2mqtt/ota/index_end_device-FORCE.json
 ```
 </details>
 <br>
@@ -243,9 +252,9 @@ _Or your custom path if you changed it in `homed-zigbee.conf` file (`device/exte
 
 </details>
 
-[quirks]: https://github.com/romasku/tuya-zigbee-switch/tree/main/zha
-[converters]: https://github.com/romasku/tuya-zigbee-switch/tree/main/zigbee2mqtt/converters
-[extensions]: https://github.com/romasku/tuya-zigbee-switch/tree/main/homed
+[quirks]: https://github.com/analienx/tuya-zigbee-switch/tree/main/zha
+[converters]: https://github.com/analienx/tuya-zigbee-switch/tree/main/zigbee2mqtt/converters
+[extensions]: https://github.com/analienx/tuya-zigbee-switch/tree/main/homed
 [zha_tips]: https://github.com/romasku/tuya-zigbee-switch/issues/62
 [zha-device-handlers]: https://github.com/zigpy/zha-device-handlers
 [zigbee-herdsman-converters]: https://github.com/Koenkk/zigbee-herdsman-converters
