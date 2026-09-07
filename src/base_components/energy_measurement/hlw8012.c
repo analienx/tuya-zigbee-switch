@@ -227,17 +227,7 @@ static void update_measurement_handler(void *arg) {
         }
     }
 
-#ifdef BSEED_PM_RECOVERY_PREDECESSOR_SEMANTICS
-    /* Recovery mode deliberately restores the hardware-proven predecessor
-     * behavior: every valid CF sample contributes to energy and no low-load
-     * power/current values are suppressed. */
-    dev->data.energy_acc +=
-        (uint32_t)cf_pulses * dev->cal.power_multiplier;
-    while (dev->data.energy_acc >= HLW8012_ENERGY_WH_SUBUNIT) {
-        dev->data.energy_acc -= HLW8012_ENERGY_WH_SUBUNIT;
-        dev->data.energy++;
-    }
-#else
+#ifndef BSEED_PM_RECOVERY_PREDECESSOR_SEMANTICS
     if (dev->data.power <= HLW8012_NO_LOAD_POWER_W &&
         dev->data.current <= HLW8012_NO_LOAD_CURRENT_MA) {
         if (dev->data.no_load_samples < HLW8012_NO_LOAD_CONFIRM_SAMPLES)
@@ -259,6 +249,16 @@ static void update_measurement_handler(void *arg) {
             dev->data.energy_acc -= HLW8012_ENERGY_WH_SUBUNIT;
             dev->data.energy++;
         }
+    }
+#else
+    /* Recovery mode deliberately restores the hardware-proven predecessor
+     * behavior: every valid CF sample contributes to energy and no low-load
+     * power/current values are suppressed. */
+    dev->data.energy_acc +=
+        (uint32_t)cf_pulses * dev->cal.power_multiplier;
+    while (dev->data.energy_acc >= HLW8012_ENERGY_WH_SUBUNIT) {
+        dev->data.energy_acc -= HLW8012_ENERGY_WH_SUBUNIT;
+        dev->data.energy++;
     }
 #endif
 
