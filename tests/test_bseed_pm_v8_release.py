@@ -29,8 +29,9 @@ def test_pm_build_pins_proven_meter_and_next_normal_ota_version():
     assert f"CANONICAL='{CONFIG}'" in text
     assert "MANUFACTURER_CODE=4417" in text
     assert "IMAGE_TYPE=43556" in text
-    assert "FILE_VERSION_HEX='0x12053002'" in text
-    assert "FILE_VERSION_DEC=302329858" in text
+    assert "SW_BUILD='1.2.5-bseedv8u2'" in text
+    assert "FILE_VERSION_HEX='0x12053004'" in text
+    assert "FILE_VERSION_DEC=302329860" in text
     assert "VOLTAGE_MULTIPLIER=161460" in text
     assert "CURRENT_MULTIPLIER=144679" in text
     assert "POWER_MULTIPLIER=16989" in text
@@ -63,8 +64,10 @@ def test_pm_validator_proves_same_sha_pm_and_ts0726_builds():
     assert 'run(["bash", "make_scripts/build_bseed_ts011f_pm_v8.sh"])' in text
     assert 'run(["bash", "make_scripts/build_bseed_ts0726_v8.sh"])' in text
     assert '"board": "OUTLET_BSEED_PM_TS011F"' in text
-    assert '"fileVersion": 302329858' in text
+    assert '"swBuildId": "1.2.5-bseedv8u2"' in text
+    assert '"fileVersion": 302329860' in text
     assert '"imageType": 43556' in text
+    assert '"samplingSemantics": "hardware-proven-8b8cc492"' in text
     assert '"fileVersion": 285356042' in text
     assert '"imageType": 45577' in text
     assert "device flash" in text
