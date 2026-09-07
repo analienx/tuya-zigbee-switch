@@ -19,16 +19,33 @@ For the TS011F PM target, the V8 platform uses the BL0937/HLW8012-compatible mea
 
 See [docs/bseed_unified_v8.md](docs/bseed_unified_v8.md) for the architecture, supported identities, firmware versions, validation model and recovery policy.
 
-## Current validated release candidate
+## Current unified V8 release
 
-The unified V8 release candidate is built from one exact source revision and produces both target images:
+The unified V8 release is built from one exact source revision and produces both target images:
 
 - **TS011F-BS-PM socket:** `1.2.5-bseedv8u3`, file version `0x12053006`
 - **TS0726 3-gang:** `1.1.8-bseedv8`, file version `0x1102300a`
 
-The PM socket candidate is functionally identical at runtime to the immediately preceding `0x12053004` hardware canary; `0x12053005` is intentionally reserved as a known-good recovery slot.
+The PM socket release is functionally identical at runtime to the immediately preceding `0x12053004` hardware canary; `0x12053005` is intentionally reserved as a known-good recovery slot.
 
-Every deployable candidate is produced by **GitHub Actions**, not by an ad-hoc local compiler output. The release gate includes normal tests/lint, image-type collision checks, real pinned Telink TC32 builds of both targets, OTA-header/manifest validation and a second byte-identical PM rebuild.
+Every deployable image is produced by **GitHub Actions**, not by an ad-hoc local compiler output. The release gate includes normal tests/lint, image-type collision checks, real pinned Telink TC32 builds of both targets, OTA-header/manifest validation and byte-identity checks.
+
+## BSEED Zigbee2MQTT OTA index
+
+For the two BSEED targets documented here, use the dedicated index instead of relying on historical generic fork entries:
+
+```text
+https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/ota/index_bseed.json
+```
+
+In Zigbee2MQTT this can be used as the OTA override index. The dedicated index contains exactly four lookup entries:
+
+- current custom -> custom TS011F-PM update;
+- exact `_TZ3000_b28wrpvx` stock-Tuya -> TS011F-PM conversion wrapper;
+- current custom -> custom TS0726 update;
+- exact `_TZ3002_iedhxgyi` stock-Tuya -> TS0726 conversion wrapper.
+
+The stock wrappers contain the **same compiled Telink payload** as the corresponding normal image. Only the outer Zigbee OTA image type and file version are changed so the original Tuya firmware will recognize the migration image. After conversion, future updates use the normal custom image type.
 
 ## Safety and hardware identification
 
@@ -42,13 +59,15 @@ b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;
 
 Do not assume another TS011F or another BSEED socket is compatible merely because the enclosure looks the same.
 
-### Stock firmware warning
+### Stock firmware conversion warning
 
-For devices that still run original Tuya firmware, do not treat possession of a custom OTA image as a complete recovery strategy. If a full original-firmware backup and tested restore path do not exist for that exact hardware, conversion can leave no reliable way back. The validated release work in this fork intentionally used already-custom hardware for risky firmware canaries.
+The project now publishes stock-facing OTA conversion wrappers for the exact identities listed above, using the same mechanism inherited from Romasku. This does **not** make conversion inherently reversible.
+
+If a full original-firmware backup and tested restore path do not exist for the exact hardware, treat conversion as potentially one-way. Do not use a BSEED conversion entry for a merely similar-looking device or a different Zigbee manufacturer identity.
 
 ## Documentation
 
-- [BSEED unified V8 architecture and release notes](docs/bseed_unified_v8.md)
+- [BSEED unified V8 architecture, conversion and release notes](docs/bseed_unified_v8.md)
 - [Supported devices](docs/supported_devices.md)
 - [OTA updating](docs/updating.md)
 - [Firmware changelog](docs/changelog_fw.md)
