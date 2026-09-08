@@ -188,7 +188,17 @@ native_bytes = (out / "forward.ota").read_bytes()
 transition_bytes = (out / "from-router.ota").read_bytes()
 assert native_bytes[56:] == transition_bytes[56:]
 diffs = [i for i, (a, b) in enumerate(zip(native_bytes, transition_bytes)) if a != b]
-assert diffs == [12, 13], f"unexpected transition-wrapper header differences: {diffs}"
+expected_diffs = [
+    12 + i
+    for i, (a, b) in enumerate(
+        zip(client_image_type.to_bytes(2, "little"), router_image_type.to_bytes(2, "little"))
+    )
+    if a != b
+]
+assert diffs == expected_diffs, (
+    f"unexpected transition-wrapper header differences: {diffs}; "
+    f"expected {expected_diffs}"
+)
 
 source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
 source_dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], text=True).strip())
