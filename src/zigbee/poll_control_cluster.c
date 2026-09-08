@@ -1,4 +1,4 @@
-#ifdef END_DEVICE
+#if defined(END_DEVICE) && !defined(BSEED_MAINS_CLIENT)
 
 #include "poll_control_cluster.h"
 
@@ -339,4 +339,4 @@ void poll_control_cluster_update(void) {
     }
 }
 
-#endif // END_DEVICE
+#endif // END_DEVICE && !BSEED_MAINS_CLIENT
