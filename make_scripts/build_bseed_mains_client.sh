@@ -4,6 +4,8 @@ set -euo pipefail
 # Reproducible experimental BSEED mains-client builds.
 # BUILD ONLY: never publishes, flashes, changes a live device, or updates an OTA index.
 #
+# Experimental OTA image identities are deliberately kept in the 0xFE00 range
+# and are not entered into device_db.yaml while this feature is under evaluation.
 # Usage:
 #   build_bseed_mains_client.sh pm [output-dir]
 #   build_bseed_mains_client.sh ts0726 [output-dir]
@@ -17,7 +19,7 @@ pm)
     BOARD='OUTLET_BSEED_PM_TS011F'
     CANONICAL='b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;'
     ROUTER_IMAGE_TYPE=43556
-    CLIENT_IMAGE_TYPE=43557
+    CLIENT_IMAGE_TYPE=65024 # 0xFE00, experimental BSEED PM mains client
     SW_BUILD='1.2.5-bseedcli1'
     FILE_VERSION_HEX='0x12053007'
     FILE_VERSION_DEC=302329863
@@ -35,7 +37,7 @@ ts0726)
     CANONICAL='iedhxgyi;TS0726-3-BS;LC4;SB1u;RC2;IC0;SB7u;RC3;ID7;SB4u;RD2;IB5;M;'
     SWAPPED='iedhxgyi;TS0726-3-BS;LC4;SB1u;RC0;IC2;SB7u;RD7;IC3;SB4u;RD2;IB5;M;'
     ROUTER_IMAGE_TYPE=45577
-    CLIENT_IMAGE_TYPE=45578
+    CLIENT_IMAGE_TYPE=65025 # 0xFE01, experimental BSEED TS0726 mains client
     SW_BUILD='1.1.8-bseedcli1'
     FILE_VERSION_HEX='0x1102300B'
     FILE_VERSION_DEC=285356043
@@ -78,6 +80,7 @@ used = {
     for v in db.values()
     if isinstance(v, dict) and v.get("firmware_image_type") is not None
 }
+assert 0xFE00 <= client_image <= 0xFEFF, "client image type left reserved experimental range"
 assert client_image not in used, f"experimental client image type {client_image} collides with device_db"
 assert client_image != router_image
 PY
