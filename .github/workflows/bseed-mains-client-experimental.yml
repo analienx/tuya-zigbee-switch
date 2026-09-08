@@ -106,18 +106,18 @@ jobs:
         run: |
           set -euo pipefail
           python3 src/telink/make_ota.py create-ota \
-            --manufacturer-id 4417 --image-type 43557 --file-version 0xFFFFFFFF \
+            --manufacturer-id 4417 --image-type 65024 --file-version 0xFFFFFFFF \
             build/client-control-pm/forward.bin \
             build/bseed-ts011f-pm-client/rollback-to-router.ota
           python3 src/telink/make_ota.py create-ota \
-            --manufacturer-id 4417 --image-type 45578 --file-version 0xFFFFFFFF \
+            --manufacturer-id 4417 --image-type 65025 --file-version 0xFFFFFFFF \
             build/client-control-ts0726/forward.bin \
             build/bseed-ts0726-client/rollback-to-router.ota
           python3 - <<'PY'
           import pathlib, struct
           cases = [
-              (pathlib.Path('build/bseed-ts011f-pm-client/rollback-to-router.ota'), 43557),
-              (pathlib.Path('build/bseed-ts0726-client/rollback-to-router.ota'), 45578),
+              (pathlib.Path('build/bseed-ts011f-pm-client/rollback-to-router.ota'), 65024),
+              (pathlib.Path('build/bseed-ts0726-client/rollback-to-router.ota'), 65025),
           ]
           for path, image_type in cases:
               values = struct.unpack('<I5HIH32sI', path.read_bytes()[:56])
@@ -146,11 +146,11 @@ jobs:
         run: |
           set -euo pipefail
           python3 src/telink/make_ota.py create-ota \
-            --manufacturer-id 4417 --image-type 43557 --file-version 0xFFFFFFFF \
+            --manufacturer-id 4417 --image-type 65024 --file-version 0xFFFFFFFF \
             build/client-control-pm/forward.bin \
             build/bseed-ts011f-pm-client/rollback-to-router.ota
           python3 src/telink/make_ota.py create-ota \
-            --manufacturer-id 4417 --image-type 45578 --file-version 0xFFFFFFFF \
+            --manufacturer-id 4417 --image-type 65025 --file-version 0xFFFFFFFF \
             build/client-control-ts0726/forward.bin \
             build/bseed-ts0726-client/rollback-to-router.ota
           sha256sum \
