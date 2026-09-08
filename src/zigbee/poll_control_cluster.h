@@ -47,12 +47,14 @@ static inline void poll_control_cluster_callback_attr_write(
     uint16_t attribute_id) {
     (void)attribute_id;
 }
+
 #else
 void poll_control_cluster_add_to_endpoint(zigbee_poll_control_cluster *cluster,
                                           hal_zigbee_endpoint *endpoint,
                                           bool is_battery_device);
 void poll_control_cluster_update(void);
 void poll_control_cluster_callback_attr_write(uint16_t attribute_id);
+
 #endif
 
 #endif // END_DEVICE
