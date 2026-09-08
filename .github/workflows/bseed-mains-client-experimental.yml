@@ -1,0 +1,185 @@
+name: BSEED experimental mains clients
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - supervisor/bseed-mains-client-experimental
+  pull_request:
+
+jobs:
+  build-clients:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.head_ref == 'supervisor/bseed-mains-client-experimental'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make python3 python3-pytest python3-yaml curl wget unzip bzip2
+
+      - name: Cache Telink SDK and toolchain
+        uses: actions/cache@v4
+        with:
+          path: telink_tools
+          key: telink-tools-v3.7.2.0
+
+      - name: Install pinned Telink build dependencies
+        run: make -C src/telink -f tools.mk sdk toolchain
+
+      - name: Record exact build environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          TC32=./telink_tools/toolchain/tc32/bin/tc32-elf-gcc
+          {
+            echo "head=$(git rev-parse HEAD)"
+            echo "status_begin"
+            git status --porcelain
+            echo "status_end"
+            echo "python=$(python3 --version 2>&1)"
+            echo "make=$(make --version | head -1)"
+            "$TC32" --version | head -1
+            sha256sum telink_tools/downloads/tc32_gcc_v2.0.tar.bz2
+          } > "$RUNNER_TEMP/client-build-environment.txt"
+
+      - name: Rebuild production routers and prove zero regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash make_scripts/build_bseed_ts011f_pm_v8.sh build/client-control-pm
+          bash make_scripts/build_bseed_ts0726_v8.sh build/client-control-ts0726
+          echo "ca8366a91a2b2e04a6d6c0371059253611ecb035d2f0ed44f3a45c2598272c73  build/client-control-pm/forward.ota" | sha256sum -c -
+          echo "67b4adf0968c240d162f386cdc628d8da710d2698402aee2a1f80c48bf152d15  build/client-control-ts0726/forward.ota" | sha256sum -c -
+          sha256sum \
+            build/client-control-pm/forward.bin \
+            build/client-control-pm/forward.ota \
+            build/client-control-ts0726/forward.bin \
+            build/client-control-ts0726/forward.ota \
+            > "$RUNNER_TEMP/router-control-sha256.txt"
+
+      - name: Build separate PM and TS0726 mains clients
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash make_scripts/build_bseed_mains_client.sh pm
+          bash make_scripts/build_bseed_mains_client.sh ts0726
+          cp build/bseed-ts011f-pm-client/forward.bin "$RUNNER_TEMP/pm-client-first.bin"
+          cp build/bseed-ts011f-pm-client/forward.ota "$RUNNER_TEMP/pm-client-first.ota"
+          cp build/bseed-ts011f-pm-client/from-router.ota "$RUNNER_TEMP/pm-client-first-from-router.ota"
+          cp build/bseed-ts0726-client/forward.bin "$RUNNER_TEMP/ts0726-client-first.bin"
+          cp build/bseed-ts0726-client/forward.ota "$RUNNER_TEMP/ts0726-client-first.ota"
+          cp build/bseed-ts0726-client/from-router.ota "$RUNNER_TEMP/ts0726-client-first-from-router.ota"
+
+      - name: Build sealed client-to-router rollback wrappers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 src/telink/make_ota.py create-ota \
+            --manufacturer-id 4417 --image-type 43557 --file-version 0xFFFFFFFF \
+            build/client-control-pm/forward.bin \
+            build/bseed-ts011f-pm-client/rollback-to-router.ota
+          python3 src/telink/make_ota.py create-ota \
+            --manufacturer-id 4417 --image-type 45578 --file-version 0xFFFFFFFF \
+            build/client-control-ts0726/forward.bin \
+            build/bseed-ts0726-client/rollback-to-router.ota
+          python3 - <<'PY'
+          import pathlib, struct
+          cases = [
+              (pathlib.Path('build/bseed-ts011f-pm-client/rollback-to-router.ota'), 43557),
+              (pathlib.Path('build/bseed-ts0726-client/rollback-to-router.ota'), 45578),
+          ]
+          for path, image_type in cases:
+              values = struct.unpack('<I5HIH32sI', path.read_bytes()[:56])
+              assert values[0] == 0x0BEEF11E
+              assert values[5] == image_type
+              assert values[6] == 0xFFFFFFFF
+              assert values[-1] == path.stat().st_size
+          PY
+
+      - name: Rebuild both clients and require byte-identical output
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build/bseed-ts011f-pm-client build/bseed-ts0726-client
+          bash make_scripts/build_bseed_mains_client.sh pm
+          bash make_scripts/build_bseed_mains_client.sh ts0726
+          cmp "$RUNNER_TEMP/pm-client-first.bin" build/bseed-ts011f-pm-client/forward.bin
+          cmp "$RUNNER_TEMP/pm-client-first.ota" build/bseed-ts011f-pm-client/forward.ota
+          cmp "$RUNNER_TEMP/pm-client-first-from-router.ota" build/bseed-ts011f-pm-client/from-router.ota
+          cmp "$RUNNER_TEMP/ts0726-client-first.bin" build/bseed-ts0726-client/forward.bin
+          cmp "$RUNNER_TEMP/ts0726-client-first.ota" build/bseed-ts0726-client/forward.ota
+          cmp "$RUNNER_TEMP/ts0726-client-first-from-router.ota" build/bseed-ts0726-client/from-router.ota
+
+      - name: Recreate rollback wrappers after reproducibility rebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 src/telink/make_ota.py create-ota \
+            --manufacturer-id 4417 --image-type 43557 --file-version 0xFFFFFFFF \
+            build/client-control-pm/forward.bin \
+            build/bseed-ts011f-pm-client/rollback-to-router.ota
+          python3 src/telink/make_ota.py create-ota \
+            --manufacturer-id 4417 --image-type 45578 --file-version 0xFFFFFFFF \
+            build/client-control-ts0726/forward.bin \
+            build/bseed-ts0726-client/rollback-to-router.ota
+          sha256sum \
+            build/bseed-ts011f-pm-client/forward.bin \
+            build/bseed-ts011f-pm-client/forward.ota \
+            build/bseed-ts011f-pm-client/from-router.ota \
+            build/bseed-ts011f-pm-client/rollback-to-router.ota \
+            build/bseed-ts0726-client/forward.bin \
+            build/bseed-ts0726-client/forward.ota \
+            build/bseed-ts0726-client/from-router.ota \
+            build/bseed-ts0726-client/rollback-to-router.ota \
+            > "$RUNNER_TEMP/client-sha256.txt"
+
+      - name: Prove client role and binding contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pytest -q tests/test_bseed_mains_client.py
+          python3 - <<'PY'
+          import json, pathlib
+          for path in [
+              pathlib.Path('build/bseed-ts011f-pm-client/manifest.json'),
+              pathlib.Path('build/bseed-ts0726-client/manifest.json'),
+          ]:
+              m = json.loads(path.read_text())
+              assert m['experimental'] is True
+              assert m['role']['logicalType'] == 'end-device'
+              assert m['role']['routing'] is False
+              assert m['role']['sleepy'] is False
+              assert m['role']['rxOnWhenIdle'] is True
+              assert m['role']['powerSource'] == 'mains'
+              assert m['role']['pmEnabled'] is False
+              assert m['binding']['roleSpecificBindingFork'] is False
+              assert m['distribution']['normalOtaIndex'] is False
+              assert m['distribution']['stockConversion'] is False
+          PY
+
+      - name: Upload immutable experimental client artifacts and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseed-mains-clients-experimental
+          path: |
+            ${{ runner.temp }}/client-build-environment.txt
+            ${{ runner.temp }}/router-control-sha256.txt
+            ${{ runner.temp }}/client-sha256.txt
+            build/bseed-ts011f-pm-client/forward.bin
+            build/bseed-ts011f-pm-client/forward.ota
+            build/bseed-ts011f-pm-client/from-router.ota
+            build/bseed-ts011f-pm-client/rollback-to-router.ota
+            build/bseed-ts011f-pm-client/manifest.json
+            build/bseed-ts0726-client/forward.bin
+            build/bseed-ts0726-client/forward.ota
+            build/bseed-ts0726-client/from-router.ota
+            build/bseed-ts0726-client/rollback-to-router.ota
+            build/bseed-ts0726-client/manifest.json
+          if-no-files-found: warn
