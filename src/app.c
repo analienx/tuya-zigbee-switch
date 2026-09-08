@@ -22,7 +22,7 @@
 
 #ifdef BSEED_MAINS_CLIENT
 extern zigbee_switch_cluster switch_clusters[];
-extern uint8_t               switch_clusters_cnt;
+extern uint8_t switch_clusters_cnt;
 
 static void apply_mains_client_defaults(void) {
     zigbee_switch_cluster_config stored_config;
@@ -43,6 +43,7 @@ static void apply_mains_client_defaults(void) {
         printf("Mains client: switch %d default binding mode -> RISE\r\n", i);
     }
 }
+
 #endif
 
 void process_device_type_change() {
