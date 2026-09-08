@@ -20,34 +20,36 @@ It therefore cannot safely be exposed as an ordinary runtime attribute or device
 
 This is deliberate: the Zigbee stack, node descriptor and routing behavior all agree on one role from boot.
 
-## Recommended user experience: role channels
+## Recommended user experience: one normal index + temporary transition indexes
 
-Do **not** put Router and Mains Client candidates into one mixed OTA index. A mixed index can create competing candidates for the same currently installed image identity and makes the selected role ambiguous.
+The OTA override is global to Zigbee2MQTT, so a permanent "Client channel" or "Router channel" is not ideal for homes that intentionally mix both roles. It would keep offering role changes to other matching devices.
 
-The intended BSEED distribution model is instead:
+The intended BSEED distribution model is therefore:
 
-- `index_bseed.json` — stable/default BSEED Router channel and stock conversion path;
-- `index_bseed_client.json` — choose Mains Client; contains Router→Client transition images plus normal Client→Client updates;
-- `index_bseed_router.json` — choose Router; contains Client→Router transition images plus normal Router→Router updates.
+- `index_bseed.json` — the normal/default BSEED index. After Client promotion it contains normal **Router→Router** and **Client→Client** updates, plus the supported stock→custom conversion path. It contains **no cross-role transitions**.
+- `index_bseed_to_client.json` — temporary role-change index containing **Router→Client** transition images.
+- `index_bseed_to_router.json` — temporary role-change index containing **Client→Router** transition images.
 
-The two role-selection indexes are published only after the Mains Client hardware canary is accepted. Until then, `index_bseed.json` remains the only production BSEED index.
+The two transition indexes are published only after the Mains Client hardware canary is accepted. Until then, `index_bseed.json` remains the only production BSEED index and contains Router firmware only.
 
-In other words, the user's role selector is the **OTA channel URL**. No force-flash guessing and no manual selection between two entries with the same current identity is required.
+This lets different BSEED devices in the same Zigbee network intentionally use different roles without permanent "wrong role available" notifications. The user's role selector is a temporary OTA-index change, not a runtime firmware attribute.
 
 ## Switching roles in Zigbee2MQTT
 
-Once the role channels are promoted:
+Once the transition indexes are promoted:
 
-1. Choose the target role by setting the corresponding BSEED OTA index URL.
-2. Restart Zigbee2MQTT so the new index is loaded.
-3. **Enable permit-join before starting a cross-role OTA.**
-4. Check for OTA updates and install the offered transition image.
-5. The firmware records the new device type and factory-resets the Zigbee stack/network state for the role transition.
-6. Application NVM is not deliberately cleared by that role-change path, so device configuration/calibration is preserved where its own schema permits it.
-7. Zigbee stack state is reset, including network membership and the binding table. Allow the device to rejoin, then interview and reconfigure it.
-8. **Recreate the device's direct Zigbee bindings after the role change.** Stored application policy may survive, but the coordinator/target binding relationships belong to Zigbee stack state and should be treated as lost across the role transition.
+1. Keep `index_bseed.json` for ordinary updates.
+2. When changing one device's role, temporarily set the OTA override to `index_bseed_to_client.json` or `index_bseed_to_router.json`.
+3. Restart Zigbee2MQTT so the temporary index is loaded.
+4. **Enable permit-join before starting a cross-role OTA.**
+5. Check for OTA updates on the device you intend to change and install the offered transition image.
+6. The firmware records the new device type and factory-resets the Zigbee stack/network state for the role transition.
+7. Application NVM is not deliberately cleared by that role-change path, so device configuration/calibration is preserved where its own schema permits it.
+8. Zigbee stack state is reset, including network membership and the binding table. Allow the device to rejoin, then interview and reconfigure it.
+9. **Recreate the device's direct Zigbee bindings after the role change.** Stored application policy may survive, but coordinator/target binding relationships belong to Zigbee stack state and should be treated as lost across the transition.
+10. Restore the normal `index_bseed.json` OTA URL and restart Zigbee2MQTT again.
 
-Normal updates inside the same role do not need the role-transition wrapper or binding recreation.
+Normal updates inside the same role use `index_bseed.json` and do not need the role-transition wrapper, rejoin, or binding recreation.
 
 ## OTA identities
 
@@ -59,6 +61,8 @@ The roles intentionally use separate custom image types.
 | BSEED TS0726 | `45577` | `65025` (`0xFE01`) |
 
 Cross-role wrappers use the **currently installed role's image type in the outer OTA header** while carrying the exact compiled payload of the destination role. This lets the currently installed firmware accept the transition without pretending both roles are the same OTA identity.
+
+Because the normal index can contain both native Router and native Client entries without image-type collision, mixed-role deployments continue receiving ordinary updates from the same `index_bseed.json`.
 
 ## Mains Client correctness contract
 
@@ -98,4 +102,4 @@ Software status on that implementation SHA:
 
 Later documentation-only commits may move the branch head without changing those firmware bytes; CI still rebuilds the exact branch head and must retain the same router/client contracts.
 
-The Mains Client remains **hardware-canary pending**. The public production landing page should describe it as a validated candidate until the first real-device Router→Client→Router campaign is accepted. After that canary, the two role-selection indexes can be published and the status can be promoted to supported.
+The Mains Client remains **hardware-canary pending**. The public production landing page should describe it as a validated candidate until the first real-device Router→Client→Router campaign is accepted. After that canary, native Client images can join the normal BSEED index, the two temporary transition indexes can be published, and the status can be promoted to supported.
