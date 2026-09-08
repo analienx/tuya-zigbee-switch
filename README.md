@@ -83,17 +83,19 @@ Mains Client deliberately uses Telink's end-device stack only for topology. It k
 
 The client candidate also hardens direct binding against the known very-short-press problem: fresh client configs use **RISE / press-start binding** and a **20 ms debounce** instead of depending on SHORT/release detection with the generic 50 ms debounce. Persisted user switch/binding settings still win.
 
-Changing role requires another OTA because Router links `libzb_router` while Mains Client links `libzb_ed`. Cross-role OTA intentionally resets Zigbee network state and rejoins; application NVM is not deliberately cleared by that role-change path.
+Changing role requires another OTA because Router links `libzb_router` while Mains Client links `libzb_ed`. Cross-role OTA intentionally resets Zigbee network state and rejoins; application NVM is not deliberately cleared by that role-change path. Zigbee bindings are stack state, so they must be recreated after a role switch.
 
 ### How users will choose a role
 
-The clean distribution model is **one OTA channel per desired role**, not a mixed index with competing candidates:
+For mixed homes, the cleanest distribution model is **one neutral normal index plus two temporary transition indexes**:
 
-- `index_bseed.json` remains the safe/default **Router** production channel and stock-conversion path.
-- `index_bseed_client.json` will select **Mains Client**: Router→Client transition images + normal Client updates.
-- `index_bseed_router.json` will select **Router**: Client→Router transition images + normal Router updates.
+- `index_bseed.json` remains the normal BSEED OTA index. After Client promotion it will contain normal **Router→Router** and **Client→Client** updates plus the supported stock-conversion path, but **no role transitions**.
+- `index_bseed_to_client.json` will be used temporarily when a user intentionally wants to change a Router into a **Mains Client**.
+- `index_bseed_to_router.json` will be used temporarily when a user intentionally wants to change a Mains Client back into a **Router**.
 
-The two role-selection indexes will be published after the Mains Client hardware canary is accepted. Until then, Mains Client images remain immutable GitHub Actions candidates rather than production OTA-index entries.
+After a role switch, rejoin/interview/reconfigure the device, recreate its direct Zigbee bindings, then restore `index_bseed.json`. This avoids persistent “wrong role available” notifications on other BSEED devices that are intentionally using a different role.
+
+The two transition indexes will be published only after the Mains Client hardware canary is accepted. Until then, Mains Client images remain immutable GitHub Actions candidates rather than production OTA-index entries.
 
 See [Router vs Mains Client](docs/bseed_roles.md) for the role contract, switching sequence, image identities and validation status.
 
@@ -182,7 +184,7 @@ Before converting a stock device:
 3. Treat conversion as potentially one-way unless you have a full original-firmware backup and a tested restore method for that exact hardware.
 4. Keep power stable during OTA.
 
-For a cross-role Router ↔ Mains Client OTA, enable **permit join before starting the update** because the role change resets Zigbee network state and expects the device to rejoin.
+For a cross-role Router ↔ Mains Client OTA, enable **permit join before starting the update** because the role change resets Zigbee network state and expects the device to rejoin. Recreate direct Zigbee bindings after the device rejoins.
 
 For the validated PM socket, the canonical custom configuration is:
 
