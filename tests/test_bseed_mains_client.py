@@ -47,8 +47,10 @@ def test_client_keeps_exact_same_direct_binding_state_machine_as_router():
 
 def test_client_artifacts_are_separate_and_never_stock_or_auto_indexed():
     script = (ROOT / "make_scripts/build_bseed_mains_client.sh").read_text()
-    assert "CLIENT_IMAGE_TYPE=43557" in script
-    assert "CLIENT_IMAGE_TYPE=45578" in script
+    assert "CLIENT_IMAGE_TYPE=65024" in script
+    assert "CLIENT_IMAGE_TYPE=65025" in script
+    assert "0xFE00" in script
+    assert "0xFE01" in script
     assert "ROUTER_IMAGE_TYPE=43556" in script
     assert "ROUTER_IMAGE_TYPE=45577" in script
     assert "from-router.ota" in script
