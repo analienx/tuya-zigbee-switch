@@ -39,6 +39,7 @@ jobs:
           TC32=./telink_tools/toolchain/tc32/bin/tc32-elf-gcc
           {
             echo "head=$(git rev-parse HEAD)"
+            echo "base=$(git merge-base HEAD origin/main)"
             echo "status_begin"
             git status --porcelain
             echo "status_end"
@@ -48,20 +49,44 @@ jobs:
             sha256sum telink_tools/downloads/tc32_gcc_v2.0.tar.bz2
           } > "$RUNNER_TEMP/client-build-environment.txt"
 
-      - name: Rebuild production routers and prove zero regression
+      - name: Rebuild exact main baseline and prove routers are unchanged
         shell: bash
         run: |
           set -euo pipefail
+          BASE_SHA="$(git merge-base HEAD origin/main)"
+          BASE_DIR="$RUNNER_TEMP/main-baseline"
+          git worktree add --detach "$BASE_DIR" "$BASE_SHA"
+          ln -s "$GITHUB_WORKSPACE/telink_tools" "$BASE_DIR/telink_tools"
+
+          (
+            cd "$BASE_DIR"
+            bash make_scripts/build_bseed_ts011f_pm_v8.sh build/baseline-pm
+            bash make_scripts/build_bseed_ts0726_v8.sh build/baseline-ts0726
+          )
+
           bash make_scripts/build_bseed_ts011f_pm_v8.sh build/client-control-pm
           bash make_scripts/build_bseed_ts0726_v8.sh build/client-control-ts0726
-          echo "ca8366a91a2b2e04a6d6c0371059253611ecb035d2f0ed44f3a45c2598272c73  build/client-control-pm/forward.ota" | sha256sum -c -
-          echo "67b4adf0968c240d162f386cdc628d8da710d2698402aee2a1f80c48bf152d15  build/client-control-ts0726/forward.ota" | sha256sum -c -
-          sha256sum \
-            build/client-control-pm/forward.bin \
-            build/client-control-pm/forward.ota \
-            build/client-control-ts0726/forward.bin \
-            build/client-control-ts0726/forward.ota \
-            > "$RUNNER_TEMP/router-control-sha256.txt"
+
+          cmp "$BASE_DIR/build/baseline-pm/forward.bin" build/client-control-pm/forward.bin
+          cmp "$BASE_DIR/build/baseline-pm/forward.ota" build/client-control-pm/forward.ota
+          cmp "$BASE_DIR/build/baseline-ts0726/forward.bin" build/client-control-ts0726/forward.bin
+          cmp "$BASE_DIR/build/baseline-ts0726/forward.ota" build/client-control-ts0726/forward.ota
+
+          {
+            echo "baseline_sha=$BASE_SHA"
+            echo "baseline"
+            sha256sum \
+              "$BASE_DIR/build/baseline-pm/forward.bin" \
+              "$BASE_DIR/build/baseline-pm/forward.ota" \
+              "$BASE_DIR/build/baseline-ts0726/forward.bin" \
+              "$BASE_DIR/build/baseline-ts0726/forward.ota"
+            echo "client_branch_router_controls"
+            sha256sum \
+              build/client-control-pm/forward.bin \
+              build/client-control-pm/forward.ota \
+              build/client-control-ts0726/forward.bin \
+              build/client-control-ts0726/forward.ota
+          } > "$RUNNER_TEMP/router-control-sha256.txt"
 
       - name: Build separate PM and TS0726 mains clients
         shell: bash
