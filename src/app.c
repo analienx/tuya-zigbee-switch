@@ -15,6 +15,35 @@
 #ifdef END_DEVICE
 #include "zigbee/poll_control_cluster.h"
 #endif
+#ifdef BSEED_MAINS_CLIENT
+#include "zigbee/consts.h"
+#include "zigbee/switch_cluster.h"
+#endif
+
+#ifdef BSEED_MAINS_CLIENT
+extern zigbee_switch_cluster switch_clusters[];
+extern uint8_t               switch_clusters_cnt;
+
+static void apply_mains_client_defaults(void) {
+    zigbee_switch_cluster_config stored_config;
+
+    for (uint8_t i = 0; i < switch_clusters_cnt; i++) {
+        hal_nvm_status_t st = hal_nvm_read(
+            NV_ITEM_SWITCH_CLUSTER_DATA(i), sizeof(stored_config),
+            (uint8_t *)&stored_config);
+        if (st == HAL_NVM_SUCCESS) {
+            continue;
+        }
+
+        // Upstream testing shows release/SHORT binding can miss very fast
+        // presses. For a fresh mains-client config prefer press-start/RISE;
+        // existing persisted user choices still win unchanged.
+        switch_clusters[i].binded_mode =
+            ZCL_ONOFF_CONFIGURATION_BINDED_MODE_RISE;
+        printf("Mains client: switch %d default binding mode -> RISE\r\n", i);
+    }
+}
+#endif
 
 void process_device_type_change() {
     enum device_type_t stored_device_type;
@@ -61,6 +90,9 @@ void app_init(void) {
 
     device_config_enable_parser_preflight();
     parse_config();
+#ifdef BSEED_MAINS_CLIENT
+    apply_mains_client_defaults();
+#endif
     hal_zigbee_init_ota();
     init_global_attr_write_callback();
 

@@ -8,7 +8,9 @@
 typedef void (*ev_button_callback_t)(void *);
 typedef void (*ev_button_multi_press_callback_t)(void *, uint8_t);
 
+#ifndef DEBOUNCE_DELAY_MS
 #define DEBOUNCE_DELAY_MS    50
+#endif
 
 typedef struct {
     hal_gpio_pin_t                   pin;
