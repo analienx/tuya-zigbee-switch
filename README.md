@@ -23,6 +23,7 @@ This fork keeps those capabilities and adds the BSEED-specific pieces that matte
 | **Working BL0937 power monitoring on the BSEED TS011F PM socket** | Standard voltage, current, active power and cumulative energy reporting instead of using the socket as relay-only hardware. | **Implemented and hardware-validated here.** Upstream currently lists power monitoring as work in progress. |
 | **BSEED TS0726 canonical migration** | Existing devices can move from the historical swapped-pin workaround to the canonical BSEED mapping without throwing away the stored configuration/state model. | **BSEED-specific.** This migration is not part of generic upstream firmware. |
 | **Per-channel indicator LED control** | Indicator LEDs can follow the logical relay state, show the inverse, or run in `manual` mode where the LED state is controlled separately. | The generic LED primitive already exists upstream; **this fork validates it on the canonical BSEED mapping and uses it as part of the BSEED control model.** |
+| **Router or always-awake Mains Client role** | A mains-powered device can either strengthen the mesh as a normal Router or behave as an always-reachable non-routing leaf. Mains Client is not a sleepy battery EndDevice: its receiver stays on and Poll Control/power-management assumptions are removed. | **Fork-specific BSEED role profile.** The candidate is software/reproducibility validated; hardware canary is the final promotion gate. |
 | **BSEED-focused Zigbee2MQTT UX** | The tested BSEED deployment layout uses human terms and ordering: logical state → physical relay behavior → button behavior → indicator behavior/state → advanced hardware configuration, with Left/Middle/Right semantics instead of endpoint decoding. | **Target-specific BSEED integration work.** The generic generated converter in this repository remains upstream-compatible, so not every deployment-level label/layout improvement has been folded into the generic converter yet. |
 | **Exact stock-Tuya conversion packages** | The two supported stock identities have dedicated, validated `from_tuya` wrappers and a small BSEED-only OTA index. | Upstream has the generic conversion mechanism; **this fork adds exact BSEED packaging, validation and index hygiene.** |
 | **Release-grade reproducibility** | Deployable images come only from GitHub Actions, both BSEED targets are built from the same SHA, OTA identities are checked and PM output is rebuilt byte-for-byte. | **Fork-specific release policy and CI.** |
@@ -50,6 +51,7 @@ This is different from ordinary `detached` mode: detached mode only decides whet
 ## What this fork adds under the hood
 
 - **One maintained V8 core, separate hardware images** for the supported BSEED families.
+- **Two mains-powered Zigbee roles**: Router and an always-awake, non-routing Mains Client built from the same application core.
 - **BL0937 power monitoring** for the validated TS011F PM socket target, using hardware-proven sampling semantics.
 - **BSEED TS0726 support** on the same common-core architecture.
 - **Physical-output policy** kept orthogonal to logical relay state.
@@ -59,14 +61,41 @@ This is different from ordinary `detached` mode: detached mode only decides whet
 
 ## Supported BSEED targets
 
-| Device family | Exact identity | Board | Current custom firmware | Custom OTA image type |
+| Device family | Exact identity | Board | Current Router firmware | Router OTA image type |
 |---|---|---|---|---:|
 | TS011F power-monitoring socket | `b28wrpvx / TS011F-BS-PM` | `OUTLET_BSEED_PM_TS011F` | `1.2.5-bseedv8u3` · `0x12053006` | `43556` |
 | TS0726 3-gang switch/dimmer | `iedhxgyi / TS0726-3-BS` | `SWITCH_BSEED_TS0726_3GANG` | `1.1.8-bseedv8` · `0x1102300a` | `45577` |
 
 Both custom images use manufacturer code `4417`.
 
-**The two targets use different binaries. Never flash a TS011F-PM image onto a TS0726 device, or vice versa.**
+**The two hardware targets use different binaries. Never flash a TS011F-PM image onto a TS0726 device, or vice versa.**
+
+## Router vs Mains Client
+
+The role is a **firmware choice**, not a runtime setting.
+
+| Role | Receiver | Routes Zigbee traffic | Sleep/Poll Control | Current status |
+|---|---|---|---|---|
+| **Router** | Always on | **Yes** | No sleepy-device behavior | **Production / hardware validated** |
+| **Mains Client** | **Always on** | **No** | **No sleep, no Poll Control** | Software + real-TC32 + reproducibility validated; **hardware canary pending** |
+
+Mains Client deliberately uses Telink's end-device stack only for topology. It keeps `RxOnWhenIdle`, advertises mains power, does not enable `PM_ENABLE`, and removes the generic Poll Control behavior that belongs to ordinary EndDevice firmware.
+
+The client candidate also hardens direct binding against the known very-short-press problem: fresh client configs use **RISE / press-start binding** and a **20 ms debounce** instead of depending on SHORT/release detection with the generic 50 ms debounce. Persisted user switch/binding settings still win.
+
+Changing role requires another OTA because Router links `libzb_router` while Mains Client links `libzb_ed`. Cross-role OTA intentionally resets Zigbee network state and rejoins; application NVM is not deliberately cleared by that role-change path.
+
+### How users will choose a role
+
+The clean distribution model is **one OTA channel per desired role**, not a mixed index with competing candidates:
+
+- `index_bseed.json` remains the safe/default **Router** production channel and stock-conversion path.
+- `index_bseed_client.json` will select **Mains Client**: Router→Client transition images + normal Client updates.
+- `index_bseed_router.json` will select **Router**: Client→Router transition images + normal Router updates.
+
+The two role-selection indexes will be published after the Mains Client hardware canary is accepted. Until then, Mains Client images remain immutable GitHub Actions candidates rather than production OTA-index entries.
+
+See [Router vs Mains Client](docs/bseed_roles.md) for the role contract, switching sequence, image identities and validation status.
 
 ### Supported stock conversion identities
 
@@ -79,7 +108,7 @@ The stock-facing wrappers use outer OTA version `0xFFFFFFFF`; after conversion, 
 
 ## Quick start with Zigbee2MQTT
 
-Use the dedicated BSEED OTA index rather than historical generic fork entries:
+For production devices today, use the dedicated **Router** BSEED OTA index rather than historical generic fork entries:
 
 ```text
 https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/ota/index_bseed.json
@@ -93,30 +122,34 @@ ota:
     https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/ota/index_bseed.json
 ```
 
-The index contains exactly four manufacturer-specific paths: normal + stock-conversion OTA for each supported BSEED family.
+The production index currently contains exactly four manufacturer-specific paths: normal + stock-conversion OTA for each supported BSEED family.
 
-For complete update/conversion steps, see [Updating OTA](docs/updating.md) and the [BSEED unified V8 guide](docs/bseed_unified_v8.md).
+Do not use the inherited generic `index_end_device.json` as a substitute for the BSEED Mains Client candidate. The BSEED client is an **always-awake mains leaf**, not the generic sleepy/power-saving EndDevice profile.
+
+For complete update/conversion steps, see [Updating OTA](docs/updating.md), [Router vs Mains Client](docs/bseed_roles.md) and the [BSEED unified V8 guide](docs/bseed_unified_v8.md).
 
 ## Architecture
 
 ```mermaid
 flowchart LR
     U[romasku upstream core] --> V[Unified V8 core]
-    V --> P[TS011F PM image]
-    V --> D[TS0726 image]
-    S1[Stock _TZ3000_b28wrpvx] -->|from-Tuya OTA wrapper| P
-    S2[Stock _TZ3002_iedhxgyi] -->|from-Tuya OTA wrapper| D
-    P -->|normal custom OTA| P
-    D -->|normal custom OTA| D
+    V --> PR[TS011F PM Router]
+    V --> PC[TS011F PM Mains Client]
+    V --> DR[TS0726 Router]
+    V --> DC[TS0726 Mains Client]
+    S1[Stock _TZ3000_b28wrpvx] -->|from-Tuya OTA wrapper| PR
+    S2[Stock _TZ3002_iedhxgyi] -->|from-Tuya OTA wrapper| DR
+    PR <-->|role transition OTA| PC
+    DR <-->|role transition OTA| DC
 ```
 
-The conversion wrappers contain the **same compiled Telink payload** as their corresponding normal image. Validation permits only the expected outer OTA-header identity/version bytes to differ.
+Role-transition wrappers contain the compiled payload of the **destination role** while their outer OTA image identity matches the currently installed role. This keeps Router and Mains Client as distinct OTA identities without requiring programmer flashing to switch between them.
 
 ## Release integrity
 
 Deployable BSEED firmware is produced by **GitHub Actions only**. Local compiler outputs are useful for diagnostics, but are not authoritative release candidates.
 
-The release path checks:
+The production Router release path checks:
 
 - host tests and lint;
 - firmware image-type collision/identity rules;
@@ -126,6 +159,14 @@ The release path checks:
 - a second PM build for byte-for-byte reproducibility;
 - normal-vs-from-Tuya payload identity;
 - generated OTA index consistency.
+
+The Mains Client candidate additionally checks:
+
+- the production Router binaries remain byte-identical;
+- PM and TS0726 client images build with the real pinned TC32 toolchain;
+- clients rebuild byte-for-byte identically;
+- Router→Client and Client→Router wrappers have the expected OTA identities;
+- receiver-on-when-idle, mains-power, no-sleep/no-Poll-Control and binding contracts remain intact.
 
 The PM release `0x12053005` is intentionally reserved as a known-good recovery slot; normal development advanced past it to `0x12053006`.
 
@@ -141,6 +182,8 @@ Before converting a stock device:
 3. Treat conversion as potentially one-way unless you have a full original-firmware backup and a tested restore method for that exact hardware.
 4. Keep power stable during OTA.
 
+For a cross-role Router ↔ Mains Client OTA, enable **permit join before starting the update** because the role change resets Zigbee network state and expects the device to rejoin.
+
 For the validated PM socket, the canonical custom configuration is:
 
 ```text
@@ -151,6 +194,7 @@ b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;
 
 | Topic | Document |
 |---|---|
+| Router vs Mains Client, switching and validation | [BSEED firmware roles](docs/bseed_roles.md) |
 | Architecture, identities, conversion and validation | [BSEED unified V8](docs/bseed_unified_v8.md) |
 | OTA conversion and updates | [Updating OTA](docs/updating.md) |
 | Supported hardware database | [Supported devices](docs/supported_devices.md) |
@@ -160,7 +204,7 @@ b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;
 
 ## Contributing and support
 
-Contributions are welcome, especially when they keep hardware-specific behavior behind explicit target guards and preserve the shared upstream architecture.
+Contributions are welcome, especially when they keep hardware-specific behavior behind explicit target guards and preserve the shared upstream architecture where practical.
 
 - [Contributing](CONTRIBUTING.md)
 - [Support / bug-reporting guidance](SUPPORT.md)
