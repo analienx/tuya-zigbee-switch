@@ -44,9 +44,10 @@ Once the role channels are promoted:
 4. Check for OTA updates and install the offered transition image.
 5. The firmware records the new device type and factory-resets the Zigbee stack/network state for the role transition.
 6. Application NVM is not deliberately cleared by that role-change path, so device configuration/calibration is preserved where its own schema permits it.
-7. Allow the device to rejoin, then interview and reconfigure it in Zigbee2MQTT.
+7. Zigbee stack state is reset, including network membership and the binding table. Allow the device to rejoin, then interview and reconfigure it.
+8. **Recreate the device's direct Zigbee bindings after the role change.** Stored application policy may survive, but the coordinator/target binding relationships belong to Zigbee stack state and should be treated as lost across the role transition.
 
-Normal updates inside the same role do not need the role-transition wrapper.
+Normal updates inside the same role do not need the role-transition wrapper or binding recreation.
 
 ## OTA identities
 
@@ -79,11 +80,11 @@ These checks address the known client-specific failure modes we have identified.
 
 ## Validation status
 
-Current Mains Client candidate source:
+Current Mains Client implementation candidate:
 
 `68c90171a24f6d24dfbfb4e3979fa0acbfe3ab6b`
 
-Software status on that exact SHA:
+Software status on that implementation SHA:
 
 - normal tests: pass;
 - lint: pass;
@@ -94,5 +95,7 @@ Software status on that exact SHA:
 - Router→Client wrappers: pass;
 - Client→Router rollback wrappers: pass;
 - role and binding contract tests: pass.
+
+Later documentation-only commits may move the branch head without changing those firmware bytes; CI still rebuilds the exact branch head and must retain the same router/client contracts.
 
 The Mains Client remains **hardware-canary pending**. The public production landing page should describe it as a validated candidate until the first real-device Router→Client→Router campaign is accepted. After that canary, the two role-selection indexes can be published and the status can be promoted to supported.
