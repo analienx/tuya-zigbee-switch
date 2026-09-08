@@ -1,0 +1,183 @@
+name: BSEED non-PM client canary
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - supervisor/bseed-mains-client-experimental
+  pull_request:
+
+jobs:
+  build-nonpm-canary:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.head_ref == 'supervisor/bseed-mains-client-experimental'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make python3 python3-pytest python3-yaml curl wget unzip bzip2
+
+      - name: Cache Telink SDK and toolchain
+        uses: actions/cache@v4
+        with:
+          path: telink_tools
+          key: telink-tools-v3.7.2.0
+
+      - name: Install pinned Telink build dependencies
+        run: make -C src/telink -f tools.mk sdk toolchain
+
+      - name: Record exact build environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          TC32=./telink_tools/toolchain/tc32/bin/tc32-elf-gcc
+          {
+            echo "head=$(git rev-parse HEAD)"
+            echo "base=$(git merge-base HEAD origin/main)"
+            echo "python=$(python3 --version 2>&1)"
+            echo "make=$(make --version | head -1)"
+            "$TC32" --version | head -1
+            sha256sum telink_tools/downloads/tc32_gcc_v2.0.tar.bz2
+          } > "$RUNNER_TEMP/nonpm-canary-environment.txt"
+
+      - name: Prove non-PM Router is unchanged from exact main merge-base
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_SHA="$(git merge-base HEAD origin/main)"
+          BASE_DIR="$RUNNER_TEMP/main-baseline"
+          git worktree add --detach "$BASE_DIR" "$BASE_SHA"
+          ln -s "$GITHUB_WORKSPACE/telink_tools" "$BASE_DIR/telink_tools"
+
+          SOURCE_ROOT="$BASE_DIR" \
+            bash make_scripts/build_bseed_ts011f_nonpm_canary_router.sh \
+            "$BASE_DIR/build/baseline-nonpm"
+          bash make_scripts/build_bseed_ts011f_nonpm_canary_router.sh \
+            build/client-control-nonpm
+
+          cmp "$BASE_DIR/build/baseline-nonpm/forward.bin" build/client-control-nonpm/forward.bin
+          cmp "$BASE_DIR/build/baseline-nonpm/forward.ota" build/client-control-nonpm/forward.ota
+          cmp "$BASE_DIR/build/baseline-nonpm/from_tuya.ota" build/client-control-nonpm/from_tuya.ota
+
+          {
+            echo "baseline_sha=$BASE_SHA"
+            echo "baseline"
+            sha256sum \
+              "$BASE_DIR/build/baseline-nonpm/forward.bin" \
+              "$BASE_DIR/build/baseline-nonpm/forward.ota" \
+              "$BASE_DIR/build/baseline-nonpm/from_tuya.ota"
+            echo "branch_router_control"
+            sha256sum \
+              build/client-control-nonpm/forward.bin \
+              build/client-control-nonpm/forward.ota \
+              build/client-control-nonpm/from_tuya.ota
+          } > "$RUNNER_TEMP/nonpm-router-control-sha256.txt"
+
+      - name: Build non-PM Mains Client
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash make_scripts/build_bseed_mains_client.sh nonpm
+          cp build/bseed-ts011f-nonpm-client/forward.bin "$RUNNER_TEMP/nonpm-client-first.bin"
+          cp build/bseed-ts011f-nonpm-client/forward.ota "$RUNNER_TEMP/nonpm-client-first.ota"
+          cp build/bseed-ts011f-nonpm-client/from-router.ota "$RUNNER_TEMP/nonpm-client-first-from-router.ota"
+
+      - name: Build sealed Client to Router rollback wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 src/telink/make_ota.py create-ota \
+            --manufacturer-id 4417 --image-type 65026 --file-version 0xFFFFFFFF \
+            build/client-control-nonpm/forward.bin \
+            build/bseed-ts011f-nonpm-client/rollback-to-router.ota
+          python3 - <<'PY'
+          import pathlib, struct
+          path = pathlib.Path('build/bseed-ts011f-nonpm-client/rollback-to-router.ota')
+          values = struct.unpack('<I5HIH32sI', path.read_bytes()[:56])
+          assert values[0] == 0x0BEEF11E
+          assert values[4] == 4417
+          assert values[5] == 65026
+          assert values[6] == 0xFFFFFFFF
+          assert values[-1] == path.stat().st_size
+          PY
+
+      - name: Rebuild Client and require byte-identical output
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build/bseed-ts011f-nonpm-client
+          bash make_scripts/build_bseed_mains_client.sh nonpm
+          cmp "$RUNNER_TEMP/nonpm-client-first.bin" build/bseed-ts011f-nonpm-client/forward.bin
+          cmp "$RUNNER_TEMP/nonpm-client-first.ota" build/bseed-ts011f-nonpm-client/forward.ota
+          cmp "$RUNNER_TEMP/nonpm-client-first-from-router.ota" build/bseed-ts011f-nonpm-client/from-router.ota
+
+          python3 src/telink/make_ota.py create-ota \
+            --manufacturer-id 4417 --image-type 65026 --file-version 0xFFFFFFFF \
+            build/client-control-nonpm/forward.bin \
+            build/bseed-ts011f-nonpm-client/rollback-to-router.ota
+
+          sha256sum \
+            build/client-control-nonpm/forward.bin \
+            build/client-control-nonpm/forward.ota \
+            build/client-control-nonpm/from_tuya.ota \
+            build/bseed-ts011f-nonpm-client/forward.bin \
+            build/bseed-ts011f-nonpm-client/forward.ota \
+            build/bseed-ts011f-nonpm-client/from-router.ota \
+            build/bseed-ts011f-nonpm-client/rollback-to-router.ota \
+            > "$RUNNER_TEMP/nonpm-canary-sha256.txt"
+
+      - name: Prove staged canary contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pytest -q tests/test_bseed_nonpm_client_canary.py tests/test_bseed_mains_client.py
+          python3 - <<'PY'
+          import json, pathlib
+
+          router = json.loads(pathlib.Path('build/client-control-nonpm/manifest.json').read_text())
+          client = json.loads(pathlib.Path('build/bseed-ts011f-nonpm-client/manifest.json').read_text())
+
+          assert router['canaryOnly'] is True
+          assert router['board'] == 'OUTLET_BSEED_TS011F'
+          assert router['imageType'] == 43555
+          assert router['stockConversion']['stockManufacturerName'] == '_TZ3000_o1jzcxou'
+          assert router['stockConversion']['stockImageType'] == 54179
+          assert router['distribution']['normalOtaIndex'] is False
+
+          assert client['target'] == 'nonpm'
+          assert client['board'] == 'OUTLET_BSEED_TS011F'
+          assert client['routerImageType'] == 43555
+          assert client['clientImageType'] == 65026
+          assert client['role']['routing'] is False
+          assert client['role']['sleepy'] is False
+          assert client['role']['rxOnWhenIdle'] is True
+          assert client['role']['pmEnabled'] is False
+          assert client['distribution']['normalOtaIndex'] is False
+          assert client['distribution']['stockConversion'] is False
+          PY
+
+      - name: Upload immutable non-PM canary artifacts and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseed-nonpm-client-canary
+          path: |
+            ${{ runner.temp }}/nonpm-canary-environment.txt
+            ${{ runner.temp }}/nonpm-router-control-sha256.txt
+            ${{ runner.temp }}/nonpm-canary-sha256.txt
+            build/client-control-nonpm/forward.bin
+            build/client-control-nonpm/forward.ota
+            build/client-control-nonpm/from_tuya.ota
+            build/client-control-nonpm/manifest.json
+            build/bseed-ts011f-nonpm-client/forward.bin
+            build/bseed-ts011f-nonpm-client/forward.ota
+            build/bseed-ts011f-nonpm-client/from-router.ota
+            build/bseed-ts011f-nonpm-client/rollback-to-router.ota
+            build/bseed-ts011f-nonpm-client/manifest.json
+          if-no-files-found: warn
