@@ -6,6 +6,7 @@ set -euo pipefail
 #
 # Usage:
 #   build_bseed_mains_client.sh pm [output-dir]
+#   build_bseed_mains_client.sh nonpm [output-dir]
 #   build_bseed_mains_client.sh ts0726 [output-dir]
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -30,6 +31,17 @@ pm)
         HLW8012_POWER_MULTIPLIER=16989
     )
     ;;
+nonpm)
+    BOARD='OUTLET_BSEED_TS011F'
+    CANONICAL='o1jzcxou;TS011F-BS;LC2;SB4u;RC3;ID2;M;'
+    ROUTER_IMAGE_TYPE=43555
+    CLIENT_IMAGE_TYPE=65026
+    SW_BUILD='1.1.2-bseedcli2'
+    FILE_VERSION_HEX='0x1102300D'
+    FILE_VERSION_DEC=285356045
+    DEFAULT_OUT='build/bseed-ts011f-nonpm-client'
+    EXTRA_ARGS=()
+    ;;
 ts0726)
     BOARD='SWITCH_BSEED_TS0726_3GANG'
     CANONICAL='iedhxgyi;TS0726-3-BS;LC4;SB1u;RC2;IC0;SB7u;RC3;ID7;SB4u;RD2;IB5;M;'
@@ -46,7 +58,7 @@ ts0726)
     )
     ;;
 *)
-    echo "usage: $0 {pm|ts0726} [output-dir]" >&2
+    echo "usage: $0 {pm|nonpm|ts0726} [output-dir]" >&2
     exit 2
     ;;
 esac
