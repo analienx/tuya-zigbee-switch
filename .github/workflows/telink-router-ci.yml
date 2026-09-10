@@ -1,0 +1,106 @@
+name: Telink Router TC32 validation
+
+on:
+  pull_request:
+    paths:
+      - 'src/telink/**'
+      - 'src/app.c'
+      - 'src/hal/**'
+      - 'src/zigbee/**'
+      - 'src/base_components/**'
+      - 'src/device_config/**'
+      - 'make_scripts/build_bseed_ts011f_pm_v8.sh'
+      - 'device_db.yaml'
+      - 'NVM_MIGRATIONS_VERSION'
+      - '.github/workflows/telink-router-ci.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/telink/**'
+      - 'src/app.c'
+      - 'src/hal/**'
+      - 'src/zigbee/**'
+      - 'src/base_components/**'
+      - 'src/device_config/**'
+      - 'make_scripts/build_bseed_ts011f_pm_v8.sh'
+      - 'device_db.yaml'
+      - 'NVM_MIGRATIONS_VERSION'
+      - '.github/workflows/telink-router-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  bseed-ts011f-router:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make python3 python3-yaml curl wget unzip bzip2
+
+      - name: Cache Telink SDK and TC32 toolchain
+        uses: actions/cache@v4
+        with:
+          path: telink_tools
+          key: telink-tools-v3.7.2.0
+
+      - name: Install pinned Telink build dependencies
+        run: make -C src/telink -f tools.mk sdk toolchain
+
+      - name: Build exact BSEED TS011F Router candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build/telink-router-ci
+          bash make_scripts/build_bseed_ts011f_pm_v8.sh build/telink-router-ci \
+            2>&1 | tee "$RUNNER_TEMP/telink-router-build.log"
+
+      - name: Record immutable build evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "head=$(git rev-parse HEAD)"
+            echo "status_begin"
+            git status --porcelain
+            echo "status_end"
+            ./telink_tools/toolchain/tc32/bin/tc32-elf-gcc --version | head -1
+            sha256sum \
+              build/telink-router-ci/forward.bin \
+              build/telink-router-ci/forward.ota \
+              build/telink-router-ci/from_tuya.ota
+          } | tee "$RUNNER_TEMP/telink-router-evidence.txt"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path('build/telink-router-ci/manifest.json').read_text())
+          assert manifest['sourceCommit']
+          assert manifest['sourceDirty'] is False
+          assert manifest['board'] == 'OUTLET_BSEED_PM_TS011F'
+          assert manifest['manufacturerCode'] == 4417
+          assert manifest['imageType'] == 43556
+          assert manifest['stockConversion']['stockImageType'] == 54179
+          assert manifest['stockConversion']['payloadFromByte56Identical'] is True
+          print('manifest identity/reproducibility guards: PASS')
+          PY
+
+      - name: Upload TC32 Router evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: telink-bseed-ts011f-router-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/telink-router-build.log
+            ${{ runner.temp }}/telink-router-evidence.txt
+            build/telink-router-ci/forward.bin
+            build/telink-router-ci/forward.ota
+            build/telink-router-ci/from_tuya.ota
+            build/telink-router-ci/manifest.json
+          if-no-files-found: warn
