@@ -32,11 +32,14 @@ on:
 jobs:
   bseed-ts011f-router:
     runs-on: ubuntu-latest
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout exact source
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install host dependencies
         run: |
@@ -56,6 +59,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
           rm -rf build/telink-router-ci
           bash make_scripts/build_bseed_ts011f_pm_v8.sh build/telink-router-ci \
             2>&1 | tee "$RUNNER_TEMP/telink-router-build.log"
@@ -65,6 +69,7 @@ jobs:
         run: |
           set -euo pipefail
           {
+            echo "expected_head=$EXPECTED_HEAD"
             echo "head=$(git rev-parse HEAD)"
             echo "status_begin"
             git status --porcelain
@@ -78,24 +83,25 @@ jobs:
 
           python3 - <<'PY'
           import json
+          import os
           from pathlib import Path
 
           manifest = json.loads(Path('build/telink-router-ci/manifest.json').read_text())
-          assert manifest['sourceCommit']
+          assert manifest['sourceCommit'] == os.environ['EXPECTED_HEAD']
           assert manifest['sourceDirty'] is False
           assert manifest['board'] == 'OUTLET_BSEED_PM_TS011F'
           assert manifest['manufacturerCode'] == 4417
           assert manifest['imageType'] == 43556
           assert manifest['stockConversion']['stockImageType'] == 54179
           assert manifest['stockConversion']['payloadFromByte56Identical'] is True
-          print('manifest identity/reproducibility guards: PASS')
+          print('exact-head manifest/identity guards: PASS')
           PY
 
       - name: Upload TC32 Router evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: telink-bseed-ts011f-router-${{ github.sha }}
+          name: telink-bseed-ts011f-router-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             ${{ runner.temp }}/telink-router-build.log
             ${{ runner.temp }}/telink-router-evidence.txt
