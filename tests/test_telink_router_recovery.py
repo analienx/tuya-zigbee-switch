@@ -82,6 +82,25 @@ def test_parent_loss_and_rejoin_failure_use_rejoin_recovery() -> None:
     assert "start_rejoin_with_backoff" in rejoin_failure_block
 
 
+def test_active_sdk_rejoin_callbacks_do_not_restart_backoff() -> None:
+    callback = _commissioning_callback(_source())
+    parent_block = callback.split("case BDB_COMMISSION_STA_PARENT_LOST:", 1)[1].split(
+        "case BDB_COMMISSION_STA_REJOIN_FAILURE:", 1
+    )[0]
+    failure_block = callback.split("case BDB_COMMISSION_STA_REJOIN_FAILURE:", 1)[
+        1
+    ].split("default:", 1)[0]
+
+    guard = "network_recovery_state != TELINK_NETWORK_RECOVERY_REJOIN"
+    assert guard in parent_block
+    assert guard in failure_block
+
+    # A fresh recovery may start only inside the guarded branch. This preserves
+    # the SDK's documented self-sustaining rejoin/backoff sequence.
+    assert parent_block.index(guard) < parent_block.index("start_rejoin_with_backoff")
+    assert failure_block.index(guard) < failure_block.index("start_rejoin_with_backoff")
+
+
 def test_join_success_clears_recovery_state_for_future_failures() -> None:
     source = _source()
     status_fn = source.split(
