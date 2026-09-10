@@ -51,7 +51,6 @@ ZIGBEE_SOURCES := \
 	$(SDK_PATH)/zigbee/aps/aps_group.c \
 	$(SDK_PATH)/zigbee/mac/mac_phy.c \
 	$(SDK_PATH)/zigbee/mac/mac_pib.c \
-	$(SDK_PATH)/zigbee/zdo/zdp.c \
 	$(SDK_PATH)/zigbee/zcl/zcl.c \
 	$(SDK_PATH)/zigbee/zcl/zcl_nv.c \
 	$(SDK_PATH)/zigbee/zcl/zcl_reporting.c \
