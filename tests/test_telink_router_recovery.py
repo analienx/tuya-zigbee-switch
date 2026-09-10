@@ -10,6 +10,13 @@ def _source() -> str:
     return SOURCE.read_text(encoding="utf-8")
 
 
+def _commissioning_callback(source: str) -> str:
+    """Return the callback definition, not its forward declaration."""
+    return source.split("void bdb_commissioning_callback(u8 status, void *arg) {", 1)[
+        1
+    ].split("void bdb_identify_callback", 1)[0]
+
+
 def test_telink_tracks_steering_and_rejoin_as_distinct_recovery_states() -> None:
     source = _source()
     assert "TELINK_NETWORK_RECOVERY_STEERING" in source
@@ -51,10 +58,7 @@ def test_rejoin_start_is_idempotent_and_never_used_for_factory_new_device() -> N
 
 
 def test_no_scan_response_is_not_grouped_with_parent_lost_rejoin() -> None:
-    source = _source()
-    callback = source.split("void bdb_commissioning_callback", 1)[1].split(
-        "void bdb_identify_callback", 1
-    )[0]
+    callback = _commissioning_callback(_source())
     no_scan_pos = callback.index("case BDB_COMMISSION_STA_NO_SCAN_RESPONSE:")
     parent_lost_pos = callback.index("case BDB_COMMISSION_STA_PARENT_LOST:")
     rejoin_pos = callback.index("start_rejoin_with_backoff", parent_lost_pos)
@@ -66,10 +70,7 @@ def test_no_scan_response_is_not_grouped_with_parent_lost_rejoin() -> None:
 
 
 def test_parent_loss_and_rejoin_failure_use_rejoin_recovery() -> None:
-    source = _source()
-    callback = source.split("void bdb_commissioning_callback", 1)[1].split(
-        "void bdb_identify_callback", 1
-    )[0]
+    callback = _commissioning_callback(_source())
     parent_block = callback.split("case BDB_COMMISSION_STA_PARENT_LOST:", 1)[1].split(
         "case BDB_COMMISSION_STA_REJOIN_FAILURE:", 1
     )[0]
