@@ -20,10 +20,20 @@ void bdb_identify_callback(u8 endpoint, u16 srcAddr, u16 identifyTime);
 void zdo_leave_indication_callback(nlme_leave_ind_t *pLeaveInd);
 void zdo_leave_confirmation_callback(nlme_leave_cnf_t *pLeaveCnf);
 
-// Network status tracking
+typedef enum {
+    TELINK_NETWORK_RECOVERY_IDLE = 0,
+    TELINK_NETWORK_RECOVERY_STEERING,
+    TELINK_NETWORK_RECOVERY_REJOIN,
+} telink_network_recovery_state_t;
+
+// Telink's BDB steering and ZDO rejoin/backoff are different recovery paths.
+// Keep them mutually exclusive so the application loop cannot start fresh BDB
+// commissioning on top of an active rejoin operation.
+static telink_network_recovery_state_t network_recovery_state =
+    TELINK_NETWORK_RECOVERY_IDLE;
+
 static hal_network_status_change_callback_t network_status_change_callback =
     NULL;
-static bool steeringInProgress = 0;
 
 // Telink ZDO callbacks
 zdo_appIndCb_t zdo_callbacks = {
@@ -62,6 +72,24 @@ static bdb_appCb_t device_bdb_cb = {
     NULL,
 };
 
+static bool start_rejoin_with_backoff(void) {
+    if (zb_isDeviceJoinedNwk() || zb_isDeviceFactoryNew() ||
+        network_recovery_state != TELINK_NETWORK_RECOVERY_IDLE) {
+        return false;
+    }
+
+    u8 res =
+        zb_rejoinReqWithBackOff(zb_apsChannelMaskGet(), g_bdbAttrs.scanDuration);
+    if (res != RET_OK) {
+        printf("Failed to start network rejoin/backoff, status: %d\r\n", res);
+        return false;
+    }
+
+    network_recovery_state = TELINK_NETWORK_RECOVERY_REJOIN;
+    printf("Starting network rejoin/backoff\r\n");
+    return true;
+}
+
 static void notify_about_network_status_change() {
     if (network_status_change_callback != NULL) {
         network_status_change_callback(hal_zigbee_get_network_status());
@@ -72,20 +100,23 @@ void zdo_leave_indication_callback(nlme_leave_ind_t *pLeaveInd) {
 }
 
 void zdo_leave_confirmation_callback(nlme_leave_cnf_t *pLeaveCnf) {
+    network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
     notify_about_network_status_change();
 }
 
 void bdb_init_callback(u8 status, u8 joinedNetwork) {
     if (status == BDB_INIT_STATUS_SUCCESS) {
+        network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
         if (joinedNetwork) {
             ota_queryStart(OTA_QUERY_INTERVAL);
-      #ifdef ZB_ED_ROLE
+#ifdef ZB_ED_ROLE
             zb_setPollRate(POLL_RATE);
-      #endif
+#endif
         }
     } else {
+        network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
         if (joinedNetwork) {
-            zb_rejoinReqWithBackOff(zb_apsChannelMaskGet(), g_bdbAttrs.scanDuration);
+            (void)start_rejoin_with_backoff();
         }
     }
     notify_about_network_status_change();
@@ -95,6 +126,7 @@ void bdb_commissioning_callback(u8 status, void *arg) {
     printf("BDB commissioning callback, status: %d\r\n", status);
     switch (status) {
     case BDB_COMMISSION_STA_SUCCESS:
+        network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
         ota_queryStart(OTA_QUERY_INTERVAL);
 #ifdef ZB_ED_ROLE
         // Need set poll rate manually,
@@ -103,32 +135,33 @@ void bdb_commissioning_callback(u8 status, void *arg) {
         zb_setPollRate(POLL_RATE);
         printf("Set poll rate to %d\r\n", POLL_RATE);
 #endif
-        steeringInProgress = 0;
         break;
     case BDB_COMMISSION_STA_IN_PROGRESS:
         break;
     case BDB_COMMISSION_STA_NOT_AA_CAPABLE:
-        break;
     case BDB_COMMISSION_STA_NO_NETWORK:
     case BDB_COMMISSION_STA_TCLK_EX_FAILURE:
-    case BDB_COMMISSION_STA_TARGET_FAILURE: {
-        steeringInProgress = 0;
-    } break;
+    case BDB_COMMISSION_STA_TARGET_FAILURE:
     case BDB_COMMISSION_STA_FORMATION_FAILURE:
-        break;
     case BDB_COMMISSION_STA_NO_IDENTIFY_QUERY_RESPONSE:
-        break;
     case BDB_COMMISSION_STA_BINDING_TABLE_FULL:
-        break;
     case BDB_COMMISSION_STA_NOT_PERMITTED:
-        break;
     case BDB_COMMISSION_STA_NO_SCAN_RESPONSE:
+        // These are terminal outcomes for the current BDB attempt. In
+        // particular, NO_SCAN_RESPONSE on a factory-new device must return to
+        // normal steering rather than pretending there is an old network to
+        // rejoin. The next application tick chooses steering vs rejoin from
+        // zb_isDeviceFactoryNew().
+        network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
+        break;
     case BDB_COMMISSION_STA_PARENT_LOST:
-        zb_rejoinReqWithBackOff(zb_apsChannelMaskGet(), g_bdbAttrs.scanDuration);
+        network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
+        (void)start_rejoin_with_backoff();
         break;
     case BDB_COMMISSION_STA_REJOIN_FAILURE:
+        network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
         if (!zb_isDeviceFactoryNew()) {
-            zb_rejoinReqWithBackOff(zb_apsChannelMaskGet(), g_bdbAttrs.scanDuration);
+            (void)start_rejoin_with_backoff();
         }
         break;
     default:
@@ -143,9 +176,13 @@ void bdb_identify_callback(u8 endpoint, u16 srcAddr, u16 identifyTime) {
 
 hal_zigbee_network_status_t hal_zigbee_get_network_status(void) {
     if (zb_isDeviceJoinedNwk()) {
+        // Rejoin success is asynchronous. Synchronize our application-side
+        // state from the authoritative stack state so future losses can start
+        // a fresh recovery operation.
+        network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
         return HAL_ZIGBEE_NETWORK_JOINED;
     }
-    if (steeringInProgress) {
+    if (network_recovery_state != TELINK_NETWORK_RECOVERY_IDLE) {
         return HAL_ZIGBEE_NETWORK_JOINING;
     }
     return HAL_ZIGBEE_NETWORK_NOT_JOINED;
@@ -163,15 +200,34 @@ void hal_zigbee_leave_network(void) {
     TL_SETSTRUCTCONTENT(leaveReq, 0);
     leaveReq.removeChildren = 1;
     leaveReq.rejoin         = 0;
+    network_recovery_state  = TELINK_NETWORK_RECOVERY_IDLE;
     zb_nlmeLeaveReq(&leaveReq);
     notify_about_network_status_change();
 }
 
 void hal_zigbee_start_network_steering(void) {
+    if (zb_isDeviceJoinedNwk()) {
+        network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
+        return;
+    }
+
+    // The public HAL name is historical. On Telink this entry point now means
+    // "ensure connectivity": factory-new devices perform BDB steering, while
+    // devices that already own network state use the SDK's rejoin/backoff
+    // recovery. Never let the two operations overlap.
+    if (network_recovery_state != TELINK_NETWORK_RECOVERY_IDLE) {
+        return;
+    }
+
+    if (!zb_isDeviceFactoryNew()) {
+        (void)start_rejoin_with_backoff();
+        return;
+    }
+
     printf("Starting network steering\r\n");
     u8 res = bdb_networkSteerStart();
     if (res == 0) {
-        steeringInProgress = 1;
+        network_recovery_state = TELINK_NETWORK_RECOVERY_STEERING;
     } else {
         printf("Failed to start network steering, status: %d\r\n", res);
     }
