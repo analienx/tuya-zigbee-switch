@@ -11,6 +11,10 @@
 - *Power-on behavior* doesn't fully work on some devices
 - Press event missing on very short single presses ([#438](https://github.com/romasku/tuya-zigbee-switch/issues/438))
 - Telink Router sometimes unavailable? ([#255](https://github.com/romasku/tuya-zigbee-switch/issues/255))
+  - **analienx fork:** a concrete recovery-state defect has been fixed and is under live canary validation.
+  - Previously joined Telink devices now use SDK rejoin/backoff instead of allowing fresh BDB steering to overlap recovery.
+  - Factory-new `NO_SCAN_RESPONSE` is no longer misrouted into old-network rejoin recovery.
+  - Keep this issue open until real TC32 CI and the already-custom Router canary prove the behavior on hardware; see [Telink Router reliability](router_reliability.md).
 - *momentary_nc* not working after power loss.  
   (Apply the setting again)
 
