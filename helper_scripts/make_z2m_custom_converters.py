@@ -118,6 +118,9 @@ if __name__ == "__main__":
                 "has_dedicated_net_led": has_dedicated_net_led,
                 "has_battery_cluster": has_battery_cluster,
                 "power_monitoring": bool(device.get("power_monitoring", False)),
+                "expose_switch_controls": bool(
+                    device.get("z2m_switch_controls", device.get("category") not in ("outlet", "plug"))
+                ),
             }
         )
 

@@ -441,6 +441,7 @@ const definitions = [
             {% if device.power_monitoring %}
             electricityMeter(),
             {% endif %}
+            {% if device.expose_switch_controls %}
             {% for switchName in device.switchNames %}
             romasku.pressAction("{{switchName}}_press_action", "{{switchName}}"),
             romasku.switchMode("{{switchName}}_mode", "{{switchName}}"),
@@ -453,6 +454,7 @@ const definitions = [
             romasku.longPressDuration("{{switchName}}_long_press_duration", "{{switchName}}"),
             romasku.levelMoveRate("{{switchName}}_level_move_rate", "{{switchName}}"),
             {% endfor %}
+            {% endif %}
             {% for relayName in device.relayIndicatorNames %}
             romasku.relayIndicatorMode("{{relayName}}_indicator_mode", "{{relayName}}"),
             romasku.relayIndicator("{{relayName}}_indicator", "{{relayName}}"),
@@ -484,6 +486,7 @@ const definitions = [
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
+            {% if device.expose_switch_controls %}
             {% for switchName in device.switchNames %}
             const endpoint{{loop.index}} = device.getEndpoint({{loop.index}});
             await reporting.bind(endpoint{{loop.index}}, coordinatorEndpoint, ["genMultistateInput"]);
@@ -497,6 +500,7 @@ const definitions = [
                 },
             ]);
             {% endfor %}
+            {% endif %}
             {% if device.has_battery_cluster %}
             // Battery reporting
             const batteryEndpoint = device.getEndpoint(1);

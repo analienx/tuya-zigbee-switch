@@ -177,6 +177,10 @@
           "type": "boolean",
           "description": "Expose standard Zigbee electrical measurement and metering capabilities"
         },
+        "z2m_switch_controls": {
+          "type": "boolean",
+          "description": "Override whether Zigbee2MQTT exposes wall-switch/button tuning controls; outlet and plug categories default to false"
+        },
         "build": {
           "type": "string",
           "enum": ["yes", "no"],
