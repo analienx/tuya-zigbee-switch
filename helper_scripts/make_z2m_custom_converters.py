@@ -117,6 +117,7 @@ if __name__ == "__main__":
                 "coverNames": cover_names,
                 "has_dedicated_net_led": has_dedicated_net_led,
                 "has_battery_cluster": has_battery_cluster,
+                "power_monitoring": bool(device.get("power_monitoring", False)),
             }
         )
 

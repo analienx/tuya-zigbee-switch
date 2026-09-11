@@ -3016,6 +3016,7 @@ OUTLET_BSEED_PM_TS011F:
   stock_manufacturer_id: 4417
   stock_image_type: 54179
   firmware_image_type: 43556
+  power_monitoring: true
   build: yes
   status: fully_supported
   info: Supported (BL0937 power monitoring)

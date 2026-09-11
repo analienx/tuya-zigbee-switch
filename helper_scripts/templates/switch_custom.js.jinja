@@ -3,6 +3,7 @@ const {
     enumLookup,
     deviceEndpoints,
     onOff,
+    electricityMeter,
     text,
     binary,
     windowCovering,
@@ -436,6 +437,9 @@ const definitions = [
             {% endif%}
             {% if device.relayNames %}
             onOff({ endpointNames: {{device.relayNames | tojson }} }),
+            {% endif %}
+            {% if device.power_monitoring %}
+            electricityMeter(),
             {% endif %}
             {% for switchName in device.switchNames %}
             romasku.pressAction("{{switchName}}_press_action", "{{switchName}}"),
