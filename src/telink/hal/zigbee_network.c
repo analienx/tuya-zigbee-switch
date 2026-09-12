@@ -262,6 +262,17 @@ uint32_t hal_zigbee_get_poll_rate_ms(void) {
 
 void telink_zigbee_hal_network_init(void) {
     zb_init();
+
+#if ZB_ROUTER_ROLE
+    /* Zigbee R23 section 3.6.10 requires a parent that accepts End Device
+     * Timeout requests to advertise at least one supported keepalive method.
+     * Telink 3.7.2.0 initializes nwkParentInformation to zero even though its
+     * router stack handles MAC data polls and child timeout refresh. Advertise
+     * only the mechanism proven by this stack so sleepy children such as IKEA
+     * RODRET can use their normal MAC polls as parent keepalives. */
+    g_zbNIB.parentInfo = MAC_DATA_POLL_KEEPALIVE_BIT;
+#endif
+
     zb_zdoCbRegister(&zdo_callbacks);
     af_powerDescPowerModeUpdate(POWER_MODE_RECEIVER_COMES_PERIODICALLY);
 }
