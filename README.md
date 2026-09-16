@@ -79,7 +79,7 @@ Both custom images use manufacturer code `4417`.
 **The two targets use different binaries. Never flash a TS011F-PM image onto a TS0726 device, or vice versa.**
 
 > [!NOTE]
-> `v8u4 / 0x12053007` is hardware-validated and reproducibly built. The public `index_bseed.json` remains on the previously accepted `v8u3 / 0x12053006` until the separate OTA-distribution publication step is promoted.
+> `v8u4 / 0x12053007` is hardware-validated, reproducibly built, and published through the public `index_bseed.json`. The published PM OTA payload is byte-identical to the artifact used for the successful IKEA RODRET hardware canary.
 
 ### Supported stock conversion identities
 
@@ -141,7 +141,7 @@ The release path checks:
 - normal-vs-from-Tuya payload identity;
 - generated OTA index consistency.
 
-The PM release `0x12053005` remains a known-good recovery slot. `0x12053007` (`1.2.5-bseedv8u4`) is the current hardware-validated PM build; `0x12053006` remains the public OTA-index version until distribution publication is promoted.
+The PM release `0x12053005` remains a known-good recovery slot. `0x12053007` (`1.2.5-bseedv8u4`) is the current hardware-validated **and public** PM release. `0x12053006` remains the previous accepted release for rollback/history. PM-only publication also preserves the existing TS0726 public binaries byte-for-byte unless TS0726 receives its own version bump and hardware-validation release boundary.
 
 ## Safety
 
