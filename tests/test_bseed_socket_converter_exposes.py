@@ -17,7 +17,7 @@ def _render(*extra: str) -> str:
 def _definition(text: str, zigbee_model: str) -> str:
     marker = f'"{zigbee_model}"'
     start = text.index(marker)
-    next_start = text.find("\n    {\n        zigbeeModel:", start + len(marker))
+    next_start = text.find("\n    {\n        fingerprint:", start + len(marker))
     return text[start:] if next_start == -1 else text[start:next_start]
 
 
@@ -49,6 +49,23 @@ def test_non_pm_bseed_outlet_uses_same_socket_profile():
         for expose in SOCKET_ONLY_SWITCH_CONTROLS:
             assert expose not in definition
         assert 'onOff({ endpointNames: ["relay"] })' in definition
+
+
+def test_custom_firmware_matchers_include_exact_bseed_identities():
+    for args in [(), ("--z2m-v1",)]:
+        rendered = _render(*args)
+        assert (
+            '{ manufacturerName: "b28wrpvx", modelID: "TS011F-BS-PM" }'
+            in rendered
+        )
+        assert (
+            '{ manufacturerName: "o1jzcxou", modelID: "TS011F-BS" }'
+            in rendered
+        )
+        assert (
+            '{ manufacturerName: "iedhxgyi", modelID: "TS0726-3-BS" }'
+            in rendered
+        )
 
 
 def test_bseed_ts0726_dimmer_keeps_full_switch_controls():
