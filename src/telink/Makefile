@@ -172,7 +172,10 @@ TELINK_SOURCES := \
 	custom_zcl/zcl_multistate_input.c \
 	custom_zcl/zcl_onoff_configuration.c \
 	custom_zcl/zcl_cover_switch_config.c \
-	patch_sdk/drv_nv.c
+	patch_sdk/drv_nv.c \
+	patch_sdk/zdp.c \
+	patch_sdk/zdo_mgmt_rtg.c \
+	patch_sdk/mgmt_rtg_codec.c
 
 COMMON_SOURCES := \
 	$(SRC_DIR)/app.c \

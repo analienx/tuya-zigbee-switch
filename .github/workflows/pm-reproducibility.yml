@@ -5,11 +5,12 @@ on:
   push:
     branches:
       - supervisor/v8-release-v12053006
+      - assistant/bseed-v8u4-canary-20260915
   pull_request:
 
 jobs:
   validate-unified-pm:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.head_ref == 'supervisor/v8-release-v12053006' || github.head_ref == 'assistant/v8-unified-pm' || github.head_ref == 'supervisor/bseed-tuya-conversion'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.head_ref == 'supervisor/v8-release-v12053006' || github.head_ref == 'assistant/v8-unified-pm' || github.head_ref == 'supervisor/bseed-tuya-conversion' || github.head_ref == 'assistant/bseed-v8u4-canary-20260915'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact source
@@ -73,7 +74,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bseed-unified-v8-v12053006
+          name: bseed-unified-v8-v12053007
           path: |
             ${{ runner.temp }}/pm-validator-output.log
             ${{ runner.temp }}/pm-build-environment.txt

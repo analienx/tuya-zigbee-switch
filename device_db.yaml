@@ -2997,6 +2997,7 @@ OUTLET_BSEED_BORUIDAPLS_PM_TS011F:
 OUTLET_BSEED_PM_TS011F:
   human_name: BSEED PM outlet 🅰
   category: outlet
+  switch_level_move_rate: false
   power: mains
   neutral: required
   output: relay

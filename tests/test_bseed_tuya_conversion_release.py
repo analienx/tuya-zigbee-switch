@@ -91,7 +91,7 @@ def test_dedicated_index_has_exact_stock_and_custom_lookup_keys(tmp_path: Path) 
         pm,
         board="OUTLET_BSEED_PM_TS011F",
         canonical="b28wrpvx;TS011F-BS-PM;",
-        version=0x12053006,
+        version=0x12053007,
         custom_type=43556,
         stock_name="_TZ3000_b28wrpvx",
     )
@@ -126,7 +126,7 @@ def test_dedicated_index_has_exact_stock_and_custom_lookup_keys(tmp_path: Path) 
         for entry in entries
     }
     assert lookup == {
-        ("b28wrpvx", 43556, 0x12053006),
+        ("b28wrpvx", 43556, 0x12053007),
         ("_TZ3000_b28wrpvx", 54179, 0xFFFFFFFF),
         ("iedhxgyi", 45577, 0x1102300A),
         ("_TZ3002_iedhxgyi", 54179, 0xFFFFFFFF),

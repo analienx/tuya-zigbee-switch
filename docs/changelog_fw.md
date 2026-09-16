@@ -18,6 +18,11 @@ Please describe what you are working on, under ## Upcoming
 
 ### Features
 
+- **Router-aware Telink network recovery** for TLSR8258 Router builds.
+  - Factory-new devices use BDB network steering.
+  - Previously joined devices use SDK rejoin/backoff recovery.
+  - Active steering/rejoin is exposed as `JOINING`, preventing repeated application ticks from starting overlapping commissioning.
+  - Router-relevant changes are now compiled by a dedicated pinned-SDK real-TC32 CI gate before live canary testing.
 - **Cover cluster** (window covering) for controlling the motor of curtains, blinds, and shutters.
   Supports open, close, and stop commands with motor safety delays.
 - **Cover switch cluster** for handling user input from window covering switches.
@@ -50,6 +55,7 @@ Please describe what you are working on, under ## Upcoming
 ### Bugs
 
 - **Fixed**
+  - Telink Router recovery could mix SDK rejoin/backoff with fresh BDB network steering after connectivity loss. Recovery paths are now explicitly separated and duplicate recovery starts are suppressed. Factory-new `NO_SCAN_RESPONSE` no longer enters old-network rejoin recovery. Hardware canary validation remains required before broad Router rollout.
   - Latching relays not working with off_pin A0
   - Silabs version updates not working
   - Telink End_device unreachable from Z2M after a while ([#217](https://github.com/romasku/tuya-zigbee-switch/issues/217))
@@ -146,9 +152,9 @@ _Contains **substantial restructuring** of the firmware architecture, but doesn'
 
 ### New features
 
-- Add support for the **levelCtrl** cluster
+- Add support of the levelCtrl cluster
   - This enables brightness control of compatible Zigbee bulbs via Zigbee binding.
-  - The feature works only for momentary switches using long press: once a long press is detected, brightness will begin to slowly change. Each subsequent long press reverses the direction (increase/decrease).
+  - The feature works only for momentary (doorbell-like) switches using long press: once a long press is detected, brightness will begin to slowly change. Each subsequent long press reverses the direction (increase/decrease).
   - Requires manual update of converters and reconfiguration.
 
 ### Changes
@@ -212,7 +218,7 @@ _Contains **substantial restructuring** of the firmware architecture, but doesn'
 
 ## v1.0.8
 
-- Add support for indicator leds.
+- Add support of indicator leds.
 - Add way to force momentary mode as default via config.
 
 ## v1.0.7

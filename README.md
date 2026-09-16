@@ -3,11 +3,15 @@
 Hardware-focused custom Zigbee firmware for selected BSEED devices, built on top of [romasku/tuya-zigbee-switch](https://github.com/romasku/tuya-zigbee-switch).
 
 [![CI](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/test.yml/badge.svg)](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/test.yml)
+[![Telink Router TC32](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/telink-router-ci.yml/badge.svg)](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/telink-router-ci.yml)
 [![Reproducible firmware](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/pm-reproducibility.yml/badge.svg)](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/pm-reproducibility.yml)
 [![BSEED OTA distribution](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/bseed-ota-distribution.yml/badge.svg)](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/bseed-ota-distribution.yml)
 
 > [!IMPORTANT]
 > This repository supports **exact hardware/Zigbee identities**, not product appearance alone. BSEED sells visually similar devices with different internals. Verify the target before installing firmware.
+
+> [!TIP]
+> **Hardware-validated sleepy end-device parenting:** the BSEED TS011F PM Router on `1.2.5-bseedv8u4` can act as a Zigbee parent for sleeping battery devices. A real IKEA RODRET E2201 was joined through the BSEED router, completed interview/configuration, delivered all expected button/dimming actions, survived sleep → wake, and was confirmed by the Zigbee neighbor topology as an actual child of the BSEED router.
 
 ## Why this fork is useful
 
@@ -19,13 +23,15 @@ This fork keeps those capabilities and adds the BSEED-specific pieces that matte
 
 | Feature | What it means in practice | Compared with Romasku `main` |
 |---|---|---|
+| **Sleepy end-device parenting (v8u4)** | A mains-powered BSEED PM socket can be a reliable Zigbee parent for sleeping battery devices instead of merely routing traffic between mains devices. Hardware validation used IKEA RODRET E2201: targeted join, successful interview/configuration, `on`/`off`/brightness-move/stop actions, sleep → wake delivery, and topology-confirmed parent/child relationship. | **Fork reliability addition, hardware validated.** Router builds advertise the standards-correct MAC Data Poll keepalive capability needed by sleepy children. |
 | **Physical relay behavior independent of Zigbee state** | Each relay can `follow_state`, stay `always_on`, or stay `always_off` while its logical Zigbee On/Off state remains independently controllable. This is especially useful with smart bulbs, remote-only buttons and safety/override use cases. | **Fork addition.** Upstream detached mode controls whether a local button operates the relay, but does not provide this separate pinned-output policy on `main`. |
 | **Working BL0937 power monitoring on the BSEED TS011F PM socket** | Standard voltage, current, active power and cumulative energy reporting instead of using the socket as relay-only hardware. | **Implemented and hardware-validated here.** Upstream currently lists power monitoring as work in progress. |
+| **Router-aware Telink network recovery** | A previously joined mains-powered Telink Router recovers through SDK rejoin/backoff instead of allowing fresh BDB commissioning to collide with recovery. Factory-new pairing remains a separate steering path, and duplicate recovery attempts are suppressed. | **Fork reliability addition, hardware validated on the BSEED PM canary.** Covered by host/static regression tests and dedicated real-TC32 CI. |
 | **BSEED TS0726 canonical migration** | Existing devices can move from the historical swapped-pin workaround to the canonical BSEED mapping without throwing away the stored configuration/state model. | **BSEED-specific.** This migration is not part of generic upstream firmware. |
 | **Per-channel indicator LED control** | Indicator LEDs can follow the logical relay state, show the inverse, or run in `manual` mode where the LED state is controlled separately. | The generic LED primitive already exists upstream; **this fork validates it on the canonical BSEED mapping and uses it as part of the BSEED control model.** |
 | **BSEED-focused Zigbee2MQTT UX** | The tested BSEED deployment layout uses human terms and ordering: logical state → physical relay behavior → button behavior → indicator behavior/state → advanced hardware configuration, with Left/Middle/Right semantics instead of endpoint decoding. | **Target-specific BSEED integration work.** The generic generated converter in this repository remains upstream-compatible, so not every deployment-level label/layout improvement has been folded into the generic converter yet. |
 | **Exact stock-Tuya conversion packages** | The two supported stock identities have dedicated, validated `from_tuya` wrappers and a small BSEED-only OTA index. | Upstream has the generic conversion mechanism; **this fork adds exact BSEED packaging, validation and index hygiene.** |
-| **Release-grade reproducibility** | Deployable images come only from GitHub Actions, both BSEED targets are built from the same SHA, OTA identities are checked and PM output is rebuilt byte-for-byte. | **Fork-specific release policy and CI.** |
+| **Release-grade reproducibility** | Deployable images come only from GitHub Actions, both BSEED targets are built from the same SHA, OTA identities are checked and PM output is rebuilt byte-for-byte. Router-relevant Telink changes also receive a real TC32 compile gate before hardware testing. | **Fork-specific release policy and CI.** |
 
 The comparison above is intentionally conservative: this project reuses upstream features when upstream already has them instead of relabeling them as fork inventions.
 
@@ -53,20 +59,27 @@ This is different from ordinary `detached` mode: detached mode only decides whet
 - **BL0937 power monitoring** for the validated TS011F PM socket target, using hardware-proven sampling semantics.
 - **BSEED TS0726 support** on the same common-core architecture.
 - **Physical-output policy** kept orthogonal to logical relay state.
+- **Standards-correct sleepy-child parenting** for Telink Router builds via MAC Data Poll keepalive advertisement; hardware-validated with an IKEA RODRET E2201 child.
+- **Router-aware Telink recovery state** that keeps BDB steering and rejoin/backoff mutually exclusive and distinguishes factory-new commissioning from existing-network recovery.
+- **Router-side Mgmt_Rtg support** with bounded pagination/read-only route-table serialization for large-mesh diagnostics.
 - **Stock-Tuya → custom OTA wrappers** for the exact supported stock identities.
 - **Safer configuration and NVM handling**, including bounded parsing and migration guards.
 - **Actions-only deployable artifacts** with pinned real-Telink builds, OTA-header checks and byte-for-byte reproducibility gates.
+- **Router-relevant real-TC32 CI** so Telink-only networking changes are compiled against the pinned SDK/toolchain before live-device canaries.
 
 ## Supported BSEED targets
 
-| Device family | Exact identity | Board | Current custom firmware | Custom OTA image type |
+| Device family | Exact identity | Board | Hardware-validated firmware | Custom OTA image type |
 |---|---|---|---|---:|
-| TS011F power-monitoring socket | `b28wrpvx / TS011F-BS-PM` | `OUTLET_BSEED_PM_TS011F` | `1.2.5-bseedv8u3` · `0x12053006` | `43556` |
+| TS011F power-monitoring socket | `b28wrpvx / TS011F-BS-PM` | `OUTLET_BSEED_PM_TS011F` | `1.2.5-bseedv8u4` · `0x12053007` | `43556` |
 | TS0726 3-gang switch/dimmer | `iedhxgyi / TS0726-3-BS` | `SWITCH_BSEED_TS0726_3GANG` | `1.1.8-bseedv8` · `0x1102300a` | `45577` |
 
 Both custom images use manufacturer code `4417`.
 
 **The two targets use different binaries. Never flash a TS011F-PM image onto a TS0726 device, or vice versa.**
+
+> [!NOTE]
+> `v8u4 / 0x12053007` is hardware-validated and reproducibly built. The public `index_bseed.json` remains on the previously accepted `v8u3 / 0x12053006` until the separate OTA-distribution publication step is promoted.
 
 ### Supported stock conversion identities
 
@@ -121,13 +134,14 @@ The release path checks:
 - host tests and lint;
 - firmware image-type collision/identity rules;
 - real pinned TC32 builds for both BSEED targets;
+- Router-relevant changes compile against the pinned Telink SDK/TC32 toolchain before canary testing;
 - exact OTA manufacturer/image/version headers;
 - manifest provenance and clean-source state;
 - a second PM build for byte-for-byte reproducibility;
 - normal-vs-from-Tuya payload identity;
 - generated OTA index consistency.
 
-The PM release `0x12053005` is intentionally reserved as a known-good recovery slot; normal development advanced past it to `0x12053006`.
+The PM release `0x12053005` remains a known-good recovery slot. `0x12053007` (`1.2.5-bseedv8u4`) is the current hardware-validated PM build; `0x12053006` remains the public OTA-index version until distribution publication is promoted.
 
 ## Safety
 
@@ -152,6 +166,7 @@ b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;
 | Topic | Document |
 |---|---|
 | Architecture, identities, conversion and validation | [BSEED unified V8](docs/bseed_unified_v8.md) |
+| Telink Router recovery architecture and validation | [Telink Router reliability](docs/router_reliability.md) |
 | OTA conversion and updates | [Updating OTA](docs/updating.md) |
 | Supported hardware database | [Supported devices](docs/supported_devices.md) |
 | Firmware changes | [Firmware changelog](docs/changelog_fw.md) |

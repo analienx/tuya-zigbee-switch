@@ -14,12 +14,12 @@ MANUFACTURER_CODE=4417
 IMAGE_TYPE=43556
 STOCK_MANUFACTURER_NAME='_TZ3000_b28wrpvx'
 STOCK_IMAGE_TYPE=54179
-SW_BUILD='1.2.5-bseedv8u3'
+SW_BUILD='1.2.5-bseedv8u4'
 # 0x12053004 is the accepted V8 PM fix1 canary. 0x12053005 is permanently
-# reserved for the sealed known-good rollback, so the next normal release
-# candidate advances to 0x12053006.
-FILE_VERSION_HEX='0x12053006'
-FILE_VERSION_DEC=302329862
+# reserved for the sealed known-good rollback. 0x12053006 is the accepted
+# consolidated V8 release; 0x12053007 is the sleepy-child parent canary.
+FILE_VERSION_HEX='0x12053007'
+FILE_VERSION_DEC=302329863
 VOLTAGE_MULTIPLIER=161460
 CURRENT_MULTIPLIER=144679
 POWER_MULTIPLIER=16989
