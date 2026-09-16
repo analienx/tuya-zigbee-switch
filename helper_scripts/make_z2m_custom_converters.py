@@ -11,6 +11,34 @@ env = Environment(
     lstrip_blocks=True,
 )
 
+
+def add_custom_fingerprints(rendered: str, devices: list[dict]) -> str:
+    """Add strong manufacturer/model matchers without changing template layout."""
+    cursor = 0
+    for device in devices:
+        model_lines = "".join(
+            f'            "{model_id}",\n' for model_id in device["zb_models"]
+        )
+        matcher = f"        zigbeeModel: [\n{model_lines}        ],\n"
+        fingerprint_lines = "".join(
+            "            { manufacturerName: "
+            f'"{fingerprint["manufacturerName"]}", modelID: '
+            f'"{fingerprint["modelID"]}" }},\n'
+            for fingerprint in device["fingerprints"]
+        )
+        fingerprints = f"        fingerprint: [\n{fingerprint_lines}        ],\n"
+
+        index = rendered.find(matcher, cursor)
+        if index < 0:
+            raise RuntimeError(
+                f"Could not locate rendered definition for {device['zb_models']}"
+            )
+        rendered = rendered[:index] + fingerprints + rendered[index:]
+        cursor = index + len(fingerprints) + len(matcher)
+
+    return rendered
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Create Zigbee2mqtt converter for custom devices",
@@ -37,6 +65,15 @@ if __name__ == "__main__":
 
         config = device["config_str"]
         zb_manufacturer, zb_model, *peripherals = config.rstrip(";").split(";")
+        zb_models = [zb_model] + (device.get("old_zb_models") or [])
+        manufacturer_names = [zb_manufacturer] + (
+            device.get("old_manufacturer_names") or []
+        )
+        fingerprints = [
+            {"manufacturerName": manufacturer_name, "modelID": model_id}
+            for manufacturer_name in manufacturer_names
+            for model_id in zb_models
+        ]
 
         relay_cnt = 0
         switch_cnt = 0
@@ -107,10 +144,12 @@ if __name__ == "__main__":
 
         devices.append(
             {
-                "zb_models": [zb_model] + (device.get("old_zb_models") or []),
+                "zb_models": zb_models,
+                "fingerprints": fingerprints,
                 "model": device.get("override_z2m_device")
                 or device["stock_converter_model"],
                 "switch_level_move_rate": device.get("switch_level_move_rate", True),
+                "expose_switch_controls": device.get("category") not in {"outlet", "plug", "din_relay"},
                 "switchNames": switch_names,
                 "relayNames": relay_names,
                 "relayIndicatorNames": relay_names[:indicators_cnt],
@@ -122,7 +161,7 @@ if __name__ == "__main__":
         )
 
     template = env.get_template("switch_custom.js.jinja")
-
-    print(template.render(devices=devices, z2m_v1=args.z2m_v1))
+    rendered = template.render(devices=devices, z2m_v1=args.z2m_v1)
+    print(add_custom_fingerprints(rendered, devices))
 
     exit(0)
