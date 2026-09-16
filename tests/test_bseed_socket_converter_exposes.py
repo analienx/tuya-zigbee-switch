@@ -21,15 +21,43 @@ def _definition(text: str, zigbee_model: str) -> str:
     return text[start:] if next_start == -1 else text[start:next_start]
 
 
-def test_bseed_pm_outlet_does_not_expose_dimming_rate():
+SOCKET_ONLY_SWITCH_CONTROLS = (
+    "switch_press_action",
+    "switch_mode",
+    "switch_action_mode",
+    "switch_relay_mode",
+    "switch_relay_index",
+    "switch_binded_mode",
+    "switch_long_press_duration",
+    "switch_level_move_rate",
+)
+
+
+def test_bseed_pm_outlet_hides_switch_and_dimmer_controls():
     for args in [(), ("--z2m-v1",)]:
         definition = _definition(_render(*args), "TS011F-BS-PM")
-        assert "switch_level_move_rate" not in definition
-        assert "switch_long_press_duration" in definition
-        assert "switch_relay_mode" in definition
+        for expose in SOCKET_ONLY_SWITCH_CONTROLS:
+            assert expose not in definition
+        assert 'onOff({ endpointNames: ["relay"] })' in definition
+        assert 'relay_physical_mode' in definition
+        assert 'relay_indicator_mode' in definition
 
 
-def test_non_outlet_switch_keeps_dimming_rate():
+def test_non_pm_bseed_outlet_uses_same_socket_profile():
     for args in [(), ("--z2m-v1",)]:
-        definition = _definition(_render(*args), "TS0004-MC")
-        assert "level_move_rate" in definition
+        definition = _definition(_render(*args), "TS011F-BS")
+        for expose in SOCKET_ONLY_SWITCH_CONTROLS:
+            assert expose not in definition
+        assert 'onOff({ endpointNames: ["relay"] })' in definition
+
+
+def test_bseed_ts0726_dimmer_keeps_full_switch_controls():
+    for args in [(), ("--z2m-v1",)]:
+        definition = _definition(_render(*args), "TS0726-3-BS")
+        assert "switch_left_mode" in definition
+        assert "switch_left_action_mode" in definition
+        assert "switch_left_relay_mode" in definition
+        assert "switch_left_relay_index" in definition
+        assert "switch_left_binded_mode" in definition
+        assert "switch_left_long_press_duration" in definition
+        assert "switch_left_level_move_rate" in definition

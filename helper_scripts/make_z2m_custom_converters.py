@@ -111,6 +111,7 @@ if __name__ == "__main__":
                 "model": device.get("override_z2m_device")
                 or device["stock_converter_model"],
                 "switch_level_move_rate": device.get("switch_level_move_rate", True),
+                "expose_switch_controls": device.get("category") not in {"outlet", "plug", "din_relay"},
                 "switchNames": switch_names,
                 "relayNames": relay_names,
                 "relayIndicatorNames": relay_names[:indicators_cnt],
