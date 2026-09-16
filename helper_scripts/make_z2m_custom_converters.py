@@ -37,6 +37,15 @@ if __name__ == "__main__":
 
         config = device["config_str"]
         zb_manufacturer, zb_model, *peripherals = config.rstrip(";").split(";")
+        zb_models = [zb_model] + (device.get("old_zb_models") or [])
+        manufacturer_names = [zb_manufacturer] + (
+            device.get("old_manufacturer_names") or []
+        )
+        fingerprints = [
+            {"manufacturerName": manufacturer_name, "modelID": model_id}
+            for manufacturer_name in manufacturer_names
+            for model_id in zb_models
+        ]
 
         relay_cnt = 0
         switch_cnt = 0
@@ -107,7 +116,8 @@ if __name__ == "__main__":
 
         devices.append(
             {
-                "zb_models": [zb_model] + (device.get("old_zb_models") or []),
+                "zb_models": zb_models,
+                "fingerprints": fingerprints,
                 "model": device.get("override_z2m_device")
                 or device["stock_converter_model"],
                 "switch_level_move_rate": device.get("switch_level_move_rate", True),
