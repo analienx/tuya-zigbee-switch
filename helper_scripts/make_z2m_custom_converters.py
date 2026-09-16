@@ -11,6 +11,34 @@ env = Environment(
     lstrip_blocks=True,
 )
 
+
+def add_custom_fingerprints(rendered: str, devices: list[dict]) -> str:
+    """Add strong manufacturer/model matchers without changing template layout."""
+    cursor = 0
+    for device in devices:
+        model_lines = "".join(
+            f'            "{model_id}",\n' for model_id in device["zb_models"]
+        )
+        matcher = f"        zigbeeModel: [\n{model_lines}        ],\n"
+        fingerprint_lines = "".join(
+            "            { manufacturerName: "
+            f'"{fingerprint["manufacturerName"]}", modelID: '
+            f'"{fingerprint["modelID"]}" }},\n'
+            for fingerprint in device["fingerprints"]
+        )
+        fingerprints = f"        fingerprint: [\n{fingerprint_lines}        ],\n"
+
+        index = rendered.find(matcher, cursor)
+        if index < 0:
+            raise RuntimeError(
+                f"Could not locate rendered definition for {device['zb_models']}"
+            )
+        rendered = rendered[:index] + fingerprints + rendered[index:]
+        cursor = index + len(fingerprints) + len(matcher)
+
+    return rendered
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Create Zigbee2mqtt converter for custom devices",
@@ -133,7 +161,7 @@ if __name__ == "__main__":
         )
 
     template = env.get_template("switch_custom.js.jinja")
-
-    print(template.render(devices=devices, z2m_v1=args.z2m_v1))
+    rendered = template.render(devices=devices, z2m_v1=args.z2m_v1)
+    print(add_custom_fingerprints(rendered, devices))
 
     exit(0)
