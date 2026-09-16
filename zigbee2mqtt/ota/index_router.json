@@ -5090,26 +5090,26 @@
     ]
   },
   {
-    "fileName": "ts011f-pm-v12053006.ota",
-    "fileVersion": 302329862,
-    "fileSize": 195314,
-    "url": "https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/ota/bseed/ts011f-pm-v12053006.ota",
+    "fileName": "ts011f-pm-v12053007.ota",
+    "fileVersion": 302329863,
+    "fileSize": 195906,
+    "url": "https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/ota/bseed/ts011f-pm-v12053007.ota",
     "imageType": 43556,
     "manufacturerCode": 4417,
-    "sha512": "327a40e5faf9cb3bd72d8bdb8066e5a122a945d40ba405a0fb7992cfbee409992496f94772f950be7832e17807ba85e8ea821b15c3f82d960a3221c82cc67327",
+    "sha512": "d46a5d347216c3d92788e5437e778aadb132612f2bcdc3be8d0cf126b93a23e7e7cef6475217065ab7d4eeea39750415463d1f5fb4e52fba8eed63b00601a500",
     "otaHeaderString": "Telink OTA Image\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
     "manufacturerName": [
       "b28wrpvx"
     ]
   },
   {
-    "fileName": "ts011f-pm-v12053006-from_tuya.ota",
+    "fileName": "ts011f-pm-v12053007-from_tuya.ota",
     "fileVersion": 4294967295,
-    "fileSize": 195314,
-    "url": "https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/ota/bseed/ts011f-pm-v12053006-from_tuya.ota",
+    "fileSize": 195906,
+    "url": "https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/ota/bseed/ts011f-pm-v12053007-from_tuya.ota",
     "imageType": 54179,
     "manufacturerCode": 4417,
-    "sha512": "486a0676aa9d66bb1efd6e5d91ee851de2c76b83efac023678bdf55bb85fdf12758e395427ad1a955e1f4ae290b93e185be1be63957087fcf33960d7d7d70f87",
+    "sha512": "9a58476dc61a70abd5f5ac0d7780aac85501d345c4e4c6ee06464f24f58327c54d5d3f3057cab9bcf3d919ad087345abacc3fdf48285ce52f76860ea52a69972",
     "otaHeaderString": "Telink OTA Image\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
     "manufacturerName": [
       "_TZ3000_b28wrpvx"
