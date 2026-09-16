@@ -47,12 +47,21 @@ current: 144679
 power:   16989
 ```
 
-The current release is:
+The current accepted release is:
 
 ```text
 build:       1.2.5-bseedv8u3
 fileVersion: 0x12053006 / 302329862
 ```
+
+The current sleepy-child parenting canary candidate is:
+
+```text
+build:       1.2.5-bseedv8u4
+fileVersion: 0x12053007 / 302329863
+```
+
+`v8u4` adds the standards-correct Telink router parent capability advertisement for MAC data-poll keepalive. It is a canary candidate only until a real IKEA sleepy child passes the hardware acceptance gate. It must not replace `0x12053006` in the published Zigbee2MQTT OTA index before that gate passes.
 
 ### TS0726 3-gang dimmer/switch
 
@@ -97,6 +106,7 @@ The PM version sequence is intentionally explicit:
 | `0x12053004` | V8 PM fix canary; successfully installed and accepted on `WorkroomSocketCabinet` |
 | `0x12053005` | sealed known-good recovery successor; intentionally reserved, not a normal release |
 | `0x12053006` | consolidated unified V8 release; runtime source unchanged from accepted `0x12053004` |
+| `0x12053007` | `v8u4` sleepy-child parent canary; advertises MAC data-poll keepalive support, pending physical IKEA acceptance |
 
 The accepted `0x12053004` canary demonstrated:
 
@@ -126,6 +136,8 @@ A release candidate must pass on one exact source SHA:
 7. OTA header, manufacturer, image type, version, size and manifest validation;
 8. byte-identity validation for reproducible output.
 
+For a router-parenting change such as `v8u4`, publication additionally requires a hardware canary with a real sleepy Zigbee end device such as IKEA RODRET or SOMRIG. The gate requires successful join/interview through the BSEED router, successful Poll Control/bind/configuration while awake, normal button actions, sleep/wake and idle survival, bounded rejoin behavior, and no regression to relay, metrology, OTA identity or canonical device configuration.
+
 Local builds are useful for diagnostics, but are not deployment candidates.
 
 ## BSEED Zigbee2MQTT OTA index
@@ -136,7 +148,7 @@ Use the dedicated BSEED index for these two families:
 https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/ota/index_bseed.json
 ```
 
-It deliberately contains only four exact lookup entries:
+It deliberately contains only four exact lookup entries for accepted releases:
 
 | Device state | Manufacturer name | OTA image type | Version exposed to updater |
 |---|---|---:|---:|
@@ -145,7 +157,7 @@ It deliberately contains only four exact lookup entries:
 | custom TS0726 | `iedhxgyi` | `45577` | `0x1102300a` |
 | stock TS0726 | `_TZ3002_iedhxgyi` | `54179` | `0xFFFFFFFF` |
 
-The repository's generic router index is also sanitized during publication: stale entries for these exact BSEED manufacturer names are removed and replaced with the same four current entries. Historical BSEED FORCE entries are removed rather than silently exposing an old firmware build.
+The `0x12053007` sleepy-child candidate is intentionally excluded from the published index until physical canary acceptance. The repository's generic router index is also sanitized during publication: stale entries for these exact BSEED manufacturer names are removed and replaced with the same four current accepted entries. Historical BSEED FORCE entries are removed rather than silently exposing an old firmware build.
 
 ## Stock Tuya -> custom conversion
 
