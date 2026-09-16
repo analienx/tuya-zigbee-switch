@@ -40,6 +40,8 @@ def test_bseed_pm_outlet_hides_switch_and_dimmer_controls():
             assert expose not in definition
         assert 'onOff({ endpointNames: ["relay"] })' in definition
         assert 'electricityMeter()' in definition
+        assert 'commandsOnOff({' not in definition
+        assert 'commandsLevelCtrl({' not in definition
         assert 'relay_physical_mode' in definition
         assert 'relay_indicator_mode' in definition
 
@@ -51,6 +53,8 @@ def test_non_pm_bseed_outlet_uses_same_socket_profile():
             assert expose not in definition
         assert 'onOff({ endpointNames: ["relay"] })' in definition
         assert 'electricityMeter()' not in definition
+        assert 'commandsOnOff({' not in definition
+        assert 'commandsLevelCtrl({' not in definition
 
 
 def test_custom_firmware_matchers_include_exact_bseed_identities():
@@ -80,3 +84,5 @@ def test_bseed_ts0726_dimmer_keeps_full_switch_controls():
         assert "switch_left_binded_mode" in definition
         assert "switch_left_long_press_duration" in definition
         assert "switch_left_level_move_rate" in definition
+        assert "commandsOnOff({" in definition
+        assert "commandsLevelCtrl({" in definition

@@ -8,6 +8,8 @@ const {
     binary,
     windowCovering,
     deviceAddCustomCluster,
+    commandsOnOff,
+    commandsLevelCtrl,
 } = require("zigbee-herdsman-converters/lib/modernExtend");
 const {assertString} = require("zigbee-herdsman-converters/lib/utils");
 const reporting = require("zigbee-herdsman-converters/lib/reporting");
@@ -464,6 +466,21 @@ const definitions = [
             {% for relayName in device.relayNames %}
             romasku.relayPhysicalMode("{{relayName}}_physical_mode", "{{relayName}}"),
             {% endfor %}
+            {% if device.expose_switch_controls and device.switchNames %}
+            // Preserve command-action compatibility for actual wall switches/dimmers.
+            // bind:false adds no configure-time binding traffic. Socket/outlet categories
+            // intentionally omit these action exposes.
+            commandsOnOff({
+                name: "action",
+                endpointNames: {{ device.switchNames | tojson }},
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: {{ device.switchNames | tojson }},
+                bind: false,
+            }),
+            {% endif %}
             {% for coverName in device.coverNames %}
             windowCovering({ 
                 controls: ["lift"],
