@@ -173,6 +173,10 @@
           "type": "integer",
           "description": "Firmware image type identifier"
         },
+        "power_monitoring": {
+          "type": "boolean",
+          "description": "Expose standard Zigbee electrical measurement and metering capabilities"
+        },
         "build": {
           "type": "string",
           "enum": ["yes", "no"],
