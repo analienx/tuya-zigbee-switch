@@ -110,6 +110,7 @@ if __name__ == "__main__":
                 "zb_models": [zb_model] + (device.get("old_zb_models") or []),
                 "model": device.get("override_z2m_device")
                 or device["stock_converter_model"],
+                "switch_level_move_rate": device.get("switch_level_move_rate", True),
                 "switchNames": switch_names,
                 "relayNames": relay_names,
                 "relayIndicatorNames": relay_names[:indicators_cnt],
