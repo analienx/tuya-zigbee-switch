@@ -3,15 +3,27 @@ const {
     enumLookup,
     deviceEndpoints,
     onOff,
+    electricityMeter,
     text,
     binary,
     windowCovering,
     deviceAddCustomCluster,
+    commandsOnOff,
+    commandsLevelCtrl,
 } = require("zigbee-herdsman-converters/lib/modernExtend");
 const {assertString} = require("zigbee-herdsman-converters/lib/utils");
 const reporting = require("zigbee-herdsman-converters/lib/reporting");
 const constants = require("zigbee-herdsman-converters/lib/constants");
 const Zcl = require('zigbee-herdsman').Zcl;
+
+// Current ZHC text() lacks a label argument while the expose itself supports
+// withLabel(). Keep the property stable and improve only presentation metadata.
+const withExposeLabel = (extend, label) => {
+    for (const expose of extend.exposes || []) {
+        if (typeof expose.withLabel === "function") expose.withLabel(label);
+    }
+    return extend;
+};
 
 /********************************************************************
   This file (`switch_custom.js`) is generated. 
@@ -32,7 +44,8 @@ const romasku = {
             lookup: { on_off: 0, off_on: 1, toggle_simple: 2, toggle_smart_sync: 3, toggle_smart_opposite: 4 },
             cluster: "genOnOffSwitchCfg",
             attribute: {ID: 0x0010, type: 0x30, required: true, write: true, min: 0, max: 4}, // Enum8
-            description: `Select how switch should work:
+            label: "Button command behavior",
+            description: `Controls which On/Off command the wall control produces:
             - on_off: When switch physically moved to position 1 it always generates ON command, and when moved to position 2 it generates OFF command
             - off_on: Same as on_off, but positions are swapped
             - toggle_simple: Any press of physical switch will TOGGLE the relay and send TOGGLE command to binds
@@ -47,7 +60,8 @@ const romasku = {
             lookup: { toggle: 0, momentary: 1, momentary_nc: 2 },
             cluster: "genOnOffSwitchCfg",
             attribute: { ID: 0xff00, type: 0x30 }, // Enum8
-            description: "Select the type of switch connected to the device",
+            label: "Button type",
+            description: "Electrical type of the wall control: toggle/rocker, momentary push button, or normally-closed momentary input.",
             entityCategory: "config",
         }),
     relayMode: (name, endpointName) =>
@@ -57,7 +71,8 @@ const romasku = {
             lookup: { detached: 0, press_start: 1, short_press: 3, long_press: 2},
             cluster: "genOnOffSwitchCfg",
             attribute: { ID: 0xff01, type: 0x30 }, // Enum8
-            description: "When to turn on/off internal relay",
+            label: "Local relay trigger",
+            description: "Controls when this physical button changes its assigned local Zigbee relay state. This is independent of Physical relay behavior: the Zigbee relay state can change even when the electrical output is forced Always on or Always off.",
             entityCategory: "config",
         }),
     relayIndex: (name, endpointName, relay_cnt) =>
@@ -69,7 +84,8 @@ const romasku = {
             ),
             cluster: "genOnOffSwitchCfg",
             attribute: { ID: 0xff02, type: 0x20 }, // uint8
-            description: "Which internal relay it should trigger",
+            label: "Assigned local relay",
+            description: "Selects which local relay endpoint this wall control changes.",
             entityCategory: "config",
         }),
     bindedMode: (name, endpointName) =>
@@ -79,7 +95,8 @@ const romasku = {
             lookup: { press_start: 1, short_press: 3, long_press: 2},
             cluster: "genOnOffSwitchCfg",
             attribute: { ID: 0xff05, type: 0x30 }, // Enum8
-            description: "When turn on/off binded device",
+            label: "Bound-device trigger",
+            description: "Controls when this button sends commands directly to Zigbee-bound devices or groups.",
             entityCategory: "config",
         }),
     longPressDuration: (name, endpointName) =>
@@ -88,7 +105,9 @@ const romasku = {
             endpointNames: [endpointName],
             cluster: "genOnOffSwitchCfg",
             attribute: { ID: 0xff03, type: 0x21 }, // uint16
-            description: "What duration is considerd to be long press",
+            label: "Long-press threshold",
+            description: "How long the button must be held before it is treated as a long press.",
+            unit: "ms",
             valueMin: 0,
             valueMax: 5000,
             entityCategory: "config",
@@ -99,7 +118,9 @@ const romasku = {
             endpointNames: [endpointName],
             cluster: "genOnOffSwitchCfg",
             attribute: { ID: 0xff04, type: 0x20 }, // uint8
-            description: "Level (dim) move rate in steps per ms",
+            label: "Hold dimming speed",
+            description: "Brightness-change rate sent in Zigbee Level Control Move commands while the button is held.",
+            unit: "level/s",
             valueMin: 1,
             valueMax: 255,
             entityCategory: "config",
@@ -112,7 +133,8 @@ const romasku = {
             lookup: { released: 0, press: 1, long_press: 2, position_on: 3, position_off: 4 },
             cluster: "genMultistateInput",
             attribute: "presentValue",
-            description: "Action of the switch: 'released' or 'press' or 'long_press'",
+            label: "Last button action",
+            description: "Most recently reported physical button action.",
             entityCategory: "diagnostic",
         }),
     relayIndicatorMode: (name, endpointName) =>
@@ -122,7 +144,8 @@ const romasku = {
             lookup: { same: 0, opposite: 1, manual: 2 },
             cluster: "genOnOff",
             attribute: { ID: 0xff01, type: 0x30 }, // Enum8
-            description: "Mode for the relay indicator LED",
+            label: "Indicator LED behavior",
+            description: "same: LED follows the relay's virtual On/Off state; opposite: LED shows the inverse state; manual: LED state is controlled separately with Indicator LED state.",
             entityCategory: "config",
         }),
     relayIndicator: (name, endpointName) =>
@@ -133,10 +156,40 @@ const romasku = {
             valueOff: ["OFF", 0],
             cluster: "genOnOff",
             attribute: {ID: 0xff02, type: 0x10},  // Boolean
-            description: "State of the relay indicator LED",
+            label: "Indicator LED state",
+            description: "Manual state of the panel indicator LED. Used when Indicator LED behavior is set to manual.",
             access: "ALL",
             entityCategory: "config",
         }),
+    relayPhysicalMode: (name, endpointName) => {
+        const result = enumLookup({
+            name,
+            endpointName,
+            // UI/MQTT vocabulary only. Firmware/NVM ABI remains 0/1/2 =
+            // ATTACHED / DETACHED_ON / DETACHED_OFF.
+            lookup: { follow_state: 0, always_on: 1, always_off: 2 },
+            cluster: "genOnOff",
+            attribute: {ID: 0xff03, type: 0x30}, // Enum8
+            label: "Physical relay behavior",
+            description: `Controls the electrical relay independently of the Zigbee On/Off state.
+Follow state: the physical relay follows the Zigbee On/Off state; selecting it immediately synchronizes the electrical output to the current Zigbee state.
+Always on: keeps the physical output energized. Recommended for smart bulbs or other loads that must remain powered; Zigbee state, button actions and bindings can continue independently.
+Always off: keeps the physical output de-energized while the Zigbee state can continue to change independently.
+Changing this setting can immediately switch mains power. The setting is stored and restored after restart.`,
+            entityCategory: "config",
+        });
+
+        // The generator already includes the logical relay name in `name`
+        // (e.g. relay_left_physical_mode). Current ZHC withEndpoint() appends
+        // the endpoint again to expose.property, which would otherwise create
+        // relay_left_physical_mode_relay_left. This feature is new and not yet
+        // deployed, so normalize only this new property before its MQTT ABI is
+        // frozen. Endpoint metadata remains intact for UI grouping/routing.
+        for (const expose of result.exposes || []) {
+            if (typeof expose.withProperty === "function") expose.withProperty(name);
+        }
+        return result;
+    },
     batteryPercentage: () => {
         const result = numeric({
             name: "battery",
@@ -168,7 +221,8 @@ const romasku = {
             valueOff: ["OFF", 0],
             cluster: "genBasic",
             attribute: {ID: 0xff01, type: 0x10},  // Boolean
-            description: "State of the network indicator LED",
+            label: "Network indicator",
+            description: "Controls the dedicated network-status indicator LED.",
             access: "ALL",
             entityCategory: "config",
         }),
@@ -178,19 +232,20 @@ const romasku = {
             endpointNames: [endpointName],
             cluster: "genBasic",
             attribute: { ID: 0xff02, type: 0x20 }, // uint8
-            description: "Number of consecutive presses to trigger factory reset (0 = disabled)",
+            label: "Factory-reset press count",
+            description: "Number of consecutive button presses required to trigger factory reset. Set to 0 to disable multi-press reset.",
             valueMin: 0,
             valueMax: 255,
             entityCategory: "config",
         }),
     deviceConfig: (name, endpointName) =>
-        text({
+        withExposeLabel(text({
             name,
             endpointName,
             access: "ALL",
             cluster: "genBasic",
             attribute:  { ID: 0xff00, type: 0x44 }, // long str
-            description: "Current configuration of the device",
+            description: "Advanced Romasku hardware pin mapping. This describes which MCU pins are connected to buttons, relays, indicators and other peripherals; it is NOT a normal behavior setting. An incorrect value can make buttons, relays or indicators stop working and may require recovery firmware. Do not edit unless you are porting or repairing a device.",
             zigbeeCommandOptions: {timeout: 30_000},
             validate: (value) => {
                 assertString(value);
@@ -244,7 +299,7 @@ const romasku = {
                 }
             },
             entityCategory: "config",
-        }),
+        }), "Advanced hardware configuration"),
     coverSwitchPressAction: (name, endpointName) =>
         enumLookup({
             name,
@@ -364,7 +419,7 @@ const definitions = [
         ],
         model: "TYWB 4ch-RF",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "MHCOZY TYWB 4ch-RF ZG-005(-RF) \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -403,6 +458,23 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            romasku.relayPhysicalMode("relay_0_physical_mode", "relay_0"),
+            romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
+            romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
+            romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -486,7 +558,7 @@ const definitions = [
         ],
         model: "TYWB 4ch-RF",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "MHCOZY TYWB 4ch-RF ZG-005(-RF) \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -525,6 +597,23 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            romasku.relayPhysicalMode("relay_0_physical_mode", "relay_0"),
+            romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
+            romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
+            romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -608,7 +697,7 @@ const definitions = [
         ],
         model: "TYWB 4ch-RF",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "MHCOZY TYWB 4ch-RF ZG-005(-RF) \ud83c\udd72 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -647,6 +736,23 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            romasku.relayPhysicalMode("relay_0_physical_mode", "relay_0"),
+            romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
+            romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
+            romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -730,7 +836,7 @@ const definitions = [
         ],
         model: "TYWB 4ch-RF",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "MHCOZY TYWB 4ch-RF ZG-005(-RF) \ud83c\udd73 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -769,6 +875,23 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            romasku.relayPhysicalMode("relay_0_physical_mode", "relay_0"),
+            romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
+            romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
+            romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -852,7 +975,7 @@ const definitions = [
         ],
         model: "ZG-001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Scimagic ZG-001 1ch-RF \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -867,6 +990,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -894,12 +1031,12 @@ const definitions = [
         ota: true,
     },
     {
-        zigbeeModel: [
-            "TS0002-SC",
+        fingerprint: [
+            { manufacturerName: "nuenzetq", modelID: "TS0002-SC" },
         ],
         model: "ZG-2002-RF",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Scimagic ZG-2002-RF \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -922,6 +1059,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -966,12 +1118,12 @@ const definitions = [
         ota: true,
     },
     {
-        zigbeeModel: [
-            "TS0002-SC",
+        fingerprint: [
+            { manufacturerName: "nuenzetq1", modelID: "TS0002-SC" },
         ],
         model: "ZG-2002-RF",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Scimagic ZG-2002-RF \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -994,6 +1146,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1043,7 +1210,7 @@ const definitions = [
         ],
         model: "Zigbee_SoC_Board_V2_(ZTU)",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "ZTU dev board 2 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -1060,6 +1227,20 @@ const definitions = [
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1100,37 +1281,19 @@ const definitions = [
         ],
         model: "TS011F_din_smart_relay",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya DIN circuit breaker PM \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
             romasku.multiPressResetCount("multi_press_reset_count", "switch"),
             romasku.networkIndicator("network_led", "switch"),
             onOff({ endpointNames: ["relay"] }),
-            romasku.pressAction("switch_press_action", "switch"),
-            romasku.switchMode("switch_mode", "switch"),
-            romasku.switchAction("switch_action_mode", "switch"),
-            romasku.relayMode("switch_relay_mode", "switch"),
-            romasku.relayIndex("switch_relay_index", "switch", 1),
-            romasku.bindedMode("switch_binded_mode", "switch"),
-            romasku.longPressDuration("switch_long_press_duration", "switch"),
-            romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
-            const endpoint1 = device.getEndpoint(1);
-            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint1.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
             const endpoint2 = device.getEndpoint(2);
             await reporting.onOff(endpoint2, {
                 min: 0,
@@ -1158,7 +1321,7 @@ const definitions = [
         ],
         model: "WHD02",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Aubess WHD02 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -1173,6 +1336,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1205,7 +1382,7 @@ const definitions = [
         ],
         model: "TMZ02",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Aubess TMZ02 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -1228,6 +1405,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1277,7 +1469,7 @@ const definitions = [
         ],
         model: "TS0003_switch_module_2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Aubess 3-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -1308,6 +1500,22 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1374,7 +1582,7 @@ const definitions = [
         ],
         model: "TS0004_switch_module",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Aubess 4-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -1413,6 +1621,23 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            romasku.relayPhysicalMode("relay_0_physical_mode", "relay_0"),
+            romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
+            romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
+            romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1498,7 +1723,7 @@ const definitions = [
         ],
         model: "ZWSM16-1-Zigbee",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO ZWSM16-1 \ud83c\udd70\ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -1513,6 +1738,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1547,7 +1786,7 @@ const definitions = [
         ],
         model: "ZWSM16-2-Zigbee",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO ZWSM16-2 \ud83c\udd70\ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -1570,6 +1809,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1621,7 +1875,7 @@ const definitions = [
         ],
         model: "ZWSM16-3-Zigbee",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO ZWSM16-3 \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -1652,6 +1906,22 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1720,7 +1990,7 @@ const definitions = [
         ],
         model: "ZWSM16-4-Zigbee",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO ZWSM16-4 \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -1759,6 +2029,23 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            romasku.relayPhysicalMode("relay_0_physical_mode", "relay_0"),
+            romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
+            romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
+            romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1842,7 +2129,7 @@ const definitions = [
         ],
         model: "ZWSM16-3-Zigbee",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO ZWSM16-3 \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -1873,6 +2160,22 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -1939,7 +2242,7 @@ const definitions = [
         ],
         model: "ZWSM16-4-Zigbee",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO ZWSM16-4 \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -1978,6 +2281,23 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            romasku.relayPhysicalMode("relay_0_physical_mode", "relay_0"),
+            romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
+            romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
+            romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2061,7 +2381,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO 1-gang dry-contact \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -2076,6 +2396,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2109,7 +2443,7 @@ const definitions = [
         ],
         model: "LZWSM16-1",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO LZWSM16-1 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -2124,6 +2458,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2157,7 +2505,7 @@ const definitions = [
         ],
         model: "LZWSM16-2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO LZWSM16-2 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -2180,6 +2528,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2229,7 +2592,7 @@ const definitions = [
         ],
         model: "LZWSM16-2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO LZWSM16-2 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -2252,6 +2615,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2301,7 +2679,7 @@ const definitions = [
         ],
         model: "LZWSM16-3",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO LZWSM16-3 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -2332,6 +2710,22 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2398,7 +2792,7 @@ const definitions = [
         ],
         model: "EKAC-T3092Z",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "EKAZA EKAC-T3092Z \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -2421,6 +2815,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2470,7 +2879,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "EKF ssh-2g-zb-nn \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -2493,6 +2902,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2542,7 +2966,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "GoSmart IP-2101SZ EMOS H5101 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -2557,6 +2981,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2589,7 +3027,7 @@ const definitions = [
         ],
         model: "TS0002",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "GoSmart IP-2102SZ EMOS H5102 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -2612,6 +3050,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2661,7 +3114,7 @@ const definitions = [
         ],
         model: "L13Z",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Farylink FS-02HZ (Nous L13Z clone) \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -2684,6 +3137,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2734,7 +3202,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Farylink FS-02Z-L \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -2749,6 +3217,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2782,7 +3264,7 @@ const definitions = [
         ],
         model: "TS0003_switch_module_2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Girier \ud83c\udd70 3-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -2813,6 +3295,22 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2879,7 +3377,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Girier \ud83c\udd71 1-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -2894,6 +3392,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2926,7 +3438,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Girier \ud83c\udd71 2-gang L-only \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -2949,6 +3461,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -2998,7 +3525,7 @@ const definitions = [
         ],
         model: "TS0001_switch_module",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Girier 1-gang dry-contact \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -3013,6 +3540,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3045,7 +3586,7 @@ const definitions = [
         ],
         model: "JR-ZDS01",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Girier JR-ZDS01 \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -3060,6 +3601,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3087,13 +3642,15 @@ const definitions = [
         ota: true,
     },
     {
+        fingerprint: [
+            { manufacturerName: "zmy4lslw", modelID: "TS0002-custom" },
+        ],
         zigbeeModel: [
             "TS0002-GIR",
-            "TS0002-custom",
         ],
         model: "TS0002_basic",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Girier 2-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -3116,6 +3673,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3165,7 +3737,7 @@ const definitions = [
         ],
         model: "TS130F_GIRIER",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Girier 1-gang curtains \u2014 Romasku custom firmware",
         extend: [
             deviceAddCustomCluster("manuSpecificTuyaCoverSwitchConfig", {
                 ID: 0xFC01,
@@ -3242,7 +3814,7 @@ const definitions = [
         ],
         model: "TS130F_GIRIER_DUAL",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Girier 2-gang curtains \u2014 Romasku custom firmware",
         extend: [
             deviceAddCustomCluster("manuSpecificTuyaCoverSwitchConfig", {
                 ID: 0xFC01,
@@ -3354,7 +3926,7 @@ const definitions = [
         ],
         model: "JR-ZDS01",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Girier JR-ZDS01 \ud83c\udd72 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -3369,6 +3941,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3401,7 +3987,7 @@ const definitions = [
         ],
         model: "ZG-301Z",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "HOBEIAN ZG-301Z mini \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -3416,6 +4002,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3448,7 +4048,7 @@ const definitions = [
         ],
         model: "WHD02",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "HOBEIAN ZG-301Z V1.3 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -3463,6 +4063,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3495,7 +4109,7 @@ const definitions = [
         ],
         model: "ZG-301Z",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "HOBEIAN ZG-301Z V2.0 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -3510,6 +4124,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3542,7 +4170,7 @@ const definitions = [
         ],
         model: "TS0011",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "HOMMYN RLZBNN01 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -3557,6 +4185,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3585,11 +4227,185 @@ const definitions = [
     },
     {
         zigbeeModel: [
+            "Hommyn-RLZBN02",
+        ],
+        model: "TS0002_limited",
+        vendor: "Tuya-custom",
+        description: "Hommyn RLZBN02 \u2014 Romasku custom firmware",
+        extend: [
+            deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
+            romasku.deviceConfig("device_config", "switch_left"),
+            romasku.multiPressResetCount("multi_press_reset_count", "switch_left"),
+            romasku.networkIndicator("network_led", "switch_left"),
+            onOff({ endpointNames: ["relay_left", "relay_right"] }),
+            romasku.pressAction("switch_left_press_action", "switch_left"),
+            romasku.switchMode("switch_left_mode", "switch_left"),
+            romasku.switchAction("switch_left_action_mode", "switch_left"),
+            romasku.relayMode("switch_left_relay_mode", "switch_left"),
+            romasku.relayIndex("switch_left_relay_index", "switch_left", 2),
+            romasku.bindedMode("switch_left_binded_mode", "switch_left"),
+            romasku.longPressDuration("switch_left_long_press_duration", "switch_left"),
+            romasku.levelMoveRate("switch_left_level_move_rate", "switch_left"),
+            romasku.pressAction("switch_right_press_action", "switch_right"),
+            romasku.switchMode("switch_right_mode", "switch_right"),
+            romasku.switchAction("switch_right_action_mode", "switch_right"),
+            romasku.relayMode("switch_right_relay_mode", "switch_right"),
+            romasku.relayIndex("switch_right_relay_index", "switch_right", 2),
+            romasku.bindedMode("switch_right_binded_mode", "switch_right"),
+            romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
+            romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+        ],
+        meta: { multiEndpoint: true },
+        configure: async (device, coordinatorEndpoint, logger) => {
+            const endpoint1 = device.getEndpoint(1);
+            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
+            // switch action:
+            await endpoint1.configureReporting("genMultistateInput", [
+                {
+                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            const endpoint2 = device.getEndpoint(2);
+            await reporting.bind(endpoint2, coordinatorEndpoint, ["genMultistateInput"]);
+            // switch action:
+            await endpoint2.configureReporting("genMultistateInput", [
+                {
+                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            const endpoint3 = device.getEndpoint(3);
+            await reporting.onOff(endpoint3, {
+                min: 0,
+                max: constants.repInterval.MAX,
+                change: 1,
+            });
+            const endpoint4 = device.getEndpoint(4);
+            await reporting.onOff(endpoint4, {
+                min: 0,
+                max: constants.repInterval.MAX,
+                change: 1,
+            });
+
+
+
+        },
+        ota: true,
+    },
+    {
+        zigbeeModel: [
+            "Hommyn-2",
+        ],
+        model: "TS0012",
+        vendor: "Tuya-custom",
+        description: "Hommyn 2-gang L-only relay module \u2014 Romasku custom firmware",
+        extend: [
+            deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
+            romasku.deviceConfig("device_config", "switch_left"),
+            romasku.multiPressResetCount("multi_press_reset_count", "switch_left"),
+            romasku.networkIndicator("network_led", "switch_left"),
+            onOff({ endpointNames: ["relay_left", "relay_right"] }),
+            romasku.pressAction("switch_left_press_action", "switch_left"),
+            romasku.switchMode("switch_left_mode", "switch_left"),
+            romasku.switchAction("switch_left_action_mode", "switch_left"),
+            romasku.relayMode("switch_left_relay_mode", "switch_left"),
+            romasku.relayIndex("switch_left_relay_index", "switch_left", 2),
+            romasku.bindedMode("switch_left_binded_mode", "switch_left"),
+            romasku.longPressDuration("switch_left_long_press_duration", "switch_left"),
+            romasku.levelMoveRate("switch_left_level_move_rate", "switch_left"),
+            romasku.pressAction("switch_right_press_action", "switch_right"),
+            romasku.switchMode("switch_right_mode", "switch_right"),
+            romasku.switchAction("switch_right_action_mode", "switch_right"),
+            romasku.relayMode("switch_right_relay_mode", "switch_right"),
+            romasku.relayIndex("switch_right_relay_index", "switch_right", 2),
+            romasku.bindedMode("switch_right_binded_mode", "switch_right"),
+            romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
+            romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+        ],
+        meta: { multiEndpoint: true },
+        configure: async (device, coordinatorEndpoint, logger) => {
+            const endpoint1 = device.getEndpoint(1);
+            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
+            // switch action:
+            await endpoint1.configureReporting("genMultistateInput", [
+                {
+                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            const endpoint2 = device.getEndpoint(2);
+            await reporting.bind(endpoint2, coordinatorEndpoint, ["genMultistateInput"]);
+            // switch action:
+            await endpoint2.configureReporting("genMultistateInput", [
+                {
+                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            const endpoint3 = device.getEndpoint(3);
+            await reporting.onOff(endpoint3, {
+                min: 0,
+                max: constants.repInterval.MAX,
+                change: 1,
+            });
+            const endpoint4 = device.getEndpoint(4);
+            await reporting.onOff(endpoint4, {
+                min: 0,
+                max: constants.repInterval.MAX,
+                change: 1,
+            });
+
+
+
+        },
+        ota: true,
+    },
+    {
+        zigbeeModel: [
             "TS0001-IHS",
         ],
         model: "_TZ3000_pgq7ormg",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno 1-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -3604,6 +4420,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3637,7 +4467,7 @@ const definitions = [
         ],
         model: "_TZ3000_mhhxxjrs",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno 3-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -3668,6 +4498,22 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3734,7 +4580,7 @@ const definitions = [
         ],
         model: "_TZ3000_knoj8lpk",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno 4-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -3773,6 +4619,23 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            romasku.relayPhysicalMode("relay_0_physical_mode", "relay_0"),
+            romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
+            romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
+            romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3856,7 +4719,7 @@ const definitions = [
         ],
         model: "WHD02",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno 1-gang \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -3871,6 +4734,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3903,7 +4780,7 @@ const definitions = [
         ],
         model: "WHD02",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno 1-gang \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -3918,6 +4795,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3950,7 +4841,7 @@ const definitions = [
         ],
         model: "TS0001_power",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "LVGESS 1-gang PM \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -3965,6 +4856,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -3997,7 +4902,7 @@ const definitions = [
         ],
         model: "ZM-104B-M",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes ZM-104B-M \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -4020,6 +4925,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4069,7 +4989,7 @@ const definitions = [
         ],
         model: "MS-104CZ",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes MS-104CZ \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -4099,6 +5019,22 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4165,7 +5101,7 @@ const definitions = [
         ],
         model: "TS0011",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes ZM-104-L-MS Moes MS-104ZL \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -4180,6 +5116,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4212,7 +5162,7 @@ const definitions = [
         ],
         model: "ZM4LT2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes ZM4LT2 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -4235,6 +5185,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4284,7 +5249,7 @@ const definitions = [
         ],
         model: "ZM4LT3",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes ZM4LT3 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -4315,6 +5280,22 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4381,7 +5362,7 @@ const definitions = [
         ],
         model: "ZM4LT4",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes ZM4LT4 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -4420,6 +5401,23 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            romasku.relayPhysicalMode("relay_0_physical_mode", "relay_0"),
+            romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
+            romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
+            romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4503,7 +5501,7 @@ const definitions = [
         ],
         model: "B1Z",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Nous B1Z \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -4518,6 +5516,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4550,7 +5562,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "NovaDigital MS105-ZB \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -4565,6 +5577,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4597,7 +5623,7 @@ const definitions = [
         ],
         model: "ZBMINIL2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "SONOFF ZBMINIL2 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -4612,6 +5638,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4644,7 +5684,7 @@ const definitions = [
         ],
         model: "WHD02",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "T-LED 1-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -4659,6 +5699,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4687,11 +5741,211 @@ const definitions = [
     },
     {
         zigbeeModel: [
+            "TS0002-N1J44RTH",
+        ],
+        model: "TS0002",
+        vendor: "Tuya-custom",
+        description: "Tuya 2-gang \u2014 Romasku custom firmware",
+        extend: [
+            deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
+            romasku.deviceConfig("device_config", "switch_left"),
+            romasku.multiPressResetCount("multi_press_reset_count", "switch_left"),
+            romasku.networkIndicator("network_led", "switch_left"),
+            onOff({ endpointNames: ["relay_left", "relay_right"] }),
+            romasku.pressAction("switch_left_press_action", "switch_left"),
+            romasku.switchMode("switch_left_mode", "switch_left"),
+            romasku.switchAction("switch_left_action_mode", "switch_left"),
+            romasku.relayMode("switch_left_relay_mode", "switch_left"),
+            romasku.relayIndex("switch_left_relay_index", "switch_left", 2),
+            romasku.bindedMode("switch_left_binded_mode", "switch_left"),
+            romasku.longPressDuration("switch_left_long_press_duration", "switch_left"),
+            romasku.levelMoveRate("switch_left_level_move_rate", "switch_left"),
+            romasku.pressAction("switch_right_press_action", "switch_right"),
+            romasku.switchMode("switch_right_mode", "switch_right"),
+            romasku.switchAction("switch_right_action_mode", "switch_right"),
+            romasku.relayMode("switch_right_relay_mode", "switch_right"),
+            romasku.relayIndex("switch_right_relay_index", "switch_right", 2),
+            romasku.bindedMode("switch_right_binded_mode", "switch_right"),
+            romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
+            romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+        ],
+        meta: { multiEndpoint: true },
+        configure: async (device, coordinatorEndpoint, logger) => {
+            const endpoint1 = device.getEndpoint(1);
+            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
+            // switch action:
+            await endpoint1.configureReporting("genMultistateInput", [
+                {
+                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            const endpoint2 = device.getEndpoint(2);
+            await reporting.bind(endpoint2, coordinatorEndpoint, ["genMultistateInput"]);
+            // switch action:
+            await endpoint2.configureReporting("genMultistateInput", [
+                {
+                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            const endpoint3 = device.getEndpoint(3);
+            await reporting.onOff(endpoint3, {
+                min: 0,
+                max: constants.repInterval.MAX,
+                change: 1,
+            });
+            const endpoint4 = device.getEndpoint(4);
+            await reporting.onOff(endpoint4, {
+                min: 0,
+                max: constants.repInterval.MAX,
+                change: 1,
+            });
+
+
+
+        },
+        ota: true,
+    },
+    {
+        zigbeeModel: [
+            "TS0003-UWHJGNGJ",
+        ],
+        model: "TS0003",
+        vendor: "Tuya-custom",
+        description: "Tuya 3-gang \u2014 Romasku custom firmware",
+        extend: [
+            deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
+            romasku.deviceConfig("device_config", "switch_left"),
+            romasku.multiPressResetCount("multi_press_reset_count", "switch_left"),
+            romasku.networkIndicator("network_led", "switch_left"),
+            onOff({ endpointNames: ["relay_left", "relay_middle", "relay_right"] }),
+            romasku.pressAction("switch_left_press_action", "switch_left"),
+            romasku.switchMode("switch_left_mode", "switch_left"),
+            romasku.switchAction("switch_left_action_mode", "switch_left"),
+            romasku.relayMode("switch_left_relay_mode", "switch_left"),
+            romasku.relayIndex("switch_left_relay_index", "switch_left", 3),
+            romasku.bindedMode("switch_left_binded_mode", "switch_left"),
+            romasku.longPressDuration("switch_left_long_press_duration", "switch_left"),
+            romasku.levelMoveRate("switch_left_level_move_rate", "switch_left"),
+            romasku.pressAction("switch_middle_press_action", "switch_middle"),
+            romasku.switchMode("switch_middle_mode", "switch_middle"),
+            romasku.switchAction("switch_middle_action_mode", "switch_middle"),
+            romasku.relayMode("switch_middle_relay_mode", "switch_middle"),
+            romasku.relayIndex("switch_middle_relay_index", "switch_middle", 3),
+            romasku.bindedMode("switch_middle_binded_mode", "switch_middle"),
+            romasku.longPressDuration("switch_middle_long_press_duration", "switch_middle"),
+            romasku.levelMoveRate("switch_middle_level_move_rate", "switch_middle"),
+            romasku.pressAction("switch_right_press_action", "switch_right"),
+            romasku.switchMode("switch_right_mode", "switch_right"),
+            romasku.switchAction("switch_right_action_mode", "switch_right"),
+            romasku.relayMode("switch_right_relay_mode", "switch_right"),
+            romasku.relayIndex("switch_right_relay_index", "switch_right", 3),
+            romasku.bindedMode("switch_right_binded_mode", "switch_right"),
+            romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
+            romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+        ],
+        meta: { multiEndpoint: true },
+        configure: async (device, coordinatorEndpoint, logger) => {
+            const endpoint1 = device.getEndpoint(1);
+            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
+            // switch action:
+            await endpoint1.configureReporting("genMultistateInput", [
+                {
+                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            const endpoint2 = device.getEndpoint(2);
+            await reporting.bind(endpoint2, coordinatorEndpoint, ["genMultistateInput"]);
+            // switch action:
+            await endpoint2.configureReporting("genMultistateInput", [
+                {
+                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            const endpoint3 = device.getEndpoint(3);
+            await reporting.bind(endpoint3, coordinatorEndpoint, ["genMultistateInput"]);
+            // switch action:
+            await endpoint3.configureReporting("genMultistateInput", [
+                {
+                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            const endpoint4 = device.getEndpoint(4);
+            await reporting.onOff(endpoint4, {
+                min: 0,
+                max: constants.repInterval.MAX,
+                change: 1,
+            });
+            const endpoint5 = device.getEndpoint(5);
+            await reporting.onOff(endpoint5, {
+                min: 0,
+                max: constants.repInterval.MAX,
+                change: 1,
+            });
+            const endpoint6 = device.getEndpoint(6);
+            await reporting.onOff(endpoint6, {
+                min: 0,
+                max: constants.repInterval.MAX,
+                change: 1,
+            });
+
+
+
+        },
+        ota: true,
+    },
+    {
+        zigbeeModel: [
             "TS0001-C",
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya common 1-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -4706,6 +5960,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4738,7 +6006,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya common 1-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -4753,6 +6021,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4786,7 +6068,7 @@ const definitions = [
         ],
         model: "TS0002_basic_2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya common 2-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -4809,6 +6091,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4858,7 +6155,7 @@ const definitions = [
         ],
         model: "SB04-Zigbee",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya common 4-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -4897,6 +6194,23 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            romasku.relayPhysicalMode("relay_0_physical_mode", "relay_0"),
+            romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
+            romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
+            romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -4980,7 +6294,7 @@ const definitions = [
         ],
         model: "SB03-Zigbee",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya common 3-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -5011,6 +6325,22 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5077,7 +6407,7 @@ const definitions = [
         ],
         model: "WHD02",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya default 1-gang \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -5092,100 +6422,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
-        ],
-        meta: { multiEndpoint: true },
-        configure: async (device, coordinatorEndpoint, logger) => {
-            const endpoint1 = device.getEndpoint(1);
-            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint1.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
-            const endpoint2 = device.getEndpoint(2);
-            await reporting.onOff(endpoint2, {
-                min: 0,
-                max: constants.repInterval.MAX,
-                change: 1,
-            });
-
-
-
-        },
-        ota: true,
-    },
-    {
-        zigbeeModel: [
-            "WHD02-custom",
-        ],
-        model: "WHD02",
-        vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
-        extend: [
-            deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
-            romasku.deviceConfig("device_config", "switch"),
-            romasku.multiPressResetCount("multi_press_reset_count", "switch"),
-            romasku.networkIndicator("network_led", "switch"),
-            onOff({ endpointNames: ["relay"] }),
-            romasku.pressAction("switch_press_action", "switch"),
-            romasku.switchMode("switch_mode", "switch"),
-            romasku.switchAction("switch_action_mode", "switch"),
-            romasku.relayMode("switch_relay_mode", "switch"),
-            romasku.relayIndex("switch_relay_index", "switch", 1),
-            romasku.bindedMode("switch_binded_mode", "switch"),
-            romasku.longPressDuration("switch_long_press_duration", "switch"),
-            romasku.levelMoveRate("switch_level_move_rate", "switch"),
-        ],
-        meta: { multiEndpoint: true },
-        configure: async (device, coordinatorEndpoint, logger) => {
-            const endpoint1 = device.getEndpoint(1);
-            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint1.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
-            const endpoint2 = device.getEndpoint(2);
-            await reporting.onOff(endpoint2, {
-                min: 0,
-                max: constants.repInterval.MAX,
-                change: 1,
-            });
-
-
-
-        },
-        ota: true,
-    },
-    {
-        zigbeeModel: [
-            "WHD02-custom",
-        ],
-        model: "WHD02",
-        vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
-        extend: [
-            deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
-            romasku.deviceConfig("device_config", "switch"),
-            romasku.multiPressResetCount("multi_press_reset_count", "switch"),
-            romasku.networkIndicator("network_led", "switch"),
-            onOff({ endpointNames: ["relay"] }),
-            romasku.pressAction("switch_press_action", "switch"),
-            romasku.switchMode("switch_mode", "switch"),
-            romasku.switchAction("switch_action_mode", "switch"),
-            romasku.relayMode("switch_relay_mode", "switch"),
-            romasku.relayIndex("switch_relay_index", "switch", 1),
-            romasku.bindedMode("switch_binded_mode", "switch"),
-            romasku.longPressDuration("switch_long_press_duration", "switch"),
-            romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5218,7 +6468,7 @@ const definitions = [
         ],
         model: "WHD02",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya default 1-gang \ud83c\udd72 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -5233,6 +6483,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5265,7 +6529,7 @@ const definitions = [
         ],
         model: "TS0011_switch_module",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/Girier 1-gang L-only \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -5280,6 +6544,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5312,7 +6590,7 @@ const definitions = [
         ],
         model: "TS0011_switch_module",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/Girier 1-gang L-only \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -5327,6 +6605,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5361,7 +6653,7 @@ const definitions = [
         ],
         model: "TS0012_switch_module",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/Girier 2-gang L-only \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -5384,6 +6676,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5434,7 +6741,7 @@ const definitions = [
         ],
         model: "ZB08",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/Girier 3-gang L-only \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -5465,6 +6772,22 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5531,7 +6854,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya QS-Zigbee-S05-LN \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -5546,6 +6869,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5578,7 +6915,7 @@ const definitions = [
         ],
         model: "TS0011_switch_module",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya QS-Zigbee-S05-L Leomoca 1-gang L-only \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -5593,6 +6930,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5625,7 +6976,7 @@ const definitions = [
         ],
         model: "TS0002_limited",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya QS-Zigbee-S04-2C \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -5648,6 +6999,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5697,7 +7063,7 @@ const definitions = [
         ],
         model: "TS0003",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "QS-Zigbee-S10-3C \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -5728,6 +7094,22 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5794,7 +7176,7 @@ const definitions = [
         ],
         model: "QS-Zigbee-SEC01-U",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "NOVATO ZRM01 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -5809,6 +7191,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5841,7 +7237,7 @@ const definitions = [
         ],
         model: "QS-Zigbee-SEC02-U",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "NOVATO ZRM02 Tuya QS-Zigbee-S10-2C \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -5864,6 +7260,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5913,7 +7324,7 @@ const definitions = [
         ],
         model: "TS0011",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "NOVATO ZNR01 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -5928,6 +7339,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -5960,7 +7385,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya QS-Zigbee-S04-2C-ML-C \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -5983,6 +7408,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6032,7 +7472,7 @@ const definitions = [
         ],
         model: "TS130F",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya QS-Zigbee-S10-C04 curtains \u2014 Romasku custom firmware",
         extend: [
             deviceAddCustomCluster("manuSpecificTuyaCoverSwitchConfig", {
                 ID: 0xFC01,
@@ -6109,7 +7549,7 @@ const definitions = [
         ],
         model: "TS0003",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/OXT 3-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -6140,6 +7580,22 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6206,7 +7662,7 @@ const definitions = [
         ],
         model: "TS0001_switch_module",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/OXT 1-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -6221,6 +7677,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6253,7 +7723,7 @@ const definitions = [
         ],
         model: "TS0002_basic",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/OXT 2-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -6276,6 +7746,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6320,12 +7805,12 @@ const definitions = [
         ota: true,
     },
     {
-        zigbeeModel: [
-            "TS0002-custom",
+        fingerprint: [
+            { manufacturerName: "01gpyda5", modelID: "TS0002-custom" },
         ],
         model: "TS0002_basic",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 2-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -6348,6 +7833,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6397,7 +7897,7 @@ const definitions = [
         ],
         model: "WHD02",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 1-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -6412,6 +7912,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6444,7 +7958,7 @@ const definitions = [
         ],
         model: "WHD02",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya ZS2S 1-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -6459,6 +7973,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6491,7 +8019,7 @@ const definitions = [
         ],
         model: "TS0001_switch_module",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya ZTU 1-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -6506,6 +8034,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6538,7 +8080,7 @@ const definitions = [
         ],
         model: "TS0004_switch_module",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 4-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -6577,6 +8119,23 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            romasku.relayPhysicalMode("relay_0_physical_mode", "relay_0"),
+            romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
+            romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
+            romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6660,7 +8219,7 @@ const definitions = [
         ],
         model: "L13Z",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "UNSH FS-02HW (Nous L13Z clone) \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -6683,6 +8242,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6732,7 +8306,7 @@ const definitions = [
         ],
         model: "TS0002",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Zbeacon 2-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -6755,6 +8329,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -6805,35 +8394,17 @@ const definitions = [
         ],
         model: "TS011F_plug_1_2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED/Boruidapls PM Outlet \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
             romasku.multiPressResetCount("multi_press_reset_count", "switch"),
             romasku.networkIndicator("network_led", "switch"),
             onOff({ endpointNames: ["relay"] }),
-            romasku.pressAction("switch_press_action", "switch"),
-            romasku.switchMode("switch_mode", "switch"),
-            romasku.switchAction("switch_action_mode", "switch"),
-            romasku.relayMode("switch_relay_mode", "switch"),
-            romasku.relayIndex("switch_relay_index", "switch", 1),
-            romasku.bindedMode("switch_binded_mode", "switch"),
-            romasku.longPressDuration("switch_long_press_duration", "switch"),
-            romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
-            const endpoint1 = device.getEndpoint(1);
-            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint1.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
             const endpoint2 = device.getEndpoint(2);
             await reporting.onOff(endpoint2, {
                 min: 0,
@@ -6852,36 +8423,20 @@ const definitions = [
         ],
         model: "TS011F_plug_1_2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED PM outlet \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
             romasku.multiPressResetCount("multi_press_reset_count", "switch"),
             romasku.networkIndicator("network_led", "switch"),
             onOff({ endpointNames: ["relay"] }),
-            romasku.pressAction("switch_press_action", "switch"),
-            romasku.switchMode("switch_mode", "switch"),
-            romasku.switchAction("switch_action_mode", "switch"),
-            romasku.relayMode("switch_relay_mode", "switch"),
-            romasku.relayIndex("switch_relay_index", "switch", 1),
-            romasku.bindedMode("switch_binded_mode", "switch"),
-            romasku.longPressDuration("switch_long_press_duration", "switch"),
+            electricityMeter(),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
-            const endpoint1 = device.getEndpoint(1);
-            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint1.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
             const endpoint2 = device.getEndpoint(2);
             await reporting.onOff(endpoint2, {
                 min: 0,
@@ -6908,37 +8463,19 @@ const definitions = [
         ],
         model: "TS011F_plug_1_2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED PM outlet \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
             romasku.multiPressResetCount("multi_press_reset_count", "switch"),
             romasku.networkIndicator("network_led", "switch"),
             onOff({ endpointNames: ["relay"] }),
-            romasku.pressAction("switch_press_action", "switch"),
-            romasku.switchMode("switch_mode", "switch"),
-            romasku.switchAction("switch_action_mode", "switch"),
-            romasku.relayMode("switch_relay_mode", "switch"),
-            romasku.relayIndex("switch_relay_index", "switch", 1),
-            romasku.bindedMode("switch_binded_mode", "switch"),
-            romasku.longPressDuration("switch_long_press_duration", "switch"),
-            romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
-            const endpoint1 = device.getEndpoint(1);
-            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint1.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
             const endpoint2 = device.getEndpoint(2);
             await reporting.onOff(endpoint2, {
                 min: 0,
@@ -6965,37 +8502,19 @@ const definitions = [
         ],
         model: "TS011F_plug_1_2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED PM outlet \ud83c\udd72 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
             romasku.multiPressResetCount("multi_press_reset_count", "switch"),
             romasku.networkIndicator("network_led", "switch"),
             onOff({ endpointNames: ["relay"] }),
-            romasku.pressAction("switch_press_action", "switch"),
-            romasku.switchMode("switch_mode", "switch"),
-            romasku.switchAction("switch_action_mode", "switch"),
-            romasku.relayMode("switch_relay_mode", "switch"),
-            romasku.relayIndex("switch_relay_index", "switch", 1),
-            romasku.bindedMode("switch_binded_mode", "switch"),
-            romasku.longPressDuration("switch_long_press_duration", "switch"),
-            romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
-            const endpoint1 = device.getEndpoint(1);
-            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint1.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
             const endpoint2 = device.getEndpoint(2);
             await reporting.onOff(endpoint2, {
                 min: 0,
@@ -7022,37 +8541,19 @@ const definitions = [
         ],
         model: "_TZ3000_o1jzcxou",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED outlet \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
             romasku.multiPressResetCount("multi_press_reset_count", "switch"),
             romasku.networkIndicator("network_led", "switch"),
             onOff({ endpointNames: ["relay"] }),
-            romasku.pressAction("switch_press_action", "switch"),
-            romasku.switchMode("switch_mode", "switch"),
-            romasku.switchAction("switch_action_mode", "switch"),
-            romasku.relayMode("switch_relay_mode", "switch"),
-            romasku.relayIndex("switch_relay_index", "switch", 1),
-            romasku.bindedMode("switch_binded_mode", "switch"),
-            romasku.longPressDuration("switch_long_press_duration", "switch"),
-            romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
-            const endpoint1 = device.getEndpoint(1);
-            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint1.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
             const endpoint2 = device.getEndpoint(2);
             await reporting.onOff(endpoint2, {
                 min: 0,
@@ -7079,58 +8580,22 @@ const definitions = [
         ],
         model: "MG-GPO01",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "MakeGood MG-GPO01 double socket \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
             romasku.multiPressResetCount("multi_press_reset_count", "switch_left"),
             romasku.networkIndicator("network_led", "switch_left"),
             onOff({ endpointNames: ["relay_left", "relay_right"] }),
-            romasku.pressAction("switch_left_press_action", "switch_left"),
-            romasku.switchMode("switch_left_mode", "switch_left"),
-            romasku.switchAction("switch_left_action_mode", "switch_left"),
-            romasku.relayMode("switch_left_relay_mode", "switch_left"),
-            romasku.relayIndex("switch_left_relay_index", "switch_left", 2),
-            romasku.bindedMode("switch_left_binded_mode", "switch_left"),
-            romasku.longPressDuration("switch_left_long_press_duration", "switch_left"),
-            romasku.levelMoveRate("switch_left_level_move_rate", "switch_left"),
-            romasku.pressAction("switch_right_press_action", "switch_right"),
-            romasku.switchMode("switch_right_mode", "switch_right"),
-            romasku.switchAction("switch_right_action_mode", "switch_right"),
-            romasku.relayMode("switch_right_relay_mode", "switch_right"),
-            romasku.relayIndex("switch_right_relay_index", "switch_right", 2),
-            romasku.bindedMode("switch_right_binded_mode", "switch_right"),
-            romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
-            romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayIndicatorMode("relay_left_indicator_mode", "relay_left"),
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
-            const endpoint1 = device.getEndpoint(1);
-            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint1.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
-            const endpoint2 = device.getEndpoint(2);
-            await reporting.bind(endpoint2, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint2.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
             const endpoint3 = device.getEndpoint(3);
             await reporting.onOff(endpoint3, {
                 min: 0,
@@ -7171,36 +8636,18 @@ const definitions = [
         ],
         model: "ZK-EU",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes PM wall socket \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
             romasku.multiPressResetCount("multi_press_reset_count", "switch"),
             onOff({ endpointNames: ["relay"] }),
-            romasku.pressAction("switch_press_action", "switch"),
-            romasku.switchMode("switch_mode", "switch"),
-            romasku.switchAction("switch_action_mode", "switch"),
-            romasku.relayMode("switch_relay_mode", "switch"),
-            romasku.relayIndex("switch_relay_index", "switch", 1),
-            romasku.bindedMode("switch_binded_mode", "switch"),
-            romasku.longPressDuration("switch_long_press_duration", "switch"),
-            romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
-            const endpoint1 = device.getEndpoint(1);
-            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint1.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
             const endpoint2 = device.getEndpoint(2);
             await reporting.onOff(endpoint2, {
                 min: 0,
@@ -7227,36 +8674,18 @@ const definitions = [
         ],
         model: "TS011F_plug_1",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya PM wall socket \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
             romasku.multiPressResetCount("multi_press_reset_count", "switch"),
             onOff({ endpointNames: ["relay"] }),
-            romasku.pressAction("switch_press_action", "switch"),
-            romasku.switchMode("switch_mode", "switch"),
-            romasku.switchAction("switch_action_mode", "switch"),
-            romasku.relayMode("switch_relay_mode", "switch"),
-            romasku.relayIndex("switch_relay_index", "switch", 1),
-            romasku.bindedMode("switch_binded_mode", "switch"),
-            romasku.longPressDuration("switch_long_press_duration", "switch"),
-            romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
-            const endpoint1 = device.getEndpoint(1);
-            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint1.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
             const endpoint2 = device.getEndpoint(2);
             await reporting.onOff(endpoint2, {
                 min: 0,
@@ -7283,36 +8712,18 @@ const definitions = [
         ],
         model: "TS011F_plug_1",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Aubess PM plug \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
             romasku.multiPressResetCount("multi_press_reset_count", "switch"),
             onOff({ endpointNames: ["relay"] }),
-            romasku.pressAction("switch_press_action", "switch"),
-            romasku.switchMode("switch_mode", "switch"),
-            romasku.switchAction("switch_action_mode", "switch"),
-            romasku.relayMode("switch_relay_mode", "switch"),
-            romasku.relayIndex("switch_relay_index", "switch", 1),
-            romasku.bindedMode("switch_binded_mode", "switch"),
-            romasku.longPressDuration("switch_long_press_duration", "switch"),
-            romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
-            const endpoint1 = device.getEndpoint(1);
-            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint1.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
             const endpoint2 = device.getEndpoint(2);
             await reporting.onOff(endpoint2, {
                 min: 0,
@@ -7339,36 +8750,18 @@ const definitions = [
         ],
         model: "TS011F_plug_1",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Lellki plug \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
             romasku.multiPressResetCount("multi_press_reset_count", "switch"),
             onOff({ endpointNames: ["relay"] }),
-            romasku.pressAction("switch_press_action", "switch"),
-            romasku.switchMode("switch_mode", "switch"),
-            romasku.switchAction("switch_action_mode", "switch"),
-            romasku.relayMode("switch_relay_mode", "switch"),
-            romasku.relayIndex("switch_relay_index", "switch", 1),
-            romasku.bindedMode("switch_binded_mode", "switch"),
-            romasku.longPressDuration("switch_long_press_duration", "switch"),
-            romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
-            const endpoint1 = device.getEndpoint(1);
-            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint1.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
             const endpoint2 = device.getEndpoint(2);
             await reporting.onOff(endpoint2, {
                 min: 0,
@@ -7395,36 +8788,18 @@ const definitions = [
         ],
         model: "HG08673",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "LIDL PM plug HG08673 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
             romasku.multiPressResetCount("multi_press_reset_count", "switch"),
             onOff({ endpointNames: ["relay"] }),
-            romasku.pressAction("switch_press_action", "switch"),
-            romasku.switchMode("switch_mode", "switch"),
-            romasku.switchAction("switch_action_mode", "switch"),
-            romasku.relayMode("switch_relay_mode", "switch"),
-            romasku.relayIndex("switch_relay_index", "switch", 1),
-            romasku.bindedMode("switch_binded_mode", "switch"),
-            romasku.longPressDuration("switch_long_press_duration", "switch"),
-            romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
-            const endpoint1 = device.getEndpoint(1);
-            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint1.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
             const endpoint2 = device.getEndpoint(2);
             await reporting.onOff(endpoint2, {
                 min: 0,
@@ -7451,7 +8826,7 @@ const definitions = [
         ],
         model: "ZG-101ZS",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "HOBEIAN ZG-101ZS \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, } }),
@@ -7481,6 +8856,19 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7552,7 +8940,7 @@ const definitions = [
         ],
         model: "ZG-101ZL",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "HOBEIAN ZG-101ZL button \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch": 1, } }),
@@ -7564,6 +8952,19 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7602,7 +9003,7 @@ const definitions = [
         ],
         model: "IH-K663",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno IH-K663 button \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch": 1, } }),
@@ -7614,6 +9015,19 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7652,7 +9066,7 @@ const definitions = [
         ],
         model: "_TZ3000_mh9px7cq",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno 4-button remote \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, } }),
@@ -7683,6 +9097,19 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7754,7 +9181,7 @@ const definitions = [
         ],
         model: "TS0046",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno 6-button remote \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, } }),
@@ -7784,6 +9211,19 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7855,7 +9295,7 @@ const definitions = [
         ],
         model: "HG08164",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "LIDL button \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch": 1, } }),
@@ -7867,6 +9307,19 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7905,7 +9358,7 @@ const definitions = [
         ],
         model: "ZT-B-EU1",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes 1-gang scene switch (multiple variants) \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch": 1, } }),
@@ -7917,6 +9370,19 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -7955,7 +9421,7 @@ const definitions = [
         ],
         model: "ZT-B-EU2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes 2-gang scene switch (multiple variants) \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, } }),
@@ -7973,6 +9439,19 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8022,7 +9501,7 @@ const definitions = [
         ],
         model: "ZT-B-EU3",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes 3-gang scene switch (multiple variants) \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, } }),
@@ -8046,6 +9525,19 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8106,7 +9598,7 @@ const definitions = [
         ],
         model: "ZT-SR-EU4",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes 4-gang scene switch (multiple variants) \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, } }),
@@ -8136,6 +9628,19 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8207,7 +9712,7 @@ const definitions = [
         ],
         model: "TS0044",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes 4-gang scene switch \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, } }),
@@ -8237,6 +9742,19 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8308,7 +9826,7 @@ const definitions = [
         ],
         model: "SH-SC07",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya button \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch": 1, } }),
@@ -8320,6 +9838,19 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8358,7 +9889,7 @@ const definitions = [
         ],
         model: "TS0041",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya button \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch": 1, } }),
@@ -8370,6 +9901,19 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8408,7 +9952,7 @@ const definitions = [
         ],
         model: "TS0041",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/Moes 1-gang scene switch \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch": 1, } }),
@@ -8420,6 +9964,19 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8458,7 +10015,7 @@ const definitions = [
         ],
         model: "TS0042",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/Moes 2-gang scene switch \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, } }),
@@ -8476,6 +10033,19 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8525,7 +10095,7 @@ const definitions = [
         ],
         model: "TS0043",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/Moes 3-gang scene switch \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, } }),
@@ -8549,6 +10119,19 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8609,7 +10192,7 @@ const definitions = [
         ],
         model: "TS0043",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/Moes 3-gang scene switch \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, } }),
@@ -8633,6 +10216,19 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8693,7 +10289,7 @@ const definitions = [
         ],
         model: "TS0044",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/Moes 4-button wireless switch \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, } }),
@@ -8723,6 +10319,19 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8794,7 +10403,7 @@ const definitions = [
         ],
         model: "TLSR82xx_2btn_remote",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 2-button remote \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, } }),
@@ -8812,6 +10421,19 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8861,7 +10483,7 @@ const definitions = [
         ],
         model: "ZG-101ZL",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya button wireless switch \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch": 1, } }),
@@ -8873,6 +10495,19 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -8911,7 +10546,7 @@ const definitions = [
         ],
         model: "TS004F",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 4-button wireless switch \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             romasku.batteryPercentage(),
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, } }),
@@ -8941,6 +10576,19 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9012,7 +10660,7 @@ const definitions = [
         ],
         model: "RoomsAI_37022454",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO ZTS02RD-US-W1 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -9027,6 +10675,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9059,7 +10721,7 @@ const definitions = [
         ],
         model: "37022463-2",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO ZTS02RD-US-W2 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -9082,6 +10744,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9132,7 +10809,7 @@ const definitions = [
         ],
         model: "370224742",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO ZTS02RD-US-W3 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -9163,6 +10840,22 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9229,7 +10922,7 @@ const definitions = [
         ],
         model: "TS0004",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "AVATTO ZTS02RD-US-W4 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -9268,6 +10961,23 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            romasku.relayPhysicalMode("relay_0_physical_mode", "relay_0"),
+            romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
+            romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
+            romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9352,7 +11062,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED dim-backlight 1-gang touch switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -9369,6 +11079,20 @@ const definitions = [
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9410,7 +11134,7 @@ const definitions = [
         ],
         model: "TS0002",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED dim-backlight 2-gang touch switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -9437,6 +11161,21 @@ const definitions = [
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9503,7 +11242,7 @@ const definitions = [
         ],
         model: "TS0003",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED dim-backlight 3-gang touch switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -9534,6 +11273,22 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9600,7 +11355,7 @@ const definitions = [
         ],
         model: "TS0011",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED latching-relays 1-gang touch switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -9617,6 +11372,20 @@ const definitions = [
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9659,7 +11428,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED latching-relays 2-gang touch switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -9686,6 +11455,21 @@ const definitions = [
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9752,7 +11536,7 @@ const definitions = [
         ],
         model: "TS0013",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED latching-relays 3-gang touch switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -9789,6 +11573,22 @@ const definitions = [
             romasku.relayIndicator("relay_middle_indicator", "relay_middle"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9879,7 +11679,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Melody 1-gang touch switch L+N \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -9894,6 +11694,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9926,7 +11740,7 @@ const definitions = [
         ],
         model: "TS0002",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Melody 2-gang touch switch L+N \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -9949,6 +11763,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -9999,7 +11828,7 @@ const definitions = [
         ],
         model: "TS0003",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Melody 3-gang touch switch L+N \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -10030,6 +11859,22 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10097,7 +11942,7 @@ const definitions = [
         ],
         model: "TS0004",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Melody 4-gang touch switch L+N \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -10136,6 +11981,23 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            romasku.relayPhysicalMode("relay_0_physical_mode", "relay_0"),
+            romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
+            romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
+            romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10219,7 +12081,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED 1-gang touch switch \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -10236,6 +12098,20 @@ const definitions = [
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10276,7 +12152,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED 1-gang touch switch \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -10293,6 +12169,20 @@ const definitions = [
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10333,7 +12223,7 @@ const definitions = [
         ],
         model: "TS0002",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED 2-gang touch switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -10358,6 +12248,21 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayIndicatorMode("relay_left_indicator_mode", "relay_left"),
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10415,7 +12320,7 @@ const definitions = [
         ],
         model: "TS0002",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED 2-gang touch switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -10440,6 +12345,21 @@ const definitions = [
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
             romasku.relayIndicatorMode("relay_left_indicator_mode", "relay_left"),
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10497,7 +12417,7 @@ const definitions = [
         ],
         model: "TS0011",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED 1-gang touch switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -10514,6 +12434,20 @@ const definitions = [
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10555,7 +12489,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED 2-gang touch switch \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -10582,6 +12516,21 @@ const definitions = [
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10647,7 +12596,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED 2-gang touch switch \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -10674,6 +12623,21 @@ const definitions = [
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10739,7 +12703,7 @@ const definitions = [
         ],
         model: "TS0013",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED 3-gang touch switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -10776,6 +12740,22 @@ const definitions = [
             romasku.relayIndicator("relay_middle_indicator", "relay_middle"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10866,7 +12846,7 @@ const definitions = [
         ],
         model: "EC-GL86ZPCS11",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Echo Click / Scale 1-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -10883,6 +12863,20 @@ const definitions = [
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -10923,7 +12917,7 @@ const definitions = [
         ],
         model: "EC-GL86ZPCS21",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Echo Click / Scale 2-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -10950,6 +12944,21 @@ const definitions = [
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11010,18 +13019,18 @@ const definitions = [
         ota: true,
     },
     {
-        zigbeeModel: [
-            "TS0726-3-BS",
+        fingerprint: [
+            { manufacturerName: "iedhxgyi", modelID: "TS0726-3-BS" },
         ],
         model: "EC-GL86ZPCS31",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Echo Click / Scale 3-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
             romasku.multiPressResetCount("multi_press_reset_count", "switch_left"),
             romasku.networkIndicator("network_led", "switch_left"),
-            onOff({ endpointNames: ["relay_left", "relay_middle", "relay_right"] }),
+            onOff({ endpointNames: ["relay_left", "relay_middle", "relay_right"], configureReporting: false }),
             romasku.pressAction("switch_left_press_action", "switch_left"),
             romasku.switchMode("switch_left_mode", "switch_left"),
             romasku.switchAction("switch_left_action_mode", "switch_left"),
@@ -11052,87 +13061,25 @@ const definitions = [
             romasku.relayIndicator("relay_middle_indicator", "relay_middle"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
-            const endpoint1 = device.getEndpoint(1);
-            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint1.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
-            const endpoint2 = device.getEndpoint(2);
-            await reporting.bind(endpoint2, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint2.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
-            const endpoint3 = device.getEndpoint(3);
-            await reporting.bind(endpoint3, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint3.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
-            const endpoint4 = device.getEndpoint(4);
-            await reporting.onOff(endpoint4, {
-                min: 0,
-                max: constants.repInterval.MAX,
-                change: 1,
-            });
-            const endpoint5 = device.getEndpoint(5);
-            await reporting.onOff(endpoint5, {
-                min: 0,
-                max: constants.repInterval.MAX,
-                change: 1,
-            });
-            const endpoint6 = device.getEndpoint(6);
-            await reporting.onOff(endpoint6, {
-                min: 0,
-                max: constants.repInterval.MAX,
-                change: 1,
-            });
-
-            await endpoint4.configureReporting("genOnOff", [
-                {
-                    attribute: {ID: 0xff02, type: 0x10}, // Boolean
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
-            await endpoint5.configureReporting("genOnOff", [
-                {
-                    attribute: {ID: 0xff02, type: 0x10}, // Boolean
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
-            await endpoint6.configureReporting("genOnOff", [
-                {
-                    attribute: {ID: 0xff02, type: 0x10}, // Boolean
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
-
-
         },
         ota: true,
     },
@@ -11143,7 +13090,7 @@ const definitions = [
         ],
         model: "EC-GL86ZPCS41",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Echo Click / Scale 4-gang \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -11190,6 +13137,23 @@ const definitions = [
             romasku.relayIndicator("relay_2_indicator", "relay_2"),
             romasku.relayIndicatorMode("relay_3_indicator_mode", "relay_3"),
             romasku.relayIndicator("relay_3_indicator", "relay_3"),
+            romasku.relayPhysicalMode("relay_0_physical_mode", "relay_0"),
+            romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
+            romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
+            romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11305,7 +13269,7 @@ const definitions = [
         ],
         model: "EC-SL-FK86ZPCS11",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Echo Click 1-gang L-only \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -11322,6 +13286,20 @@ const definitions = [
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11362,7 +13340,7 @@ const definitions = [
         ],
         model: "EC-SL-FK86ZPCS21",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Echo Click 2-gang L-only \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -11389,6 +13367,21 @@ const definitions = [
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11449,12 +13442,12 @@ const definitions = [
         ota: true,
     },
     {
-        zigbeeModel: [
-            "TS0726-3-BS",
+        fingerprint: [
+            { manufacturerName: "r2fgo9ks", modelID: "TS0726-3-BS" },
         ],
         model: "EC-SL-FK86ZPCS31",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "BSEED Echo Click 3-gang L-only \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -11491,6 +13484,22 @@ const definitions = [
             romasku.relayIndicator("relay_middle_indicator", "relay_middle"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11577,11 +13586,189 @@ const definitions = [
     },
     {
         zigbeeModel: [
+            "Girier-4-gang",
+        ],
+        model: "TS0014",
+        vendor: "Tuya-custom",
+        description: "Girier 4-gang switch \u2014 Romasku custom firmware",
+        extend: [
+            deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
+            romasku.deviceConfig("device_config", "switch_0"),
+            romasku.multiPressResetCount("multi_press_reset_count", "switch_0"),
+            onOff({ endpointNames: ["relay_0", "relay_1", "relay_2", "relay_3"] }),
+            romasku.pressAction("switch_0_press_action", "switch_0"),
+            romasku.switchMode("switch_0_mode", "switch_0"),
+            romasku.switchAction("switch_0_action_mode", "switch_0"),
+            romasku.relayMode("switch_0_relay_mode", "switch_0"),
+            romasku.relayIndex("switch_0_relay_index", "switch_0", 4),
+            romasku.bindedMode("switch_0_binded_mode", "switch_0"),
+            romasku.longPressDuration("switch_0_long_press_duration", "switch_0"),
+            romasku.levelMoveRate("switch_0_level_move_rate", "switch_0"),
+            romasku.pressAction("switch_1_press_action", "switch_1"),
+            romasku.switchMode("switch_1_mode", "switch_1"),
+            romasku.switchAction("switch_1_action_mode", "switch_1"),
+            romasku.relayMode("switch_1_relay_mode", "switch_1"),
+            romasku.relayIndex("switch_1_relay_index", "switch_1", 4),
+            romasku.bindedMode("switch_1_binded_mode", "switch_1"),
+            romasku.longPressDuration("switch_1_long_press_duration", "switch_1"),
+            romasku.levelMoveRate("switch_1_level_move_rate", "switch_1"),
+            romasku.pressAction("switch_2_press_action", "switch_2"),
+            romasku.switchMode("switch_2_mode", "switch_2"),
+            romasku.switchAction("switch_2_action_mode", "switch_2"),
+            romasku.relayMode("switch_2_relay_mode", "switch_2"),
+            romasku.relayIndex("switch_2_relay_index", "switch_2", 4),
+            romasku.bindedMode("switch_2_binded_mode", "switch_2"),
+            romasku.longPressDuration("switch_2_long_press_duration", "switch_2"),
+            romasku.levelMoveRate("switch_2_level_move_rate", "switch_2"),
+            romasku.pressAction("switch_3_press_action", "switch_3"),
+            romasku.switchMode("switch_3_mode", "switch_3"),
+            romasku.switchAction("switch_3_action_mode", "switch_3"),
+            romasku.relayMode("switch_3_relay_mode", "switch_3"),
+            romasku.relayIndex("switch_3_relay_index", "switch_3", 4),
+            romasku.bindedMode("switch_3_binded_mode", "switch_3"),
+            romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
+            romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            romasku.relayIndicatorMode("relay_0_indicator_mode", "relay_0"),
+            romasku.relayIndicator("relay_0_indicator", "relay_0"),
+            romasku.relayIndicatorMode("relay_1_indicator_mode", "relay_1"),
+            romasku.relayIndicator("relay_1_indicator", "relay_1"),
+            romasku.relayIndicatorMode("relay_2_indicator_mode", "relay_2"),
+            romasku.relayIndicator("relay_2_indicator", "relay_2"),
+            romasku.relayIndicatorMode("relay_3_indicator_mode", "relay_3"),
+            romasku.relayIndicator("relay_3_indicator", "relay_3"),
+            romasku.relayPhysicalMode("relay_0_physical_mode", "relay_0"),
+            romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
+            romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
+            romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+        ],
+        meta: { multiEndpoint: true },
+        configure: async (device, coordinatorEndpoint, logger) => {
+            const endpoint1 = device.getEndpoint(1);
+            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
+            // switch action:
+            await endpoint1.configureReporting("genMultistateInput", [
+                {
+                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            const endpoint2 = device.getEndpoint(2);
+            await reporting.bind(endpoint2, coordinatorEndpoint, ["genMultistateInput"]);
+            // switch action:
+            await endpoint2.configureReporting("genMultistateInput", [
+                {
+                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            const endpoint3 = device.getEndpoint(3);
+            await reporting.bind(endpoint3, coordinatorEndpoint, ["genMultistateInput"]);
+            // switch action:
+            await endpoint3.configureReporting("genMultistateInput", [
+                {
+                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            const endpoint4 = device.getEndpoint(4);
+            await reporting.bind(endpoint4, coordinatorEndpoint, ["genMultistateInput"]);
+            // switch action:
+            await endpoint4.configureReporting("genMultistateInput", [
+                {
+                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            const endpoint5 = device.getEndpoint(5);
+            await reporting.onOff(endpoint5, {
+                min: 0,
+                max: constants.repInterval.MAX,
+                change: 1,
+            });
+            const endpoint6 = device.getEndpoint(6);
+            await reporting.onOff(endpoint6, {
+                min: 0,
+                max: constants.repInterval.MAX,
+                change: 1,
+            });
+            const endpoint7 = device.getEndpoint(7);
+            await reporting.onOff(endpoint7, {
+                min: 0,
+                max: constants.repInterval.MAX,
+                change: 1,
+            });
+            const endpoint8 = device.getEndpoint(8);
+            await reporting.onOff(endpoint8, {
+                min: 0,
+                max: constants.repInterval.MAX,
+                change: 1,
+            });
+
+            await endpoint5.configureReporting("genOnOff", [
+                {
+                    attribute: {ID: 0xff02, type: 0x10}, // Boolean
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            await endpoint6.configureReporting("genOnOff", [
+                {
+                    attribute: {ID: 0xff02, type: 0x10}, // Boolean
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            await endpoint7.configureReporting("genOnOff", [
+                {
+                    attribute: {ID: 0xff02, type: 0x10}, // Boolean
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            await endpoint8.configureReporting("genOnOff", [
+                {
+                    attribute: {ID: 0xff02, type: 0x10}, // Boolean
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+
+
+        },
+        ota: true,
+    },
+    {
+        zigbeeModel: [
             "TS0001-HBS",
         ],
         model: "TS0601_switch_1_gang",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "HOBEIAN ZG-302Z1 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -11597,6 +13784,20 @@ const definitions = [
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11637,7 +13838,7 @@ const definitions = [
         ],
         model: "Homeetec_37022454",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "homeetec 1-gang touch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -11652,6 +13853,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11684,7 +13899,7 @@ const definitions = [
         ],
         model: "37022463-1",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "homeetec 2-gang touch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -11707,6 +13922,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11756,7 +13986,7 @@ const definitions = [
         ],
         model: "37022474_1",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "homeetec 3-gang touch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -11787,6 +14017,22 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11853,7 +14099,7 @@ const definitions = [
         ],
         model: "_TZ3000_qq9ahj6z",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno 1-gang switches (button/touch) UNSH 1-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -11868,6 +14114,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11900,7 +14160,7 @@ const definitions = [
         ],
         model: "_TZ3000_zxrfobzw",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno 2-gang switches (buttons/touch) UNSH 2-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -11923,6 +14183,21 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -11972,7 +14247,7 @@ const definitions = [
         ],
         model: "TW-03",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "iHseno 3-gang switches (buttons/touch) UNSH 3-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -12003,6 +14278,22 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -12069,7 +14360,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "LerLink 2-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -12095,6 +14386,21 @@ const definitions = [
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -12160,7 +14466,7 @@ const definitions = [
         ],
         model: "TS0013",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "LerLink 3-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -12196,6 +14502,22 @@ const definitions = [
             romasku.relayIndicator("relay_middle_indicator", "relay_middle"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -12282,11 +14604,189 @@ const definitions = [
     },
     {
         zigbeeModel: [
+            "LerLink-4-gang",
+        ],
+        model: "TS0014",
+        vendor: "Tuya-custom",
+        description: "LerLink 4-gang switch \u2014 Romasku custom firmware",
+        extend: [
+            deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
+            romasku.deviceConfig("device_config", "switch_0"),
+            romasku.multiPressResetCount("multi_press_reset_count", "switch_0"),
+            onOff({ endpointNames: ["relay_0", "relay_1", "relay_2", "relay_3"] }),
+            romasku.pressAction("switch_0_press_action", "switch_0"),
+            romasku.switchMode("switch_0_mode", "switch_0"),
+            romasku.switchAction("switch_0_action_mode", "switch_0"),
+            romasku.relayMode("switch_0_relay_mode", "switch_0"),
+            romasku.relayIndex("switch_0_relay_index", "switch_0", 4),
+            romasku.bindedMode("switch_0_binded_mode", "switch_0"),
+            romasku.longPressDuration("switch_0_long_press_duration", "switch_0"),
+            romasku.levelMoveRate("switch_0_level_move_rate", "switch_0"),
+            romasku.pressAction("switch_1_press_action", "switch_1"),
+            romasku.switchMode("switch_1_mode", "switch_1"),
+            romasku.switchAction("switch_1_action_mode", "switch_1"),
+            romasku.relayMode("switch_1_relay_mode", "switch_1"),
+            romasku.relayIndex("switch_1_relay_index", "switch_1", 4),
+            romasku.bindedMode("switch_1_binded_mode", "switch_1"),
+            romasku.longPressDuration("switch_1_long_press_duration", "switch_1"),
+            romasku.levelMoveRate("switch_1_level_move_rate", "switch_1"),
+            romasku.pressAction("switch_2_press_action", "switch_2"),
+            romasku.switchMode("switch_2_mode", "switch_2"),
+            romasku.switchAction("switch_2_action_mode", "switch_2"),
+            romasku.relayMode("switch_2_relay_mode", "switch_2"),
+            romasku.relayIndex("switch_2_relay_index", "switch_2", 4),
+            romasku.bindedMode("switch_2_binded_mode", "switch_2"),
+            romasku.longPressDuration("switch_2_long_press_duration", "switch_2"),
+            romasku.levelMoveRate("switch_2_level_move_rate", "switch_2"),
+            romasku.pressAction("switch_3_press_action", "switch_3"),
+            romasku.switchMode("switch_3_mode", "switch_3"),
+            romasku.switchAction("switch_3_action_mode", "switch_3"),
+            romasku.relayMode("switch_3_relay_mode", "switch_3"),
+            romasku.relayIndex("switch_3_relay_index", "switch_3", 4),
+            romasku.bindedMode("switch_3_binded_mode", "switch_3"),
+            romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
+            romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            romasku.relayIndicatorMode("relay_0_indicator_mode", "relay_0"),
+            romasku.relayIndicator("relay_0_indicator", "relay_0"),
+            romasku.relayIndicatorMode("relay_1_indicator_mode", "relay_1"),
+            romasku.relayIndicator("relay_1_indicator", "relay_1"),
+            romasku.relayIndicatorMode("relay_2_indicator_mode", "relay_2"),
+            romasku.relayIndicator("relay_2_indicator", "relay_2"),
+            romasku.relayIndicatorMode("relay_3_indicator_mode", "relay_3"),
+            romasku.relayIndicator("relay_3_indicator", "relay_3"),
+            romasku.relayPhysicalMode("relay_0_physical_mode", "relay_0"),
+            romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
+            romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
+            romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+        ],
+        meta: { multiEndpoint: true },
+        configure: async (device, coordinatorEndpoint, logger) => {
+            const endpoint1 = device.getEndpoint(1);
+            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
+            // switch action:
+            await endpoint1.configureReporting("genMultistateInput", [
+                {
+                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            const endpoint2 = device.getEndpoint(2);
+            await reporting.bind(endpoint2, coordinatorEndpoint, ["genMultistateInput"]);
+            // switch action:
+            await endpoint2.configureReporting("genMultistateInput", [
+                {
+                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            const endpoint3 = device.getEndpoint(3);
+            await reporting.bind(endpoint3, coordinatorEndpoint, ["genMultistateInput"]);
+            // switch action:
+            await endpoint3.configureReporting("genMultistateInput", [
+                {
+                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            const endpoint4 = device.getEndpoint(4);
+            await reporting.bind(endpoint4, coordinatorEndpoint, ["genMultistateInput"]);
+            // switch action:
+            await endpoint4.configureReporting("genMultistateInput", [
+                {
+                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            const endpoint5 = device.getEndpoint(5);
+            await reporting.onOff(endpoint5, {
+                min: 0,
+                max: constants.repInterval.MAX,
+                change: 1,
+            });
+            const endpoint6 = device.getEndpoint(6);
+            await reporting.onOff(endpoint6, {
+                min: 0,
+                max: constants.repInterval.MAX,
+                change: 1,
+            });
+            const endpoint7 = device.getEndpoint(7);
+            await reporting.onOff(endpoint7, {
+                min: 0,
+                max: constants.repInterval.MAX,
+                change: 1,
+            });
+            const endpoint8 = device.getEndpoint(8);
+            await reporting.onOff(endpoint8, {
+                min: 0,
+                max: constants.repInterval.MAX,
+                change: 1,
+            });
+
+            await endpoint5.configureReporting("genOnOff", [
+                {
+                    attribute: {ID: 0xff02, type: 0x10}, // Boolean
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            await endpoint6.configureReporting("genOnOff", [
+                {
+                    attribute: {ID: 0xff02, type: 0x10}, // Boolean
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            await endpoint7.configureReporting("genOnOff", [
+                {
+                    attribute: {ID: 0xff02, type: 0x10}, // Boolean
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            await endpoint8.configureReporting("genOnOff", [
+                {
+                    attribute: {ID: 0xff02, type: 0x10}, // Boolean
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+
+
+        },
+        ota: true,
+    },
+    {
+        zigbeeModel: [
             "TS130F-LT",
         ],
         model: "TS130F",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "LoraTap 1-gang curtains switch \u2014 Romasku custom firmware",
         extend: [
             deviceAddCustomCluster("manuSpecificTuyaCoverSwitchConfig", {
                 ID: 0xFC01,
@@ -12363,7 +14863,7 @@ const definitions = [
         ],
         model: "TS0011",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Manhot \ud83c\udd70 1-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -12379,6 +14879,20 @@ const definitions = [
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -12419,7 +14933,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Manhot \ud83c\udd70 2-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -12445,6 +14959,21 @@ const definitions = [
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -12510,7 +15039,7 @@ const definitions = [
         ],
         model: "TS0013",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Manhot \ud83c\udd70 3-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -12546,6 +15075,22 @@ const definitions = [
             romasku.relayIndicator("relay_middle_indicator", "relay_middle"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -12636,7 +15181,7 @@ const definitions = [
         ],
         model: "TS0011",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Manhot \ud83c\udd71 1-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -12652,6 +15197,20 @@ const definitions = [
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -12692,7 +15251,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Manhot \ud83c\udd71 2-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -12718,6 +15277,21 @@ const definitions = [
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -12783,7 +15357,7 @@ const definitions = [
         ],
         model: "TS0013",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Manhot \ud83c\udd71 3-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -12819,6 +15393,22 @@ const definitions = [
             romasku.relayIndicator("relay_middle_indicator", "relay_middle"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -12909,7 +15499,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Milfra 1-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -12926,6 +15516,20 @@ const definitions = [
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -12966,7 +15570,7 @@ const definitions = [
         ],
         model: "TS0002",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Milfra 2-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -12993,6 +15597,21 @@ const definitions = [
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -13058,7 +15677,7 @@ const definitions = [
         ],
         model: "TS0003",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Milfra 3-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -13095,133 +15714,22 @@ const definitions = [
             romasku.relayIndicator("relay_middle_indicator", "relay_middle"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
-        ],
-        meta: { multiEndpoint: true },
-        configure: async (device, coordinatorEndpoint, logger) => {
-            const endpoint1 = device.getEndpoint(1);
-            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint1.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
-            const endpoint2 = device.getEndpoint(2);
-            await reporting.bind(endpoint2, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint2.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
-            const endpoint3 = device.getEndpoint(3);
-            await reporting.bind(endpoint3, coordinatorEndpoint, ["genMultistateInput"]);
-            // switch action:
-            await endpoint3.configureReporting("genMultistateInput", [
-                {
-                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
-            const endpoint4 = device.getEndpoint(4);
-            await reporting.onOff(endpoint4, {
-                min: 0,
-                max: constants.repInterval.MAX,
-                change: 1,
-            });
-            const endpoint5 = device.getEndpoint(5);
-            await reporting.onOff(endpoint5, {
-                min: 0,
-                max: constants.repInterval.MAX,
-                change: 1,
-            });
-            const endpoint6 = device.getEndpoint(6);
-            await reporting.onOff(endpoint6, {
-                min: 0,
-                max: constants.repInterval.MAX,
-                change: 1,
-            });
-
-            await endpoint4.configureReporting("genOnOff", [
-                {
-                    attribute: {ID: 0xff02, type: 0x10}, // Boolean
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
-            await endpoint5.configureReporting("genOnOff", [
-                {
-                    attribute: {ID: 0xff02, type: 0x10}, // Boolean
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
-            await endpoint6.configureReporting("genOnOff", [
-                {
-                    attribute: {ID: 0xff02, type: 0x10}, // Boolean
-                    minimumReportInterval: 0,
-                    maximumReportInterval: constants.repInterval.MAX,
-                    reportableChange: 1,
-                },
-            ]);
-
-
-        },
-        ota: true,
-    },
-    {
-        zigbeeModel: [
-            "TS0003-YBJ",
-        ],
-        model: "TS0003",
-        vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
-        extend: [
-            deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
-            romasku.deviceConfig("device_config", "switch_left"),
-            romasku.multiPressResetCount("multi_press_reset_count", "switch_left"),
-            romasku.networkIndicator("network_led", "switch_left"),
-            onOff({ endpointNames: ["relay_left", "relay_middle", "relay_right"] }),
-            romasku.pressAction("switch_left_press_action", "switch_left"),
-            romasku.switchMode("switch_left_mode", "switch_left"),
-            romasku.switchAction("switch_left_action_mode", "switch_left"),
-            romasku.relayMode("switch_left_relay_mode", "switch_left"),
-            romasku.relayIndex("switch_left_relay_index", "switch_left", 3),
-            romasku.bindedMode("switch_left_binded_mode", "switch_left"),
-            romasku.longPressDuration("switch_left_long_press_duration", "switch_left"),
-            romasku.levelMoveRate("switch_left_level_move_rate", "switch_left"),
-            romasku.pressAction("switch_middle_press_action", "switch_middle"),
-            romasku.switchMode("switch_middle_mode", "switch_middle"),
-            romasku.switchAction("switch_middle_action_mode", "switch_middle"),
-            romasku.relayMode("switch_middle_relay_mode", "switch_middle"),
-            romasku.relayIndex("switch_middle_relay_index", "switch_middle", 3),
-            romasku.bindedMode("switch_middle_binded_mode", "switch_middle"),
-            romasku.longPressDuration("switch_middle_long_press_duration", "switch_middle"),
-            romasku.levelMoveRate("switch_middle_level_move_rate", "switch_middle"),
-            romasku.pressAction("switch_right_press_action", "switch_right"),
-            romasku.switchMode("switch_right_mode", "switch_right"),
-            romasku.switchAction("switch_right_action_mode", "switch_right"),
-            romasku.relayMode("switch_right_relay_mode", "switch_right"),
-            romasku.relayIndex("switch_right_relay_index", "switch_right", 3),
-            romasku.bindedMode("switch_right_binded_mode", "switch_right"),
-            romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
-            romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
-            romasku.relayIndicatorMode("relay_left_indicator_mode", "relay_left"),
-            romasku.relayIndicator("relay_left_indicator", "relay_left"),
-            romasku.relayIndicatorMode("relay_middle_indicator_mode", "relay_middle"),
-            romasku.relayIndicator("relay_middle_indicator", "relay_middle"),
-            romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
-            romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -13312,7 +15820,7 @@ const definitions = [
         ],
         model: "TS0004",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Milfra 4-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -13359,6 +15867,23 @@ const definitions = [
             romasku.relayIndicator("relay_2_indicator", "relay_2"),
             romasku.relayIndicatorMode("relay_3_indicator_mode", "relay_3"),
             romasku.relayIndicator("relay_3_indicator", "relay_3"),
+            romasku.relayPhysicalMode("relay_0_physical_mode", "relay_0"),
+            romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
+            romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
+            romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -13475,7 +16000,7 @@ const definitions = [
         ],
         model: "ZS-EUB_1gang",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes 1-gang switches (all variants) \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -13491,6 +16016,20 @@ const definitions = [
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -13532,7 +16071,7 @@ const definitions = [
         ],
         model: "ZS-EUB_2gang",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes 2-gang switches (all variants) \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -13558,6 +16097,21 @@ const definitions = [
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -13624,7 +16178,7 @@ const definitions = [
         ],
         model: "TS0013",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes 3-gang switches (all variants) \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -13660,6 +16214,22 @@ const definitions = [
             romasku.relayIndicator("relay_middle_indicator", "relay_middle"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -13750,7 +16320,7 @@ const definitions = [
         ],
         model: "TS0014",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes 4-gang switches (all variants) \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -13796,6 +16366,23 @@ const definitions = [
             romasku.relayIndicator("relay_2_indicator", "relay_2"),
             romasku.relayIndicatorMode("relay_3_indicator_mode", "relay_3"),
             romasku.relayIndicator("relay_3_indicator", "relay_3"),
+            romasku.relayPhysicalMode("relay_0_physical_mode", "relay_0"),
+            romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
+            romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
+            romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -13911,7 +16498,7 @@ const definitions = [
         ],
         model: "SR-ZS",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Moes SR-ZS \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -13957,6 +16544,23 @@ const definitions = [
             romasku.relayIndicator("relay_2_indicator", "relay_2"),
             romasku.relayIndicatorMode("relay_3_indicator_mode", "relay_3"),
             romasku.relayIndicator("relay_3_indicator", "relay_3"),
+            romasku.relayPhysicalMode("relay_0_physical_mode", "relay_0"),
+            romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
+            romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
+            romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -14072,7 +16676,7 @@ const definitions = [
         ],
         model: "WS-US-ZB",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "NovaDigital ZTS-3W \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -14108,6 +16712,22 @@ const definitions = [
             romasku.relayIndicator("relay_middle_indicator", "relay_middle"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -14198,7 +16818,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "PSMART T441/T451 TL \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -14215,6 +16835,20 @@ const definitions = [
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -14255,7 +16889,7 @@ const definitions = [
         ],
         model: "TS0002",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "PSMART T442/T452 TL \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -14282,6 +16916,21 @@ const definitions = [
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -14348,7 +16997,7 @@ const definitions = [
         ],
         model: "T441",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "PSMART T441/T451 SL \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -14365,6 +17014,20 @@ const definitions = [
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -14406,7 +17069,7 @@ const definitions = [
         ],
         model: "T442",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "PSMART T442/T452 SL \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -14433,6 +17096,21 @@ const definitions = [
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -14498,7 +17176,7 @@ const definitions = [
         ],
         model: "ZM-L03E-Z",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "PSMART T443/T453 SL \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -14535,6 +17213,22 @@ const definitions = [
             romasku.relayIndicator("relay_middle_indicator", "relay_middle"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -14625,7 +17319,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 1-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -14641,6 +17335,20 @@ const definitions = [
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -14681,7 +17389,7 @@ const definitions = [
         ],
         model: "X701A",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 1-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -14697,6 +17405,20 @@ const definitions = [
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -14737,7 +17459,7 @@ const definitions = [
         ],
         model: "X702A",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 2-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -14763,6 +17485,21 @@ const definitions = [
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -14828,7 +17565,7 @@ const definitions = [
         ],
         model: "X703A",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 3-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -14864,6 +17601,22 @@ const definitions = [
             romasku.relayIndicator("relay_middle_indicator", "relay_middle"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -14954,7 +17707,7 @@ const definitions = [
         ],
         model: "TS0003",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 3-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_middle": 2, "switch_right": 3, "relay_left": 4, "relay_middle": 5, "relay_right": 6, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -14990,6 +17743,22 @@ const definitions = [
             romasku.relayIndicator("relay_middle_indicator", "relay_middle"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_middle", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -15080,7 +17849,7 @@ const definitions = [
         ],
         model: "TS0004",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 4-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -15126,6 +17895,23 @@ const definitions = [
             romasku.relayIndicator("relay_2_indicator", "relay_2"),
             romasku.relayIndicatorMode("relay_3_indicator_mode", "relay_3"),
             romasku.relayIndicator("relay_3_indicator", "relay_3"),
+            romasku.relayPhysicalMode("relay_0_physical_mode", "relay_0"),
+            romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
+            romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
+            romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -15241,7 +18027,7 @@ const definitions = [
         ],
         model: "TS0001",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 1-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -15256,6 +18042,20 @@ const definitions = [
             romasku.bindedMode("switch_binded_mode", "switch"),
             romasku.longPressDuration("switch_long_press_duration", "switch"),
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -15288,7 +18088,7 @@ const definitions = [
         ],
         model: "TS0004",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya 4-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
             romasku.deviceConfig("device_config", "switch_0"),
@@ -15327,6 +18127,23 @@ const definitions = [
             romasku.bindedMode("switch_3_binded_mode", "switch_3"),
             romasku.longPressDuration("switch_3_long_press_duration", "switch_3"),
             romasku.levelMoveRate("switch_3_level_move_rate", "switch_3"),
+            romasku.relayPhysicalMode("relay_0_physical_mode", "relay_0"),
+            romasku.relayPhysicalMode("relay_1_physical_mode", "relay_1"),
+            romasku.relayPhysicalMode("relay_2_physical_mode", "relay_2"),
+            romasku.relayPhysicalMode("relay_3_physical_mode", "relay_3"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_0", "switch_1", "switch_2", "switch_3"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -15410,7 +18227,7 @@ const definitions = [
         ],
         model: "X701A",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Tuya/Lonsonho 1-gang switch \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -15426,6 +18243,20 @@ const definitions = [
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -15467,7 +18298,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Zemismart 2-gang switch \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -15493,6 +18324,21 @@ const definitions = [
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -15558,7 +18404,7 @@ const definitions = [
         ],
         model: "TS0011",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Zemismart 1-gang switch \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -15574,6 +18420,20 @@ const definitions = [
             romasku.levelMoveRate("switch_level_move_rate", "switch"),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
+            romasku.relayPhysicalMode("relay_physical_mode", "relay"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
@@ -15614,7 +18474,7 @@ const definitions = [
         ],
         model: "TS0012",
         vendor: "Tuya-custom",
-        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        description: "Zemismart 2-gang switch \ud83c\udd71 \u2014 Romasku custom firmware",
         extend: [
             deviceEndpoints({ endpoints: {"switch_left": 1, "switch_right": 2, "relay_left": 3, "relay_right": 4, } }),
             romasku.deviceConfig("device_config", "switch_left"),
@@ -15640,6 +18500,21 @@ const definitions = [
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
             romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
+            romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
+            romasku.relayPhysicalMode("relay_right_physical_mode", "relay_right"),
+            // Command-action compatibility: emits action payloads from received
+            // genOnOff / genLevelCtrl commands (from coordinator binds). bind:false
+            // ensures zero configure/bind callbacks.
+            commandsOnOff({
+                name: "action",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
+            commandsLevelCtrl({
+                name: "action_level",
+                endpointNames: ["switch_left", "switch_right"],
+                bind: false,
+            }),
         ],
         meta: { multiEndpoint: true },
         configure: async (device, coordinatorEndpoint, logger) => {
