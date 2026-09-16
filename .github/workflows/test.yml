@@ -81,15 +81,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Install pytests
+      - name: Install pytests and converter dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y make python3 python3-pytest python3-yaml
+          sudo apt-get install -y make python3 python3-pytest python3-yaml python3-jinja2
       - name: Run tests
         shell: bash
         run: |
           set -o pipefail
           make tests 2>&1 | tee test-output.log
+      - name: Generate converter canary artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p converter-canary
+          python3 helper_scripts/make_z2m_custom_converters.py device_db.yaml > converter-canary/switch_custom.js
+          python3 helper_scripts/make_z2m_custom_converters.py --z2m-v1 device_db.yaml > converter-canary/switch_custom_z2m_v1.js
+          node --check converter-canary/switch_custom.js
+          node --check converter-canary/switch_custom_z2m_v1.js
+          sha256sum converter-canary/switch_custom.js converter-canary/switch_custom_z2m_v1.js | tee converter-canary/SHA256SUMS
+          diff -u zigbee2mqtt/converters/switch_custom.js converter-canary/switch_custom.js > converter-canary/current-vs-generated.patch || true
+      - name: Upload converter canary
+        uses: actions/upload-artifact@v4
+        with:
+          name: z2m-converter-canary-${{ github.sha }}
+          path: converter-canary/
+          if-no-files-found: error
       - name: Upload test diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
