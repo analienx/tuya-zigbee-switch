@@ -16,6 +16,11 @@ on:
 permissions:
   contents: write
 
+env:
+  BSEED_PM_VERSION_HEX: '12053007'
+  BSEED_PM_VERSION_DEC: '302329863'
+  BSEED_PM_RELEASE: 'v8u4'
+
 jobs:
   build-bseed-distribution:
     if: github.event_name == 'push' || github.head_ref == 'supervisor/bseed-tuya-conversion'
@@ -57,9 +62,9 @@ jobs:
           set -euo pipefail
           mkdir -p zigbee2mqtt/ota/bseed
           cp build/bseed-ts011f-pm-v8/forward.ota \
-            zigbee2mqtt/ota/bseed/ts011f-pm-v12053006.ota
+            "zigbee2mqtt/ota/bseed/ts011f-pm-v${BSEED_PM_VERSION_HEX}.ota"
           cp build/bseed-ts011f-pm-v8/from_tuya.ota \
-            zigbee2mqtt/ota/bseed/ts011f-pm-v12053006-from_tuya.ota
+            "zigbee2mqtt/ota/bseed/ts011f-pm-v${BSEED_PM_VERSION_HEX}-from_tuya.ota"
           cp build/bseed-ts0726-v8/forward.ota \
             zigbee2mqtt/ota/bseed/ts0726-v1102300a.ota
           cp build/bseed-ts0726-v8/from_tuya.ota \
@@ -106,13 +111,15 @@ jobs:
           python3 - <<'PY'
           import hashlib
           import json
+          import os
           from pathlib import Path
           import yaml
 
           entries = json.loads(Path('zigbee2mqtt/ota/index_bseed.json').read_text())
           assert len(entries) == 4
+          pm_version = int(os.environ['BSEED_PM_VERSION_DEC'])
           expected = {
-              ('b28wrpvx', 43556, 0x12053006),
+              ('b28wrpvx', 43556, pm_version),
               ('_TZ3000_b28wrpvx', 54179, 0xFFFFFFFF),
               ('iedhxgyi', 45577, 0x1102300A),
               ('_TZ3002_iedhxgyi', 54179, 0xFFFFFFFF),
@@ -136,7 +143,7 @@ jobs:
       - name: Upload immutable distribution evidence
         uses: actions/upload-artifact@v4
         with:
-          name: bseed-v8u3-ota-distribution
+          name: bseed-${{ env.BSEED_PM_RELEASE }}-ota-distribution
           path: |
             build/bseed-ts011f-pm-v8/forward.bin
             build/bseed-ts011f-pm-v8/forward.ota
