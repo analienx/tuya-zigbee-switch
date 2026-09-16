@@ -1,4 +1,7 @@
 import argparse
+import html
+import re
+import sys
 from pathlib import Path
 
 import yaml
@@ -11,69 +14,25 @@ env = Environment(
     lstrip_blocks=True,
 )
 
-
-def add_custom_fingerprints(rendered: str, devices: list[dict]) -> str:
-    """Add strong manufacturer/model matchers without changing template layout."""
-    cursor = 0
-    for device in devices:
-        model_lines = "".join(
-            f'            "{model_id}",\n' for model_id in device["zb_models"]
-        )
-        matcher = f"        zigbeeModel: [\n{model_lines}        ],\n"
-        fingerprint_lines = "".join(
-            "            { manufacturerName: "
-            f'"{fingerprint["manufacturerName"]}", modelID: '
-            f'"{fingerprint["modelID"]}" }},\n'
-            for fingerprint in device["fingerprints"]
-        )
-        fingerprints = f"        fingerprint: [\n{fingerprint_lines}        ],\n"
-
-        index = rendered.find(matcher, cursor)
-        if index < 0:
-            raise RuntimeError(
-                f"Could not locate rendered definition for {device['zb_models']}"
-            )
-        rendered = rendered[:index] + fingerprints + rendered[index:]
-        cursor = index + len(fingerprints) + len(matcher)
-
-    return rendered
+def _plain_text(value):
+    """Normalize human_name for a one-line JS device description."""
+    if value is None:
+        return ""
+    value = html.unescape(str(value))
+    value = re.sub(r"<[^>]+>", " ", value)
+    return " ".join(value.split())
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Create Zigbee2mqtt converter for custom devices",
-        epilog="Generates a js file that adds support of re-flashed devices to z2m",
-    )
-    parser.add_argument(
-        "db_file", metavar="INPUT", type=str, help="File with device db"
-    )
-    parser.add_argument(
-        "--z2m-v1", action=argparse.BooleanOptionalAction, help="Use old z2m"
-    )
-
-    args = parser.parse_args()
-
-    db_str = Path(args.db_file).read_text()
-    db = yaml.safe_load(db_str)
-
+def collect_devices(db):
     devices = []
 
-    for device in db.values():
+    for db_key, device in db.items():
         # Skip if build == no. Defaults to yes
         if not device.get("build", True):
             continue
 
         config = device["config_str"]
         zb_manufacturer, zb_model, *peripherals = config.rstrip(";").split(";")
-        zb_models = [zb_model] + (device.get("old_zb_models") or [])
-        manufacturer_names = [zb_manufacturer] + (
-            device.get("old_manufacturer_names") or []
-        )
-        fingerprints = [
-            {"manufacturerName": manufacturer_name, "modelID": model_id}
-            for manufacturer_name in manufacturer_names
-            for model_id in zb_models
-        ]
 
         relay_cnt = 0
         switch_cnt = 0
@@ -144,12 +103,19 @@ if __name__ == "__main__":
 
         devices.append(
             {
-                "zb_models": zb_models,
-                "fingerprints": fingerprints,
-                "model": device.get("override_z2m_device")
-                or device["stock_converter_model"],
+                "db_key": db_key,
+                "human_name": _plain_text(device.get("human_name") or db_key),
+                "zb_manufacturer": zb_manufacturer,
+                "zb_models": [zb_model] + (device.get("old_zb_models") or []),
+                # Deployment-only safety overlay. This branch is used for the
+                # BSEED canary; upstream/generic converter branches must not
+                # carry this special case.
+                "bseed_canary_no_configure": db_key == "SWITCH_BSEED_TS0726_3GANG",
                 "switch_level_move_rate": device.get("switch_level_move_rate", True),
                 "expose_switch_controls": device.get("category") not in {"outlet", "plug", "din_relay"},
+                "power_monitoring": bool(device.get("power_monitoring", False)),
+                "model": device.get("override_z2m_device")
+                or device["stock_converter_model"],
                 "switchNames": switch_names,
                 "relayNames": relay_names,
                 "relayIndicatorNames": relay_names[:indicators_cnt],
@@ -157,12 +123,163 @@ if __name__ == "__main__":
                 "coverNames": cover_names,
                 "has_dedicated_net_led": has_dedicated_net_led,
                 "has_battery_cluster": has_battery_cluster,
-                "power_monitoring": bool(device.get("power_monitoring", False)),
             }
         )
 
+    return devices
+
+
+def _contract_signature(device):
+    """Functional generated contract, excluding presentation-only metadata."""
+    return repr(
+        sorted(
+            (k, v)
+            for k, v in device.items()
+            if k not in {"db_key", "human_name"}
+        )
+    )
+
+
+def mark_ambiguous_models(devices):
+    """Classify model collisions per re-review 5492467354 (gate E).
+
+    - RESOLVABLE: every claimant of a model has a distinct manufacturer, so
+      each definition is pinned with a `fingerprint` on
+      (manufacturerName, modelID). Matching becomes order-independent.
+    - Deterministic merge: definitions with an IDENTICAL
+      (manufacturer, models, contract) collapse into one — they were
+      byte-identical in the output anyway.
+    - UNRESOLVED LEGACY: the same (manufacturer, model) tuple is claimed by
+      definitions with different contracts. Fingerprints cannot separate
+      them; the legacy bare `zigbeeModel` matcher is preserved for the whole
+      model group and a deterministic warning lists all DB keys. We do NOT
+      pretend the group became deterministic and we never silently merge
+      different contracts.
+    """
+    # 1. Deterministic merge of byte-identical definitions.
+    seen = {}
+    deduped = []
+    merged = []
+    for device in devices:
+        key = (
+            device["zb_manufacturer"],
+            tuple(device["zb_models"]),
+            _contract_signature(device),
+        )
+        if key in seen:
+            # Presentation metadata must not prevent deterministic merging of
+            # byte/semantic-identical functional contracts. Pick a stable
+            # description independent of DB traversal order.
+            kept = seen[key]
+            kept["human_name"] = min(kept["human_name"], device["human_name"])
+            merged.append((device["db_key"], kept["db_key"]))
+            continue
+        seen[key] = device
+        deduped.append(device)
+
+    # 2. Group claims per model string.
+    claims = {}
+    for device in deduped:
+        for model in device["zb_models"]:
+            claims.setdefault(model, []).append(device)
+
+    # 3. Classify each MODEL independently. A single definition may need
+    # both match surfaces: exact fingerprints for resolvable collisions and
+    # zigbeeModel fallback entries for unique / unresolved legacy aliases.
+    for device in deduped:
+        device["unique_models"] = []
+        device["ambiguous_models"] = []  # RESOLVABLE -> fingerprint
+        device["unresolved_models"] = []  # legacy model-only fallback
+        for model in device["zb_models"]:
+            group = claims[model]
+            if len(group) == 1:
+                device["unique_models"].append(model)
+                continue
+            manufacturers = {x["zb_manufacturer"] for x in group}
+            if len(manufacturers) == len(group):
+                device["ambiguous_models"].append(model)
+            else:
+                device["unresolved_models"].append(model)
+
+        device["fingerprints"] = [
+            {
+                "manufacturerName": device["zb_manufacturer"],
+                "modelID": model,
+            }
+            for model in device["ambiguous_models"]
+        ]
+        # ZHC supports fingerprint + zigbeeModel on the same definition.
+        # Preserve unique aliases and unresolved legacy collisions here so a
+        # collision in one old alias never drops the definition's current
+        # unique model (e.g. TS0002-GIR + old TS0002-custom).
+        device["legacy_models"] = (
+            device["unique_models"] + device["unresolved_models"]
+        )
+        device["has_collision"] = bool(device["fingerprints"])
+        device["has_unresolved"] = bool(device["unresolved_models"])
+
+    return deduped, merged
+
+
+def generate(db, z2m_v1=False):
+    devices, merged = mark_ambiguous_models(collect_devices(db))
+
     template = env.get_template("switch_custom.js.jinja")
-    rendered = template.render(devices=devices, z2m_v1=args.z2m_v1)
-    print(add_custom_fingerprints(rendered, devices))
+    rendered = template.render(devices=devices, z2m_v1=z2m_v1)
+
+    for device in devices:
+        if device["has_collision"]:
+            print(
+                "Ambiguous model(s) %s disambiguated via fingerprint for %s"
+                % (
+                    ",".join(device["ambiguous_models"]),
+                    device["zb_manufacturer"],
+                ),
+                file=sys.stderr,
+            )
+        if device["has_unresolved"]:
+            print(
+                "UNRESOLVED legacy model collision for %s: model(s) %s "
+                "claimed by DB keys with different contracts: %s"
+                % (
+                    device["zb_manufacturer"],
+                    ",".join(device["unresolved_models"]),
+                    ",".join(
+                        d["db_key"]
+                        for d in devices
+                        if set(d["unresolved_models"])
+                        & set(device["unresolved_models"])
+                    ),
+                ),
+                file=sys.stderr,
+            )
+    for dup, kept in merged:
+        print(
+            "Merged byte-identical definition: %s merged into %s"
+            % (dup, kept),
+            file=sys.stderr,
+        )
+
+    return rendered
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Create Zigbee2mqtt converter for custom devices",
+        epilog="Generates a js file that adds support of re-flashed devices to z2m",
+    )
+    parser.add_argument(
+        "db_file", metavar="INPUT", type=str, help="File with device db"
+    )
+    parser.add_argument(
+        "--z2m-v1", action=argparse.BooleanOptionalAction, help="Use old z2m"
+    )
+
+    args = parser.parse_args()
+
+    db_str = Path(args.db_file).read_text()
+    db = yaml.safe_load(db_str)
+
+    print(generate(db, z2m_v1=args.z2m_v1))
 
     exit(0)
