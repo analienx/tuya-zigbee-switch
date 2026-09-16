@@ -447,7 +447,9 @@ const definitions = [
             {% endif %}
             romasku.bindedMode("{{switchName}}_binded_mode", "{{switchName}}"),
             romasku.longPressDuration("{{switchName}}_long_press_duration", "{{switchName}}"),
+            {% if device.switch_level_move_rate %}
             romasku.levelMoveRate("{{switchName}}_level_move_rate", "{{switchName}}"),
+            {% endif %}
             {% endfor %}
             {% for relayName in device.relayIndicatorNames %}
             romasku.relayIndicatorMode("{{relayName}}_indicator_mode", "{{relayName}}"),
