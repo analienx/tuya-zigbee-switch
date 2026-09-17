@@ -91,19 +91,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 src/telink/make_ota.py create-ota \
-            --manufacturer-id 4417 --image-type 65026 --file-version 0xFFFFFFFF \
-            build/client-control-nonpm/forward.bin \
+          python3 src/telink/make_ota.py reseal-ota \
+            --manufacturer-id 4417 \
+            --source-image-type 43555 --source-file-version 0x11023001 \
+            --image-type 65026 --file-version 0xFFFFFFFF \
+            zigbee2mqtt/ota/bseed/ts011f-nonpm-v11023001.ota \
             build/bseed-ts011f-nonpm-client/rollback-to-router.ota
           python3 - <<'PY'
           import pathlib, struct
           path = pathlib.Path('build/bseed-ts011f-nonpm-client/rollback-to-router.ota')
-          values = struct.unpack('<I5HIH32sI', path.read_bytes()[:56])
+          golden = pathlib.Path('zigbee2mqtt/ota/bseed/ts011f-nonpm-v11023001.ota')
+          rollback = path.read_bytes()
+          source = golden.read_bytes()
+          values = struct.unpack('<I5HIH32sI', rollback[:56])
           assert values[0] == 0x0BEEF11E
           assert values[4] == 4417
           assert values[5] == 65026
           assert values[6] == 0xFFFFFFFF
           assert values[-1] == path.stat().st_size
+          assert rollback[56:] == source[56:]
+          assert [i for i, (a, b) in enumerate(zip(source, rollback)) if a != b] == [12, 13, 14, 15, 16, 17]
           PY
 
       - name: Rebuild Client and require byte-identical output
@@ -116,12 +123,15 @@ jobs:
           cmp "$RUNNER_TEMP/nonpm-client-first.ota" build/bseed-ts011f-nonpm-client/forward.ota
           cmp "$RUNNER_TEMP/nonpm-client-first-from-router.ota" build/bseed-ts011f-nonpm-client/from-router.ota
 
-          python3 src/telink/make_ota.py create-ota \
-            --manufacturer-id 4417 --image-type 65026 --file-version 0xFFFFFFFF \
-            build/client-control-nonpm/forward.bin \
+          python3 src/telink/make_ota.py reseal-ota \
+            --manufacturer-id 4417 \
+            --source-image-type 43555 --source-file-version 0x11023001 \
+            --image-type 65026 --file-version 0xFFFFFFFF \
+            zigbee2mqtt/ota/bseed/ts011f-nonpm-v11023001.ota \
             build/bseed-ts011f-nonpm-client/rollback-to-router.ota
 
           sha256sum \
+            zigbee2mqtt/ota/bseed/ts011f-nonpm-v11023001.ota \
             build/client-control-nonpm/forward.bin \
             build/client-control-nonpm/forward.ota \
             build/client-control-nonpm/from_tuya.ota \

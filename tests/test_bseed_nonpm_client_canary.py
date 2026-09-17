@@ -42,7 +42,11 @@ def test_nonpm_canary_workflow_proves_router_regression_and_client_rollback():
     assert "build_bseed_ts011f_nonpm_router.sh build/baseline-nonpm" in workflow
     assert "build_bseed_ts011f_nonpm_router.sh build/client-control-nonpm" in workflow
     assert "build_bseed_mains_client.sh nonpm" in workflow
+    assert "reseal-ota" in workflow
+    assert "--source-image-type 43555 --source-file-version 0x11023001" in workflow
     assert "--image-type 65026 --file-version 0xFFFFFFFF" in workflow
+    assert "zigbee2mqtt/ota/bseed/ts011f-nonpm-v11023001.ota" in workflow
+    assert "rollback[56:] == source[56:]" in workflow
     assert "rollback-to-router.ota" in workflow
     assert "Rebuild Client and require byte-identical output" in workflow
     assert "normalOtaIndex" in workflow
