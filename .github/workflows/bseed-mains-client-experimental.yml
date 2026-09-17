@@ -9,7 +9,6 @@ on:
 
 jobs:
   build-clients:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.head_ref == 'supervisor/bseed-mains-client-experimental'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact source

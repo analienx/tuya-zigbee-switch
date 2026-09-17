@@ -9,7 +9,6 @@ on:
 
 jobs:
   build-nonpm-canary:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.head_ref == 'supervisor/bseed-mains-client-experimental'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact source
@@ -55,11 +54,11 @@ jobs:
           git worktree add --detach "$BASE_DIR" "$BASE_SHA"
           ln -s "$GITHUB_WORKSPACE/telink_tools" "$BASE_DIR/telink_tools"
 
-          SOURCE_ROOT="$BASE_DIR" \
-            bash make_scripts/build_bseed_ts011f_nonpm_canary_router.sh \
-            "$BASE_DIR/build/baseline-nonpm"
-          bash make_scripts/build_bseed_ts011f_nonpm_canary_router.sh \
-            build/client-control-nonpm
+          (
+            cd "$BASE_DIR"
+            bash make_scripts/build_bseed_ts011f_nonpm_router.sh build/baseline-nonpm
+          )
+          bash make_scripts/build_bseed_ts011f_nonpm_router.sh build/client-control-nonpm
 
           cmp "$BASE_DIR/build/baseline-nonpm/forward.bin" build/client-control-nonpm/forward.bin
           cmp "$BASE_DIR/build/baseline-nonpm/forward.ota" build/client-control-nonpm/forward.ota
@@ -143,12 +142,12 @@ jobs:
           router = json.loads(pathlib.Path('build/client-control-nonpm/manifest.json').read_text())
           client = json.loads(pathlib.Path('build/bseed-ts011f-nonpm-client/manifest.json').read_text())
 
-          assert router['canaryOnly'] is True
           assert router['board'] == 'OUTLET_BSEED_TS011F'
+          assert router['softwareBuild'] == '1.1.3-bseedv8'
+          assert router['fileVersion'] == 285356033
           assert router['imageType'] == 43555
           assert router['stockConversion']['stockManufacturerName'] == '_TZ3000_o1jzcxou'
           assert router['stockConversion']['stockImageType'] == 54179
-          assert router['distribution']['normalOtaIndex'] is False
 
           assert client['target'] == 'nonpm'
           assert client['board'] == 'OUTLET_BSEED_TS011F'

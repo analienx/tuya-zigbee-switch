@@ -37,8 +37,10 @@ def test_nonpm_stock_conversion_is_staged_through_router_not_direct_to_client():
 def test_nonpm_canary_workflow_proves_router_regression_and_client_rollback():
     workflow = (ROOT / ".github/workflows/bseed-nonpm-client-canary.yml").read_text()
     assert "git merge-base HEAD origin/main" in workflow
-    assert "SOURCE_ROOT=\"$BASE_DIR\"" in workflow
+    assert 'cd "$BASE_DIR"' in workflow
     assert "cmp \"$BASE_DIR/build/baseline-nonpm/forward.bin\" build/client-control-nonpm/forward.bin" in workflow
+    assert "build_bseed_ts011f_nonpm_router.sh build/baseline-nonpm" in workflow
+    assert "build_bseed_ts011f_nonpm_router.sh build/client-control-nonpm" in workflow
     assert "build_bseed_mains_client.sh nonpm" in workflow
     assert "--image-type 65026 --file-version 0xFFFFFFFF" in workflow
     assert "rollback-to-router.ota" in workflow
