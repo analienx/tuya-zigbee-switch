@@ -1,0 +1,46 @@
+schema_version: 1
+project_id: tuya-zigbee-switch
+repo: analienx/tuya-zigbee-switch
+lifecycle: active
+
+execution:
+  schema_version: 1
+  default_mode: host_specialist
+  optional_modes: [foundry_isolated]
+  build_lane: firmware builder CI
+  host_specialist: USB device operations
+
+canonical_skill:
+  source: external_github
+  repo: analienx/config
+  ref: main
+  path: skills/supervisor-executor/SKILL.md
+
+registry:
+  source: external_github
+  repo: analienx/config
+  ref: main
+  path: supervisor/projects.yaml
+
+context:
+  project_readme: readme.md
+  firmware_sources: src
+  tests: tests
+
+executor:
+  environment: windows_notebook
+  management_paths:
+    - local_shell
+    - usb
+
+mutation_policy:
+  typed_host_actions:
+    - usb.attach
+    - usb.detach
+  physical_device_mutation_requires_explicit_scope: true
+
+secrets:
+  policy: never_print
+
+user_shorthand:
+  ".": supervise_latest
