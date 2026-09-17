@@ -10,7 +10,7 @@ def test_nonpm_target_has_distinct_router_and_client_identities():
     assert "CANONICAL='o1jzcxou;TS011F-BS;LC2;SB4u;RC3;ID2;M;'" in script
     assert "ROUTER_IMAGE_TYPE=43555" in script
     assert "CLIENT_IMAGE_TYPE=65026" in script
-    assert "FILE_VERSION_HEX='0x1102300D'" in script
+    assert "FILE_VERSION_HEX='0x1102300E'" in script
     assert "DEFAULT_OUT='build/bseed-ts011f-nonpm-client'" in script
 
 
