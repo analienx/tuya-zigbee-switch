@@ -46,7 +46,7 @@ static void apply_mains_client_defaults(void) {
 
 #endif
 
-void process_device_type_change() {
+static bool process_device_type_change(void) {
     enum device_type_t stored_device_type;
     hal_nvm_status_t   st =
         hal_nvm_read(NV_ITEM_DEVICE_TYPE, sizeof(stored_device_type),
@@ -56,17 +56,25 @@ void process_device_type_change() {
         stored_device_type = CURRENT_DEVICE_TYPE;
         hal_nvm_write(NV_ITEM_DEVICE_TYPE, sizeof(stored_device_type),
                       (uint8_t *)&stored_device_type);
-        return;
+        return false;
     }
     if (stored_device_type != CURRENT_DEVICE_TYPE) {
         printf("Device type change detected: %d -> %d\r\n", stored_device_type,
                CURRENT_DEVICE_TYPE);
+        if (!hal_role_change_reset()) {
+            printf("Role-change Zigbee reset failed; rebooting for retry\r\n");
+            schedule_reboot(2000);
+            return true;
+        }
         stored_device_type = CURRENT_DEVICE_TYPE;
-        hal_nvm_write(NV_ITEM_DEVICE_TYPE, sizeof(stored_device_type),
-                      (uint8_t *)&stored_device_type);
-        hal_factory_reset();
+        if (hal_nvm_write(NV_ITEM_DEVICE_TYPE, sizeof(stored_device_type),
+                          (uint8_t *)&stored_device_type) != HAL_NVM_SUCCESS) {
+            printf("Role-change marker write failed; rebooting for retry\r\n");
+        }
         schedule_reboot(2000);
+        return true;
     }
+    return false;
 }
 
 void app_init(void) {
@@ -89,6 +97,10 @@ void app_init(void) {
         return;
     }
 
+    if (process_device_type_change()) {
+        return;
+    }
+
     device_config_enable_parser_preflight();
     parse_config();
 #ifdef BSEED_MAINS_CLIENT
@@ -97,7 +109,6 @@ void app_init(void) {
     hal_zigbee_init_ota();
     init_global_attr_write_callback();
 
-    process_device_type_change();
 }
 
 static bool boot_announce_sent = false;

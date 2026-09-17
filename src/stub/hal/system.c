@@ -21,3 +21,8 @@ void hal_factory_reset(void) {
 
     hal_zigbee_leave_network();
 }
+
+bool hal_role_change_reset(void) {
+    hal_factory_reset();
+    return true;
+}

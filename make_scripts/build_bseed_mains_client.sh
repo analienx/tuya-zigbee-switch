@@ -141,7 +141,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pathlib
+import re
 import struct
 import subprocess
 import sys
@@ -212,8 +214,23 @@ assert diffs == expected_diffs, (
     f"expected {expected_diffs}"
 )
 
-source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-source_dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], text=True).strip())
+def git_output(*args: str) -> str:
+    env = os.environ.copy()
+    dotgit = pathlib.Path(".git")
+    if dotgit.is_file():
+        marker = dotgit.read_text().strip()
+        if marker.startswith("gitdir: "):
+            gitdir = marker[8:].strip()
+            match = re.match(r"^([A-Za-z]):[\\/](.*)$", gitdir)
+            if match and pathlib.Path("/mnt").is_dir():
+                tail = match.group(2).replace("\\", "/")
+                gitdir = f"/mnt/{match.group(1).lower()}/{tail}"
+            env["GIT_DIR"] = gitdir
+            env["GIT_WORK_TREE"] = str(pathlib.Path.cwd())
+    return subprocess.check_output(["git", *args], text=True, env=env).strip()
+
+source_commit = git_output("rev-parse", "HEAD")
+source_dirty = bool(git_output("status", "--porcelain"))
 manifest = {
     "schema": 2,
     "experimental": True,
@@ -249,7 +266,8 @@ manifest = {
     },
     "roleTransition": {
         "storedDeviceTypeChanges": True,
-        "zigbeeFactoryResetOnRouterToClient": True,
+        "zigbeeFactoryResetOnRouterToClient": False,
+        "selectiveZigbeeNvResetOnRoleChange": True,
         "applicationNvClearCalled": False,
         "rejoinExpected": True,
         "permitJoinBeforeCanary": True,
