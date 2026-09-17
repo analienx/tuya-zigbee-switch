@@ -92,7 +92,7 @@ def test_production_router_build_scripts_stay_router_only():
     dimmer = (ROOT / "make_scripts/build_bseed_ts0726_v8.sh").read_text()
     assert "DEVICE_TYPE=router" in pm
     assert "IMAGE_TYPE=43556" in pm
-    assert "FILE_VERSION_HEX='0x12053006'" in pm
+    assert "FILE_VERSION_HEX='0x12053007'" in pm
     assert "DEVICE_TYPE=router" in dimmer
     assert "IMAGE_TYPE=45577" in dimmer
     assert "FILE_VERSION_HEX='0x1102300A'" in dimmer

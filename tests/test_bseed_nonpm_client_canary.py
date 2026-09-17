@@ -15,15 +15,16 @@ def test_nonpm_target_has_distinct_router_and_client_identities():
 
 
 def test_nonpm_stock_conversion_is_staged_through_router_not_direct_to_client():
-    router = (ROOT / "make_scripts/build_bseed_ts011f_nonpm_canary_router.sh").read_text()
+    router = (ROOT / "make_scripts/build_bseed_ts011f_nonpm_router.sh").read_text()
     client = (ROOT / "make_scripts/build_bseed_mains_client.sh").read_text()
 
     assert "STOCK_MANUFACTURER_NAME='_TZ3000_o1jzcxou'" in router
     assert "STOCK_IMAGE_TYPE=54179" in router
     assert "IMAGE_TYPE=43555" in router
     assert "OTA_VERSION=0xFFFFFFFF" in router
-    assert '"sacrificialHardwareCanaryOnly": True' in router
-    assert '"normalOtaIndex": False' in router
+    assert "SW_BUILD='1.1.3-bseedv8'" in router
+    assert "FILE_VERSION_HEX='0x11023001'" in router
+    assert 'BUILD ONLY: never publishes, flashes, or mutates a live device.' in router
 
     # The Client artifact intentionally accepts only the already-custom Router
     # identity. Stock conversion and role conversion are two observable stages.
@@ -46,10 +47,10 @@ def test_nonpm_canary_workflow_proves_router_regression_and_client_rollback():
 
 
 def test_nonpm_canary_identity_guard_is_exact():
-    script = (ROOT / "make_scripts/build_bseed_ts011f_nonpm_canary_router.sh").read_text()
+    script = (ROOT / "make_scripts/build_bseed_ts011f_nonpm_router.sh").read_text()
     assert "BOARD='OUTLET_BSEED_TS011F'" in script
     assert "STOCK_MANUFACTURER_NAME='_TZ3000_o1jzcxou'" in script
     assert "CANONICAL='o1jzcxou;TS011F-BS;LC2;SB4u;RC3;ID2;M;'" in script
-    assert 'entry["stock_manufacturer_name"] == stock_name' in script
-    assert 'entry["stock_image_type"]' in script
-    assert 'entry["mcu"] == "TLSR8258"' in script
+    assert '[[ "${db_values[4]}" == "$STOCK_MANUFACTURER_NAME" ]]' in script
+    assert '[[ "${db_values[3]}" == "$STOCK_IMAGE_TYPE" ]]' in script
+    assert "[[ \"${db_values[6]}\" == 'Telink' && \"${db_values[7]}\" == 'TLSR8258' ]]" in script
