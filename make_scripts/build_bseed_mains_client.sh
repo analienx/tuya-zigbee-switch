@@ -235,7 +235,7 @@ manifest = {
         "rxOnWhenIdle": True,
         "powerSource": "mains",
         "telinkLibrary": "libzb_ed",
-        "pmEnabled": False,
+        "pmEnabled": target == "pm",
         "pollControlCluster": False,
     },
     "binding": {

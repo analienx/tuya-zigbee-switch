@@ -83,6 +83,7 @@ def test_client_artifacts_are_separate_and_never_stock_or_auto_indexed():
     assert '"normalOtaIndex": False' in script
     assert '"stockConversion": False' in script
     assert '"pollControlCluster": False' in script
+    assert '"pmEnabled": target == "pm"' in script
     assert '"defaultDebounceMs": 20' in script
     assert '"permitJoinBeforeCanary": True' in script
 
