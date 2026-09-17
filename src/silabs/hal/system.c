@@ -19,4 +19,5 @@ bool hal_role_change_reset(void) {
     hal_factory_reset();
     return true;
 }
+
 #endif

@@ -101,6 +101,7 @@ void process_device_type_change() {
         schedule_reboot(2000);
     }
 }
+
 #endif
 
 void app_init(void) {

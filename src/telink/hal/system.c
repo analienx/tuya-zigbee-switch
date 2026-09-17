@@ -28,4 +28,5 @@ bool hal_role_change_reset(void) {
     }
     return ok;
 }
+
 #endif
