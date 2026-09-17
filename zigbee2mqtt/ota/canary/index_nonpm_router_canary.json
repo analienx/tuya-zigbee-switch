@@ -1,0 +1,13 @@
+[
+  {
+    "fileName": "ts011f-nonpm-v11023001.ota",
+    "fileVersion": 285356033,
+    "fileSize": 194562,
+    "url": "https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/058370d491fc820ca3cc3ce49775529dfa12da4c/zigbee2mqtt/ota/canary/ts011f-nonpm-v11023001.ota",
+    "imageType": 43555,
+    "manufacturerCode": 4417,
+    "sha512": "a8d74aff115ed6682228244e713938d951a5c5f7c5da13eb3c65ad4188ef662e7fcbd9e3d70c3a06d4f1a326c854ae36d180770b7061a6fa4473b510a1114d21",
+    "otaHeaderString": "Telink OTA Image\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
+    "manufacturerName": ["o1jzcxou"]
+  }
+]
