@@ -109,7 +109,7 @@ void bdb_init_callback(u8 status, u8 joinedNetwork) {
         network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
         if (joinedNetwork) {
             ota_queryStart(OTA_QUERY_INTERVAL);
-#ifdef ZB_ED_ROLE
+#if defined(ZB_ED_ROLE) && !defined(BSEED_MAINS_CLIENT)
             zb_setPollRate(POLL_RATE);
 #endif
         }
@@ -128,7 +128,7 @@ void bdb_commissioning_callback(u8 status, void *arg) {
     case BDB_COMMISSION_STA_SUCCESS:
         network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
         ota_queryStart(OTA_QUERY_INTERVAL);
-#ifdef ZB_ED_ROLE
+#if defined(ZB_ED_ROLE) && !defined(BSEED_MAINS_CLIENT)
         // Need set poll rate manually,
         // to avoid bugs related to no poll task
         // after fast re-connect.
@@ -274,7 +274,23 @@ void telink_zigbee_hal_network_init(void) {
 #endif
 
     zb_zdoCbRegister(&zdo_callbacks);
+#ifdef BSEED_MAINS_CLIENT
+    // A mains client is a Zigbee End Device only in the topology sense. Keep
+    // the radio on continuously, advertise mains power, and do not enable the
+    // sleepy-end-device polling model. ZB_MAC_RX_ON_WHEN_IDLE=1 also seeds the
+    // Telink MAC PIB at stack initialization; update the descriptor explicitly
+    // here so the role invariant remains obvious and testable.
+    af_nodeDescRxOnWhenIdleUpdate(1);
+    power_descriptor_t mains_power = {
+        .current_power_mode         = POWER_MODE_RECEIVER_SYNCHRONIZED_WHEN_ON_IDLE,
+        .available_power_sources    = POWER_SRC_MAINS_POWER,
+        .current_power_source       = POWER_SRC_MAINS_POWER,
+        .current_power_source_level = POWER_LEVEL_PERCENT_100,
+    };
+    af_powerDescriptorSet(&mains_power);
+#else
     af_powerDescPowerModeUpdate(POWER_MODE_RECEIVER_COMES_PERIODICALLY);
+#endif
 }
 
 void telink_zigbee_hal_bdb_init(af_simple_descriptor_t *endpoint_descriptor) {
