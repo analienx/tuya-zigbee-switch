@@ -22,7 +22,9 @@ void hal_factory_reset(void) {
     hal_zigbee_leave_network();
 }
 
+#ifdef BSEED_MAINS_CLIENT
 bool hal_role_change_reset(void) {
     hal_factory_reset();
     return true;
 }
+#endif

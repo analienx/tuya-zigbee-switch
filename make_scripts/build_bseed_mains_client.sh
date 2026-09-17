@@ -230,7 +230,7 @@ def git_output(*args: str) -> str:
     return subprocess.check_output(["git", *args], text=True, env=env).strip()
 
 source_commit = git_output("rev-parse", "HEAD")
-source_dirty = bool(git_output("status", "--porcelain"))
+source_dirty = bool(git_output("status", "--porcelain", "--untracked-files=no"))
 manifest = {
     "schema": 2,
     "experimental": True,

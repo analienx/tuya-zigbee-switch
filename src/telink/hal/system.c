@@ -15,14 +15,17 @@ void hal_factory_reset(void) {
     zb_factoryReset();
 }
 
+#ifdef BSEED_MAINS_CLIENT
 bool hal_role_change_reset(void) {
     const nv_module_t modules[] = {
         NV_MODULE_ZB_INFO, NV_MODULE_ADDRESS_TABLE, NV_MODULE_APS,
-        NV_MODULE_ZCL, NV_MODULE_OTA, NV_MODULE_KEYPAIR,
+        NV_MODULE_ZCL,     NV_MODULE_OTA,           NV_MODULE_KEYPAIR,
     };
     bool ok = true;
+
     for (unsigned i = 0; i < sizeof(modules) / sizeof(modules[0]); i++) {
         if (nv_resetModule(modules[i]) != NV_SUCC) ok = false;
     }
     return ok;
 }
+#endif

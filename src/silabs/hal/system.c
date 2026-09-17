@@ -14,7 +14,9 @@ void hal_factory_reset(void) {
     sl_zigbee_clear_binding_table();
 }
 
+#ifdef BSEED_MAINS_CLIENT
 bool hal_role_change_reset(void) {
     hal_factory_reset();
     return true;
 }
+#endif
