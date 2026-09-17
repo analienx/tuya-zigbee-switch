@@ -1,0 +1,13 @@
+[
+  {
+    "fileName": "ts011f-nonpm-client-v1102300d-from-router.ota",
+    "fileVersion": 285356045,
+    "fileSize": 158082,
+    "url": "https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/f80bea355c68b6b5d2890915e9cdeb310799cca2/zigbee2mqtt/ota/canary/ts011f-nonpm-client-v1102300d-from-router.ota",
+    "imageType": 43555,
+    "manufacturerCode": 4417,
+    "sha512": "94703ec230be41e2bd39dd62ba35f2689fc671aceaf32a7d876177efd851a49d89f215fed73f8dc1c8365cfdbd8a1d09c75110eedc31b12dc4502e3560f4d542",
+    "otaHeaderString": "Telink OTA Image\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
+    "manufacturerName": ["o1jzcxou"]
+  }
+]
