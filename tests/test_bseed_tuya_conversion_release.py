@@ -72,6 +72,7 @@ def write_target(
 def test_release_builders_generate_stock_wrappers_from_same_binary() -> None:
     for relative in (
         "make_scripts/build_bseed_ts011f_pm_v8.sh",
+        "make_scripts/build_bseed_ts011f_nonpm_router.sh",
         "make_scripts/build_bseed_ts0726_v8.sh",
     ):
         source = (ROOT / relative).read_text(encoding="utf-8")
@@ -85,6 +86,7 @@ def test_release_builders_generate_stock_wrappers_from_same_binary() -> None:
 
 def test_dedicated_index_has_exact_stock_and_custom_lookup_keys(tmp_path: Path) -> None:
     pm = tmp_path / "pm"
+    nonpm = tmp_path / "nonpm"
     ts = tmp_path / "ts"
     output = tmp_path / "index_bseed.json"
     write_target(
@@ -94,6 +96,14 @@ def test_dedicated_index_has_exact_stock_and_custom_lookup_keys(tmp_path: Path) 
         version=0x12053007,
         custom_type=43556,
         stock_name="_TZ3000_b28wrpvx",
+    )
+    write_target(
+        nonpm,
+        board="OUTLET_BSEED_TS011F",
+        canonical="o1jzcxou;TS011F-BS;",
+        version=0x11023001,
+        custom_type=43555,
+        stock_name="_TZ3000_o1jzcxou",
     )
     write_target(
         ts,
@@ -109,6 +119,8 @@ def test_dedicated_index_has_exact_stock_and_custom_lookup_keys(tmp_path: Path) 
             str(ROOT / "make_scripts/make_bseed_ota_index.py"),
             "--pm-dir",
             str(pm),
+            "--nonpm-dir",
+            str(nonpm),
             "--ts0726-dir",
             str(ts),
             "--output",
@@ -120,7 +132,7 @@ def test_dedicated_index_has_exact_stock_and_custom_lookup_keys(tmp_path: Path) 
         cwd=ROOT,
     )
     entries = json.loads(output.read_text(encoding="utf-8"))
-    assert len(entries) == 4
+    assert len(entries) == 6
     lookup = {
         (entry["manufacturerName"][0], entry["imageType"], entry["fileVersion"])
         for entry in entries
@@ -128,6 +140,8 @@ def test_dedicated_index_has_exact_stock_and_custom_lookup_keys(tmp_path: Path) 
     assert lookup == {
         ("b28wrpvx", 43556, 0x12053007),
         ("_TZ3000_b28wrpvx", 54179, 0xFFFFFFFF),
+        ("o1jzcxou", 43555, 0x11023001),
+        ("_TZ3000_o1jzcxou", 54179, 0xFFFFFFFF),
         ("iedhxgyi", 45577, 0x1102300A),
         ("_TZ3002_iedhxgyi", 54179, 0xFFFFFFFF),
     }
@@ -141,6 +155,8 @@ def test_generic_index_replaces_stale_bseed_and_removes_force_entries(tmp_path: 
     current = [
         {"manufacturerName": ["b28wrpvx"], "imageType": 43556, "fileVersion": 1},
         {"manufacturerName": ["_TZ3000_b28wrpvx"], "imageType": 54179, "fileVersion": 0xFFFFFFFF},
+        {"manufacturerName": ["o1jzcxou"], "imageType": 43555, "fileVersion": 0x11023001},
+        {"manufacturerName": ["_TZ3000_o1jzcxou"], "imageType": 54179, "fileVersion": 0xFFFFFFFF},
         {"manufacturerName": ["iedhxgyi"], "imageType": 45577, "fileVersion": 2},
         {"manufacturerName": ["_TZ3002_iedhxgyi"], "imageType": 54179, "fileVersion": 0xFFFFFFFF},
     ]

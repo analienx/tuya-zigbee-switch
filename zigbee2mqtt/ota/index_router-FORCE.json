@@ -1349,20 +1349,6 @@
   {
     "fileName": "tlc_switch-1.1.2-8542fc05-forced.zigbee",
     "fileVersion": 4294967295,
-    "fileSize": 180978,
-    "url": "https://github.com/romasku/tuya-zigbee-switch/raw/0f2b99e5a0ebd72a2d7c3375cde69db4696e6f00/bin/router/OUTLET_BSEED_TS011F/tlc_switch-1.1.2-8542fc05-forced.zigbee",
-    "imageType": 43555,
-    "manufacturerCode": 4417,
-    "sha512": "87037f3816c1421eb18a639b74e45d0f1925bba6a4bed2f037f87b8cc3589c0729fa0d2a467ff4b26490fb7e903a4d30f73711d28df6b212a03f17d7902d5323",
-    "otaHeaderString": "Telink OTA Image\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
-    "manufacturerName": [
-      "_TZ3000_o1jzcxou",
-      "o1jzcxou"
-    ]
-  },
-  {
-    "fileName": "tlc_switch-1.1.2-8542fc05-forced.zigbee",
-    "fileVersion": 4294967295,
     "fileSize": 180994,
     "url": "https://github.com/romasku/tuya-zigbee-switch/raw/0f2b99e5a0ebd72a2d7c3375cde69db4696e6f00/bin/router/OUTLET_MAKEGOOD_PM_TS011F_2GANG/tlc_switch-1.1.2-8542fc05-forced.zigbee",
     "imageType": 47009,
