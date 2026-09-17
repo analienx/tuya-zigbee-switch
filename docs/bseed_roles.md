@@ -59,6 +59,7 @@ The roles intentionally use separate custom image types.
 |---|---:|---:|
 | BSEED TS011F-PM | `43556` | `65024` (`0xFE00`) |
 | BSEED TS0726 | `45577` | `65025` (`0xFE01`) |
+| BSEED TS011F non-PM | `43555` | `65026` (`0xFE02`) |
 
 Cross-role wrappers use the **currently installed role's image type in the outer OTA header** while carrying the exact compiled payload of the destination role. This lets the currently installed firmware accept the transition without pretending both roles are the same OTA identity.
 
@@ -84,22 +85,18 @@ These checks address the known client-specific failure modes we have identified.
 
 ## Validation status
 
-Current Mains Client implementation candidate:
+Current Mains Client implementation is maintained on the dedicated golden candidate branch and is rebuilt by CI from its exact head.
 
-`68c90171a24f6d24dfbfb4e3979fa0acbfe3ab6b`
-
-Software status on that implementation SHA:
+Software status required before hardware canary:
 
 - normal tests: pass;
 - lint: pass;
 - image-type collision guard: pass;
-- real pinned TC32 PM + TS0726 client builds: pass;
+- real pinned TC32 PM + TS0726 + non-PM TS011F client builds: pass;
 - Router byte-regression gate: pass;
 - second-build reproducibility: pass;
 - Router→Client wrappers: pass;
 - Client→Router rollback wrappers: pass;
 - role and binding contract tests: pass.
-
-Later documentation-only commits may move the branch head without changing those firmware bytes; CI still rebuilds the exact branch head and must retain the same router/client contracts.
 
 The Mains Client remains **hardware-canary pending**. The public production landing page should describe it as a validated candidate until the first real-device Router→Client→Router campaign is accepted. After that canary, native Client images can join the normal BSEED index, the two temporary transition indexes can be published, and the status can be promoted to supported.
