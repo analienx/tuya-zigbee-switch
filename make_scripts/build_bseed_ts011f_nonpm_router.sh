@@ -85,7 +85,14 @@ assert normal['fileVersion'] == file_version
 assert stock['manufacturerCode'] == manufacturer
 assert stock['imageType'] == stock_image_type
 assert stock['fileVersion'] == 0xFFFFFFFF
-assert ota_path.read_bytes()[56:] == stock_path.read_bytes()[56:]
+normal_bytes = ota_path.read_bytes()
+stock_bytes = stock_path.read_bytes()
+if normal_bytes[56:] != stock_bytes[56:]:
+    raise SystemExit('from-Tuya wrapper changed bytes after the 56-byte OTA header')
+diff_offsets = [i for i, (a, b) in enumerate(zip(normal_bytes, stock_bytes)) if a != b]
+expected_offsets = list(range(12, 18))
+if diff_offsets != expected_offsets:
+    raise SystemExit(f'unexpected from-Tuya wrapper diff offsets: {diff_offsets}; expected {expected_offsets}')
 source_commit = subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip()
 source_dirty = bool(subprocess.check_output(['git','status','--porcelain'], text=True).strip())
 manifest = {
@@ -100,11 +107,15 @@ manifest = {
     'sourceDirty': source_dirty,
     'forwardBinSha256': hashlib.sha256(bin_path.read_bytes()).hexdigest(),
     'forwardOta': normal,
+    'otaHeader': normal,
+    'fromTuyaOtaHeader': stock,
     'stockConversion': {
         'stockManufacturerName': stock_name,
         'stockImageType': stock_image_type,
         'outerVersion': 0xFFFFFFFF,
-        'payloadFromByte56Identical': True,
+        'wrapperFileVersion': 0xFFFFFFFF,
+        'headerDiffOffsets': diff_offsets,
+        "payloadFromByte56Identical": True,
         'ota': stock,
     },
 }

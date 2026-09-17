@@ -20,6 +20,7 @@ env:
   BSEED_PM_VERSION_HEX: '12053007'
   BSEED_PM_VERSION_DEC: '302329863'
   BSEED_PM_RELEASE: 'v8u4'
+  BSEED_NONPM_VERSION_DEC: '285356033'
 
 jobs:
   build-bseed-distribution:
@@ -86,13 +87,16 @@ jobs:
 
           pm_names = {'b28wrpvx', '_TZ3000_b28wrpvx'}
           ts0726_names = {'iedhxgyi', '_TZ3002_iedhxgyi'}
+          nonpm_names = {'o1jzcxou', '_TZ3000_o1jzcxou'}
 
           pm_entries = [e for e in generated if e['manufacturerName'][0] in pm_names]
           ts0726_entries = [e for e in previous if e['manufacturerName'][0] in ts0726_names]
+          nonpm_entries = [e for e in previous if e['manufacturerName'][0] in nonpm_names]
           assert len(pm_entries) == 2, pm_entries
           assert len(ts0726_entries) == 2, ts0726_entries
+          assert len(nonpm_entries) in (0, 2), nonpm_entries
 
-          out = pm_entries + ts0726_entries
+          out = pm_entries + nonpm_entries + ts0726_entries
           Path('zigbee2mqtt/ota/index_bseed.json').write_text(
               json.dumps(out, indent=2) + '\n', encoding='utf-8'
           )
@@ -140,8 +144,9 @@ jobs:
 
           entries = json.loads(Path('zigbee2mqtt/ota/index_bseed.json').read_text())
           previous = json.loads(Path('/tmp/index_bseed-before.json').read_text())
-          assert len(entries) == 4
+          assert len(entries) in (4, 6)
           pm_version = int(os.environ['BSEED_PM_VERSION_DEC'])
+          nonpm_version = int(os.environ['BSEED_NONPM_VERSION_DEC'])
           expected = {
               ('b28wrpvx', 43556, pm_version),
               ('_TZ3000_b28wrpvx', 54179, 0xFFFFFFFF),
@@ -149,6 +154,11 @@ jobs:
               ('_TZ3002_iedhxgyi', 54179, 0xFFFFFFFF),
           }
           actual = {(e['manufacturerName'][0], e['imageType'], e['fileVersion']) for e in entries}
+          if len(entries) == 6:
+              expected |= {
+                  ('o1jzcxou', 43555, nonpm_version),
+                  ('_TZ3000_o1jzcxou', 54179, 0xFFFFFFFF),
+              }
           assert actual == expected
 
           old_ts = {

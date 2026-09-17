@@ -8,6 +8,8 @@ from pathlib import Path
 BSEED_MANUFACTURERS = {
     "_TZ3000_b28wrpvx",
     "b28wrpvx",
+    "_TZ3000_o1jzcxou",
+    "o1jzcxou",
     "_TZ3002_iedhxgyi",
     "iedhxgyi",
 }
@@ -35,8 +37,12 @@ parser.add_argument("--force-index", type=Path, required=True)
 args = parser.parse_args()
 
 bseed = load(args.bseed_index)
-if len(bseed) != 4 or any(not is_bseed(entry) for entry in bseed):
-    raise SystemExit("dedicated BSEED index must contain exactly four BSEED entries")
+names = [entry.get("manufacturerName") or [] for entry in bseed]
+if any(len(name_list) != 1 for name_list in names):
+    raise SystemExit("dedicated BSEED entries must each have one exact manufacturerName")
+actual_names = {name_list[0] for name_list in names}
+if actual_names != BSEED_MANUFACTURERS or len(bseed) != len(BSEED_MANUFACTURERS):
+    raise SystemExit(f"dedicated BSEED index has wrong exact manufacturer set: {sorted(actual_names)}")
 
 router = load(args.router_index)
 router_without_stale = [entry for entry in router if not is_bseed(entry)]

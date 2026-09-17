@@ -9,6 +9,7 @@ from pathlib import Path
 
 TARGETS = {
     "OUTLET_BSEED_PM_TS011F": "ts011f-pm",
+    "OUTLET_BSEED_TS011F": "ts011f-nonpm",
     "SWITCH_BSEED_TS0726_3GANG": "ts0726",
 }
 
@@ -101,6 +102,7 @@ def assert_unique(entries: list[dict]) -> None:
 
 parser = argparse.ArgumentParser(description="Generate the dedicated BSEED Zigbee2MQTT OTA index")
 parser.add_argument("--pm-dir", type=Path, required=True)
+parser.add_argument("--nonpm-dir", type=Path)
 parser.add_argument("--ts0726-dir", type=Path, required=True)
 parser.add_argument("--output", type=Path, required=True)
 parser.add_argument(
@@ -109,7 +111,10 @@ parser.add_argument(
 )
 ARGS = parser.parse_args()
 
-entries = make_entries(ARGS.pm_dir) + make_entries(ARGS.ts0726_dir)
+entries = make_entries(ARGS.pm_dir)
+if ARGS.nonpm_dir is not None:
+    entries += make_entries(ARGS.nonpm_dir)
+entries += make_entries(ARGS.ts0726_dir)
 assert_unique(entries)
 ARGS.output.parent.mkdir(parents=True, exist_ok=True)
 ARGS.output.write_text(json.dumps(entries, indent=2) + "\n", encoding="utf-8")
