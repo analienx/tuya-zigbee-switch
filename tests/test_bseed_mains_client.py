@@ -109,7 +109,7 @@ def test_mains_client_recovers_periodic_ota_query_after_abort():
     assert "static hal_task_t ota_abort_query_retry_task;" in ota
     assert "hal_tasks_init(&ota_abort_query_retry_task);" in ota
     assert "ota_abort_query_retry_task.handler = ota_abort_query_retry;" in ota
-    assert "ota_abort_query_retry_task.arg = NULL;" in ota
+    assert "ota_abort_query_retry_task.arg     = NULL;" in ota
     assert "hal_tasks_unschedule(&ota_abort_query_retry_task);" in ota
     assert "hal_tasks_schedule(&ota_abort_query_retry_task," in ota
     assert "OTA_ABORT_QUERY_RETRY_DELAY_MS" in ota
