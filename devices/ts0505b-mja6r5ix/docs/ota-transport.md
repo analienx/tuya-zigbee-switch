@@ -41,3 +41,8 @@ Keep manufacturer and image type fixed and vary one dimension at a time:
 - if size is not causal, version sweep at a conservative fixed size: `+1`, `+0x100`, `+0x10000`.
 
 An `accepted_prebyte=true` result means only that stock firmware requested block 0. The probe aborts immediately and is **not** evidence that the bootloader would accept or activate a candidate.
+
+
+## Replay protection
+
+Every runtime sidecar must use a unique `run_id`. The extension reserves a persistent sentinel before the first Image Notify. If Zigbee2MQTT restarts unexpectedly, the same run ID is blocked instead of replaying the matrix.

@@ -1,5 +1,6 @@
 {
   "target_ieee": "REPLACE_AT_RUNTIME",
+  "run_id": "REPLACE_AT_RUNTIME",
   "manufacturerCode": "0x100B",
   "imageType": "0x020C",
   "waitMs": 20000,

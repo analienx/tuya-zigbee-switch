@@ -17,6 +17,7 @@ def test_probe_never_sends_firmware_payload(tmp_path):
     config = tmp_path / "probe.json"
     config.write_text(json.dumps({
         "target_ieee": "0x00124b0000000001",
+        "run_id": "unit-1",
         "manufacturerCode": "0x100B",
         "imageType": "0x020C",
         "cooldownMs": 5000,
@@ -79,6 +80,14 @@ const statuses = published
 assert.equal(statuses.every((x) => x.payload_bytes_sent === 0), true);
 assert.equal(statuses.some((x) => x.result?.accepted_prebyte === true), true);
 await probe.stop();
+const replay = new mod.default(zigbee, mqtt, null, null, eventBus, null, null, null, null, logger);
+await replay.start();
+assert.equal(calls.filter((x) => x[1] === "imageNotify").length, 1);
+assert.equal(
+  published.some((x) => x[0] === mod.STATUS_TOPIC && JSON.parse(x[1]).state === "blocked-replay"),
+  true,
+);
+await replay.stop();
 """, encoding="utf-8")
 
     completed = subprocess.run(

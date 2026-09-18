@@ -26,6 +26,7 @@ function normalizeCase(input, defaults) {
 function normalizeConfig(raw) {
     if (!raw || typeof raw !== "object") throw new Error("config must be an object");
     if (!raw.target_ieee || !/^0x[0-9a-f]{16}$/i.test(raw.target_ieee)) throw new Error("target_ieee is required");
+    if (!raw.run_id || !/^[A-Za-z0-9._-]{1,64}$/.test(raw.run_id)) throw new Error("run_id is required");
     const defaults = {
         manufacturerCode: parseNumber(raw.manufacturerCode ?? 0x100b, "manufacturerCode"),
         imageType: parseNumber(raw.imageType ?? 0x020c, "imageType"),
@@ -34,6 +35,7 @@ function normalizeConfig(raw) {
     if (!Array.isArray(raw.cases) || raw.cases.length === 0) throw new Error("cases must be non-empty");
     return {
         targetIeee: raw.target_ieee.toLowerCase(),
+        runId: raw.run_id,
         cooldownMs: parseNumber(raw.cooldownMs ?? 1500, "cooldownMs"),
         cases: raw.cases.map((item) => normalizeCase(item, defaults)),
     };
@@ -51,6 +53,7 @@ export default class Ts0505bOtaAcceptanceProbe {
         this.logger = logger;
         this.configPath = process.env.Z2M_TS0505B_OTA_PROBE_CONFIG || DEFAULT_CONFIG;
         this.config = undefined;
+        this.sentinelPath = undefined;
         this.device = undefined;
         this.endpoint = undefined;
         this.prototype = undefined;
@@ -63,6 +66,12 @@ export default class Ts0505bOtaAcceptanceProbe {
 
     async start() {
         this.config = normalizeConfig(JSON.parse(fs.readFileSync(this.configPath, "utf8").replace(/^\uFEFF/, "")));
+        this.sentinelPath = this.configPath + "." + this.config.runId + ".sentinel.json";
+        if (fs.existsSync(this.sentinelPath)) {
+            await this.publishStatus({state: "blocked-replay", run_id: this.config.runId});
+            return;
+        }
+        fs.writeFileSync(this.sentinelPath, JSON.stringify({state: "reserved", run_id: this.config.runId}) + "\n", {encoding: "utf8", flag: "wx"});
         this.device = [...this.zigbee.zhController.getDevicesIterator()]
             .find((item) => item.ieeeAddr?.toLowerCase() === this.config.targetIeee);
         if (!this.device) throw new Error("configured TS0505B OTA probe target not found");
@@ -105,7 +114,8 @@ export default class Ts0505bOtaAcceptanceProbe {
         this.caseIndex += 1;
         if (this.caseIndex >= this.config.cases.length) {
             this.current = undefined;
-            await this.publishStatus({state: "complete", results: this.results});
+            fs.writeFileSync(this.sentinelPath, JSON.stringify({state: "complete", run_id: this.config.runId, results: this.results}, null, 2) + "\n", "utf8");
+            await this.publishStatus({state: "complete", run_id: this.config.runId, results: this.results});
             return;
         }
 
