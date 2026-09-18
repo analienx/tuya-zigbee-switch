@@ -87,7 +87,7 @@ def test_client_artifacts_are_separate_and_never_stock_or_auto_indexed():
     assert "CLIENT_IMAGE_TYPE=65025" in script
     assert "ROUTER_IMAGE_TYPE=43556" in script
     assert "ROUTER_IMAGE_TYPE=45577" in script
-    assert "FILE_VERSION_HEX='0x12053009'" in script
+    assert "FILE_VERSION_HEX='0x1205300A'" in script
     assert "FILE_VERSION_HEX='0x1102300C'" in script
     assert "from-router.ota" in script
     assert "from_tuya" not in script.lower()
@@ -101,6 +101,18 @@ def test_client_artifacts_are_separate_and_never_stock_or_auto_indexed():
     assert '"zigbeeFactoryResetOnRouterToClient": False' in script
     assert '"selectiveZigbeeNvResetOnRoleChange": True' in script
     assert 'git_output("status", "--porcelain", "--untracked-files=no")' in script
+
+
+def test_mains_client_recovers_periodic_ota_query_after_abort():
+    ota = (ROOT / "src/telink/hal/zigbee_ota.c").read_text()
+    assert '#include "hal/tasks.h"' in ota
+    assert "static hal_task_t ota_abort_query_retry_task;" in ota
+    assert "hal_tasks_init(&ota_abort_query_retry_task);" in ota
+    assert "hal_tasks_unschedule(&ota_abort_query_retry_task);" in ota
+    assert "hal_tasks_schedule(&ota_abort_query_retry_task," in ota
+    assert "OTA_ABORT_QUERY_RETRY_DELAY_MS" in ota
+    assert "ota_queryStart(OTA_PERIODIC_QUERY_INTERVAL);" in ota
+    assert "#ifdef BSEED_MAINS_CLIENT" in ota
 
 
 def test_production_router_build_scripts_stay_router_only():
