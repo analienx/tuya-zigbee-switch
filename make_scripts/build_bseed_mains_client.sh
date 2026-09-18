@@ -19,9 +19,9 @@ pm)
     CANONICAL='b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;'
     ROUTER_IMAGE_TYPE=43556
     CLIENT_IMAGE_TYPE=65024
-    SW_BUILD='1.2.5-bseedcli2'
-    FILE_VERSION_HEX='0x12053008'
-    FILE_VERSION_DEC=302329864
+    SW_BUILD='1.2.5-bseedcli3'
+    FILE_VERSION_HEX='0x12053009'
+    FILE_VERSION_DEC=302329865
     DEFAULT_OUT='build/bseed-ts011f-pm-client'
     EXTRA_ARGS=(
         BSEED_PM_B28WRPVX=1
@@ -36,9 +36,9 @@ nonpm)
     CANONICAL='o1jzcxou;TS011F-BS;LC2;SB4u;RC3;ID2;M;'
     ROUTER_IMAGE_TYPE=43555
     CLIENT_IMAGE_TYPE=65026
-    SW_BUILD='1.1.2-bseedcli2'
-    FILE_VERSION_HEX='0x1102300D'
-    FILE_VERSION_DEC=285356045
+    SW_BUILD='1.1.2-bseedcli3'
+    FILE_VERSION_HEX='0x1102300E'
+    FILE_VERSION_DEC=285356046
     DEFAULT_OUT='build/bseed-ts011f-nonpm-client'
     EXTRA_ARGS=()
     ;;
@@ -141,7 +141,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pathlib
+import re
 import struct
 import subprocess
 import sys
@@ -212,8 +214,23 @@ assert diffs == expected_diffs, (
     f"expected {expected_diffs}"
 )
 
-source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-source_dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], text=True).strip())
+def git_output(*args: str) -> str:
+    env = os.environ.copy()
+    dotgit = pathlib.Path(".git")
+    if dotgit.is_file():
+        marker = dotgit.read_text().strip()
+        if marker.startswith("gitdir: "):
+            gitdir = marker[8:].strip()
+            match = re.match(r"^([A-Za-z]):[\\/](.*)$", gitdir)
+            if match and pathlib.Path("/mnt").is_dir():
+                tail = match.group(2).replace("\\", "/")
+                gitdir = f"/mnt/{match.group(1).lower()}/{tail}"
+            env["GIT_DIR"] = gitdir
+            env["GIT_WORK_TREE"] = str(pathlib.Path.cwd())
+    return subprocess.check_output(["git", *args], text=True, env=env).strip()
+
+source_commit = git_output("rev-parse", "HEAD")
+source_dirty = bool(git_output("status", "--porcelain", "--untracked-files=no"))
 manifest = {
     "schema": 2,
     "experimental": True,
@@ -235,7 +252,7 @@ manifest = {
         "rxOnWhenIdle": True,
         "powerSource": "mains",
         "telinkLibrary": "libzb_ed",
-        "pmEnabled": False,
+        "pmEnabled": target == "pm",
         "pollControlCluster": False,
     },
     "binding": {
@@ -249,7 +266,8 @@ manifest = {
     },
     "roleTransition": {
         "storedDeviceTypeChanges": True,
-        "zigbeeFactoryResetOnRouterToClient": True,
+        "zigbeeFactoryResetOnRouterToClient": False,
+        "selectiveZigbeeNvResetOnRoleChange": True,
         "applicationNvClearCalled": False,
         "rejoinExpected": True,
         "permitJoinBeforeCanary": True,

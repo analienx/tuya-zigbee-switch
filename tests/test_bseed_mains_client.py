@@ -64,9 +64,21 @@ def test_client_keeps_exact_same_direct_binding_state_machine_as_router():
 
 def test_router_to_client_transition_resets_network_not_application_nv_module():
     app = (ROOT / "src/app.c").read_text()
+    telink = (ROOT / "src/telink/hal/system.c").read_text()
     assert "stored_device_type != CURRENT_DEVICE_TYPE" in app
+    assert "#ifdef BSEED_MAINS_CLIENT\nstatic bool process_device_type_change" in app
+    assert "hal_role_change_reset()" in app
+    assert app.index("if (process_device_type_change())") < app.index("parse_config();")
+    assert "#else\nvoid process_device_type_change()" in app
+    assert "#ifndef BSEED_MAINS_CLIENT\n    process_device_type_change();" in app
     assert "hal_factory_reset();" in app
     assert "hal_nvm_clear_all" not in app
+    assert "#ifdef BSEED_MAINS_CLIENT\nbool hal_role_change_reset" in telink
+    for module in ["NV_MODULE_ZB_INFO", "NV_MODULE_ADDRESS_TABLE", "NV_MODULE_APS", "NV_MODULE_ZCL", "NV_MODULE_OTA", "NV_MODULE_KEYPAIR"]:
+        assert module in telink
+    reset_body = telink.split("bool hal_role_change_reset(void)", 1)[1]
+    assert "NV_MODULE_APP" not in reset_body
+    assert "NV_MODULE_NWK_FRAME_COUNT" not in reset_body
 
 
 def test_client_artifacts_are_separate_and_never_stock_or_auto_indexed():
@@ -75,7 +87,7 @@ def test_client_artifacts_are_separate_and_never_stock_or_auto_indexed():
     assert "CLIENT_IMAGE_TYPE=65025" in script
     assert "ROUTER_IMAGE_TYPE=43556" in script
     assert "ROUTER_IMAGE_TYPE=45577" in script
-    assert "FILE_VERSION_HEX='0x12053008'" in script
+    assert "FILE_VERSION_HEX='0x12053009'" in script
     assert "FILE_VERSION_HEX='0x1102300C'" in script
     assert "from-router.ota" in script
     assert "from_tuya" not in script.lower()
@@ -83,8 +95,12 @@ def test_client_artifacts_are_separate_and_never_stock_or_auto_indexed():
     assert '"normalOtaIndex": False' in script
     assert '"stockConversion": False' in script
     assert '"pollControlCluster": False' in script
+    assert '"pmEnabled": target == "pm"' in script
     assert '"defaultDebounceMs": 20' in script
     assert '"permitJoinBeforeCanary": True' in script
+    assert '"zigbeeFactoryResetOnRouterToClient": False' in script
+    assert '"selectiveZigbeeNvResetOnRoleChange": True' in script
+    assert 'git_output("status", "--porcelain", "--untracked-files=no")' in script
 
 
 def test_production_router_build_scripts_stay_router_only():
