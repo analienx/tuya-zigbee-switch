@@ -74,6 +74,8 @@ void ota_process_msg_callback(u8 evt, u8 status) {
 void hal_zigbee_init_ota() {
 #ifdef BSEED_MAINS_CLIENT
     hal_tasks_init(&ota_abort_query_retry_task);
+    ota_abort_query_retry_task.handler = ota_abort_query_retry;
+    ota_abort_query_retry_task.arg = NULL;
 #endif
     // This registers OTA cluster in ZCL and does all SDK-internal setup
     ota_init(OTA_TYPE_CLIENT, telink_zigbee_hal_zcl_get_descriptors(),
