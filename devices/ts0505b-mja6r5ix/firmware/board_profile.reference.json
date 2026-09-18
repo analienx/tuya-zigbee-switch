@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "profile": "tuya-zsu-ts0505b-reference",
+  "status": "REFERENCE_ONLY",
+  "deployment_eligible": false,
+  "source": {
+    "kind": "Tuya Lighting Product Development Kit",
+    "url": "https://developer.tuya.com/en/docs/iot-device-dev/tuyaos_zigbee_light_product_development_kit?id=Kd6efghkquo9d",
+    "scope": "TS0505B family reference; not proof of _TZ3210_mja6r5ix production PCB wiring"
+  },
+  "platform": {
+    "module": "ZSU",
+    "soc_primary": "EFR32MG21A020F1024IM32",
+    "soc_documented_alternative": "EFR32MG21A020F768IM32"
+  },
+  "channels": {
+    "red": "PA3",
+    "green": "PD2",
+    "blue": "PC5",
+    "cold_white": "PA4",
+    "warm_white": "PA0"
+  },
+  "electrical_unknowns": [
+    "pwm_frequency",
+    "pwm_polarity",
+    "minimum_duty",
+    "maximum_duty",
+    "channel_power_limits",
+    "production_board_channel_mapping",
+    "safe_reset_output_state"
+  ],
+  "rules": {
+    "custom_runtime_may_not_enable_outputs_from_this_profile": true,
+    "requires_independent_production_board_evidence_before_deployment": true
+  }
+}

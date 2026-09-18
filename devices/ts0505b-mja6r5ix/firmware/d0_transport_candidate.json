@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "name": "d0.1-noled",
+  "status": "transport-research-only",
+  "deployment_ready": false,
+  "outer_ota": {
+    "manufacturer_code": "0x100B",
+    "image_type": "0x020C",
+    "file_version": "0x10003608",
+    "total_image_size": 304602
+  },
+  "artifact_hashes": {
+    "ota_sha256": "55d976078d573aa4dd8833d8af0f000aacbdbef9850bb1e65e1ffe8c4816c549",
+    "gbl_sha256": "eb7332f0576698f4e012e01e8a62e618e8be22174a9c76a482da9c162645b26b",
+    "app_sha256": "a5a0e1d49ca5224894059b999e35b5fa3e0c6f34ac657f72d8787117a7acf0d7"
+  },
+  "gbl": {
+    "application_version": 1,
+    "signed": false,
+    "encrypted": false,
+    "bootloader_upgrade_payload": false,
+    "se_upgrade_payload": false
+  },
+  "program_ranges": [
+    {"start": "0x00004000", "end_exclusive": "0x00004234"},
+    {"start": "0x00004238", "end_exclusive": "0x0004E548"}
+  ],
+  "live_result": "no image block request; zero image bytes transferred",
+  "note": "Artifact bytes are intentionally not distributed from this experimental target."
+}

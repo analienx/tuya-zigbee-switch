@@ -1,0 +1,70 @@
+{
+  "schema_version": 2,
+  "purpose": "unmodified Tuya TS0505B/ZSU reference build control",
+  "status": "PENDING_TUYAOS_LIGHTING_FRAMEWORK",
+  "source": {
+    "application_baseline": "Tuya Lighting Product Development Kit",
+    "public_reference_repo": "tuya/tuya-iotos-embeded-demo-zigbee-sdk-development-course",
+    "public_reference_sha": "cdf8dfe6d545aedd78210da50288c4bf300892f8",
+    "tuyaos_framework_version": null,
+    "tuyaos_framework_sha256": null,
+    "local_application_source_sha": null
+  },
+  "target": {
+    "module": "ZSU",
+    "soc": "EFR32MG21A020F1024IM32",
+    "model_id": "TS0505B",
+    "role": "router",
+    "ota_manufacturer_code": 4098,
+    "ota_image_type": 5634,
+    "identity_scope": "generic_tuya_reference_only",
+    "deployable_to_installed_population": false
+  },
+  "toolchain": {
+    "host": null,
+    "compiler": null,
+    "compiler_version": null,
+    "build_entrypoint": "build_app.sh",
+    "build_command": null,
+    "slt_version": "1.2.1-101",
+    "simplicity_sdk": "2026.6.1",
+    "zigbee_sdk": "9.1.1",
+    "gcc_arm_none_eabi": "14.2.rel1",
+    "environment_recipe": "toolchains/silabs/pkg.slt"
+  },
+  "build": {
+    "application_version": null,
+    "clean_build": true,
+    "success": false,
+    "flash_bytes": null,
+    "ram_bytes": null,
+    "warnings": null
+  },
+  "artifacts": {
+    "qio": {
+      "path": null,
+      "sha256": null,
+      "deployment_eligible": false
+    },
+    "ug": {
+      "path": null,
+      "sha256": null,
+      "classification": null,
+      "ota_manufacturer_code": null,
+      "ota_image_type": null,
+      "ota_file_version": null,
+      "gbl_signed": null,
+      "gbl_encrypted": null
+    }
+  },
+  "live_compatibility": {
+    "live_tuple_checked": true,
+    "live_manufacturer_code": 4107,
+    "live_image_type": 524,
+    "live_file_version": 268449287,
+    "identity_match": false,
+    "compatibility_status": "UNRESOLVED_IDENTITY_MISMATCH",
+    "deployable": false
+  },
+  "scope": "STRUCTURAL_REFERENCE_ONLY"
+}

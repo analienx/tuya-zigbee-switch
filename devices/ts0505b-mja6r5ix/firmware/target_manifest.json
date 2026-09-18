@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "target": "ts0505b-mja6r5ix",
+  "status": "experimental",
+  "deployment_ready": false,
+  "model_id": "TS0505B",
+  "manufacturer_name": "_TZ3210_mja6r5ix",
+  "stock": {
+    "software_build_id": "z.1.0",
+    "application_version": 112,
+    "stack_version": 2,
+    "hardware_version": 0,
+    "logical_type": "router",
+    "endpoint_1": {"profile_id": "0x0104", "device_id": "0x010D"},
+    "ota_query": {
+      "manufacturer_code": "0x100B",
+      "image_type": "0x020C",
+      "file_version": "0x10003607",
+      "field_control": 0,
+      "evidence": "independently observed on multiple matching stock units; no device identifiers retained"
+    }
+  },
+  "tuya_family_reference": {
+    "module": "ZSU",
+    "soc_variants": ["EFR32MG21A020F768IM32", "EFR32MG21A020F1024IM32"],
+    "documented_max_firmware_kib": {
+      "EFR32MG21A020F768IM32": 376,
+      "EFR32MG21A020F1024IM32": 528
+    },
+    "reference_pwm": {
+      "red": "PA3",
+      "green": "PD2",
+      "blue": "PC5",
+      "cold_white": "PA4",
+      "warm_white": "PA0"
+    },
+    "note": "PWM mapping is a Tuya family reference, not proof of a particular production PCB."
+  },
+  "transport": {
+    "ota_only": true,
+    "stock_to_custom_block0_status": "not_yet_accepted",
+    "observed_behavior": "stock client accepts Image Notify / Query Next Image exchange but has not requested image block 0 for the full D0 candidate",
+    "candidate_total_image_bytes": 304602,
+    "size_ceiling_conclusion": "candidate is below Tuya's documented 376 KiB firmware ceiling for the 768 KiB MG21 platform; documented size ceiling alone does not explain pre-block refusal"
+  },
+  "open_blockers": [
+    "pre-byte OTA acceptance policy",
+    "installed flash-density / bootloader contract",
+    "stock bootloader signature/encryption/rollback policy",
+    "production RGB+CCT electrical polarity/PWM limits"
+  ]
+}

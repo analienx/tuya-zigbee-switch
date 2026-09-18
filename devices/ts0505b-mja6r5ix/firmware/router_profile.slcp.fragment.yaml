@@ -1,0 +1,48 @@
+# Simplicity SDK / Zigbee project configuration fragment.
+# Apply to the exact-part project generated from Silicon Labs Z3 Light only
+# after devices/ts0505b-mja6r5ix hardware identity is confirmed.
+#
+# Baseline intent: Simplicity SDK 2026.6.1 / EmberZNet 9.1.1.
+
+configuration:
+  - name: SLI_ZIGBEE_PRIMARY_NETWORK_DEVICE_TYPE
+    value: SLI_ZIGBEE_NETWORK_DEVICE_TYPE_ROUTER
+
+  # Deliberate v0 routing improvement. EmberZNet 9.1 supports 1, 16 or 26.
+  - name: SL_ZIGBEE_NEIGHBOR_TABLE_SIZE
+    value: 26
+
+  # Keep these defaults explicit so accidental "max everything" changes are
+  # visible in review and CI.
+  - name: SL_ZIGBEE_ROUTE_TABLE_SIZE
+    value: 16
+  - name: SL_ZIGBEE_DISCOVERY_TABLE_SIZE
+    value: 8
+  - name: SL_ZIGBEE_ADDRESS_TABLE_SIZE
+    value: 12
+  - name: SL_ZIGBEE_BROADCAST_TABLE_SIZE
+    value: 15
+
+# Required capabilities inherited from the vendor Z3 Light architecture:
+required_components:
+  - zigbee_pro_stack
+  - zigbee_source_route
+  - zigbee_stack_diagnostics
+  - zigbee_counters
+  - zigbee_basic
+  - zigbee_identify
+  - zigbee_groups_server
+  - zigbee_scenes
+  - zigbee_on_off
+  - zigbee_level_control
+  - zigbee_color_control_server
+  - zigbee_network_steering
+  - zigbee_reporting
+  - zigbee_application_bootloader
+
+forbidden_design_choices:
+  - router_as_concentrator
+  - periodic_many_to_one_originator
+  - increased_broadcast_table_without_network_wide_review
+  - guessed_gpio_mapping
+  - guessed_ota_identity
