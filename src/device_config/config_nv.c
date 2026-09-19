@@ -160,6 +160,73 @@ static bool config_pulse_meter_token_valid(const uint8_t *data, uint16_t start,
     return true;
 }
 
+/* EB<TX><RX>[S<baud>][V<n>][A<n>][W<n>]
+ *
+ * UART metering owns two distinct pins. S/V/A/W are optional, unique and
+ * decimal-only. Baud is bounded to a conservative UART range; calibration
+ * multipliers use the same uint32_t domain as EP. */
+static bool config_uart_meter_token_valid(const uint8_t *data, uint16_t start,
+                                          uint16_t len) {
+    if (len < 6 || data[start] != 'E' || data[start + 1] != 'B' ||
+        !config_pin_is_valid(data, start + 2) ||
+        !config_pin_is_valid(data, start + 4) ||
+        config_pin_pair_equal(data, start + 2, start + 4)) {
+        return false;
+    }
+
+    bool     seen_s = false;
+    bool     seen_v = false;
+    bool     seen_a = false;
+    bool     seen_w = false;
+    uint16_t pos    = 6;
+
+    while (pos < len) {
+        uint8_t marker = data[start + pos++];
+        bool *seen = NULL;
+        uint32_t max_value = UINT32_MAX;
+
+        if (marker == 'S') {
+            seen = &seen_s;
+            max_value = 1000000u;
+        } else if (marker == 'V') {
+            seen = &seen_v;
+        } else if (marker == 'A') {
+            seen = &seen_a;
+        } else if (marker == 'W') {
+            seen = &seen_w;
+        } else {
+            return false;
+        }
+
+        if (*seen) {
+            return false;
+        }
+        *seen = true;
+
+        uint16_t digits_start = pos;
+        while (pos < len && data[start + pos] >= '0' &&
+               data[start + pos] <= '9') {
+            pos++;
+        }
+        if (!config_decimal_fits(data, start + digits_start,
+                                 pos - digits_start, max_value)) {
+            return false;
+        }
+
+        if (marker == 'S') {
+            uint32_t baud = 0;
+            for (uint16_t i = digits_start; i < pos; i++) {
+                baud = baud * 10u + (uint32_t)(data[start + i] - '0');
+            }
+            if (baud < 300u) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
 /* OL[C<soft-mA>][P<hard-mA>] -- at least one setting, no duplicates. */
 static bool config_overload_token_valid(const uint8_t *data, uint16_t start,
                                         uint16_t len) {
@@ -407,6 +474,12 @@ bool device_config_resources_are_safe(const uint8_t *data, uint16_t size) {
             } else if (kind == 'E' && len >= 2 &&
                        data[token_start + 1] == 'P') {
                 if (!config_pulse_meter_token_valid(data, token_start, len)) {
+                    return false;
+                }
+                meter_tokens++;
+            } else if (kind == 'E' && len >= 2 &&
+                       data[token_start + 1] == 'B') {
+                if (!config_uart_meter_token_valid(data, token_start, len)) {
                     return false;
                 }
                 meter_tokens++;

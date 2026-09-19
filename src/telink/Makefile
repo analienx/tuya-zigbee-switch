@@ -168,6 +168,7 @@ TELINK_SOURCES := \
 	hal/zigbee_zcl.c \
 	hal/zigbee_ota.c \
 	hal/adc.c \
+	hal/uart.c \
 	libc_polyfills/atoi.c \
 	custom_zcl/zcl_multistate_input.c \
 	custom_zcl/zcl_onoff_configuration.c \
@@ -187,6 +188,7 @@ COMMON_SOURCES := \
 	$(SRC_DIR)/base_components/battery.c \
 	$(SRC_DIR)/base_components/overload_protection.c \
 	$(SRC_DIR)/base_components/energy_measurement/hlw8012.c \
+	$(SRC_DIR)/base_components/energy_measurement/bl0942.c \
 	$(SRC_DIR)/device_config/config_nv.c \
 	$(SRC_DIR)/device_config/device_params_nv.c \
 	$(SRC_DIR)/device_config/reset.c \

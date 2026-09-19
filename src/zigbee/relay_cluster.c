@@ -607,7 +607,16 @@ void relay_cluster_handle_startup_mode(zigbee_relay_cluster *cluster) {
         break;
 
     case ZCL_START_UP_ONOFF_SET_ONOFF_TO_PREVIOUS:
-        if (prev_on) {
+        if (cluster->relay->is_latching) {
+            /*
+             * A magnetic latching contact physically survives MCU/mains
+             * restarts.  "Restore" therefore restores only our logical/NVM
+             * view.  Re-pulsing the coil on every boot is unnecessary wear
+             * and, more importantly, creates an avoidable output transition
+             * before the application is fully initialized.
+             */
+            relay_cluster_set_virtual_state(cluster, prev_on);
+        } else if (prev_on) {
             relay_cluster_on(cluster);
         } else {
             relay_cluster_off(cluster);

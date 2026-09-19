@@ -399,6 +399,28 @@ static int cmd_zcl_cmd_no_activity(int argc, char **argv) {
     return cmd_zcl_cmd_impl(argc, argv, false);
 }
 
+static int cmd_uart_rx(int argc, char **argv) {
+    if (argc < 2 || argc > 65) {
+        io_res_err("usage");
+        return -1;
+    }
+
+    uint8_t payload[64];
+    uint16_t len = 0;
+    for (int i = 1; i < argc; i++) {
+        char *end = NULL;
+        long value = strtol(argv[i], &end, 16);
+        if (*argv[i] == '\0' || *end || value < 0 || value > 0xFF) {
+            io_res_err("bad_payload_byte=%s", argv[i]);
+            return -1;
+        }
+        payload[len++] = (uint8_t)value;
+    }
+    stub_uart_inject_rx(payload, len);
+    io_res_ok("len=%u", len);
+    return 0;
+}
+
 static int cmd_freeze_time(int argc, char **argv) {
     if (argc != 2) {
         fprintf(stderr, "Usage: freeze_time <0|1>\n");
@@ -475,6 +497,7 @@ static const SimpleReplCommand kCmds[] = {
     { "zcl_list_attrs",      cmd_zcl_list_attrs      },
     { "zcl_cmd",             cmd_zcl_cmd             },
     { "zcl_cmd_no_activity", cmd_zcl_cmd_no_activity },
+    { "uart_rx",              cmd_uart_rx              },
     { "freeze_time",         cmd_freeze_time         },
     { "step_time",           cmd_step_time           },
     { "set_battery_voltage", cmd_set_battery_voltage },

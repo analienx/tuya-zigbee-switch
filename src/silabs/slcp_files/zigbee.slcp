@@ -12,6 +12,7 @@ source:
 - {path: ../../silabs/main.c}
 - {path: ../../silabs/hal/zigbee.c}
 - {path: ../../silabs/hal/gpio.c}
+- {path: ../../silabs/hal/uart.c}
 - {path: ../../silabs/hal/nvm.c}
 - {path: ../../silabs/hal/tasks.c}
 - {path: ../../silabs/hal/timer.c}
@@ -22,6 +23,7 @@ source:
 - {path: ../../hal/adc.h}
 - {path: ../../hal/zigbee.h}
 - {path: ../../hal/gpio.h}
+- {path: ../../hal/uart.h}
 - {path: ../../hal/nvm.h}
 - {path: ../../hal/tasks.h}
 - {path: ../../hal/timer.h}
@@ -33,11 +35,18 @@ source:
 - {path: ../../base_components/led.c}
 - {path: ../../base_components/network_indicator.c}
 - {path: ../../base_components/relay.c}
+- {path: ../../base_components/energy_measurement/hlw8012.c}
+- {path: ../../base_components/energy_measurement/bl0942.c}
+- {path: ../../base_components/overload_protection.c}
 - {path: ../../base_components/battery.h}
 - {path: ../../base_components/button.h}
 - {path: ../../base_components/led.h}
 - {path: ../../base_components/network_indicator.h}
 - {path: ../../base_components/relay.h}
+- {path: ../../base_components/energy_meter.h}
+- {path: ../../base_components/energy_measurement/hlw8012.h}
+- {path: ../../base_components/energy_measurement/bl0942.h}
+- {path: ../../base_components/overload_protection.h}
 - {path: ../../device_config/config_nv.c}
 - {path: ../../device_config/config_nv.h}
 - {path: ../../device_config/config_parser.c}
@@ -48,6 +57,8 @@ source:
 - {path: ../../device_config/reset.c}
 - {path: ../../device_config/reset.h}
 - {path: ../../device_config/nvm_migrations.c}
+- {path: ../../device_config/device_migration.c}
+- {path: ../../device_config/pm_legacy_migration.c}
 - {path: ../../zigbee/basic_cluster.c}
 - {path: ../../zigbee/battery_cluster.c}
 - {path: ../../zigbee/general_commands.c}
@@ -56,6 +67,8 @@ source:
 - {path: ../../zigbee/switch_cluster.c}
 - {path: ../../zigbee/cover_switch_cluster.c}
 - {path: ../../zigbee/cover_cluster.c}
+- {path: ../../zigbee/electrical_measurement_cluster.c}
+- {path: ../../zigbee/metering_cluster.c}
 - {path: ../../zigbee/battery_cluster.h}
 - {path: ../../zigbee/basic_cluster.h}
 - {path: ../../zigbee/cluster_common.h}
@@ -77,6 +90,9 @@ component:
   id: cli
 - {id: gpiointerrupt}
 - {id: emlib_iadc}
+- {id: emlib_cmu}
+- {id: emlib_core}
+- {id: emlib_usart}
 - {id: iostream_recommended_stream}
 - { instance: [inst], id: iostream_usart}
 - {id: toolchain_gcc}

@@ -345,3 +345,31 @@ def test_startup_matrix_detached_off(
         assert first_enable_level(d, RELAY_PIN) == 0
         assert not d.get_gpio(RELAY_PIN, refresh=True)
         assert d.zcl_relay_get(RELAY_ENDPOINT) == expected_virtual
+
+
+@pytest.mark.parametrize("previous_state", [0, 1])
+def test_latching_attached_previous_restores_without_coil_pulse(
+    previous_state: int,
+) -> None:
+    """Restore on a latching relay must trust the retained contact state.
+
+    The physical relay is already latched across the MCU restart; issuing a
+    fresh SET/RESET pulse here would be both unnecessary and potentially
+    disruptive during early boot.
+    """
+    seed_physical_mode(ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED)
+    seed_relay_record(on_off=previous_state, startup_mode=STARTUP_PREVIOUS)
+
+    with StubProc(device_config=LATCHING_DEVICE_CONFIG) as proc:
+        d = Device(proc)
+        assert first_enable_level(d, RELAY_PIN) == 0
+        assert first_enable_level(d, RELAY_OFF_COIL_PIN) == 0
+        assert not d.get_gpio(RELAY_PIN, refresh=True)
+        assert not d.get_gpio(RELAY_OFF_COIL_PIN, refresh=True)
+        assert d.zcl_relay_get(RELAY_ENDPOINT) == str(previous_state)
+
+        # Advancing beyond the normal 100 ms latch pulse window must not
+        # reveal a deferred pulse either.
+        d.step_time(300)
+        assert not d.get_gpio(RELAY_PIN, refresh=True)
+        assert not d.get_gpio(RELAY_OFF_COIL_PIN, refresh=True)

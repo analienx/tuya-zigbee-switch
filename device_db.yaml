@@ -256,6 +256,34 @@ DIN_RELAY_TUYA_TS011F_PM:
   info: Power monitoring not implemented
   threads: https://github.com/romasku/tuya-zigbee-switch/pull/428
   store: https://www.aliexpress.com/item/1005008782778996.html
+DIN_RELAY_TONGOU_TOQSY2_163JZT:
+  human_name: Tongou TO-Q-SY2-163JZT breaker PM
+  category: din_relay
+  power: mains
+  neutral: required
+  output: relay
+  device_type: router
+  stock_model_name: TS011F
+  stock_manufacturer_name: _TZ3000_cayepv1a
+  stock_converter_manufacturer: Tongou
+  stock_converter_model: TS011F_with_threshold
+  override_z2m_device: TO-Q-SY2-163JZT
+  tuya_module: ZSU
+  mcu_family: Silabs
+  mcu: EFR32MG21A020F1024IM32
+  config_str: cayepv1a;TS011F-TOQSY2;TQ;LC3;SD1u;RA4;IC2;EBA5A6;OLC63000P65000;M;
+  alt_config_str: null
+  old_manufacturer_names: null
+  old_zb_models: null
+  stock_manufacturer_id: null
+  stock_image_type: null
+  firmware_image_type: 47115
+  power_monitoring: true
+  build: no
+  status: in_progress
+  info: "Research target for _TZ3000_cayepv1a / TO-Q-SY2-163JZT. ZSU/EFR32MG21 platform and PA5/PA6 BL0942 UART path are strongly supported by Tuya/FCC/public-port evidence. Candidate relay PA4, button PD1 and LEDs PC3/PC2 remain canary-gated. Firmware caps are 63 A continuous / 65 A peak; these are software limits only, not a replacement for certified breaker protection. Stock OTA tuple 4098/5634 is intentionally not enabled for migration packaging while the Tuya/Silabs stock bootloader signature requirement remains unresolved."
+  threads: https://github.com/Koenkk/zigbee-herdsman-converters/pull/5555
+  store: https://www.zigbee2mqtt.io/devices/TO-Q-SY2-163JZT.html
 MODULE_AUBESS_TS0001:
   human_name: Aubess WHD02
   category: module

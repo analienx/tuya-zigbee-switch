@@ -75,13 +75,17 @@ MIG_FORWARD_IN_PROGRESS = 1
 MIG_FORWARD_COMPLETE = 2
 MIG_REVERT_IN_PROGRESS = 3
 
-STUB_BINARY = Path("build/stub/stub_device")
+# Migration variants must not replace the default simulator while other
+# pytest modules are exercising it.  These tests compile multiple firmware
+# variants at runtime and deliberately switch between them.
+STUB_BINARY = Path("build/stub/stub_device_migration")
 
 
 def build_stub(**flags: str | None) -> None:
     if shutil.which("make") is None:
         pytest.skip("make is required to build the stub device")
     env = dict(os.environ)
+    env["BINARY"] = "../../build/stub/stub_device_migration"
     env.update({key: value for key, value in flags.items() if value is not None})
     subprocess.run(
         ["make", "-C", "src/stub", "build"],
@@ -101,7 +105,7 @@ def forward_stub() -> Iterator[None]:
 @contextmanager
 def booted(device_config: str | None = None) -> Iterator[Device]:
     """Boot the stub. ``device_config=None`` keeps whatever NV already holds."""
-    with StubProc(device_config=device_config) as proc:
+    with StubProc(cmd=[str(STUB_BINARY)], device_config=device_config) as proc:
         yield Device(proc)
 
 
