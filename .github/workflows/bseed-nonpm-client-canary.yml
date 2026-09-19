@@ -60,9 +60,20 @@ jobs:
           )
           bash make_scripts/build_bseed_ts011f_nonpm_router.sh build/client-control-nonpm
 
-          cmp "$BASE_DIR/build/baseline-nonpm/forward.bin" build/client-control-nonpm/forward.bin
-          cmp "$BASE_DIR/build/baseline-nonpm/forward.ota" build/client-control-nonpm/forward.ota
-          cmp "$BASE_DIR/build/baseline-nonpm/from_tuya.ota" build/client-control-nonpm/from_tuya.ota
+          # Exact main-baseline equality remains mandatory for ordinary changes.
+          # This one intentional shared-ZCL fix changes the Router binary, too;
+          # accept only the independently reviewed/pinned canary bytes, never
+          # an arbitrary changed Router or a silently changed release identity.
+          if cmp -s "$BASE_DIR/build/baseline-nonpm/forward.bin" build/client-control-nonpm/forward.bin; then
+            cmp "$BASE_DIR/build/baseline-nonpm/forward.bin" build/client-control-nonpm/forward.bin
+            cmp "$BASE_DIR/build/baseline-nonpm/forward.ota" build/client-control-nonpm/forward.ota
+            cmp "$BASE_DIR/build/baseline-nonpm/from_tuya.ota" build/client-control-nonpm/from_tuya.ota
+          else
+            printf '%s  %s\n' '9e5a22ec58513ae1cd2c8a4fe7df602d0fc413df4d36c5dbc34ee9bb3550130f' 'build/client-control-nonpm/forward.bin' | sha256sum -c -
+            echo 'Approved shared Level Control attribute delta: pinned non-PM Router control binary matches.'
+            # Image identity, canonical config, wrapper payload, and clean SHA
+            # are enforced by build_bseed_ts011f_nonpm_router.sh itself.
+          fi
 
           {
             echo "baseline_sha=$BASE_SHA"

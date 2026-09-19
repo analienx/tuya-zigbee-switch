@@ -48,6 +48,9 @@
 #define POWER_SOURCE_BATTERY                                            0x03
 #define POWER_SOURCE_DC                                                 0x04
 
+// Level Control cluster (server-side read of the binary relay level)
+#define ZCL_ATTR_LEVEL_CURRENT_LEVEL                                    0x0000
+
 // OnOff cluster
 #define ZCL_ATTR_ONOFF                                                  0x0000
 #define ZCL_ATTR_START_UP_ONOFF                                         0x4003
