@@ -1,10 +1,33 @@
 {
   "schema_version": 1,
   "purpose": "Public, device-agnostic evidence ledger; claims require independent supporting records",
-  "installed_platform_and_memory": {"status": "unverified", "evidence": null},
-  "prebyte_ota_acceptance": {"status": "unverified", "evidence": null},
-  "stock_application_properties": {"status": "unverified", "evidence": null},
-  "bootloader_policy": {"status": "unverified", "evidence": null},
-  "recoverability": {"status": "unverified", "evidence": null},
-  "lighting_behavior": {"status": "unverified", "evidence": null}
+  "installed_platform_and_memory": {
+    "status": "unverified",
+    "evidence": null
+  },
+  "prebyte_ota_acceptance": {
+    "status": "partial_metadata_only",
+    "evidence": "devices/ts0505b-mja6r5ix/evidence/ota-prebyte-size64k-20260919.json",
+    "observed_metadata_size_bytes": 65536,
+    "full_candidate_size_bytes": 304602,
+    "full_candidate_prebyte_acceptance": "unverified",
+    "same_transport_size_threshold": "unverified",
+    "note": "Block zero was requested and aborted before payload for a 64-KiB metadata offer only; this is not full-candidate flash readiness."
+  },
+  "stock_application_properties": {
+    "status": "unverified",
+    "evidence": null
+  },
+  "bootloader_policy": {
+    "status": "unverified",
+    "evidence": null
+  },
+  "recoverability": {
+    "status": "unverified",
+    "evidence": null
+  },
+  "lighting_behavior": {
+    "status": "unverified",
+    "evidence": null
+  }
 }

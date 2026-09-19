@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-19",
+  "scope": "single stock TS0505B unit; identifiers and home-specific data retained only in private runtime evidence",
+  "purpose": "metadata-only OTA transport acceptance, not application/bootloader validation",
+  "stock": {"model": "TS0505B", "manufacturer": "_TZ3210_mja6r5ix", "application_version": 112, "software_build_id": "z.1.0", "ota_file_version": "0x10003607"},
+  "offer": {"manufacturer_code": "0x100B", "image_type": "0x020C", "file_version": "0x10003608", "advertised_image_size_bytes": 65536},
+  "result": {"query_next_image_seen": true, "image_block_zero_requested": true, "image_block_response_status": "0x95 ABORT", "firmware_payload_bytes_sent": 0},
+  "controls": {"automatic_ota_disabled": true, "old_target_schedule_cleared": true, "one_case_one_run_id": true, "probe_sha256": "62e69d034ba58c984cf056bb17343d49f91d8a51b5fbb8a0e3e8d236ad86000a"},
+  "postflight": {"stock_application_version": 112, "stock_software_build_id": "z.1.0", "availability": "online", "zigbee2mqtt": "started", "live_probe_removed": true, "target_runtime_sidecar_removed": true, "replay_sentinel_preserved_privately": true, "target_firmware_artifact_absent": true},
+  "interpretation": "Stock OTA client requested block zero for this metadata offer. This is not proof of an acceptable GBL, functional lighting image, bootloader support, rollback or installed platform compatibility.",
+  "comparison_limit": "The earlier 304602-byte offer used a different Zigbee2MQTT OTA-serving path; this observation alone does not establish an image-size acceptance threshold. A same-path comparison is needed.",
+  "deployment_ready": false
+}
