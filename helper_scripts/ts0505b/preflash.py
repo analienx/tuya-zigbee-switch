@@ -106,6 +106,18 @@ def readiness_blockers(target: dict, frozen: dict, board: dict, proof: dict,
         blockers += artifact_errors
     if frozen.get("deployment_ready") is not True or target.get("deployment_ready") is not True:
         blockers.append("candidate and target are explicitly marked experimental / not deployable")
+    if board.get("deployment_eligible") is True:
+        validation = board.get("production_board_validation", {})
+        channels = validation.get("channels", {})
+        if (validation.get("status") != "independently_verified"
+                or not validation.get("evidence")
+                or not isinstance(channels, dict)
+                or any(not isinstance(channels.get(channel), dict)
+                       or channels[channel].get("verified") is not True
+                       or not channels[channel].get("driver_path_evidence")
+                       or channels[channel].get("safe_reset_verified") is not True
+                       for channel in ("red", "green", "blue", "cold_white", "warm_white"))):
+            blockers.append("production RGB+CCT channel/driver/reset evidence missing; reference GPIO labels alone do not authorize outputs")
     if board.get("deployment_eligible") is not True:
         blockers.append("physical RGB+CCT board mapping/polarity/PWM/safe startup not verified")
     for key, description in (
