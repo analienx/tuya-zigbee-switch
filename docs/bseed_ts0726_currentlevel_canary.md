@@ -1,0 +1,9 @@
+# BSEED TS0726 CurrentLevel canary — one-device acceptance
+
+Target: `LivingRoomMainDimmer` / `0xa4c13843a9d40f85`, **not** the other living-room light dimmers. Live Zigbee2MQTT on 2026-09-19 shows TS0726-3-BS Router, installed `1.1.8-bseedv8`, `CurrentLevel` reads returning `UNSUPPORTED_ATTRIBUTE` on relay endpoints 5 and 6. Switch endpoints 1–3 have outbound/client Level Control only; relay endpoints 4–6 have inbound/server Level Control.
+
+The merged source correction is in `main` commit `8027fb7b`. The existing production OTA index intentionally remains on `0x1102300A`; do not repackage changed bytes under that version. The separately opted-in candidate uses manufacturer 4417, image type 45577, file version `0x1102300D`, build ID `1.1.9-bseedlevel1`, canonical TS0726 pin/config layout and unchanged NVM schema. The candidate builder only builds; the dedicated Actions workflow uploads an isolated artifact and does not update a public OTA index or flash anything.
+
+Before a one-device OTA, preserve current IEEE address, binding and group tables, device configuration, installed image identity, relay modes, and the current accepted `0x1102300A` OTA as a rollback image. Validate artifact manifest, source SHA, exact target identity, and rollback availability. **No reset/re-pair and no group or binding rewrite.** Do not let a generic index advertise this canary to unrelated devices.
+
+After an explicitly controlled OTA, read `genLevelCtrl.currentLevel` on relay endpoints 4, 5 and 6. Each must return 0 (logical off) or 254 (logical on) consistently with `genOnOff.onOff`. Verify switch endpoints 1–3 remain Level Control clients, existing direct bindings and group dimming remain functional, and detached physical relay/LED policies behave as configured. A binary-relay `CurrentLevel` is not the actual brightness of a bound dimmable light. Check Zigbee2MQTT logs for recurring unsupported-attribute and route failures before wider rollout.
