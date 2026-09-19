@@ -1,6 +1,7 @@
 import binascii
 import struct
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 import click
@@ -212,6 +213,100 @@ def create_ota(
     )
     with open(output_file, "wb") as f:
         f.write(ota_image)
+
+
+@cli.command("reseal-ota")
+@click.argument("input_file", type=click.Path(exists=True))
+@click.argument("output_file", type=click.Path())
+@click.option("--manufacturer-id", type=INT_OR_HEX, required=True)
+@click.option("--source-image-type", type=INT_OR_HEX, required=True)
+@click.option("--source-file-version", type=INT_OR_HEX, required=True)
+@click.option("--image-type", type=INT_OR_HEX, required=True)
+@click.option("--file-version", type=INT_OR_HEX, required=True)
+def reseal_ota(
+    input_file: str,
+    output_file: str,
+    manufacturer_id: int,
+    source_image_type: int,
+    source_file_version: int,
+    image_type: int,
+    file_version: int,
+) -> None:
+    """Rewrite only OTA identity fields while preserving the payload byte-for-byte."""
+    source = bytes(open(input_file, "rb").read())
+    if len(source) < OTA_HDR_STRUCT.size:
+        raise click.ClickException("input is shorter than the Zigbee OTA header")
+
+    values = OTA_HDR_STRUCT.unpack(source[: OTA_HDR_STRUCT.size])
+    (
+        magic,
+        _,
+        header_length,
+        _,
+        manufacturer,
+        current_image,
+        current_version,
+        _,
+        _,
+        total,
+    ) = values
+    if magic != ZIGBEE_OTA_MAGIC:
+        raise click.ClickException("input does not have a Zigbee OTA header")
+    if header_length != OTA_HDR_STRUCT.size:
+        raise click.ClickException(f"unsupported OTA header length: {header_length}")
+    if total != len(source):
+        raise click.ClickException(f"OTA total size mismatch: header={total}, actual={len(source)}")
+    if manufacturer != manufacturer_id:
+        raise click.ClickException(
+            f"manufacturer mismatch: expected {manufacturer_id}, found {manufacturer}"
+        )
+    if current_image != source_image_type:
+        raise click.ClickException(
+            f"source image type mismatch: expected {source_image_type}, found {current_image}"
+        )
+    if current_version != source_file_version:
+        raise click.ClickException(
+            f"source file version mismatch: expected {source_file_version}, found {current_version}"
+        )
+
+    resealed = bytearray(source)
+    resealed[12:14] = image_type.to_bytes(2, byteorder="little")
+    resealed[14:18] = file_version.to_bytes(4, byteorder="little")
+    resealed = bytes(resealed)
+
+    if resealed[OTA_HDR_STRUCT.size :] != source[OTA_HDR_STRUCT.size :]:
+        raise click.ClickException("reseal changed OTA payload bytes")
+    diffs = [i for i, (a, b) in enumerate(zip(source, resealed)) if a != b]
+    expected_diffs = [
+        *[
+            12 + i
+            for i, (a, b) in enumerate(
+                zip(
+                    source_image_type.to_bytes(2, "little"),
+                    image_type.to_bytes(2, "little"),
+                )
+            )
+            if a != b
+        ],
+        *[
+            14 + i
+            for i, (a, b) in enumerate(
+                zip(
+                    source_file_version.to_bytes(4, "little"),
+                    file_version.to_bytes(4, "little"),
+                )
+            )
+            if a != b
+        ],
+    ]
+    if diffs != expected_diffs:
+        raise click.ClickException(
+            f"unexpected OTA byte differences: {diffs}; expected {expected_diffs}"
+        )
+
+    output = Path(output_file)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(resealed)
 
 
 if __name__ == "__main__":
