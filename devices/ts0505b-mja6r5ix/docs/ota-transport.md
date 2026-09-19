@@ -73,3 +73,12 @@ One additional single-case run used the same SHA-256-matched metadata-only exten
 The largest **observed** accepted metadata size is now 196,608 bytes. The advertised 304,602-byte candidate size did not elicit a block request in the same window. This **does not** establish a precise or monotonic threshold, the size of the installed OTA slot, or bootloader compatibility. A single-case **256-KiB (262,144-byte)** no-payload probe is the next useful size discriminator. Keep `deployment_ready=false` regardless of metadata-only results.
 
 Both temporary probe files were removed after the run; the single-use result sentinel was preserved privately. The bulb remained online on stock app 112 / `z.1.0`, and unrelated Zigbee2MQTT OTA assets were not touched.
+
+## Slim reference result (2026-09-19)
+
+The 304,602-byte D0 is retained as historical negative evidence only. The
+reduced-build OTA has 183,234 bytes, and a one-case, one-device metadata-only
+offer of that exact size elicited block 0. The probe returned `ABORT (0x95)`
+without sending candidate data. This resolves the **observed metadata-entry
+blocker for the compact size**, not the OEM GBL validation or installation
+contract. See `../evidence/ota-prebyte-size183234-20260919.json`.
