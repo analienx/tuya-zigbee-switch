@@ -1,5 +1,7 @@
 # TS0505B hardware identification and recovery — evidence contract
 
+> **Superseded hardware hypothesis:** the three RGB+CCT modules have since been reported as ZTU (Telink Z2/TLSR8258-compatible). The ZSU/SWD/MG21 procedure below applies **only** to a separately confirmed ZSU device, NOT to the ZTU bulbs. Use [ZTU flash-image plan](ztu-telink-flash-plan.md) and the Telink SWire interface instead.
+
 **Status: external reference only; no production bulb has been opened, electrically traced, or identified.** The stock Zigbee identity identifies a product family, not its exact chip, module, bootloader, or LED-driver board.
 
 ## 1. Module candidate, not measured target
