@@ -104,6 +104,7 @@ void relay_cluster_add_to_endpoint(zigbee_relay_cluster *cluster,
         relay_cluster_store_binding_intent_to_nv(cluster);
     }
     sync_indicator_led(cluster);
+    cluster->current_level = cluster->relay->on ? 254 : 0;
 
     SETUP_ATTR(0, ZCL_ATTR_ONOFF, ZCL_DATA_TYPE_BOOLEAN, ATTR_READONLY,
                cluster->relay->on);
@@ -129,9 +130,15 @@ void relay_cluster_add_to_endpoint(zigbee_relay_cluster *cluster,
         relay_cluster_callback_trampoline;
     endpoint->cluster_count++;
 
+    // Relay level is binary, not a physical dimming output. Expose a readable
+    // logical 0/254 level because this endpoint accepts MoveToLevelWithOnOff.
+    // This is separate from the switch input endpoints (Level Control clients).
+    SETUP_ATTR_FOR_TABLE(cluster->level_attr_infos, 0,
+                         ZCL_ATTR_LEVEL_CURRENT_LEVEL, ZCL_DATA_TYPE_UINT8,
+                         ATTR_READONLY, cluster->current_level);
     endpoint->clusters[endpoint->cluster_count].cluster_id      = ZCL_CLUSTER_LEVEL_CONTROL;
-    endpoint->clusters[endpoint->cluster_count].attribute_count = 0;
-    endpoint->clusters[endpoint->cluster_count].attributes      = NULL;
+    endpoint->clusters[endpoint->cluster_count].attribute_count = 1;
+    endpoint->clusters[endpoint->cluster_count].attributes      = cluster->level_attr_infos;
     endpoint->clusters[endpoint->cluster_count].is_server       = 1;
     endpoint->clusters[endpoint->cluster_count].cmd_callback    =
         relay_cluster_level_callback_trampoline;
@@ -312,8 +319,12 @@ void relay_cluster_toggle(zigbee_relay_cluster *cluster) {
 
 void relay_cluster_on_relay_change(zigbee_relay_cluster *cluster,
                                    uint8_t state) {
+    cluster->current_level = state ? 254 : 0;
     hal_zigbee_notify_attribute_changed(cluster->endpoint, ZCL_CLUSTER_ON_OFF,
                                         ZCL_ATTR_ONOFF);
+    hal_zigbee_notify_attribute_changed(cluster->endpoint,
+                                        ZCL_CLUSTER_LEVEL_CONTROL,
+                                        ZCL_ATTR_LEVEL_CURRENT_LEVEL);
     if (cluster->startup_mode == ZCL_START_UP_ONOFF_SET_ONOFF_TOGGLE ||
         cluster->startup_mode == ZCL_START_UP_ONOFF_SET_ONOFF_TO_PREVIOUS) {
         relay_cluster_store_attrs_to_nv(cluster);

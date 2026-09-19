@@ -15,6 +15,8 @@ typedef struct {
     uint8_t              indicator_led_mode;
     uint8_t              physical_relay_mode;
     uint8_t              binding_intent_state;
+    uint8_t              current_level;
+    hal_zigbee_attribute level_attr_infos[1];
     hal_zigbee_attribute attr_infos[6];
     relay_t *            relay;
     led_t *              indicator_led;
