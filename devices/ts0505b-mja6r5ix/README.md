@@ -24,7 +24,7 @@ This directory contains reusable firmware and OTA-transport work only. It intent
 - metadata-only Zigbee OTA acceptance probe under `zigbee2mqtt/extensions/`
 The physical-output hook remains intentionally inert until production-board polarity, PWM frequency and safe reset levels are independently proven.
 
-## Current OTA blocker
+## Historical full-size OTA blocker
 
 A stock client was offered a structurally valid custom image with a newer outer Zigbee OTA version. It completed Image Notify / Query Next Image exchange but did not request image block 0. Post-attempt OTA attributes remained idle and no candidate bytes were staged.
 
@@ -37,3 +37,16 @@ See [OTA transport research](docs/ota-transport.md).
 ## Offline preflash gate
 
 See [preflash contract](docs/preflash.md). The currently frozen D0 is a dark diagnostic artifact, not a lighting-capable production image; the fail-closed release gate remains red.
+
+## Compact candidate: transport entry demonstrated
+
+The [slim reference project](firmware/slim_reference/) builds an 183,234-byte
+experimental full-image OTA for both MG21 flash-density templates. A stock
+client requested block 0 when this exact size was offered by the metadata-only
+probe; the probe aborted and no firmware payload bytes were sent. See the
+[anonymized evidence](evidence/ota-prebyte-size183234-20260919.json). The
+[offline build recipe](../../helper_scripts/ts0505b/build_slim.py) produces
+variant-specific hashes and marks both builds *not deployable*.
+
+**Do not flash:** Installed silicon density, installed bootloader/rollback
+policy, verified physical RGB+CCT output and recovery remain unproven.

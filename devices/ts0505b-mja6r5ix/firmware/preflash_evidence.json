@@ -20,6 +20,13 @@
       "full_candidate_advertised_size_bytes": 304602,
       "full_size_block0_not_seen_within_seconds": 45,
       "monotonic_threshold_unverified": true
+    },
+    "compact_candidate": {
+      "advertised_image_size_bytes": 183234,
+      "image_block_zero_requested": true,
+      "actual_candidate_bytes_sent": 0,
+      "evidence": "devices/ts0505b-mja6r5ix/evidence/ota-prebyte-size183234-20260919.json",
+      "scope": "exact size, metadata only; no installed bootloader/GBL validation"
     }
   },
   "stock_application_properties": {

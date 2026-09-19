@@ -11,7 +11,10 @@
     "stack_version": 2,
     "hardware_version": 0,
     "logical_type": "router",
-    "endpoint_1": {"profile_id": "0x0104", "device_id": "0x010D"},
+    "endpoint_1": {
+      "profile_id": "0x0104",
+      "device_id": "0x010D"
+    },
     "ota_query": {
       "manufacturer_code": "0x100B",
       "image_type": "0x020C",
@@ -22,7 +25,10 @@
   },
   "tuya_family_reference": {
     "module": "ZSU",
-    "soc_variants": ["EFR32MG21A020F768IM32", "EFR32MG21A020F1024IM32"],
+    "soc_variants": [
+      "EFR32MG21A020F768IM32",
+      "EFR32MG21A020F1024IM32"
+    ],
     "documented_max_firmware_kib": {
       "EFR32MG21A020F768IM32": 376,
       "EFR32MG21A020F1024IM32": 528
@@ -41,7 +47,19 @@
     "stock_to_custom_block0_status": "not_yet_accepted",
     "observed_behavior": "stock client accepts Image Notify / Query Next Image exchange but has not requested image block 0 for the full D0 candidate",
     "candidate_total_image_bytes": 304602,
-    "size_ceiling_conclusion": "candidate is below Tuya's documented 376 KiB firmware ceiling for the 768 KiB MG21 platform; documented size ceiling alone does not explain pre-block refusal"
+    "size_ceiling_conclusion": "candidate is below Tuya's documented 376 KiB firmware ceiling for the 768 KiB MG21 platform; documented size ceiling alone does not explain pre-block refusal",
+    "compact_reference": {
+      "outer_ota_size_bytes": 183234,
+      "application_bin_size_bytes": 183088,
+      "ota_version": "0x10003608",
+      "internal_application_version": "0x10003608",
+      "prebyte_metadata_acceptance": "observed_block0_aborted_zero_bytes",
+      "chip_templates_tested": [
+        768,
+        1024
+      ],
+      "actual_download_bootloader_acceptance": "unverified"
+    }
   },
   "open_blockers": [
     "pre-byte OTA acceptance policy",

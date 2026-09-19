@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-19",
+  "scope": "one stock TS0505B, private target identifiers excluded",
+  "purpose": "pre-byte OTA acceptance of the exact compact reference package size",
+  "stock": {
+    "model": "TS0505B",
+    "manufacturer": "_TZ3210_mja6r5ix",
+    "application_version": 112,
+    "software_build_id": "z.1.0",
+    "ota_file_version": "0x10003607"
+  },
+  "offer": {
+    "manufacturer_code": "0x100B",
+    "image_type": "0x020C",
+    "file_version": "0x10003608",
+    "advertised_image_size_bytes": 183234
+  },
+  "result": {
+    "query_next_image_seen": true,
+    "image_block_zero_requested": true,
+    "image_block_response_status": "0x95 ABORT",
+    "firmware_payload_bytes_sent": 0,
+    "reason": "block_request_aborted"
+  },
+  "controls": {
+    "one_case_one_run_id": true,
+    "metadata_only": true,
+    "activation_hold_active": true,
+    "probe_sha256": "62e69d034ba58c984cf056bb17343d49f91d8a51b5fbb8a0e3e8d236ad86000a"
+  },
+  "postflight": {
+    "availability": "online",
+    "zigbee2mqtt": "started",
+    "live_probe_removed": true,
+    "private_target_sidecar_removed": true,
+    "replay_sentinel_preserved_privately": true,
+    "other_ota_artifacts_untouched": true
+  },
+  "interpretation": "Stock client requested block 0 for the exact compact D0 image size. This does not establish that downloaded GBL content, installed bootloader acceptance, recovery, or production lighting is functional.",
+  "deployment_ready": false
+}
