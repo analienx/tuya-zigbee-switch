@@ -48,3 +48,14 @@ An `accepted_prebyte=true` result means only that stock firmware requested block
 Every runtime sidecar must use a unique `run_id`, set `armed=true` locally, and configure global automatic OTA checks disabled. The extension reserves a persistent sentinel before the first Image Notify. If Zigbee2MQTT restarts unexpectedly, the same run ID is blocked instead of replaying an offer.
 
 A run with `query_seen=false` is inconclusive, not evidence of a rejected image. Never publish firmware data or deploy a candidate from a metadata-only result.
+
+## Same-path 64-KiB versus full-size comparison (2026-09-19)
+
+Both one-case runs used the same source-hashed metadata-only probe, one stock TS0505B, manufacturer `0x100B`, image type `0x020C`, and offered version `0x10003608`. Both received the stock Query Next Image request; no firmware payload bytes were sent.
+
+| Advertised bytes | Block 0 requested? | Observation/result |
+| ---: | :---: | --- |
+| 65,536 | Yes | Aborted immediately with OTA `0x95` |
+| 304,602 | No | No block request within 45 seconds |
+
+The same-path discrepancy supports a size-sensitive stock acceptance or storage-policy gate **under the tested conditions**, but does not establish a monotonic size threshold, an exact slot capacity, or why the client declined the larger offer. The documented 376-KiB MG21 firmware build ceiling is not evidence of the installed device's OTA staging capacity. Next, use single-case, zero-payload probes around 128/192/256 KiB and compare identical offer paths before attempting any firmware transfer. Bootloader policy, board outputs, stock rollback and candidate installation remain unverified.
