@@ -42,6 +42,7 @@ SOURCES := \
 	$(SRC_DIR)/stub/hal/tasks.c \
 	$(SRC_DIR)/stub/hal/nvm.c \
 	$(SRC_DIR)/stub/hal/adc.c \
+	$(SRC_DIR)/stub/hal/uart.c \
 	$(SRC_DIR)/stub/hal/zigbee.c \
 	$(SRC_DIR)/stub/hal/ota.c \
 	$(SRC_DIR)/stub/simple_repl.c \
@@ -55,6 +56,7 @@ SOURCES := \
 	$(SRC_DIR)/base_components/network_indicator.c \
 	$(SRC_DIR)/base_components/overload_protection.c \
 	$(SRC_DIR)/base_components/energy_measurement/hlw8012.c \
+	$(SRC_DIR)/base_components/energy_measurement/bl0942.c \
 	$(SRC_DIR)/device_config/config_parser.c \
 	$(SRC_DIR)/device_config/config_nv.c \
 	$(SRC_DIR)/device_config/device_params_nv.c \

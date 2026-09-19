@@ -13,6 +13,9 @@ uint8_t stub_gpio_has_initial_output(hal_gpio_pin_t gpio_pin);
 uint8_t stub_gpio_get_initial_output(hal_gpio_pin_t gpio_pin);
 void stub_set_pulse_counter(hal_gpio_pin_t gpio_pin, uint32_t value);
 
+// UART stub functions
+void stub_uart_inject_rx(const uint8_t *data, uint16_t len);
+
 // Tasks stub functions
 void stub_tasks_poll(void);
 
