@@ -10,9 +10,11 @@
     "evidence": "devices/ts0505b-mja6r5ix/evidence/ota-prebyte-size64k-20260919.json",
     "observed_metadata_size_bytes": 65536,
     "full_candidate_size_bytes": 304602,
-    "full_candidate_prebyte_acceptance": "unverified",
-    "same_transport_size_threshold": "unverified",
-    "note": "Block zero was requested and aborted before payload for a 64-KiB metadata offer only; this is not full-candidate flash readiness."
+    "full_candidate_prebyte_acceptance": "not_observed_after_45s_using_same_probe",
+    "same_transport_size_threshold": "not_established",
+    "note": "The same metadata-only probe elicited block zero at 65,536 advertised bytes but no block request in 45 s at 304,602 bytes. This is partial transport evidence, not full candidate or bootloader readiness.",
+    "comparison_evidence": "devices/ts0505b-mja6r5ix/evidence/ota-prebyte-size304602-20260919.json",
+    "same_transport_size_effect_observed": true
   },
   "stock_application_properties": {
     "status": "unverified",

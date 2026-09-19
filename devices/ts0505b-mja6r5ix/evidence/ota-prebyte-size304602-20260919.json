@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-19",
+  "scope": "single stock TS0505B; household identifiers and live traces excluded",
+  "purpose": "same-path metadata-only OTA comparison, not firmware payload or bootloader validation",
+  "stock": {
+    "model": "TS0505B",
+    "manufacturer": "_TZ3210_mja6r5ix",
+    "application_version": 112,
+    "software_build_id": "z.1.0",
+    "ota_file_version": "0x10003607"
+  },
+  "offer": {
+    "manufacturer_code": "0x100B",
+    "image_type": "0x020C",
+    "file_version": "0x10003608",
+    "advertised_image_size_bytes": 304602
+  },
+  "result": {
+    "query_next_image_seen": true,
+    "image_block_zero_requested": false,
+    "observation_window_seconds": 45,
+    "image_block_response_status": null,
+    "firmware_payload_bytes_sent": 0,
+    "reason": "no_block_request"
+  },
+  "controls": {
+    "automatic_ota_disabled": true,
+    "one_case_one_run_id": true,
+    "metadata_only": true,
+    "probe_sha256": "62e69d034ba58c984cf056bb17343d49f91d8a51b5fbb8a0e3e8d236ad86000a"
+  },
+  "postflight": {
+    "stock_application_version": 112,
+    "stock_software_build_id": "z.1.0",
+    "availability": "online",
+    "zigbee2mqtt": "started",
+    "live_probe_removed": true,
+    "target_runtime_sidecar_removed": true,
+    "replay_sentinel_preserved_privately": true,
+    "target_firmware_artifact_absent": true,
+    "other_ota_artifacts_untouched": true
+  },
+  "comparison": {
+    "evidence": "devices/ts0505b-mja6r5ix/evidence/ota-prebyte-size64k-20260919.json",
+    "same_probe_sha256": true,
+    "same_target": true,
+    "same_manufacturer_image_type_version": true,
+    "size_65536_block_zero_requested": true,
+    "size_304602_block_zero_requested": false,
+    "interpretation": "Observed size-dependent pre-byte behavior under the same transport; precise threshold, timing variability and internal acceptance policy remain unresolved."
+  },
+  "deployment_ready": false
+}
