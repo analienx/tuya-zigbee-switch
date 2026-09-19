@@ -607,6 +607,7 @@ void relay_cluster_handle_startup_mode(zigbee_relay_cluster *cluster) {
         break;
 
     case ZCL_START_UP_ONOFF_SET_ONOFF_TO_PREVIOUS:
+#ifndef HAL_TELINK
         if (cluster->relay->is_latching) {
             /*
              * A magnetic latching contact physically survives MCU/mains
@@ -616,7 +617,9 @@ void relay_cluster_handle_startup_mode(zigbee_relay_cluster *cluster) {
              * before the application is fully initialized.
              */
             relay_cluster_set_virtual_state(cluster, prev_on);
-        } else if (prev_on) {
+        } else
+#endif
+        if (prev_on) {
             relay_cluster_on(cluster);
         } else {
             relay_cluster_off(cluster);

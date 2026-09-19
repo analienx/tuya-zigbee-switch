@@ -182,8 +182,11 @@ void parse_config() {
      * always wins over the board compatibility fallback. */
 #ifdef BSEED_PM_B28WRPVX
     bool has_explicit_energy_token =
-        strstr((const char *)device_config_str.data, ";EP") != NULL ||
-        strstr((const char *)device_config_str.data, ";EB") != NULL;
+        strstr((const char *)device_config_str.data, ";EP") != NULL;
+#ifndef HAL_TELINK
+    has_explicit_energy_token = has_explicit_energy_token ||
+                                strstr((const char *)device_config_str.data, ";EB") != NULL;
+#endif
 #endif
 
     char *      cursor          = (char *)device_config_str.data;
@@ -224,15 +227,20 @@ void parse_config() {
     }
 #endif
 
-    bool     has_dedicated_status_led = false;
-    bool     tongou_compat            = false;
+    bool has_dedicated_status_led = false;
+#ifndef HAL_TELINK
+    bool tongou_compat = false;
+#endif
     uint16_t debounce_ms = DEBOUNCE_DELAY_MS;
     char *   entry;
     for (entry = extract_next_entry(&cursor); *entry != '\0';
          entry = extract_next_entry(&cursor)) {
+#ifndef HAL_TELINK
         if (entry[0] == 'T' && entry[1] == 'Q' && entry[2] == '\0') {
             tongou_compat = true;
-        } else if (entry[0] == 'S' && entry[1] == 'L' && entry[2] == 'P') {
+        } else
+#endif
+        if (entry[0] == 'S' && entry[1] == 'L' && entry[2] == 'P') {
             allow_simultaneous_latching_pulses = 1;
         } else if (entry[0] == 'D' && entry[1] >= '0' && entry[1] <= '9') {
             debounce_ms = (uint16_t)parse_int(entry + 1);
@@ -417,8 +425,8 @@ void parse_config() {
                 printf("Config: explicit pulse meter CF=%04x CF1=%04x SEL=%04x\r\n",
                        cf_pin, cf1_pin, sel_pin);
             }
+#ifndef HAL_TELINK
         } else if (entry[0] == 'E' && entry[1] == 'B') {
-#if defined(HAL_SILABS) || defined(HAL_STUB)
             hal_gpio_pin_t tx_pin = hal_gpio_parse_pin(entry + 2);
             hal_gpio_pin_t rx_pin = hal_gpio_parse_pin(entry + 4);
             const char *   opts   = entry + 6;
@@ -451,6 +459,7 @@ void parse_config() {
         }
     }
 
+#ifndef HAL_TELINK
     if (tongou_compat && energy_monitoring_enabled) {
         if (!metering_cluster_set_divisor(&metering_cluster_inst, 100)) {
             printf("Tongou: failed to set stock metering divisor\r\n");
@@ -458,6 +467,7 @@ void parse_config() {
             printf("Tongou: stock-compatible metering divisor=100\r\n");
         }
     }
+#endif
 
     peripherals_init();
 

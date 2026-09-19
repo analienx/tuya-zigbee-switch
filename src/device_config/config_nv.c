@@ -480,6 +480,7 @@ bool device_config_resources_are_safe(const uint8_t *data, uint16_t size) {
                     return false;
                 }
                 meter_tokens++;
+#ifndef HAL_TELINK
             } else if (kind == 'E' && len >= 2 &&
                        data[token_start + 1] == 'B') {
 #if defined(HAL_SILABS) || defined(HAL_STUB)
@@ -490,6 +491,7 @@ bool device_config_resources_are_safe(const uint8_t *data, uint16_t size) {
 #else
                 /* UART metering is not implemented on this platform. */
                 return false;
+#endif
 #endif
             } else if (kind == 'O' && len >= 2 &&
                        data[token_start + 1] == 'L') {

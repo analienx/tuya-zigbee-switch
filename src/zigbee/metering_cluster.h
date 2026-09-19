@@ -13,8 +13,10 @@ typedef struct {
     uint8_t              unit_of_measure;
     uint32_t             multiplier;
     uint32_t             divisor;
+#ifndef HAL_TELINK
     uint16_t             wire_wh_per_unit;
     uint16_t             pending_wh;
+#endif
     uint8_t              summation_formatting;
     uint8_t              metering_device_type;
     uint8_t              reset_trigger;
@@ -26,7 +28,11 @@ typedef struct {
 } metering_cluster_t;
 
 void metering_cluster_init(metering_cluster_t *cluster, energy_meter_t *meter);
+
+#ifndef HAL_TELINK
 bool metering_cluster_set_divisor(metering_cluster_t *cluster, uint32_t divisor);
+
+#endif
 void metering_cluster_add_to_endpoint(metering_cluster_t *cluster,
                                       hal_zigbee_endpoint *endpoint);
 void metering_cluster_update(metering_cluster_t *cluster);

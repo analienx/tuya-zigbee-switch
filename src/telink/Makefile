@@ -168,7 +168,6 @@ TELINK_SOURCES := \
 	hal/zigbee_zcl.c \
 	hal/zigbee_ota.c \
 	hal/adc.c \
-	hal/uart.c \
 	libc_polyfills/atoi.c \
 	custom_zcl/zcl_multistate_input.c \
 	custom_zcl/zcl_onoff_configuration.c \
