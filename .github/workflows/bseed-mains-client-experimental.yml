@@ -66,10 +66,20 @@ jobs:
           bash make_scripts/build_bseed_ts011f_pm_v8.sh build/client-control-pm
           bash make_scripts/build_bseed_ts0726_v8.sh build/client-control-ts0726
 
-          cmp "$BASE_DIR/build/baseline-pm/forward.bin" build/client-control-pm/forward.bin
-          cmp "$BASE_DIR/build/baseline-pm/forward.ota" build/client-control-pm/forward.ota
-          cmp "$BASE_DIR/build/baseline-ts0726/forward.bin" build/client-control-ts0726/forward.bin
-          cmp "$BASE_DIR/build/baseline-ts0726/forward.ota" build/client-control-ts0726/forward.ota
+          # Normal client-only changes must preserve both Router images exactly.
+          # The reviewed shared ZCL correction intentionally changes both;
+          # allow only the pinned, separately compiled PM/TS0726 binaries.
+          if cmp -s "$BASE_DIR/build/baseline-pm/forward.bin" build/client-control-pm/forward.bin && cmp -s "$BASE_DIR/build/baseline-ts0726/forward.bin" build/client-control-ts0726/forward.bin; then
+            cmp "$BASE_DIR/build/baseline-pm/forward.bin" build/client-control-pm/forward.bin
+            cmp "$BASE_DIR/build/baseline-pm/forward.ota" build/client-control-pm/forward.ota
+            cmp "$BASE_DIR/build/baseline-ts0726/forward.bin" build/client-control-ts0726/forward.bin
+            cmp "$BASE_DIR/build/baseline-ts0726/forward.ota" build/client-control-ts0726/forward.ota
+          else
+            printf '%s  %s\n' 'e4c6fa0bed8d3397478d8b03ed49c5d9efb11679848105af800f67285b21f281' 'build/client-control-pm/forward.bin' 'd0bf912352bf0bfc8c984ab4438ca5d1fd3fc665b1dc3dd1b3e254a5d8e155ae' 'build/client-control-ts0726/forward.bin' | sha256sum -c -
+            echo 'Accepted only the pinned PM and TS0726 shared-ZCL Router control binaries.'
+            # Both target scripts have already checked board identity, OTA
+            # header, normal/stock wrapper payload equality and clean-source SHA.
+          fi
 
           {
             echo "baseline_sha=$BASE_SHA"
