@@ -59,3 +59,17 @@ Both one-case runs used the same source-hashed metadata-only probe, one stock TS
 | 304,602 | No | No block request within 45 seconds |
 
 The same-path discrepancy supports a size-sensitive stock acceptance or storage-policy gate **under the tested conditions**, but does not establish a monotonic size threshold, an exact slot capacity, or why the client declined the larger offer. The documented 376-KiB MG21 firmware build ceiling is not evidence of the installed device's OTA staging capacity. Next, use single-case, zero-payload probes around 128/192/256 KiB and compare identical offer paths before attempting any firmware transfer. Bootloader policy, board outputs, stock rollback and candidate installation remain unverified.
+
+## Same-path 192-KiB probe (2026-09-19)
+
+One additional single-case run used the same SHA-256-matched metadata-only extension, stock target, manufacturer `0x100B`, image type `0x020C`, and offered version `0x10003608`. The only deliberate change from the 304,602-byte run was its advertised image size: **196,608 bytes**.
+
+| Advertised bytes | Query Next Image seen? | Block 0 requested? | Outcome |
+| ---: | :---: | :---: | --- |
+| 65,536 | Yes | Yes | First block aborted with OTA `0x95`; zero firmware bytes |
+| 196,608 | Yes | Yes | First block aborted with OTA `0x95`; zero firmware bytes |
+| 304,602 | Yes | No | No block request within the 45-second observation window; zero firmware bytes |
+
+The largest **observed** accepted metadata size is now 196,608 bytes. The advertised 304,602-byte candidate size did not elicit a block request in the same window. This **does not** establish a precise or monotonic threshold, the size of the installed OTA slot, or bootloader compatibility. A single-case **256-KiB (262,144-byte)** no-payload probe is the next useful size discriminator. Keep `deployment_ready=false` regardless of metadata-only results.
+
+Both temporary probe files were removed after the run; the single-use result sentinel was preserved privately. The bulb remained online on stock app 112 / `z.1.0`, and unrelated Zigbee2MQTT OTA assets were not touched.

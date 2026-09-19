@@ -7,14 +7,20 @@
   },
   "prebyte_ota_acceptance": {
     "status": "partial_metadata_only",
-    "evidence": "devices/ts0505b-mja6r5ix/evidence/ota-prebyte-size64k-20260919.json",
-    "observed_metadata_size_bytes": 65536,
+    "evidence": "devices/ts0505b-mja6r5ix/evidence/ota-prebyte-size196608-20260919.json",
+    "observed_metadata_size_bytes": 196608,
     "full_candidate_size_bytes": 304602,
     "full_candidate_prebyte_acceptance": "not_observed_after_45s_using_same_probe",
     "same_transport_size_threshold": "not_established",
-    "note": "The same metadata-only probe elicited block zero at 65,536 advertised bytes but no block request in 45 s at 304,602 bytes. This is partial transport evidence, not full candidate or bootloader readiness.",
+    "note": "The same one-device metadata-only probe elicited block zero at 65,536 and 196,608 bytes, but no block request within 45 seconds at 304,602 bytes. Storage limits, exact threshold and bootloader acceptance remain unverified.",
     "comparison_evidence": "devices/ts0505b-mja6r5ix/evidence/ota-prebyte-size304602-20260919.json",
-    "same_transport_size_effect_observed": true
+    "same_transport_size_effect_observed": true,
+    "observed_size_comparison": {
+      "largest_observed_prebyte_acceptance_bytes": 196608,
+      "full_candidate_advertised_size_bytes": 304602,
+      "full_size_block0_not_seen_within_seconds": 45,
+      "monotonic_threshold_unverified": true
+    }
   },
   "stock_application_properties": {
     "status": "unverified",
