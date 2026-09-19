@@ -188,7 +188,6 @@ COMMON_SOURCES := \
 	$(SRC_DIR)/base_components/battery.c \
 	$(SRC_DIR)/base_components/overload_protection.c \
 	$(SRC_DIR)/base_components/energy_measurement/hlw8012.c \
-	$(SRC_DIR)/base_components/energy_measurement/bl0942.c \
 	$(SRC_DIR)/device_config/config_nv.c \
 	$(SRC_DIR)/device_config/device_params_nv.c \
 	$(SRC_DIR)/device_config/reset.c \

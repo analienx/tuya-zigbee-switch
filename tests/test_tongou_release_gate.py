@@ -25,3 +25,13 @@ def test_tongou_is_not_present_in_existing_ota_indices():
         contents = path.read_text(encoding="utf-8")
         assert "cayepv1a" not in contents, path
         assert "TS011F-TOQSY2" not in contents, path
+
+
+def test_bl0942_is_not_linked_into_telink_firmware():
+    """Prevent the 64-bit Silabs BL0942 driver from breaking BSEED TC32 builds."""
+    telink_makefile = (ROOT / "src/telink/Makefile").read_text(encoding="utf-8")
+    assert "base_components/energy_measurement/bl0942.c" not in telink_makefile
+    parser = (ROOT / "src/device_config/config_parser.c").read_text(encoding="utf-8")
+    assert "#if defined(HAL_SILABS) || defined(HAL_STUB)" in parser
+    preflight = (ROOT / "src/device_config/config_nv.c").read_text(encoding="utf-8")
+    assert "UART metering is not implemented on this platform" in preflight

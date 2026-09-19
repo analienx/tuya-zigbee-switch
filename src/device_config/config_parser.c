@@ -21,7 +21,9 @@
 #include "base_components/network_indicator.h"
 #include "base_components/battery.h"
 #include "base_components/energy_measurement/hlw8012.h"
+#if defined(HAL_SILABS) || defined(HAL_STUB)
 #include "base_components/energy_measurement/bl0942.h"
+#endif
 #include "config_nv.h"
 #include "device_config/device_params_nv.h"
 #include "device_config/reset.h"
@@ -75,8 +77,10 @@ battery_t battery = {
     .voltage_max =            3000,
 };
 
-static hlw8012_t       hlw8012_device;
-static bl0942_t        bl0942_device;
+static hlw8012_t hlw8012_device;
+#if defined(HAL_SILABS) || defined(HAL_STUB)
+static bl0942_t bl0942_device;
+#endif
 static energy_meter_t *energy_meter = NULL;
 static electrical_measurement_cluster_t elec_meas_cluster;
 static metering_cluster_t metering_cluster_inst;
@@ -121,6 +125,7 @@ static bool init_hlw8012_energy_meter(hal_gpio_pin_t cf_pin,
     return true;
 }
 
+#if defined(HAL_SILABS) || defined(HAL_STUB)
 static bool init_bl0942_energy_meter(hal_gpio_pin_t tx_pin,
                                      hal_gpio_pin_t rx_pin,
                                      uint32_t baudrate,
@@ -154,6 +159,8 @@ static bool init_bl0942_energy_meter(hal_gpio_pin_t tx_pin,
     energy_monitoring_endpoint = 1;
     return true;
 }
+
+#endif
 
 void on_reset_clicked(void *_) {
     hal_factory_reset();
@@ -411,6 +418,7 @@ void parse_config() {
                        cf_pin, cf1_pin, sel_pin);
             }
         } else if (entry[0] == 'E' && entry[1] == 'B') {
+#if defined(HAL_SILABS) || defined(HAL_STUB)
             hal_gpio_pin_t tx_pin = hal_gpio_parse_pin(entry + 2);
             hal_gpio_pin_t rx_pin = hal_gpio_parse_pin(entry + 4);
             const char *   opts   = entry + 6;
@@ -429,6 +437,7 @@ void parse_config() {
                 printf("Config: explicit BL0942 meter TX=%04x RX=%04x\r\n",
                        tx_pin, rx_pin);
             }
+#endif
         } else if (entry[0] == 'O' && entry[1] == 'L') {
             if (energy_monitoring_enabled) {
                 const char *c = seek_until(entry + 2, 'C');

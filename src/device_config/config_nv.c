@@ -165,6 +165,7 @@ static bool config_pulse_meter_token_valid(const uint8_t *data, uint16_t start,
  * UART metering owns two distinct pins. S/V/A/W are optional, unique and
  * decimal-only. Baud is bounded to a conservative UART range; calibration
  * multipliers use the same uint32_t domain as EP. */
+#if defined(HAL_SILABS) || defined(HAL_STUB)
 static bool config_uart_meter_token_valid(const uint8_t *data, uint16_t start,
                                           uint16_t len) {
     if (len < 6 || data[start] != 'E' || data[start + 1] != 'B' ||
@@ -226,6 +227,8 @@ static bool config_uart_meter_token_valid(const uint8_t *data, uint16_t start,
 
     return true;
 }
+
+#endif
 
 /* OL[C<soft-mA>][P<hard-mA>] -- at least one setting, no duplicates. */
 static bool config_overload_token_valid(const uint8_t *data, uint16_t start,
@@ -479,10 +482,15 @@ bool device_config_resources_are_safe(const uint8_t *data, uint16_t size) {
                 meter_tokens++;
             } else if (kind == 'E' && len >= 2 &&
                        data[token_start + 1] == 'B') {
+#if defined(HAL_SILABS) || defined(HAL_STUB)
                 if (!config_uart_meter_token_valid(data, token_start, len)) {
                     return false;
                 }
                 meter_tokens++;
+#else
+                /* UART metering is not implemented on this platform. */
+                return false;
+#endif
             } else if (kind == 'O' && len >= 2 &&
                        data[token_start + 1] == 'L') {
                 if (!config_overload_token_valid(data, token_start, len)) {
