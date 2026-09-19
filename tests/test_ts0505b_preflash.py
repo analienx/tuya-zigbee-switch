@@ -89,3 +89,15 @@ def test_cli_cannot_claim_ready_without_independent_evidence():
     assert report["status"] == "NOT_READY"
     assert report["artifact_verified"] is False
     assert any("bootloader" in blocker for blocker in report["blockers"])
+
+
+def test_compressed_or_unknown_program_range_fails_closed():
+    blob, frozen, target = make_artifact()
+    altered = bytearray(blob)
+    marker = struct.pack("<I", 0xFD0303FD)
+    index = altered.find(marker)
+    assert index > 0
+    altered[index:index + 4] = struct.pack("<I", 0xFD0505FD)
+    errors = inspect_candidate(bytes(altered), frozen, target)
+    assert any("unexpected tags" in item for item in errors)
+    assert any("program range" in item for item in errors)

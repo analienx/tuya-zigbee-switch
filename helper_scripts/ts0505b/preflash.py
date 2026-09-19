@@ -93,7 +93,7 @@ def inspect_candidate(blob: bytes, frozen: dict, target: dict) -> list[str]:
     for index, (begin, end) in enumerate(actual):
         if end is None or begin < 0x4000 or end <= begin or end > 0xAC000:
             errors.append(f"program range {index} exceeds conservative reference envelope")
-        if index and begin < actual[index - 1][1]:
+        if index and actual[index - 1][1] is not None and begin < actual[index - 1][1]:
             errors.append(f"program range {index} overlaps prior range")
     return errors
 
