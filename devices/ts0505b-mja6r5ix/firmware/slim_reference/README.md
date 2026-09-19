@@ -1,3 +1,5 @@
+**ARCHIVED PLATFORM MISMATCH:** The module identified for the three RGB+CCT bulbs is ZTU/Telink, not EFR32MG21. This Silicon Labs reference can only be used for historical comparison, never as a ZTU firmware/OTA payload.
+
 # Slim TS0505B reference build (experimental; do not flash)
 
 This project uses Silicon Labs Simplicity SDK **2026.6.1** to build a minimal

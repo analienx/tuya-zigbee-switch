@@ -66,5 +66,17 @@
     "installed flash-density / bootloader contract",
     "stock bootloader signature/encryption/rollback policy",
     "production RGB+CCT electrical polarity/PWM limits"
-  ]
+  ],
+  "physical_hardware": {
+    "reported_module": "ZTU",
+    "module_evidence": "user-reported marking on three bulbs; one photograph shows ZTU on the module",
+    "chip_platform": "Telink Z2/TLSR8258-compatible per ZTU manufacturer documentation",
+    "physical_to_live_mqtt_identity": "requires per-unit reconciliation",
+    "driver_chip_and_channel_mapping": "not_verified_on_ZTU_bulbs"
+  },
+  "legacy_efr32_reference": {
+    "status": "NOT_COMPATIBLE_WITH_REPORTED_ZTU_HARDWARE",
+    "software_research_retained": true,
+    "silabs_gbl_ota_must_not_be_offered_to_ztu": true
+  }
 }

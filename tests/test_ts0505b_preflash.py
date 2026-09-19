@@ -124,3 +124,13 @@ def test_board_validation_requires_all_five_traced_channels():
     board["production_board_validation"] = {"status": "independently_verified", "evidence": "local-measurement", "channels": {}}
     blockers = readiness_blockers(target, frozen, board, proof, artifact_errors=[])
     assert any("channel/driver/reset evidence missing" in item for item in blockers)
+
+
+def test_legacy_gbl_is_architecture_blocked_on_reported_ztu():
+    frozen = json.loads((FAMILY / "d0_transport_candidate.json").read_text())
+    target = json.loads((FAMILY / "target_manifest.json").read_text())
+    board = json.loads((FAMILY / "board_profile.reference.json").read_text())
+    proof = json.loads((FAMILY / "preflash_evidence.json").read_text())
+    assert target["physical_hardware"]["reported_module"] == "ZTU"
+    blockers = readiness_blockers(target, frozen, board, proof, artifact_errors=[])
+    assert any("ARCHITECTURE_MISMATCH" in item for item in blockers)

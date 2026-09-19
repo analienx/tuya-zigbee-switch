@@ -1,5 +1,7 @@
 # TS0505B / `_TZ3210_mja6r5ix` RGB+CCT light
 
+**Hardware correction (2026-09-19):** three inspected light modules are reported as **ZTU (Telink Z2/TLSR8258-compatible)**. The legacy Silicon Labs EFR32MG21/GBL experiments are **not compatible flash images for these bulbs**. Their metadata-only OTA results do not prove payload compatibility. See [ZTU flash-image research](docs/ztu-telink-flash-plan.md); no image is flash-ready.
+
 Experimental Silicon Labs target for the Tuya `TS0505B` extended-color light family.
 
 This directory contains reusable firmware and OTA-transport work only. It intentionally excludes household device names, IEEE addresses, room names, local filesystem paths, and per-home Zigbee telemetry.

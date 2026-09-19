@@ -104,6 +104,8 @@ def readiness_blockers(target: dict, frozen: dict, board: dict, proof: dict,
         blockers.append("frozen OTA bytes were not supplied for byte-for-byte verification")
     else:
         blockers += artifact_errors
+    if target.get("physical_hardware", {}).get("reported_module") == "ZTU" and frozen.get("gbl") is not None:
+        blockers.append("ARCHITECTURE_MISMATCH: Silicon Labs GBL/EFR32 image cannot run on reported ZTU Telink Z2/TLSR8258 hardware")
     if frozen.get("deployment_ready") is not True or target.get("deployment_ready") is not True:
         blockers.append("candidate and target are explicitly marked experimental / not deployable")
     if board.get("deployment_eligible") is True:
