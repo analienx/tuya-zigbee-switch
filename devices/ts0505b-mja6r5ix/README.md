@@ -50,3 +50,7 @@ variant-specific hashes and marks both builds *not deployable*.
 
 **Do not flash:** Installed silicon density, installed bootloader/rollback
 policy, verified physical RGB+CCT output and recovery remain unproven.
+
+## Physical board and recovery evidence
+
+The generic kit PWM pin example conflicts with the ZSU datasheet on PD02; see [hardware identification and recovery](docs/hardware-identification.md). No debug probe was connected during the research, and reference pad names do not establish actual production wiring. Keep the output and flash-readiness gates closed until physical evidence is available.

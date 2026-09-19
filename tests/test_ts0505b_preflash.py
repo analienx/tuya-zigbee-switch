@@ -101,3 +101,26 @@ def test_compressed_or_unknown_program_range_fails_closed():
     errors = inspect_candidate(bytes(altered), frozen, target)
     assert any("unexpected tags" in item for item in errors)
     assert any("program range" in item for item in errors)
+
+
+def test_board_reference_cannot_be_approved_by_one_boolean():
+    frozen = json.loads((FAMILY / "d0_transport_candidate.json").read_text())
+    target = json.loads((FAMILY / "target_manifest.json").read_text())
+    board = json.loads((FAMILY / "board_profile.reference.json").read_text())
+    proof = json.loads((FAMILY / "preflash_evidence.json").read_text())
+    board["deployment_eligible"] = True
+    blockers = readiness_blockers(target, frozen, board, proof, artifact_errors=[])
+    assert any("channel/driver/reset evidence missing" in item for item in blockers)
+    assert board["module_datasheet_crosscheck"]["module_pd02_documented_function"] == "ADC input"
+    assert board["module_datasheet_crosscheck"]["physical_target_inspected"] is False
+
+
+def test_board_validation_requires_all_five_traced_channels():
+    frozen = json.loads((FAMILY / "d0_transport_candidate.json").read_text())
+    target = json.loads((FAMILY / "target_manifest.json").read_text())
+    board = json.loads((FAMILY / "board_profile.reference.json").read_text())
+    proof = json.loads((FAMILY / "preflash_evidence.json").read_text())
+    board["deployment_eligible"] = True
+    board["production_board_validation"] = {"status": "independently_verified", "evidence": "local-measurement", "channels": {}}
+    blockers = readiness_blockers(target, frozen, board, proof, artifact_errors=[])
+    assert any("channel/driver/reset evidence missing" in item for item in blockers)
