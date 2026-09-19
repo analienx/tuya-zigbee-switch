@@ -99,4 +99,4 @@ Software status required before hardware canary:
 - Client→Router rollback wrappers: pass;
 - role and binding contract tests: pass.
 
-The Mains Client remains **hardware-canary pending**. The public production landing page should describe it as a validated candidate until the first real-device Router→Client→Router campaign is accepted. After that canary, native Client images can join the normal BSEED index, the two temporary transition indexes can be published, and the status can be promoted to supported.
+The Mains Client remains **hardware-canary pending**. The non-PM `cli4` device has passed OTA installation but failed the 2026-09-19 relay-read repeatability gate (19/20); the PM Client has not passed a physical canary. See [board-specific release status](bseed_socket_release_status.md). The public landing page must describe Clients as candidates until each board has passed its own Router→Client→Router and functionality campaign. After that canary, native Client images can join the normal BSEED index, the two temporary transition indexes can be published, and the status can be promoted to supported.

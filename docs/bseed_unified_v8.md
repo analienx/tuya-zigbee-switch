@@ -50,18 +50,18 @@ power:   16989
 The current accepted release is:
 
 ```text
-build:       1.2.5-bseedv8u3
-fileVersion: 0x12053006 / 302329862
-```
-
-The current sleepy-child parenting canary candidate is:
-
-```text
 build:       1.2.5-bseedv8u4
 fileVersion: 0x12053007 / 302329863
 ```
 
-`v8u4` adds the standards-correct Telink router parent capability advertisement for MAC data-poll keepalive. It is a canary candidate only until a real IKEA sleepy child passes the hardware acceptance gate. It must not replace `0x12053006` in the published Zigbee2MQTT OTA index before that gate passes.
+The previous consolidated PM release was:
+
+```text
+build:       1.2.5-bseedv8u3
+fileVersion: 0x12053006 / 302329862
+```
+
+`v8u4` adds Telink router MAC data-poll keepalive. Its IKEA RODRET sleepy-child hardware acceptance passed; the `0x12053007` image is in the published index. See [router reliability](router_reliability.md) and [socket release status](bseed_socket_release_status.md).
 
 ### TS0726 3-gang dimmer/switch
 
@@ -106,7 +106,7 @@ The PM version sequence is intentionally explicit:
 | `0x12053004` | V8 PM fix canary; successfully installed and accepted on `WorkroomSocketCabinet` |
 | `0x12053005` | sealed known-good recovery successor; intentionally reserved, not a normal release |
 | `0x12053006` | consolidated unified V8 release; runtime source unchanged from accepted `0x12053004` |
-| `0x12053007` | `v8u4` sleepy-child parent canary; advertises MAC data-poll keepalive support, pending physical IKEA acceptance |
+| `0x12053007` | `v8u4` parent-capability update; accepted on physical PM Router with IKEA RODRET sleepy-child tests |
 
 The accepted `0x12053004` canary demonstrated:
 
@@ -142,22 +142,24 @@ Local builds are useful for diagnostics, but are not deployment candidates.
 
 ## BSEED Zigbee2MQTT OTA index
 
-Use the dedicated BSEED index for these two families:
+Use the dedicated BSEED index for these three hardware families:
 
 ```text
 https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/ota/index_bseed.json
 ```
 
-It deliberately contains only four exact lookup entries for accepted releases:
+It deliberately contains six exact lookup entries for accepted Router releases and stock conversion:
 
 | Device state | Manufacturer name | OTA image type | Version exposed to updater |
 |---|---|---:|---:|
-| custom TS011F-PM | `b28wrpvx` | `43556` | `0x12053006` |
+| custom TS011F-PM | `b28wrpvx` | `43556` | `0x12053007` |
 | stock TS011F-PM | `_TZ3000_b28wrpvx` | `54179` | `0xFFFFFFFF` |
+| custom TS011F non-PM | `o1jzcxou` | `43555` | `0x11023001` |
+| stock TS011F non-PM | `_TZ3000_o1jzcxou` | `54179` | `0xFFFFFFFF` |
 | custom TS0726 | `iedhxgyi` | `45577` | `0x1102300a` |
 | stock TS0726 | `_TZ3002_iedhxgyi` | `54179` | `0xFFFFFFFF` |
 
-The `0x12053007` sleepy-child candidate is intentionally excluded from the published index until physical canary acceptance. The repository's generic router index is also sanitized during publication: stale entries for these exact BSEED manufacturer names are removed and replaced with the same four current accepted entries. Historical BSEED FORCE entries are removed rather than silently exposing an old firmware build.
+The `0x12053007` PM Router is published after physical acceptance. Mains Client images and cross-role indexes remain withheld pending their own hardware canaries. The repository's generic router index is also sanitized during publication: stale entries for these exact BSEED manufacturer names are removed and replaced with the same six current accepted entries. Historical BSEED FORCE entries are removed rather than silently exposing an old firmware build.
 
 ## Stock Tuya -> custom conversion
 
@@ -171,7 +173,8 @@ For each target GitHub Actions compiles **one Telink firmware binary** and then 
 For the supported targets the stock identities are:
 
 ```text
-TS011F-PM: _TZ3000_b28wrpvx / TS011F
+TS011F-PM:    _TZ3000_b28wrpvx / TS011F
+TS011F non-PM: _TZ3000_o1jzcxou / TS011F
 TS0726:    _TZ3002_iedhxgyi / TS0726
 ```
 
