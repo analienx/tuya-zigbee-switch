@@ -11,8 +11,6 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-import paho.mqtt.client as mqtt
-import yaml
 
 
 def endpoint(server: str) -> tuple[str, int]:
@@ -81,6 +79,10 @@ def main() -> int:
     args = ap.parse_args()
     if not args.allow_live_network_changes:
         ap.error("Live logging changes and coordinator restarts are disabled by default; prefer reparse_tongou_ota_capture.py with saved evidence")
+
+    # The offline parser and test suite must not need live MQTT dependencies.
+    import paho.mqtt.client as mqtt
+    import yaml
 
     cfg = yaml.safe_load(args.config.read_text(encoding="utf-8"))
     mc = cfg["mqtt"]

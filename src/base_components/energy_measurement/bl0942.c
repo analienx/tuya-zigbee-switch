@@ -92,11 +92,11 @@ static void bl0942_apply_frame(bl0942_t *dev) {
         ((uint64_t)watt * dev->cal.power_multiplier +
          BL0942_FIXED_POINT_SCALE / 2) / BL0942_FIXED_POINT_SCALE;
     dev->data.voltage = (uint16_t)(voltage_scaled > UINT16_MAX ?
-                                    UINT16_MAX : voltage_scaled);
+                                   UINT16_MAX : voltage_scaled);
     dev->data.current = (uint16_t)(current_scaled > UINT16_MAX ?
-                                    UINT16_MAX : current_scaled);
+                                   UINT16_MAX : current_scaled);
     dev->data.power = (int16_t)(power_scaled > INT16_MAX ?
-                                 INT16_MAX : power_scaled);
+                                INT16_MAX : power_scaled);
 
     // Use the BL0942's hardware CF energy counter rather than integrating
     // rounded whole-watt readings.  First frame only establishes a baseline.
@@ -122,18 +122,18 @@ static void bl0942_apply_frame(bl0942_t *dev) {
         uint64_t whole_wh = scaled / BL0942_CF_ENERGY_DENOMINATOR;
         if (whole_wh >= UINT32_MAX - dev->data.energy) {
             // Preserve monotonicity rather than wrapping cumulative energy.
-            dev->data.energy = UINT32_MAX;
+            dev->data.energy       = UINT32_MAX;
             dev->data.cf_remainder = 0;
         } else {
-            dev->data.energy += (uint32_t)whole_wh;
+            dev->data.energy      += (uint32_t)whole_wh;
             dev->data.cf_remainder =
                 (uint32_t)(scaled % BL0942_CF_ENERGY_DENOMINATOR);
         }
     } else {
         dev->data.cf_baseline_valid = 1;
     }
-    dev->data.last_cf_count = cf_count;
-    dev->data.valid         = 1;
+    dev->data.last_cf_count       = cf_count;
+    dev->data.valid               = 1;
     dev->data.last_valid_frame_ms = hal_millis();
 }
 
@@ -196,7 +196,7 @@ int bl0942_init(bl0942_t *dev, hal_gpio_pin_t tx_pin, hal_gpio_pin_t rx_pin,
         return -1;
     }
 
-    dev->initialized          = 1;
+    dev->initialized = 1;
 
     energy_meter_init(&dev->meter, &bl0942_energy_meter_ops, dev,
                       ENERGY_METER_BL0942);
@@ -243,7 +243,7 @@ static void bl0942_meter_get_data(void *ctx, energy_meter_data_t *data) {
     data->energy = dev->data.energy;
     if (!dev->data.valid ||
         (uint32_t)(hal_millis() - dev->data.last_valid_frame_ms) >
-            BL0942_STALE_AFTER_MS) {
+        BL0942_STALE_AFTER_MS) {
         data->valid = 0;
         return;
     }
@@ -291,7 +291,7 @@ static int bl0942_meter_calibrate(void *ctx, energy_meter_channel_t channel,
     // disconnected meter or an arbitrarily old reading.
     if (!dev->data.valid ||
         (uint32_t)(hal_millis() - dev->data.last_valid_frame_ms) >
-            BL0942_STALE_AFTER_MS || raw == 0)
+        BL0942_STALE_AFTER_MS || raw == 0)
         return -1;
 
     // The public calibration API uses uint32 reference. Avoid a 32-bit
@@ -302,6 +302,7 @@ static int bl0942_meter_calibrate(void *ctx, energy_meter_channel_t channel,
                         BL0942_MAX_POWER_MULTIPLIER : UINT32_MAX;
     if (proposed == 0 || proposed > max_gain)
         return -1;
+
     *target = (uint32_t)proposed;
 
     printf("BL0942: calibrated ch %u to ref %u (raw %u) => mult %u\r\n",

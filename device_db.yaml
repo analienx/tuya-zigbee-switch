@@ -277,7 +277,7 @@ DIN_RELAY_TONGOU_TOQSY2_163JZT:
   old_zb_models: null
   stock_manufacturer_id: null
   stock_image_type: null
-  firmware_image_type: 47115
+  firmware_image_type: 60013
   power_monitoring: true
   build: no
   status: in_progress

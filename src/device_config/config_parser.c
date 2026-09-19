@@ -76,7 +76,7 @@ battery_t battery = {
 };
 
 static hlw8012_t       hlw8012_device;
-static bl0942_t       bl0942_device;
+static bl0942_t        bl0942_device;
 static energy_meter_t *energy_meter = NULL;
 static electrical_measurement_cluster_t elec_meas_cluster;
 static metering_cluster_t metering_cluster_inst;
@@ -218,7 +218,7 @@ void parse_config() {
 #endif
 
     bool     has_dedicated_status_led = false;
-    bool     tongou_compat = false;
+    bool     tongou_compat            = false;
     uint16_t debounce_ms = DEBOUNCE_DELAY_MS;
     char *   entry;
     for (entry = extract_next_entry(&cursor); *entry != '\0';

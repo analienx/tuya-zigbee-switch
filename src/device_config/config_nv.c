@@ -181,12 +181,12 @@ static bool config_uart_meter_token_valid(const uint8_t *data, uint16_t start,
     uint16_t pos    = 6;
 
     while (pos < len) {
-        uint8_t marker = data[start + pos++];
-        bool *seen = NULL;
+        uint8_t  marker    = data[start + pos++];
+        bool *   seen      = NULL;
         uint32_t max_value = UINT32_MAX;
 
         if (marker == 'S') {
-            seen = &seen_s;
+            seen      = &seen_s;
             max_value = 1000000u;
         } else if (marker == 'V') {
             seen = &seen_v;

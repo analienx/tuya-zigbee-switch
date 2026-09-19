@@ -14,7 +14,7 @@ def test_tongou_device_is_not_releasable_or_stock_ota_enabled():
     assert board["status"] == "in_progress"
     assert board["stock_manufacturer_id"] is None
     assert board["stock_image_type"] is None
-    assert board["firmware_image_type"] == 47115
+    assert board["firmware_image_type"] == 60013
     assert board["stock_model_name"] == "TS011F"
     assert board["stock_manufacturer_name"] == "_TZ3000_cayepv1a"
 

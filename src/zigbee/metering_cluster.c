@@ -96,8 +96,8 @@ void metering_cluster_update(metering_cluster_t *cluster) {
 
     uint32_t current_energy = data.energy;
     if (current_energy >= cluster->last_energy_value) {
-        uint32_t delta_wh = current_energy - cluster->last_energy_value;
-        uint32_t total_wh = (uint32_t)cluster->pending_wh + delta_wh;
+        uint32_t delta_wh    = current_energy - cluster->last_energy_value;
+        uint32_t total_wh    = (uint32_t)cluster->pending_wh + delta_wh;
         uint16_t wh_per_unit = cluster->wire_wh_per_unit ?
                                cluster->wire_wh_per_unit : 1;
         cluster->current_summation_delivered += total_wh / wh_per_unit;
@@ -134,7 +134,7 @@ void metering_cluster_load_energy(metering_cluster_t *cluster) {
     } else {
         cluster->current_summation_delivered = 0;
         cluster->last_reported_energy        = 0;
-        cluster->pending_wh                  = 0;
+        cluster->pending_wh = 0;
         printf("Metering: No energy in NVM, starting from 0\r\n");
     }
 }
@@ -157,7 +157,7 @@ void metering_cluster_reset_energy(metering_cluster_t *cluster) {
     cluster->current_summation_delivered = 0;
     cluster->last_energy_value           = 0;
     cluster->last_reported_energy        = 0;
-    cluster->pending_wh                  = 0;
+    cluster->pending_wh = 0;
     if (cluster->meter)
         energy_meter_reset_energy(cluster->meter);
     metering_cluster_save_energy(cluster);

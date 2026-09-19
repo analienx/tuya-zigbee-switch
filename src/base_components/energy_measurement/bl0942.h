@@ -18,37 +18,37 @@
 // the same output units as the HLW8012 driver: voltage in cV, current in mA,
 // power in W. Field-adjustable via the on-device calibrate attributes or the
 // config_str V/A/W markers.
-#define BL0942_FIXED_POINT_SCALE     65536
+#define BL0942_FIXED_POINT_SCALE       65536
 #ifndef BL0942_VOLTAGE_MULTIPLIER
-#define BL0942_VOLTAGE_MULTIPLIER    413  // 65536 * 100 / 15883.34
+#define BL0942_VOLTAGE_MULTIPLIER      413 // 65536 * 100 / 15883.34
 #endif
 #ifndef BL0942_CURRENT_MULTIPLIER
-#define BL0942_CURRENT_MULTIPLIER    261  // 65536 * 1000 / 251065.7
+#define BL0942_CURRENT_MULTIPLIER      261 // 65536 * 1000 / 251065.7
 #endif
 #ifndef BL0942_POWER_MULTIPLIER
-#define BL0942_POWER_MULTIPLIER      105  // 65536 / 623.03
+#define BL0942_POWER_MULTIPLIER        105 // 65536 / 623.03
 #endif
 
-#define BL0942_DEFAULT_BAUDRATE      4800
-#define BL0942_POLL_INTERVAL_MS      1000
-#define BL0942_STALE_AFTER_MS       5000u
+#define BL0942_DEFAULT_BAUDRATE        4800
+#define BL0942_POLL_INTERVAL_MS        1000
+#define BL0942_STALE_AFTER_MS          5000u
 /* Bound power calibration to keep the largest 24-bit CF delta within uint64. */
-#define BL0942_MAX_POWER_MULTIPLIER 65535u
-#define BL0942_FRAME_LEN             23
-#define BL0942_RX_RING_SIZE          64
+#define BL0942_MAX_POWER_MULTIPLIER    65535u
+#define BL0942_FRAME_LEN               23
+#define BL0942_RX_RING_SIZE            64
 
 // BL0942 CF_CNT conversion. With our power multiplier M = 65536/PREF,
 // one counter increment contributes M*8/4500 Wh. Accumulate the numerator
 // and carry whole Wh so low loads are not quantized through rounded watts.
-#define BL0942_CF_ENERGY_DENOMINATOR 4500u
-#define BL0942_CF_COUNTER_MASK       0x00FFFFFFu
+#define BL0942_CF_ENERGY_DENOMINATOR    4500u
+#define BL0942_CF_COUNTER_MASK          0x00FFFFFFu
 
 typedef struct {
-    uint16_t voltage;    // cV
-    uint16_t current;    // mA
-    int16_t  power;      // W
-    uint32_t energy;       // Wh accumulated during this MCU session
-    uint32_t cf_remainder; // fixed-point remainder, denominator 4500
+    uint16_t voltage;       // cV
+    uint16_t current;       // mA
+    int16_t  power;         // W
+    uint32_t energy;        // Wh accumulated during this MCU session
+    uint32_t cf_remainder;  // fixed-point remainder, denominator 4500
     uint32_t last_cf_count; // 24-bit BL0942 CF_CNT baseline
     uint8_t  cf_baseline_valid;
     uint8_t  valid;

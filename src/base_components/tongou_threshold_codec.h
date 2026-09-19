@@ -7,22 +7,22 @@
 /* Pure stock-wire codec. No GPIO, NVM, Zigbee identity or protection actions.
  * Values are WIRE units: degrees C, kW, A and V (not internal SI-scaled values).
  * Do not expose this as a protection implementation or stock-compatible image. */
-#define TQ_THRESHOLD_COUNT 5u
-#define TQ_CMD_E6 0xE6u
-#define TQ_CMD_E7 0xE7u
+#define TQ_THRESHOLD_COUNT    5u
+#define TQ_CMD_E6             0xE6u
+#define TQ_CMD_E7             0xE7u
 
 typedef enum {
-    TQ_TEMPERATURE = 0,
-    TQ_POWER = 1,
-    TQ_CURRENT = 2,
-    TQ_OVER_VOLTAGE = 3,
+    TQ_TEMPERATURE   = 0,
+    TQ_POWER         = 1,
+    TQ_CURRENT       = 2,
+    TQ_OVER_VOLTAGE  = 3,
     TQ_UNDER_VOLTAGE = 4
 } tq_channel_t;
 
 typedef struct {
     uint16_t threshold;
-    uint8_t enabled;
-    uint8_t known;
+    uint8_t  enabled;
+    uint8_t  known;
 } tq_threshold_t;
 
 typedef struct {
