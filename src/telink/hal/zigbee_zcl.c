@@ -30,12 +30,13 @@ static hal_zcl_activity_callback_t     zcl_activity_callback     = NULL;
 /* Register standard PM attribute tables without linking optional Telink
  * Electrical Measurement or Metering command implementations. */
 static status_t register_pm_electrical_attrs(u8 ep, u16 mfr, u8 n,
-                                            const zclAttrInfo_t attrs[], cluster_forAppCb_t cb) {
+                                             const zclAttrInfo_t attrs[], cluster_forAppCb_t cb) {
     return zcl_registerCluster(ep, ZCL_CLUSTER_MS_ELECTRICAL_MEASUREMENT,
                                mfr, n, attrs, NULL, cb);
 }
+
 static status_t register_pm_metering_attrs(u8 ep, u16 mfr, u8 n,
-                                          const zclAttrInfo_t attrs[], cluster_forAppCb_t cb) {
+                                           const zclAttrInfo_t attrs[], cluster_forAppCb_t cb) {
     return zcl_registerCluster(ep, ZCL_CLUSTER_SE_METERING,
                                mfr, n, attrs, NULL, cb);
 }

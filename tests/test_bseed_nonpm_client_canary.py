@@ -37,6 +37,11 @@ def test_nonpm_stock_conversion_is_staged_through_router_not_direct_to_client():
 def test_nonpm_canary_workflow_proves_router_regression_and_client_rollback():
     workflow = (ROOT / ".github/workflows/bseed-nonpm-client-canary.yml").read_text()
     assert "git merge-base HEAD origin/main" in workflow
+    # Ordinary changes retain exact baseline byte equality; the reviewed shared
+    # ZCL delta permits only the separately verified non-PM Router SHA-256.
+    assert "if cmp -s" in workflow
+    assert "sha256sum -c -" in workflow
+    assert "9e5a22ec58513ae1cd2c8a4fe7df602d0fc413df4d36c5dbc34ee9bb3550130f" in workflow
     assert 'cd "$BASE_DIR"' in workflow
     assert "cmp \"$BASE_DIR/build/baseline-nonpm/forward.bin\" build/client-control-nonpm/forward.bin" in workflow
     assert "build_bseed_ts011f_nonpm_router.sh build/baseline-nonpm" in workflow
