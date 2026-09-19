@@ -36,6 +36,23 @@ const withExposeLabel = (extend, label) => {
   Generate with: `make tools/update_converters`
 ********************************************************************/
 
+// BSEED_SOCKET_RECONNECT_READ_START
+// Zigbee2MQTT availability calls convertGet with the default endpoint (1).
+// BSEED socket relay state lives on input genOnOff endpoint 2. Keep writes,
+// exposures and all other converter definitions unchanged.
+const bseedSocketRelayOnOff = () => {
+    const extension = onOff({ endpointNames: ["relay"] });
+    const stateConverter = extension.toZigbee.find((converter) => converter.key.includes("state"));
+    const originalGet = stateConverter.convertGet;
+    stateConverter.convertGet = async (endpoint, key, meta) => {
+        const relay = meta.device?.getEndpoint(2);
+        if (!relay) throw new Error("BSEED socket relay endpoint 2 unavailable for state read");
+        return originalGet(relay, key, meta);
+    };
+    return extension;
+};
+// BSEED_SOCKET_RECONNECT_READ_END
+
 const romasku = {
     switchAction: (name, endpointName) =>
         enumLookup({
@@ -8429,7 +8446,7 @@ const definitions = [
             romasku.deviceConfig("device_config", "switch"),
             romasku.multiPressResetCount("multi_press_reset_count", "switch"),
             romasku.networkIndicator("network_led", "switch"),
-            onOff({ endpointNames: ["relay"] }),
+            bseedSocketRelayOnOff(),
             electricityMeter(),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
@@ -8547,7 +8564,7 @@ const definitions = [
             romasku.deviceConfig("device_config", "switch"),
             romasku.multiPressResetCount("multi_press_reset_count", "switch"),
             romasku.networkIndicator("network_led", "switch"),
-            onOff({ endpointNames: ["relay"] }),
+            bseedSocketRelayOnOff(),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),

@@ -39,6 +39,23 @@ const ota = require("zigbee-herdsman-converters/lib/ota");
   Generate with: `make tools/update_converters`
 ********************************************************************/
 
+// BSEED_SOCKET_RECONNECT_READ_START
+// Zigbee2MQTT availability calls convertGet with the default endpoint (1).
+// BSEED socket relay state lives on input genOnOff endpoint 2. Keep writes,
+// exposures and all other converter definitions unchanged.
+const bseedSocketRelayOnOff = () => {
+    const extension = onOff({ endpointNames: ["relay"] });
+    const stateConverter = extension.toZigbee.find((converter) => converter.key.includes("state"));
+    const originalGet = stateConverter.convertGet;
+    stateConverter.convertGet = async (endpoint, key, meta) => {
+        const relay = meta.device?.getEndpoint(2);
+        if (!relay) throw new Error("BSEED socket relay endpoint 2 unavailable for state read");
+        return originalGet(relay, key, meta);
+    };
+    return extension;
+};
+// BSEED_SOCKET_RECONNECT_READ_END
+
 const romasku = {
     switchAction: (name, endpointName) =>
         enumLookup({
@@ -488,7 +505,11 @@ const definitions = [
             romasku.networkIndicator("network_led", "{{first_endpoint}}"),
             {% endif%}
             {% if device.relayNames %}
+{% if device.bseed_socket_relay_read %}
+            bseedSocketRelayOnOff(),
+{% else %}
             onOff({ endpointNames: {{device.relayNames | tojson }}{% if device.bseed_canary_no_configure %}, configureReporting: false{% endif %} }),
+{% endif %}
             {% endif %}
             {% if device.power_monitoring %}
             electricityMeter(),
