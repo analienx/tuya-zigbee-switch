@@ -114,6 +114,7 @@ def collect_devices(db):
                 "switch_level_move_rate": device.get("switch_level_move_rate", True),
                 "expose_switch_controls": device.get("category") not in {"outlet", "plug", "din_relay"},
                 "power_monitoring": bool(device.get("power_monitoring", False)),
+                "bseed_socket_relay_read": db_key in {"OUTLET_BSEED_PM_TS011F", "OUTLET_BSEED_TS011F"},
                 "model": device.get("override_z2m_device")
                 or device["stock_converter_model"],
                 "switchNames": switch_names,

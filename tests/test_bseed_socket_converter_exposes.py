@@ -41,7 +41,7 @@ def test_bseed_pm_outlet_hides_switch_and_dimmer_controls():
         definition = _definition(_render(*args), "TS011F-BS-PM")
         for expose in SOCKET_ONLY_SWITCH_CONTROLS:
             assert expose not in definition
-        assert 'onOff({ endpointNames: ["relay"] })' in definition
+        assert "bseedSocketRelayOnOff()" in definition
         assert 'electricityMeter()' in definition
         assert 'commandsOnOff({' not in definition
         assert 'commandsLevelCtrl({' not in definition
@@ -54,7 +54,7 @@ def test_non_pm_bseed_outlet_uses_same_socket_profile():
         definition = _definition(_render(*args), "TS011F-BS")
         for expose in SOCKET_ONLY_SWITCH_CONTROLS:
             assert expose not in definition
-        assert 'onOff({ endpointNames: ["relay"] })' in definition
+        assert "bseedSocketRelayOnOff()" in definition
         assert 'electricityMeter()' not in definition
         assert 'commandsOnOff({' not in definition
         assert 'commandsLevelCtrl({' not in definition
