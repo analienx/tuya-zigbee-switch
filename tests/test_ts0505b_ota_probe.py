@@ -18,6 +18,7 @@ def test_probe_never_sends_firmware_payload(tmp_path):
     config.write_text(json.dumps({
         "target_ieee": "0x00124b0000000001",
         "run_id": "unit-1",
+        "armed": True,
         "manufacturerCode": "0x100B",
         "imageType": "0x020C",
         "cooldownMs": 5000,
@@ -36,7 +37,8 @@ class Endpoint {{
   async commandResponse(...args) {{ calls.push(args); return "ok"; }}
 }}
 const endpoint = new Endpoint();
-const device = {{ieeeAddr: "0x00124b0000000001", endpoints: [endpoint]}};
+const device = {{ieeeAddr: "0x00124b0000000001", modelID: "TS0505B",
+  manufacturerName: "_TZ3210_mja6r5ix", scheduledOta: null, endpoints: [endpoint]}};
 const eventBus = {{
   handler: null,
   onDeviceMessage(_owner, handler) {{ this.handler = handler; }},
@@ -45,10 +47,13 @@ const eventBus = {{
 const zigbee = {{zhController: {{*getDevicesIterator() {{ yield device; }}}}}};
 const mqtt = {{publish: async (...args) => published.push(args)}};
 const logger = {{warning: () => {{}}, error: (msg) => {{ throw new Error(msg); }}}};
+const settings = {{get: () => ({{ota: {{disable_automatic_update_check: true}}}})}};
 
-const probe = new mod.default(zigbee, mqtt, null, null, eventBus, null, null, null, null, logger);
+const probe = new mod.default(zigbee, mqtt, null, null, eventBus, null, null, null, settings, logger);
 await probe.start();
 assert.equal(calls[0][1], "imageNotify");
+await assert.rejects(endpoint.commandResponse("genOta", "imageBlockResponse", {{status: 0, data: [1]}}), /blocked another OTA handler/);
+assert.equal(calls.some((x) => x[1] === "imageBlockResponse"), false);
 
 await eventBus.handler({{
   device, endpoint, cluster: "genOta", type: "commandQueryNextImageRequest",
@@ -66,7 +71,8 @@ assert.equal(calls.length, beforeSuppressed);
 
 await eventBus.handler({{
   device, endpoint, cluster: "genOta", type: "commandImageBlockRequest",
-  data: {{fileOffset: 0, maximumDataSize: 50}},
+  data: {{fileOffset: 0, manufacturerCode: 0x100b, imageType: 0x020c,
+    fileVersion: 0x10003608, maximumDataSize: 50}},
   meta: {{zclTransactionSequenceNumber: 8}},
 }});
 const block = calls.find((x) => x[1] === "imageBlockResponse");
@@ -80,7 +86,7 @@ const statuses = published
 assert.equal(statuses.every((x) => x.payload_bytes_sent === 0), true);
 assert.equal(statuses.some((x) => x.result?.accepted_prebyte === true), true);
 await probe.stop();
-const replay = new mod.default(zigbee, mqtt, null, null, eventBus, null, null, null, null, logger);
+const replay = new mod.default(zigbee, mqtt, null, null, eventBus, null, null, null, settings, logger);
 await replay.start();
 assert.equal(calls.filter((x) => x[1] === "imageNotify").length, 1);
 assert.equal(

@@ -35,7 +35,7 @@ The D0 image is 304,602 bytes (~297.5 KiB), below the smaller documented ceiling
 
 ## First probe matrix
 
-Keep manufacturer and image type fixed and vary one dimension at a time:
+Keep manufacturer and image type fixed. Run exactly one case per unique local `run_id` and vary one dimension at a time:
 
 - size sweep at `0x10003608`: 64 KiB, 128 KiB, 192 KiB, 256 KiB, 304602 bytes;
 - if size is not causal, version sweep at a conservative fixed size: `+1`, `+0x100`, `+0x10000`.
@@ -45,4 +45,6 @@ An `accepted_prebyte=true` result means only that stock firmware requested block
 
 ## Replay protection
 
-Every runtime sidecar must use a unique `run_id`. The extension reserves a persistent sentinel before the first Image Notify. If Zigbee2MQTT restarts unexpectedly, the same run ID is blocked instead of replaying the matrix.
+Every runtime sidecar must use a unique `run_id`, set `armed=true` locally, and configure global automatic OTA checks disabled. The extension reserves a persistent sentinel before the first Image Notify. If Zigbee2MQTT restarts unexpectedly, the same run ID is blocked instead of replaying an offer.
+
+A run with `query_seen=false` is inconclusive, not evidence of a rejected image. Never publish firmware data or deploy a candidate from a metadata-only result.

@@ -27,14 +27,16 @@ function normalizeConfig(raw) {
     if (!raw || typeof raw !== "object") throw new Error("config must be an object");
     if (!raw.target_ieee || !/^0x[0-9a-f]{16}$/i.test(raw.target_ieee)) throw new Error("target_ieee is required");
     if (!raw.run_id || !/^[A-Za-z0-9._-]{1,64}$/.test(raw.run_id)) throw new Error("run_id is required");
+    if (raw.armed !== true) throw new Error("probe must be explicitly armed in local runtime sidecar");
     const defaults = {
         manufacturerCode: parseNumber(raw.manufacturerCode ?? 0x100b, "manufacturerCode"),
         imageType: parseNumber(raw.imageType ?? 0x020c, "imageType"),
         waitMs: parseNumber(raw.waitMs ?? 20000, "waitMs"),
     };
-    if (!Array.isArray(raw.cases) || raw.cases.length === 0) throw new Error("cases must be non-empty");
+    if (!Array.isArray(raw.cases) || raw.cases.length !== 1) throw new Error("one case per run_id is required");
     return {
         targetIeee: raw.target_ieee.toLowerCase(),
+        stockFileVersion: parseNumber(raw.stock_file_version ?? 0x10003607, "stock_file_version"),
         runId: raw.run_id,
         cooldownMs: parseNumber(raw.cooldownMs ?? 1500, "cooldownMs"),
         cases: raw.cases.map((item) => normalizeCase(item, defaults)),
@@ -51,6 +53,7 @@ export default class Ts0505bOtaAcceptanceProbe {
         this.mqtt = mqtt;
         this.eventBus = eventBus;
         this.logger = logger;
+        this.settings = _settings;
         this.configPath = process.env.Z2M_TS0505B_OTA_PROBE_CONFIG || DEFAULT_CONFIG;
         this.config = undefined;
         this.sentinelPath = undefined;
@@ -75,6 +78,12 @@ export default class Ts0505bOtaAcceptanceProbe {
         this.device = [...this.zigbee.zhController.getDevicesIterator()]
             .find((item) => item.ieeeAddr?.toLowerCase() === this.config.targetIeee);
         if (!this.device) throw new Error("configured TS0505B OTA probe target not found");
+        if (this.device.modelID !== "TS0505B" || this.device.manufacturerName !== "_TZ3210_mja6r5ix") {
+            throw new Error("stock TS0505B target identity mismatch");
+        }
+        if (this.device.scheduledOta || this.settings?.get?.()?.ota?.disable_automatic_update_check !== true) {
+            throw new Error("scheduled or automatic OTA activity must be disabled before probe");
+        }
 
         this.endpoint = this.device.endpoints.find((item) => item.ID === 1);
         if (!this.endpoint) throw new Error("configured TS0505B OTA probe endpoint 1 not found");
@@ -96,6 +105,10 @@ export default class Ts0505bOtaAcceptanceProbe {
             const target = this.deviceIeeeAddress?.toLowerCase() === probe.config.targetIeee;
             const ota = clusterKey === "genOta" || clusterKey === 0x0019;
             const queryResponse = commandKey === "queryNextImageResponse" || commandKey === 0x02;
+            const blockResponse = commandKey === "imageBlockResponse" || commandKey === 0x05;
+            if (probe.current && target && ota && blockResponse && payload?.status === 0) {
+                throw new Error("blocked another OTA handler from delivering firmware bytes");
+            }
             if (probe.current && target && ota && queryResponse && payload?.status === NO_IMAGE_AVAILABLE) {
                 probe.logger?.warning?.("TS0505B OTA probe suppressed competing NO_IMAGE_AVAILABLE response");
                 return;
@@ -138,6 +151,12 @@ export default class Ts0505bOtaAcceptanceProbe {
         if (data.endpoint?.ID !== 1 || data.cluster !== "genOta") return;
 
         if (data.type === "commandQueryNextImageRequest") {
+            if (data.data?.manufacturerCode !== this.current.offer.manufacturerCode ||
+                data.data?.imageType !== this.current.offer.imageType ||
+                data.data?.fileVersion !== this.config.stockFileVersion) {
+                await this.fail(new Error("OTA Query Next Image stock identity/version mismatch"));
+                return;
+            }
             const offer = this.current.offer;
             this.current.querySeen = true;
             await data.endpoint.commandResponse("genOta", "queryNextImageResponse", {
@@ -152,9 +171,17 @@ export default class Ts0505bOtaAcceptanceProbe {
         }
 
         if (isDataRequest(data.type)) {
-            this.current.acceptedPrebyte = true;
+            // Every data request is aborted, even if its metadata is unexpected.
             await data.endpoint.commandResponse("genOta", "imageBlockResponse", {status: OTA_ABORT},
                 undefined, data.meta.zclTransactionSequenceNumber);
+            if (data.data?.manufacturerCode !== this.current.offer.manufacturerCode ||
+                data.data?.imageType !== this.current.offer.imageType ||
+                data.data?.fileVersion !== this.current.offer.fileVersion ||
+                data.data?.fileOffset !== 0) {
+                await this.fail(new Error("unexpected OTA block request: aborted without data"));
+                return;
+            }
+            this.current.acceptedPrebyte = true;
             await this.finishCurrent("block_request_aborted");
         }
     }

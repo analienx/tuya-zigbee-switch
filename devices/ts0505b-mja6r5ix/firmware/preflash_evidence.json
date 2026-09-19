@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "purpose": "Public, device-agnostic evidence ledger; claims require independent supporting records",
+  "installed_platform_and_memory": {"status": "unverified", "evidence": null},
+  "prebyte_ota_acceptance": {"status": "unverified", "evidence": null},
+  "stock_application_properties": {"status": "unverified", "evidence": null},
+  "bootloader_policy": {"status": "unverified", "evidence": null},
+  "recoverability": {"status": "unverified", "evidence": null},
+  "lighting_behavior": {"status": "unverified", "evidence": null}
+}
