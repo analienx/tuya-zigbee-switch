@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "purpose": "Installed TS0505B endpoint-1 structural parity target",
+  "evidence": "live Zigbee2MQTT fingerprint",
+  "endpoint_id": 1,
+  "profile_id": 260,
+  "device_type": 269,
+  "device_type_hex": "0x010D",
+  "server_clusters": [0, 3, 4, 5, 6, 8, 768, 4096],
+  "client_clusters": [10, 25],
+  "zcl_manufacturer_code": 4107,
+  "model_id": "TS0505B",
+  "manufacturer_name": "_TZ3210_mja6r5ix",
+  "single_exposed_endpoint": true,
+  "basic_identity_runtime_pending": false,
+  "ota_identity_runtime_pending": true,
+  "physical_output_implementation": "weak_noop",
+  "deployment_eligible": false
+}

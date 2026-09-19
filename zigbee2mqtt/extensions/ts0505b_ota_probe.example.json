@@ -1,0 +1,15 @@
+{
+  "target_ieee": "REPLACE_AT_RUNTIME",
+  "run_id": "REPLACE_AT_RUNTIME",
+  "manufacturerCode": "0x100B",
+  "imageType": "0x020C",
+  "waitMs": 20000,
+  "cooldownMs": 1500,
+  "cases": [
+    {"name": "size-64k", "fileVersion": "0x10003608", "imageSize": 65536},
+    {"name": "size-128k", "fileVersion": "0x10003608", "imageSize": 131072},
+    {"name": "size-192k", "fileVersion": "0x10003608", "imageSize": 196608},
+    {"name": "size-256k", "fileVersion": "0x10003608", "imageSize": 262144},
+    {"name": "size-d0", "fileVersion": "0x10003608", "imageSize": 304602}
+  ]
+}

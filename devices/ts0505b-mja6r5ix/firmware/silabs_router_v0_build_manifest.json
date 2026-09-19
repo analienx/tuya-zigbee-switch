@@ -1,0 +1,203 @@
+{
+  "schema_version": 3,
+  "purpose": "Silicon Labs Z3 Light MG21 router-v0, board-neutral lightcore, and exact endpoint structural build evidence",
+  "status": "BUILT_STRUCTURAL_REFERENCE",
+  "deployment_eligible": false,
+  "target": {
+    "soc": "EFR32MG21A020F1024IM32",
+    "evidence_level": "Tuya ZSU family reference compile envelope; installed PCB not directly proved",
+    "role": "router"
+  },
+  "sdk": {
+    "name": "Simplicity SDK",
+    "version": "2026.6.1",
+    "zigbee_stack": "9.1.1",
+    "descriptor_sha256": "4c29eda09d94635971a66c1b250d4037308e3f6164546471cfae7c140d616149",
+    "template": "zigbee_app/z3/zigbee_z3_light/zigbee_z3_light.slcp",
+    "slc_version": "6.0.23",
+    "slc_sha256": "755f7b7208923581f37668c1ac7ebe728494a57d2899c94e6e059f31f3609ca2",
+    "zap_version": "2026.6.18",
+    "zap_commit": "f4385241a2684847d4df0259261bdf3595080548",
+    "cmake_version": "3.30.2",
+    "ninja_version": "1.12.1",
+    "compiler": "Arm GNU Toolchain 14.2.rel1 (silabs-14.2.rel1-b66)",
+    "compiler_version": "14.2.1",
+    "gcc_sha256": "f5e88de608aafedd1614928acdcd4e4b8e7113ca9aa128f2b18d0c56b6ea6d61",
+    "commander_version": "1v24p3b1989",
+    "commander_sha256": "55fab9542fa45ab82f71acb947203b7dfa986c78b52dfa0ac8f29c08ba7c98f5"
+  },
+  "generation": {
+    "source": "official_vendor_template",
+    "part": "EFR32MG21A020F1024IM32",
+    "add_components": [
+      "iostream_rtt"
+    ],
+    "remove_components": [
+      "simple_led",
+      "simple_button"
+    ],
+    "configuration": {
+      "SL_ZIGBEE_NEIGHBOR_TABLE_SIZE": 26
+    },
+    "no_guessed_gpio": true,
+    "direct_from_template_rebuild_success": true,
+    "deterministic_bin_match": true
+  },
+  "router_profile": {
+    "neighbor_table": 26,
+    "route_table": 16,
+    "discovery_table": 8,
+    "address_table": 12,
+    "broadcast_table": 15,
+    "concentrator": false,
+    "periodic_many_to_one_originator": false
+  },
+  "reference_build": {
+    "success": true,
+    "neighbor_table": 16,
+    "bin_bytes": 305244,
+    "text_section_bytes": 300672,
+    "data_section_bytes": 3984,
+    "bss_section_bytes": 14620,
+    "managed_heap_bytes": 75184,
+    "bin_sha256": "2d81c5c8ccd4742d833a928d189150fabb20d9d74d98cf86016dcb9b926e80d8"
+  },
+  "router_v0_build": {
+    "success": true,
+    "neighbor_table": 26,
+    "bin_bytes": 305244,
+    "text_section_bytes": 300672,
+    "data_section_bytes": 3984,
+    "bss_section_bytes": 14836,
+    "managed_heap_bytes": 74968,
+    "bin_sha256": "6c88a93bb9f5eb05145ca7a4dd8d6dd3a80febd42c97a4e62013701fdbe8c3b3",
+    "rebuild_bin_sha256": "6c88a93bb9f5eb05145ca7a4dd8d6dd3a80febd42c97a4e62013701fdbe8c3b3"
+  },
+  "router_delta": {
+    "neighbor_entries": 10,
+    "neighbor_data_bytes": 180,
+    "frame_counter_table_bytes": 40,
+    "bss_section_bytes": 216,
+    "managed_heap_bytes": -216,
+    "text_section_bytes": 0,
+    "data_section_bytes": 0,
+    "bin_bytes": 0
+  },
+  "lightcore_build": {
+    "success": true,
+    "board_output_implementation": "weak_noop",
+    "no_guessed_gpio": true,
+    "bin_bytes": 305468,
+    "text_section_bytes": 300896,
+    "data_section_bytes": 3984,
+    "bss_section_bytes": 14836,
+    "managed_heap_bytes": 74968,
+    "bin_sha256": "2ca1d42aca7d1b5bc47cdeb460ff2f74e25f1a1108c1a1b13531b3d9fc412ba6",
+    "rebuild_bin_sha256": "2ca1d42aca7d1b5bc47cdeb460ff2f74e25f1a1108c1a1b13531b3d9fc412ba6",
+    "independent_template_bin_sha256": "2ca1d42aca7d1b5bc47cdeb460ff2f74e25f1a1108c1a1b13531b3d9fc412ba6",
+    "independent_template_byte_equal": true,
+    "state_contract_exact_zcl_mirror": true,
+    "minimum_duty_translation_in_core": false,
+    "board_output_runtime_exercised": false,
+    "lto_note": "weak no-op board hook allows output-render path optimization; host harness is authoritative for logical state contract"
+  },
+  "lightcore_delta_from_router_v0": {
+    "text_section_bytes": 224,
+    "data_section_bytes": 0,
+    "bss_section_bytes": 0,
+    "managed_heap_bytes": 0,
+    "bin_bytes": 224
+  },
+  "lightcore_reproduction": {
+    "source": "official_vendor_template",
+    "seed_generation": "slc_new_project",
+    "add_components": [
+      "iostream_rtt"
+    ],
+    "remove_components": [
+      "simple_led",
+      "simple_button"
+    ],
+    "configuration": {
+      "SL_ZIGBEE_NEIGHBOR_TABLE_SIZE": 26
+    },
+    "seed_overlay_tool": "tools/apply_silabs_light_core.py",
+    "generated_header_staging_required": true,
+    "board_only_component_autoselection_detected": true,
+    "board_only_component_autoselection_fail_closed": true,
+    "independent_clean_build_success": true,
+    "independent_byte_equal": true
+  },
+  "compatibility": {
+    "live_ota_identity": "0x100B/0x020C",
+    "live_file_version": "0x10003607",
+    "binary_bootloader_compatibility": "UNRESOLVED_IDENTITY_MISMATCH",
+    "ota_container_produced": false,
+    "rollback_status": "UNRESOLVED",
+    "deployment_ready": false
+  },
+  "endpoint_v0_build": {
+    "success": true,
+    "endpoint_id": 1,
+    "profile_id": 260,
+    "device_type": 269,
+    "server_clusters": [
+      0,
+      3,
+      4,
+      5,
+      6,
+      8,
+      768,
+      4096
+    ],
+    "client_clusters": [
+      10,
+      25
+    ],
+    "basic_manufacturer_name": "_TZ3210_mja6r5ix",
+    "basic_model_id": "TS0505B",
+    "zcl_manufacturer_code_metadata": 4107,
+    "zcl_manufacturer_code_metadata_scope": "ZAP generation metadata; not proof of Node Descriptor or OTA image identity",
+    "ota_identity_runtime_pending": true,
+    "board_output_implementation": "weak_noop",
+    "deployment_eligible": false,
+    "bin_bytes": 304440,
+    "text_section_bytes": 299916,
+    "data_section_bytes": 3936,
+    "bss_section_bytes": 14192,
+    "managed_heap_bytes": 75660,
+    "bin_sha256": "b9cd57674051d9239489f639f017b5be112329743ce861ca9f84ae82ba573042",
+    "independent_template_bin_sha256": "b9cd57674051d9239489f639f017b5be112329743ce861ca9f84ae82ba573042",
+    "independent_template_byte_equal": true
+  },
+  "endpoint_v0_delta_from_lightcore": {
+    "text_section_bytes": -980,
+    "data_section_bytes": -48,
+    "bss_section_bytes": -644,
+    "managed_heap_bytes": 692,
+    "bin_bytes": -1028
+  },
+  "endpoint_v0_reproduction": {
+    "source": "official_vendor_template",
+    "seed_generation": "slc_new_project",
+    "add_components": [
+      "iostream_rtt"
+    ],
+    "remove_components": [
+      "simple_led",
+      "simple_button"
+    ],
+    "configuration": {
+      "SL_ZIGBEE_NEIGHBOR_TABLE_SIZE": 26
+    },
+    "seed_overlay_tools": [
+      "tools/apply_silabs_light_core.py",
+      "tools/apply_silabs_endpoint_profile.py"
+    ],
+    "endpoint_validator": "tools/verify_endpoint_profile.py",
+    "generated_header_staging_required": true,
+    "independent_clean_build_success": true,
+    "independent_byte_equal": true
+  }
+}
