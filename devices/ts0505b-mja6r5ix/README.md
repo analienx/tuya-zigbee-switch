@@ -33,3 +33,7 @@ Tuya documents firmware ceilings of 376 KiB for EFR32MG21A020F768 and 528 KiB fo
 Use the metadata-only acceptance probe to vary **only** Query Next Image response metadata and abort on the first block request. This separates version/size acceptance from GBL contents without sending firmware payload bytes.
 
 See [OTA transport research](docs/ota-transport.md).
+
+## Offline preflash gate
+
+See [preflash contract](docs/preflash.md). The currently frozen D0 is a dark diagnostic artifact, not a lighting-capable production image; the fail-closed release gate remains red.
