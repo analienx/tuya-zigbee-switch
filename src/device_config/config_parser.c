@@ -21,6 +21,9 @@
 #include "base_components/network_indicator.h"
 #include "base_components/battery.h"
 #include "base_components/energy_measurement/hlw8012.h"
+#if defined(HAL_SILABS) || defined(HAL_STUB)
+#include "base_components/energy_measurement/bl0942.h"
+#endif
 #include "config_nv.h"
 #include "device_config/device_params_nv.h"
 #include "device_config/reset.h"
@@ -74,7 +77,10 @@ battery_t battery = {
     .voltage_max =            3000,
 };
 
-static hlw8012_t       hlw8012_device;
+static hlw8012_t hlw8012_device;
+#if defined(HAL_SILABS) || defined(HAL_STUB)
+static bl0942_t bl0942_device;
+#endif
 static energy_meter_t *energy_meter = NULL;
 static electrical_measurement_cluster_t elec_meas_cluster;
 static metering_cluster_t metering_cluster_inst;
@@ -119,6 +125,43 @@ static bool init_hlw8012_energy_meter(hal_gpio_pin_t cf_pin,
     return true;
 }
 
+#if defined(HAL_SILABS) || defined(HAL_STUB)
+static bool init_bl0942_energy_meter(hal_gpio_pin_t tx_pin,
+                                     hal_gpio_pin_t rx_pin,
+                                     uint32_t baudrate,
+                                     uint32_t voltage_mult,
+                                     uint32_t current_mult,
+                                     uint32_t power_mult) {
+    if (energy_monitoring_enabled) {
+        printf("Config: refusing duplicate energy meter\r\n");
+        return false;
+    }
+
+    if (baudrate == 0)
+        baudrate = BL0942_DEFAULT_BAUDRATE;
+
+    if (bl0942_init(&bl0942_device, tx_pin, rx_pin, baudrate) != 0) {
+        printf("Config: failed to initialize BL0942 meter\r\n");
+        return false;
+    }
+
+    bl0942_set_calibration(&bl0942_device, voltage_mult, current_mult,
+                           power_mult);
+    energy_meter = bl0942_as_energy_meter(&bl0942_device);
+    if (!energy_meter) {
+        printf("Config: BL0942 adapter unavailable\r\n");
+        return false;
+    }
+
+    electrical_measurement_cluster_init(&elec_meas_cluster, energy_meter);
+    metering_cluster_init(&metering_cluster_inst, energy_meter);
+    energy_monitoring_enabled  = 1;
+    energy_monitoring_endpoint = 1;
+    return true;
+}
+
+#endif
+
 void on_reset_clicked(void *_) {
     hal_factory_reset();
 }
@@ -137,8 +180,14 @@ void parse_config() {
      * production config without an EP token. Detect an explicit EP before the
      * parser temporarily NUL-terminates tokens so an explicit future config
      * always wins over the board compatibility fallback. */
+#ifdef BSEED_PM_B28WRPVX
     bool has_explicit_energy_token =
         strstr((const char *)device_config_str.data, ";EP") != NULL;
+#ifndef HAL_TELINK
+    has_explicit_energy_token = has_explicit_energy_token ||
+                                strstr((const char *)device_config_str.data, ";EB") != NULL;
+#endif
+#endif
 
     char *      cursor          = (char *)device_config_str.data;
     const char *zb_manufacturer = extract_next_entry(&cursor);
@@ -178,11 +227,19 @@ void parse_config() {
     }
 #endif
 
-    bool     has_dedicated_status_led = false;
+    bool has_dedicated_status_led = false;
+#ifndef HAL_TELINK
+    bool tongou_compat = false;
+#endif
     uint16_t debounce_ms = DEBOUNCE_DELAY_MS;
     char *   entry;
     for (entry = extract_next_entry(&cursor); *entry != '\0';
          entry = extract_next_entry(&cursor)) {
+#ifndef HAL_TELINK
+        if (entry[0] == 'T' && entry[1] == 'Q' && entry[2] == '\0') {
+            tongou_compat = true;
+        } else
+#endif
         if (entry[0] == 'S' && entry[1] == 'L' && entry[2] == 'P') {
             allow_simultaneous_latching_pulses = 1;
         } else if (entry[0] == 'D' && entry[1] >= '0' && entry[1] <= '9') {
@@ -368,6 +425,27 @@ void parse_config() {
                 printf("Config: explicit pulse meter CF=%04x CF1=%04x SEL=%04x\r\n",
                        cf_pin, cf1_pin, sel_pin);
             }
+#ifndef HAL_TELINK
+        } else if (entry[0] == 'E' && entry[1] == 'B') {
+            hal_gpio_pin_t tx_pin = hal_gpio_parse_pin(entry + 2);
+            hal_gpio_pin_t rx_pin = hal_gpio_parse_pin(entry + 4);
+            const char *   opts   = entry + 6;
+            const char *   speed  = seek_until((char *)opts, 'S');
+            const char *   v      = seek_until((char *)opts, 'V');
+            const char *   a      = seek_until((char *)opts, 'A');
+            const char *   w      = seek_until((char *)opts, 'W');
+
+            if (init_bl0942_energy_meter(
+                    tx_pin, rx_pin,
+                    (*speed == 'S') ? parse_int(speed + 1)
+                                    : BL0942_DEFAULT_BAUDRATE,
+                    (*v == 'V') ? parse_int(v + 1) : 0,
+                    (*a == 'A') ? parse_int(a + 1) : 0,
+                    (*w == 'W') ? parse_int(w + 1) : 0)) {
+                printf("Config: explicit BL0942 meter TX=%04x RX=%04x\r\n",
+                       tx_pin, rx_pin);
+            }
+#endif
         } else if (entry[0] == 'O' && entry[1] == 'L') {
             if (energy_monitoring_enabled) {
                 const char *c = seek_until(entry + 2, 'C');
@@ -380,6 +458,16 @@ void parse_config() {
             }
         }
     }
+
+#ifndef HAL_TELINK
+    if (tongou_compat && energy_monitoring_enabled) {
+        if (!metering_cluster_set_divisor(&metering_cluster_inst, 100)) {
+            printf("Tongou: failed to set stock metering divisor\r\n");
+        } else {
+            printf("Tongou: stock-compatible metering divisor=100\r\n");
+        }
+    }
+#endif
 
     peripherals_init();
 

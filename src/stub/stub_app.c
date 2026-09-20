@@ -168,6 +168,25 @@ const char *stub_app_attribute_value_to_string(hal_zigbee_attribute *attr,
             buf[0] = '\0';
         }
         break;
+    case ZCL_DATA_TYPE_INT16:
+        if (attr->size >= 2) {
+            int16_t val = (int16_t)((uint16_t)attr->value[0] |
+                                    ((uint16_t)attr->value[1] << 8));
+            snprintf(buf, bufsize, "%d", (int)val);
+        } else {
+            buf[0] = '\0';
+        }
+        break;
+    case ZCL_DATA_TYPE_UINT24:
+        if (attr->size >= 3) {
+            uint32_t val = (uint32_t)attr->value[0] |
+                           ((uint32_t)attr->value[1] << 8) |
+                           ((uint32_t)attr->value[2] << 16);
+            snprintf(buf, bufsize, "%lu", (unsigned long)val);
+        } else {
+            buf[0] = '\0';
+        }
+        break;
     case ZCL_DATA_TYPE_UINT32:
         if (attr->size >= 4) {
             uint32_t val = (uint32_t)attr->value[0] |
@@ -175,6 +194,16 @@ const char *stub_app_attribute_value_to_string(hal_zigbee_attribute *attr,
                            ((uint32_t)attr->value[2] << 16) |
                            ((uint32_t)attr->value[3] << 24);
             snprintf(buf, bufsize, "%lu", (unsigned long)val);
+        } else {
+            buf[0] = '\0';
+        }
+        break;
+    case ZCL_DATA_TYPE_UINT48:
+        if (attr->size >= 6) {
+            uint64_t val = 0;
+            for (uint8_t i = 0; i < 6; i++)
+                val |= ((uint64_t)attr->value[i]) << (8u * i);
+            snprintf(buf, bufsize, "%llu", (unsigned long long)val);
         } else {
             buf[0] = '\0';
         }
