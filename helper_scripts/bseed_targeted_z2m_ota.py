@@ -17,6 +17,8 @@ import uuid
 import paho.mqtt.client as mqtt
 import yaml
 
+DEFAULT_CHECK_TIMEOUT_SECONDS = 90  # Z2M may take 60 seconds to report a device OTA-query failure.
+
 
 def timestamp():
     return dt.datetime.now().astimezone().isoformat()
@@ -30,6 +32,11 @@ def matches_response(message, token, device, ieee):
     tx = message.get('transaction')
     target = (message.get('data') or {}).get('id')
     return (tx == token and target in (None, device, ieee)) if tx is not None else target in (device, ieee)
+
+
+def wait_for_check_result(event, seconds):
+    assert seconds >= 70, 'Check monitor must outlast Zigbee2MQTT 60-second response timeout'
+    return event.wait(seconds)
 
 
 def verify_image(args):
@@ -64,6 +71,7 @@ def arguments():
     p.add_argument('--expect-relay', choices=['ON', 'OFF'], required=True)
     p.add_argument('--max-reported-watts', type=float, default=1.0)
     p.add_argument('--timeout-seconds', type=int, default=2400)
+    p.add_argument('--check-timeout-seconds', type=int, default=DEFAULT_CHECK_TIMEOUT_SECONDS)
     p.add_argument('--max-block-bytes', type=int, default=50, help='OTA per-request maximum; conservative 50-byte default for fragile meshes')
     return p.parse_args()
 
@@ -71,6 +79,7 @@ def arguments():
 def main():
     args = arguments()
     assert 10 <= args.max_block_bytes <= 100, 'OTA maximum data size must be 10..100 bytes'
+    assert args.check_timeout_seconds >= 70, 'OTA check wait must outlast Zigbee2MQTT 60-second device timeout'
     verify_image(args)
     work = Path(args.workdir); work.mkdir(parents=True, exist_ok=True)
     lock = work / 'ACTIVE_LOCK.json'
@@ -156,7 +165,7 @@ def main():
             payload = {'id': args.ieee, 'url': args.index_url, 'transaction': token}
             state['sent'] = True
             client.publish(req, json.dumps(payload), qos=1).wait_for_publish(5)
-            assert answered.wait(55), 'Read-only OTA index check timed out'
+            assert wait_for_check_result(answered, args.check_timeout_seconds), 'Read-only OTA index check timed out before a Zigbee2MQTT result'
             result = state['result'] or {}
             assert result.get('status') == 'ok' and result.get('data', {}).get('update_available') is True, 'OTA check did not offer an update'
             assert result['data'].get('source') == args.url, 'OTA index offered a different image URL'

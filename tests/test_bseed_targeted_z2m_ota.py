@@ -73,3 +73,15 @@ def test_update_payload_uses_explicit_bounded_block_size():
         update_payload('target', 'url', 'token', 101)
     with pytest.raises(AssertionError, match='10..100'):
         update_payload('target', 'url', 'token', 9)
+
+
+def test_readonly_check_wait_outlasts_z2m_device_timeout():
+    from bseed_targeted_z2m_ota import DEFAULT_CHECK_TIMEOUT_SECONDS, wait_for_check_result
+    from unittest.mock import Mock
+    done = Mock()
+    done.wait.return_value = True
+    assert DEFAULT_CHECK_TIMEOUT_SECONDS >= 70
+    assert wait_for_check_result(done, DEFAULT_CHECK_TIMEOUT_SECONDS)
+    done.wait.assert_called_once_with(DEFAULT_CHECK_TIMEOUT_SECONDS)
+    with pytest.raises(AssertionError, match='outlast Zigbee2MQTT'):
+        wait_for_check_result(done, 55)
