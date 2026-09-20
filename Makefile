@@ -83,6 +83,11 @@ board/%:
 # minimal installs), `python` may be missing while `python3` exists.
 PYTHON ?= $(shell command -v python >/dev/null 2>&1 && echo python || echo python3)
 
+# Offline, build-only cross-role gate for BSEED PM shared-core firmware.
+# Python venv and Telink SDK/toolchain required; no live-device operations.
+bseed/pm-matrix:
+	$(PYTHON) helper_scripts/bseed_pm_variant_matrix.py
+
 # Run pytest tests (requires stub to be built)
 tests: stub/build stub/build_end_device
 	$(PYTHON) -m pytest tests/ -v

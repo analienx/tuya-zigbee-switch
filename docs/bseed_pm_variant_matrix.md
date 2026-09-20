@@ -3,7 +3,11 @@
 Run `python helper_scripts/bseed_pm_variant_matrix.py` from a **clean Linux** checkout with
 Telink toolchain, SDK, host compiler and pytest installed. This is strictly offline.
 `--source-only` skips compilation and cannot authorize OTA. Artifacts remain under ignored
-`build/bseed-pm-role-matrix/{router,client}/`; neither image is published or flashed.
+`build/bseed-pm-role-matrix-TIMESTAMP-ID/{router,client}/`; neither image is published or flashed.
+
+Every invocation creates new, non-overwritable evidence; use a new `--output-dir` when
+selecting an explicit build path. The resulting `ROLE_MATRIX.json` is evidence for
+offline gating only and must not be confused with a live hardware acceptance.
 
 Each run tests one shared PM attribute/metering contract (types, reads, scaling,
 energy accumulation, NVM, converter and live-test logic), both role-specific

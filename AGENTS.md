@@ -7,3 +7,7 @@ Do not interpret Zigbee2MQTT OTA `status:ok` or 100% as a confirmed boot. Never 
 ## Canonical Home Assistant diagnostics and Zigbee device identification
 
 For any live Home Assistant access, Zigbee2MQTT NWK/address mapping or route-error investigation, load the **single canonical** [Home Assistant read-only skill](https://github.com/analienx/config/blob/main/skills/home-assistant-readonly/SKILL.md) from `analienx/config` (main). It provides the existing SSH alias, a host-key-verified Paramiko fallback for Windows OpenSSH exit-255 failures, and the reusable `ha_readonly.py` live inventory helper. Keep implementation and credentials in the canonical location; do not copy the helper or SSH settings here. This does not authorize Zigbee firmware flashing, HA mutations or bypass of this repository's own safety/deployment rules.
+
+## Required BSEED shared PM firmware gate
+
+Before releasing any BSEED TS011F-BS-PM source change, run `make bseed/pm-matrix` in a clean Linux checkout with the Telink toolchain. This builds and validates the Router and mains Client from the exact same commit, not merely host tests. Read `docs/bseed_pm_variant_matrix.md`. Keep role-specific OTA identities and live hardware gates separate; a green offline matrix never authorizes flashing.

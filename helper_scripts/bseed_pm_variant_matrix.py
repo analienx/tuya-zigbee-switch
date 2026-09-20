@@ -4,12 +4,14 @@ No device access, publication, OTA index changes, relay commands, or flashing.
 Run from a Linux toolchain checkout with pytest and the Telink SDK installed.
 """
 import argparse
+import datetime as dt
 import hashlib
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
+import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMON_TESTS = ('tests/test_unified_pm_v8.py', 'tests/test_pm_cluster_layout_guard.py',
@@ -63,22 +65,27 @@ def verify_artifact(path, expected, source_commit):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output-dir', default='build/bseed-pm-role-matrix',
+    parser.add_argument('--output-dir', default=None,
                         help='Build-only artifacts, must be beneath ignored build/')
     parser.add_argument('--source-only', action='store_true',
                         help='Run host tests only; NOT firmware or hardware acceptance')
     args = parser.parse_args(argv)
     root_build = (ROOT / 'build').resolve()
-    output = (ROOT / args.output_dir).resolve()
+    destination = args.output_dir or ('build/bseed-pm-role-matrix-' +
+        dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ') +
+        '-' + uuid.uuid4().hex[:8])
+    output = (ROOT / destination).resolve()
     if not output.is_relative_to(root_build) or output == root_build:
         parser.error('Output must be under the ignored build directory')
+    if output.exists():
+        parser.error('Refusing to overwrite previous build/matrix evidence')
     head = run(['git', 'rev-parse', 'HEAD']).strip()
     run(['make', 'stub/build'])
     run(['make', 'stub/build_end_device'])
     tests = list(dict.fromkeys((*COMMON_TESTS, *ROLE_TESTS['Router'],
                                 *ROLE_TESTS['EndDevice'])))
     run([sys.executable, '-m', 'pytest', *tests, '-q'])
-    result = {'sourceCommit': head, 'roles': ['Router', 'EndDevice'],
+    result = {'outputDir': str(output), 'sourceCommit': head, 'roles': ['Router', 'EndDevice'],
               'hostTests': 'passed', 'compiledBothRoles': False,
               'hardwareAcceptance': False, 'artifacts': []}
     if args.source_only:
