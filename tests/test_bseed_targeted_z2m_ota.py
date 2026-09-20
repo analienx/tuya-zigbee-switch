@@ -63,3 +63,13 @@ def test_wrong_identity_and_payload_rejected_before_network(tmp_path):
     Path(a.native_image).write_bytes(original[:-1] + b'x')
     with pytest.raises(AssertionError, match='payload differs'):
         verify_image(a)
+
+
+def test_update_payload_uses_explicit_bounded_block_size():
+    from bseed_targeted_z2m_ota import update_payload
+    data = update_payload('0xa4c138241e3de538', 'http://example.invalid/client.ota', 'transaction-1', 50)
+    assert data == {'id': '0xa4c138241e3de538', 'url': 'http://example.invalid/client.ota', 'transaction': 'transaction-1', 'image_block_request_timeout': 600000, 'default_maximum_data_size': 50}
+    with pytest.raises(AssertionError, match='10..100'):
+        update_payload('target', 'url', 'token', 101)
+    with pytest.raises(AssertionError, match='10..100'):
+        update_payload('target', 'url', 'token', 9)

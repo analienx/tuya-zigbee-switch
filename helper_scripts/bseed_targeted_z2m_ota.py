@@ -46,6 +46,11 @@ def verify_image(args):
     return image, header
 
 
+def update_payload(ieee, url, token, max_block_bytes):
+    assert 10 <= max_block_bytes <= 100, 'OTA maximum data size must be 10..100 bytes'
+    return {'id': ieee, 'url': url, 'transaction': token, 'image_block_request_timeout': 600000, 'default_maximum_data_size': max_block_bytes}
+
+
 def arguments():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--mode', choices=['preflight', 'check', 'flash'], required=True)
@@ -59,11 +64,13 @@ def arguments():
     p.add_argument('--expect-relay', choices=['ON', 'OFF'], required=True)
     p.add_argument('--max-reported-watts', type=float, default=1.0)
     p.add_argument('--timeout-seconds', type=int, default=2400)
+    p.add_argument('--max-block-bytes', type=int, default=50, help='OTA per-request maximum; conservative 50-byte default for fragile meshes')
     return p.parse_args()
 
 
 def main():
     args = arguments()
+    assert 10 <= args.max_block_bytes <= 100, 'OTA maximum data size must be 10..100 bytes'
     verify_image(args)
     work = Path(args.workdir); work.mkdir(parents=True, exist_ok=True)
     lock = work / 'ACTIVE_LOCK.json'
@@ -168,13 +175,13 @@ def main():
         with lock.open('x' if not lock.exists() else 'w', encoding='utf-8') as handle:
             json.dump(campaign, handle, indent=2)
         campaign['phase'] = 'ota_running'; lock.write_text(json.dumps(campaign, indent=2), encoding='utf-8')
-        payload = {'id': args.ieee, 'url': args.url, 'transaction': token, 'image_block_request_timeout': 600000}
+        payload = update_payload(args.ieee, args.url, token, args.max_block_bytes)
         state['sent'] = True
         pub = client.publish(req, json.dumps(payload), qos=1)
         assert pub.rc == mqtt.MQTT_ERR_SUCCESS, 'OTA publish failed'
         pub.wait_for_publish(5)
         assert pub.is_published(), 'OTA publish not confirmed'
-        log('ota_request_sent', {'ieee': args.ieee, 'image_sha256': args.sha256, 'transaction': token})
+        log('ota_request_sent', {'ieee': args.ieee, 'image_sha256': args.sha256, 'transaction': token, 'default_maximum_data_size': args.max_block_bytes})
         deadline = time.monotonic() + args.timeout_seconds
         while not answered.wait(15) and time.monotonic() < deadline:
             log('ota_pending', {'elapsed_seconds': int(args.timeout_seconds - max(0, deadline - time.monotonic()))})
