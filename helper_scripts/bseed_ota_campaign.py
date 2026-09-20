@@ -120,11 +120,31 @@ def postflash_cmd(profile, evidence):
     return cmd
 
 
+
+def provision_cmd(profile, confirmation, evidence):
+    """Explicit per-device PM repair; returns a command, never runs implicitly on status."""
+    if not profile.get('require_pm'): raise ValueError('Not a PM campaign')
+    if confirmation != profile['ieee']: raise ValueError('Confirm exact IEEE to provision PM')
+    if not profile.get('pm_ssh_host') or not profile.get('pm_ssh_key'):
+        raise ValueError('PM campaign requires private pm_ssh_host and pm_ssh_key')
+    cmd = [sys.executable, '-u', str(ROOT/'helper_scripts/bseed_pm_provision.py'),
+           '--device', profile['device'], '--ieee', profile['ieee'],
+           '--confirm-ieee', confirmation, '--expect-role', profile['postflash_role'],
+           '--expect-build', profile['postflash_build'], '--mqtt-config', profile['mqtt_config'],
+           '--broker', profile['broker'], '--ssh-host', profile['pm_ssh_host'],
+           '--ssh-key', profile['pm_ssh_key'], '--output', str(evidence),
+           '--max-writes', str(profile.get('pm_max_writes', 4)),
+           '--observe-seconds', str(profile.get('pm_observe_seconds', 135)), '--apply']
+    if profile.get('pm_allow_configure'): cmd.append('--allow-configure')
+    if profile.get('pm_expected_idle'): cmd.append('--expect-idle')
+    return cmd
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', required=True, help='Private JSON profile outside git')
-    parser.add_argument('--mode', choices=['prepare', 'preflight', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'postflash', 'status'], required=True)
-    parser.add_argument('--confirm-ieee', help='Required for flash, transition and rejoin; must match profile IEEE exactly')
+    parser.add_argument('--mode', choices=['prepare', 'preflight', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'provision-pm', 'postflash', 'status'], required=True)
+    parser.add_argument('--confirm-ieee', help='Required for flash, transition, rejoin, metadata and provision-pm; must match profile IEEE exactly')
     args = parser.parse_args()
     profile = load_profile(args.profile)
     work = Path(profile['workdir'])
@@ -136,6 +156,12 @@ def main():
             f = work / filename
             print(filename, f.read_text(encoding='utf8') if f.exists() else 'not present')
         return
+    if args.mode == 'provision-pm':
+        if args.confirm_ieee != profile['ieee']:
+            raise SystemExit('Provision refused: confirm exact IEEE')
+        import uuid
+        evidence = work / ('pm_provision_' + uuid.uuid4().hex + '.json')
+        raise SystemExit(subprocess.call(provision_cmd(profile, args.confirm_ieee, evidence)))
     if args.mode == 'postflash':
         import uuid
         evidence = work / ('postflash_' + uuid.uuid4().hex + '.json')
@@ -153,6 +179,7 @@ def main():
             raise SystemExit(subprocess.call(metadata_cmd(profile, args.confirm_ieee, evidence)))
         # Resolve the scoped recovery route *before* submitting a firmware image.
         planned_join = rejoin_cmd(profile, args.confirm_ieee, work / ('rejoin_' + uuid.uuid4().hex + '.json'))
+        if profile.get('require_pm'): provision_cmd(profile, args.confirm_ieee, work / 'pm_prevalidated.json')
         if args.mode == 'transition':
             print('ONE_DEVICE_ROLE_TRANSITION', profile['ieee'], flush=True)
             flashed = subprocess.call(runner_args(profile, 'flash'))
@@ -163,6 +190,10 @@ def main():
         metadata_evidence = work / ('metadata_' + uuid.uuid4().hex + '.json')
         refreshed = subprocess.call(metadata_cmd(profile, args.confirm_ieee, metadata_evidence))
         if refreshed: raise SystemExit(refreshed)
+        if profile.get('require_pm'):
+            pm_evidence = work / ('pm_provision_' + uuid.uuid4().hex + '.json')
+            provisioned = subprocess.call(provision_cmd(profile, args.confirm_ieee, pm_evidence))
+            if provisioned: raise SystemExit(provisioned)
         if args.mode == 'transition':
             post_evidence = work / ('postflash_' + uuid.uuid4().hex + '.json')
             raise SystemExit(subprocess.call(postflash_cmd(profile, post_evidence)))
@@ -172,9 +203,21 @@ def main():
             raise SystemExit('Flash refused: supply --confirm-ieee with the exact target IEEE')
         if profile['preflash_role'] != profile['postflash_role']:
             raise SystemExit('Cross-role flash refused: use --mode transition for scoped rejoin')
+        if profile.get('require_pm'):
+            provision_cmd(profile, args.confirm_ieee, work / 'pm_prevalidated.json')
         print('EXPLICIT_FLASH_TARGET', profile['ieee'], profile['device'], flush=True)
+        flashed = subprocess.call(runner_args(profile, 'flash'))
+        if flashed: raise SystemExit(flashed)
+        if profile.get('require_pm'):
+            import uuid
+            pm_evidence = work / ('pm_provision_' + uuid.uuid4().hex + '.json')
+            provisioned = subprocess.call(provision_cmd(profile, args.confirm_ieee, pm_evidence))
+            if provisioned: raise SystemExit(provisioned)
+            post_evidence = work / ('postflash_' + uuid.uuid4().hex + '.json')
+            raise SystemExit(subprocess.call(postflash_cmd(profile, post_evidence)))
+        return
     elif args.confirm_ieee:
-        raise SystemExit('--confirm-ieee may only be supplied for flash, transition, rejoin or metadata')
+        raise SystemExit('--confirm-ieee may only be supplied for flash, transition, rejoin, metadata or provision-pm')
     raise SystemExit(subprocess.call(runner_args(profile, args.mode)))
 
 

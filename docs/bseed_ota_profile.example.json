@@ -26,5 +26,11 @@
   "check_timeout_seconds": 90,
   "monitor_seconds": 7200,
   "require_pm": true,
-  "observe_seconds": 30
+  "observe_seconds": 30,
+  "pm_ssh_host": "PRIVATE_Z2M_HOST",
+  "pm_ssh_key": "/private/keys/host_verified_ssh_identity",
+  "pm_max_writes": 4,
+  "pm_observe_seconds": 135,
+  "pm_allow_configure": true,
+  "pm_expected_idle": false
 }
