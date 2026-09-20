@@ -168,6 +168,22 @@ const romasku = {
             description: "same: LED follows the relay's virtual On/Off state; opposite: LED shows the inverse state; manual: LED state is controlled separately with Indicator LED state.",
             entityCategory: "config",
         }),
+    bseedTs0726IndicatorMode: (name, endpointName) => {
+        const result = enumLookup({
+            name,
+            endpointName,
+            lookup: {"Logical state": 0, "Inverse logical state": 1, "Manual": 2, "Physical output": 3, "Binding status": 4},
+            cluster: "genOnOff",
+            attribute: {ID: 0xff01, type: 0x30},
+            label: "Indicator LED behavior",
+            description: "Logical state follows Zigbee On/Off; Inverse logical state shows its opposite; Manual controls LED state separately; Physical output follows relay output; Binding status follows local bound-light command intent, not confirmation of the light's state. LED behavior does not change electrical output.",
+            entityCategory: "config",
+        });
+        for (const expose of result.exposes || []) {
+            if (typeof expose.withProperty === "function") expose.withProperty(name);
+        }
+        return result;
+    },
     relayIndicator: (name, endpointName) =>
         binary({
             name,
@@ -539,7 +555,11 @@ const definitions = [
             {% endfor %}
             {% endif %}
             {% for relayName in device.relayIndicatorNames %}
+            {% if device.model == "EC-GL86ZPCS31" %}
+            romasku.bseedTs0726IndicatorMode("{{relayName}}_indicator_mode", "{{relayName}}"),
+            {% else %}
             romasku.relayIndicatorMode("{{relayName}}_indicator_mode", "{{relayName}}"),
+            {% endif %}
             romasku.relayIndicator("{{relayName}}_indicator", "{{relayName}}"),
             {% endfor %}
             {% for relayName in device.relayNames %}

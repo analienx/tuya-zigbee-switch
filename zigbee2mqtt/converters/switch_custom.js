@@ -165,6 +165,22 @@ const romasku = {
             description: "same: LED follows the relay's virtual On/Off state; opposite: LED shows the inverse state; manual: LED state is controlled separately with Indicator LED state.",
             entityCategory: "config",
         }),
+    bseedTs0726IndicatorMode: (name, endpointName) => {
+        const result = enumLookup({
+            name,
+            endpointName,
+            lookup: {"Logical state": 0, "Inverse logical state": 1, "Manual": 2, "Physical output": 3, "Binding status": 4},
+            cluster: "genOnOff",
+            attribute: {ID: 0xff01, type: 0x30},
+            label: "Indicator LED behavior",
+            description: "Logical state follows Zigbee On/Off; Inverse logical state shows its opposite; Manual controls LED state separately; Physical output follows relay output; Binding status follows local bound-light command intent, not confirmation of the light's state. LED behavior does not change electrical output.",
+            entityCategory: "config",
+        });
+        for (const expose of result.exposes || []) {
+            if (typeof expose.withProperty === "function") expose.withProperty(name);
+        }
+        return result;
+    },
     relayIndicator: (name, endpointName) =>
         binary({
             name,
@@ -13076,11 +13092,11 @@ const definitions = [
             romasku.bindedMode("switch_right_binded_mode", "switch_right"),
             romasku.longPressDuration("switch_right_long_press_duration", "switch_right"),
             romasku.levelMoveRate("switch_right_level_move_rate", "switch_right"),
-            romasku.relayIndicatorMode("relay_left_indicator_mode", "relay_left"),
+            romasku.bseedTs0726IndicatorMode("relay_left_indicator_mode", "relay_left"),
             romasku.relayIndicator("relay_left_indicator", "relay_left"),
-            romasku.relayIndicatorMode("relay_middle_indicator_mode", "relay_middle"),
+            romasku.bseedTs0726IndicatorMode("relay_middle_indicator_mode", "relay_middle"),
             romasku.relayIndicator("relay_middle_indicator", "relay_middle"),
-            romasku.relayIndicatorMode("relay_right_indicator_mode", "relay_right"),
+            romasku.bseedTs0726IndicatorMode("relay_right_indicator_mode", "relay_right"),
             romasku.relayIndicator("relay_right_indicator", "relay_right"),
             romasku.relayPhysicalMode("relay_left_physical_mode", "relay_left"),
             romasku.relayPhysicalMode("relay_middle_physical_mode", "relay_middle"),
