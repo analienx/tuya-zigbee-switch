@@ -154,7 +154,8 @@ def test_same_role_pm_flash_runs_provision_and_postflash(tmp_path,monkeypatch):
         with pytest.raises(SystemExit) as done: campaign.main()
     assert done.value.code==0
     assert [Path(x.args[0][2]).name for x in call.call_args_list]==[
-        'bseed_targeted_z2m_ota.py','bseed_pm_provision.py','bseed_z2m_postflash_verify.py']
+        'bseed_targeted_z2m_ota.py','bseed_z2m_postota_reinterview.py',
+        'bseed_pm_provision.py','bseed_z2m_postflash_verify.py']
 
 
 def test_same_role_pm_flash_transport_failure_never_provisions(tmp_path,monkeypatch):
@@ -218,3 +219,29 @@ def test_router_candidate_requires_exact_matrix_and_relay_proof(tmp_path):
     cfg['relay_get_key']='state_relay';cfg['sha256']='0'*64
     with pytest.raises(ValueError,match='differs'):
         campaign.verified_router_pm_candidate(cfg)
+
+
+def test_same_role_router_interview_precedes_audit_and_postflash(tmp_path,monkeypatch):
+    cfg=_router_candidate_profile(tmp_path)
+    src=tmp_path/'router.json';src.write_text(json.dumps(cfg))
+    monkeypatch.setattr(sys,'argv',['campaign','--profile',str(src),'--mode','flash',
+                                    '--confirm-ieee',cfg['ieee']])
+    with patch('bseed_ota_campaign.subprocess.call',return_value=0) as run:
+        with pytest.raises(SystemExit) as result:campaign.main()
+    assert result.value.code==0
+    assert [Path(c.args[0][2]).name for c in run.call_args_list]==[
+        'bseed_targeted_z2m_ota.py','bseed_z2m_postota_reinterview.py',
+        'bseed_z2m_postflash_verify.py','bseed_pm_role_audit.py']
+
+
+def test_same_role_interview_failure_blocks_provision_and_postflash(tmp_path,monkeypatch):
+    cfg=profile(tmp_path);cfg.update(preflash_role='EndDevice',require_pm=True,
+        pm_ssh_host='test.invalid',pm_ssh_key=str(tmp_path/'private.key'))
+    src=tmp_path/'pm.json';src.write_text(json.dumps(cfg))
+    monkeypatch.setattr(sys,'argv',['campaign','--profile',str(src),'--mode','flash',
+                                    '--confirm-ieee',cfg['ieee']])
+    with patch('bseed_ota_campaign.subprocess.call',side_effect=[0,2]) as run:
+        with pytest.raises(SystemExit) as result:campaign.main()
+    assert result.value.code==2
+    assert [Path(c.args[0][2]).name for c in run.call_args_list]==[
+        'bseed_targeted_z2m_ota.py','bseed_z2m_postota_reinterview.py']

@@ -23,6 +23,7 @@
   "join_via": "VERIFIED_NEIGHBOR_ROUTER_FRIENDLY_NAME",
   "join_seconds": 120,
   "block_bytes": 32,
+  "postota_settle_seconds": 10,
   "check_timeout_seconds": 90,
   "monitor_seconds": 7200,
   "require_pm": true,

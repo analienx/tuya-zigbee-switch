@@ -8456,7 +8456,7 @@ const definitions = [
         ],
         model: "TS011F_plug_1_2",
         vendor: "Tuya-custom",
-        description: "BSEED PM outlet \ud83c\udd70 \u2014 Romasku custom firmware",
+        description: "BSEED PM outlet \ud83c\udd70 \u2014 Analienx BSEED firmware (based on Romasku)",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, }, multiEndpointSkip: ["power", "current", "voltage", "energy"] }),
             romasku.deviceConfig("device_config", "switch"),
@@ -8500,7 +8500,7 @@ const definitions = [
         ],
         model: "TS011F_plug_1_2",
         vendor: "Tuya-custom",
-        description: "BSEED PM outlet \ud83c\udd71 \u2014 Romasku custom firmware",
+        description: "BSEED PM outlet \ud83c\udd71 \u2014 Analienx BSEED firmware (based on Romasku)",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),
@@ -8539,7 +8539,7 @@ const definitions = [
         ],
         model: "TS011F_plug_1_2",
         vendor: "Tuya-custom",
-        description: "BSEED PM outlet \ud83c\udd72 \u2014 Romasku custom firmware",
+        description: "BSEED PM outlet \ud83c\udd72 \u2014 Analienx BSEED firmware (based on Romasku)",
         extend: [
             deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
             romasku.deviceConfig("device_config", "switch"),

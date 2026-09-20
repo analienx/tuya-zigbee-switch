@@ -123,6 +123,24 @@ def postflash_cmd(profile, evidence):
 
 
 
+
+def reinterview_cmd(profile, confirmation, evidence):
+    """Only after confirmed same-role OTA OK, never after an ABORT or role transition."""
+    if profile['preflash_role'] != profile['postflash_role']:
+        raise ValueError('Cross-role OTA follows scoped rejoin and metadata workflow')
+    if confirmation != profile['ieee']:
+        raise ValueError('Confirm exact IEEE for target-only post-OTA interview')
+    cmd=[sys.executable,'-u',str(ROOT/'helper_scripts/bseed_z2m_postota_reinterview.py')]
+    for key,flag in [('device','device'),('ieee','ieee'),('manufacturer','manufacturer'),
+                     ('model','model'),('postflash_role','expect-role'),('postflash_build','expect-build'),
+                     ('mqtt_config','mqtt-config'),('broker','broker')]:
+        cmd.extend(['--'+flag,str(profile[key])])
+    cmd.extend(['--confirm-ieee',confirmation,'--campaign-lock',
+                str(Path(profile['workdir'])/'ACTIVE_LOCK.json'),'--output',str(evidence),
+                '--settle-seconds',str(profile.get('postota_settle_seconds',10))])
+    return cmd
+
+
 def provision_cmd(profile, confirmation, evidence):
     """Explicit per-device PM repair; returns a command, never runs implicitly on status."""
     if not profile.get('require_pm'): raise ValueError('Not a PM campaign')
@@ -187,7 +205,7 @@ def verified_router_pm_candidate(profile):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', required=True, help='Private JSON profile outside git')
-    parser.add_argument('--mode', choices=['prepare', 'preflight', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'provision-pm', 'audit-pm', 'postflash', 'status'], required=True)
+    parser.add_argument('--mode', choices=['prepare', 'preflight', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'provision-pm', 'audit-pm', 'postflash', 'reinterview', 'status'], required=True)
     parser.add_argument('--confirm-ieee', help='Required for flash, transition, rejoin, metadata and provision-pm; must match profile IEEE exactly')
     args = parser.parse_args()
     profile = load_profile(args.profile)
@@ -207,6 +225,13 @@ def main():
         import uuid
         evidence = work / ('pm_role_audit_' + uuid.uuid4().hex + '.json')
         raise SystemExit(subprocess.call(role_audit_cmd(profile, evidence)))
+    if args.mode == 'reinterview':
+        if args.confirm_ieee != profile['ieee']:
+            raise SystemExit('Target re-interview refused: confirm exact IEEE')
+        import uuid
+        evidence = work / ('postota_interview_' + uuid.uuid4().hex + '.json')
+        print('PRIVATE_EVIDENCE', evidence, flush=True)
+        raise SystemExit(subprocess.call(reinterview_cmd(profile, args.confirm_ieee, evidence)))
     if args.mode == 'provision-pm':
         if args.confirm_ieee != profile['ieee']:
             raise SystemExit('Provision refused: confirm exact IEEE')
@@ -258,7 +283,13 @@ def main():
             provision_cmd(profile, args.confirm_ieee, work / 'pm_prevalidated.json')
         print('EXPLICIT_FLASH_TARGET', profile['ieee'], profile['device'], flush=True)
         flashed = subprocess.call(runner_args(profile, 'flash'))
-        if flashed: raise SystemExit(flashed)
+        if flashed: raise SystemExit(flashed)  # Never interview or retry after OTA failure.
+        import uuid
+        interview = work / ('postota_interview_' + uuid.uuid4().hex + '.json')
+        interviewed = subprocess.call(reinterview_cmd(profile, args.confirm_ieee, interview))
+        if interviewed:
+            print('POSTOTA_INTERVIEW_UNCONFIRMED', interview, flush=True)
+            raise SystemExit(interviewed)  # No provisioning or hardware acceptance on stale build.
         if profile.get('require_pm'):
             import uuid
             if profile['postflash_role'] == 'Router':
@@ -272,9 +303,10 @@ def main():
             if provisioned: raise SystemExit(provisioned)
             post_evidence = work / ('postflash_' + uuid.uuid4().hex + '.json')
             raise SystemExit(subprocess.call(postflash_cmd(profile, post_evidence)))
-        return
+        post = work / ('postflash_' + uuid.uuid4().hex + '.json')
+        raise SystemExit(subprocess.call(postflash_cmd(profile, post)))
     elif args.confirm_ieee:
-        raise SystemExit('--confirm-ieee may only be supplied for flash, transition, rejoin, metadata or provision-pm')
+        raise SystemExit('--confirm-ieee may only be supplied for flash, transition, rejoin, metadata, reinterview or provision-pm')
     raise SystemExit(subprocess.call(runner_args(profile, args.mode)))
 
 

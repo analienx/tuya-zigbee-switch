@@ -2,6 +2,8 @@
 
 Hardware-focused custom Zigbee firmware for selected BSEED devices, built on top of [romasku/tuya-zigbee-switch](https://github.com/romasku/tuya-zigbee-switch).
 
+**Project identity:** Analienx BSEED firmware (based on Romasku). The BSEED variants, testing and deployment tooling belong to this fork; the reusable switch framework remains Romasku-derived. Keep upstream attribution and licenses intact; do not call every generic Romasku device an Analienx build.
+
 [![CI](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/test.yml/badge.svg)](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/test.yml)
 [![Telink Router TC32](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/telink-router-ci.yml/badge.svg)](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/telink-router-ci.yml)
 [![Reproducible firmware](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/pm-reproducibility.yml/badge.svg)](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/pm-reproducibility.yml)
