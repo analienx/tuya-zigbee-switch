@@ -15,7 +15,11 @@
 
 void ota_process_msg_callback(u8 evt, u8 status);
 
-#ifdef BSEED_MAINS_CLIENT
+#if defined(BSEED_MAINS_CLIENT) || defined(BSEED_PM_B28WRPVX)
+#define BSEED_OTA_DEFERRED_REQUERY 1
+#endif
+
+#ifdef BSEED_OTA_DEFERRED_REQUERY
 #define OTA_ABORT_QUERY_RETRY_DELAY_MS    1000
 static hal_task_t ota_abort_query_retry_task;
 
@@ -48,7 +52,7 @@ void hal_ota_cluster_setup(hal_zigbee_cluster *cluster) {
 }
 
 void ota_process_msg_callback(u8 evt, u8 status) {
-#ifdef BSEED_MAINS_CLIENT
+#ifdef BSEED_OTA_DEFERRED_REQUERY
     if (evt == OTA_EVT_START) {
         hal_tasks_unschedule(&ota_abort_query_retry_task);
         return;
@@ -59,7 +63,7 @@ void ota_process_msg_callback(u8 evt, u8 status) {
         if (status == ZCL_STA_SUCCESS) {
             ota_mcuReboot();
         } else {
-#ifdef BSEED_MAINS_CLIENT
+#ifdef BSEED_OTA_DEFERRED_REQUERY
             // Telink uses one shared OTA timer for block-response waits and
             // periodic queries. Restart querying from a separate application
             // timer so an abort callback cannot race the shared timer cleanup.
@@ -73,7 +77,7 @@ void ota_process_msg_callback(u8 evt, u8 status) {
 }
 
 void hal_zigbee_init_ota() {
-#ifdef BSEED_MAINS_CLIENT
+#ifdef BSEED_OTA_DEFERRED_REQUERY
     hal_tasks_init(&ota_abort_query_retry_task);
     ota_abort_query_retry_task.handler = ota_abort_query_retry;
     ota_abort_query_retry_task.arg     = NULL;

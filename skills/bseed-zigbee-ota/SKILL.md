@@ -62,3 +62,23 @@ For PM Routers, a live scale/energy read on the verified Router canary returned 
 ## Shared PM core regression gate (Router and mains Client)
 
 Before changing or distributing PM firmware, read `docs/bseed_pm_variant_matrix.md` and run `make bseed/pm-matrix` in a clean local Linux toolchain checkout. This runs common PM/ZCL/scaling/NVM tests, role-specific suites and builds both role images at one source SHA with separate OTA identities. The published Router v8u4 predates the Telink PM attribute registration fix; do not rebuild or relabel it as an updated release. Use only a separately versioned, verified Router candidate and a target-only canary before any promotion. Never apply Client-only reporting or cached scales to a Router automatically.
+
+## Failed PM Router OTA: mandatory offline diagnostics (2026-09-20)
+
+KitchenSocketRight v8u4 -> v8u5-rc1 OTA ended in device `ABORT` at 1.86%; its
+PRIVATE campaign lock is `update_error`. Read
+`docs/bseed_pm_router_v8u5_ota_abort_20260920.md` and
+`docs/bseed_ota_abort_forensics.md` first. Use
+`helper_scripts/bseed_ota_abort_forensics.py` offline with the original
+single-transaction JSONL and actual installed Telink SDK constants. The
+50-byte server ceiling is not the device's actual requested block size;
+this SDK requests at most 48 bytes. An info-level progress stall cannot prove
+a failed image offset, radio defect, firmware write failure or root cause.
+
+The Client post-abort OTA timer recovery is now shared with PM Router source
+in **a separately versioned rc2 candidate**, but only affects behavior *after*
+an abort and cannot repair v8u4's ongoing download. Do not claim rc2 resolves
+the initial ABORT. No follow-up flash, unlock, retry, relay change or restart
+is authorized solely by a clean offline build; require independent raw
+block-level/APS evidence, a new device/network eligibility decision and
+exact single-target authorization. Keep rc1's validated hash immutable.

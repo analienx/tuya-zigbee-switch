@@ -20,13 +20,15 @@ COMMON_TESTS = ('tests/test_unified_pm_v8.py', 'tests/test_pm_cluster_layout_gua
                 'tests/test_bseed_pm_variant_matrix.py',
                 'tests/test_bseed_pm_zcl_read_probe.py',
                 'tests/test_bseed_pm_role_audit.py', 'tests/test_bseed_pm_provision.py',
-                'tests/test_bseed_pm_fleet_audit.py', 'tests/test_live_bseed_pm_metering.py')
+                'tests/test_bseed_pm_fleet_audit.py', 'tests/test_live_bseed_pm_metering.py',
+                'tests/test_bseed_pm_ota_recovery_cross_role.py',
+                'tests/test_bseed_ota_abort_forensics.py')
 ROLE_TESTS = {'Router': ('tests/test_bseed_pm_v8_release.py',
                          'tests/test_bseed_golden_role_distribution.py'),
               'EndDevice': ('tests/test_bseed_mains_client.py',
                             'tests/test_bseed_mains_client_keepalive.py')}
-ROUTER = {'role': 'Router', 'build': '1.2.5-bseedv8u5-rc1',
-          'version': 0x1205300D, 'type': 43556, 'artifact': 'forward.ota'}
+ROUTER = {'role': 'Router', 'build': '1.2.5-bseedv8u5-rc2',
+          'version': 0x1205300E, 'type': 43556, 'artifact': 'forward.ota'}
 CLIENT = {'role': 'EndDevice', 'build': '1.2.5-bseedcli6',
           'version': 0x1205300C, 'type': 65024, 'artifact': 'forward.ota'}
 

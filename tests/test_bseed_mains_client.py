@@ -114,7 +114,7 @@ def test_mains_client_recovers_periodic_ota_query_after_abort():
     assert "hal_tasks_schedule(&ota_abort_query_retry_task," in ota
     assert "OTA_ABORT_QUERY_RETRY_DELAY_MS" in ota
     assert "ota_queryStart(OTA_PERIODIC_QUERY_INTERVAL);" in ota
-    assert "#ifdef BSEED_MAINS_CLIENT" in ota
+    assert "#ifdef BSEED_OTA_DEFERRED_REQUERY" in ota
 
 
 def test_production_router_build_scripts_stay_router_only():

@@ -18,7 +18,7 @@ radio-report proof, fixture calibration or Router child-parenting verification.
 
 Published Router `1.2.5-bseedv8u4` (`0x12053007`) must remain byte-stable.
 Opt-in candidate mode `BSEED_PM_ROUTER_CANDIDATE=1` builds isolated
-`1.2.5-bseedv8u5-rc1` (`0x1205300D`, Router image type 43556).
+`1.2.5-bseedv8u5-rc2` (`0x1205300E`, Router image type 43556).
 The Client remains `1.2.5-bseedcli6` (`0x1205300C`, Client type 65024).
 Do not use either image as the other role or put the experimental Client in a
 normal OTA index. No old Router artifact may be relabeled with a newer version.
@@ -36,3 +36,19 @@ copying Client metadata or rewriting HA history; configure Router reports only
 if device-originated support has been demonstrated. Test no-load and known
 load with independently controlled mains-safe fixture and check relay preferences,
 energy monotonicity, uptime and child routing before wider deployment.
+
+## Router rc1 abort and separately versioned rc2
+
+The validated rc1 image (`0x1205300D`) aborted on KitchenSocketRight in the
+first 1.86% of a targeted OTA on 2026-09-20; preserve its SHA/evidence as
+immutable. The rc2 (`0x1205300E`) source only adds the Client's already-tested
+post-abort timer/query recovery to the PM Router; it does **not** cure a
+currently installed v8u4 client's initial block-response stall.
+
+Run `tests/test_bseed_pm_ota_recovery_cross_role.py` and
+`tests/test_bseed_ota_abort_forensics.py` as part of this matrix. Even if both
+roles compile, rc2 remains **offline-only** until target-specific OTA failure
+forensics and explicit hardware eligibility are satisfied. Review
+`docs/bseed_pm_router_v8u5_ota_abort_20260920.md` before considering a new
+Router attempt; a new output directory or file version must never bypass its
+existing `update_error` campaign lock.
