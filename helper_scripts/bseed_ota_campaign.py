@@ -111,11 +111,13 @@ def metadata_cmd(profile, confirmation, evidence):
 
 
 def postflash_cmd(profile, evidence):
-    return [sys.executable, '-u', str(ROOT/'helper_scripts/bseed_z2m_postflash_verify.py'),
+    cmd = [sys.executable, '-u', str(ROOT/'helper_scripts/bseed_z2m_postflash_verify.py'),
             '--device', profile['device'], '--ieee', profile['ieee'],
             '--expect-role', profile['postflash_role'], '--expect-build', profile['postflash_build'],
             '--mqtt-config', profile['mqtt_config'], '--broker', profile['broker'],
             '--output', str(evidence), '--observe-seconds', str(profile.get('observe_seconds', 20))]
+    if profile.get('require_pm'): cmd.append('--require-pm')
+    return cmd
 
 
 def main():

@@ -25,5 +25,6 @@
   "block_bytes": 32,
   "check_timeout_seconds": 90,
   "monitor_seconds": 7200,
+  "require_pm": true,
   "observe_seconds": 30
 }

@@ -96,3 +96,11 @@ def test_transition_orders_flash_join_metadata_postflash(tmp_path,monkeypatch):
     invoked=[args.args[0] for args in call.call_args_list]
     assert ['bseed_targeted_z2m_ota.py','bseed_z2m_rejoin_window.py',
             'bseed_z2m_metadata_refresh.py','bseed_z2m_postflash_verify.py']==[Path(a[2]).name for a in invoked]
+
+
+def test_pm_profile_passes_strict_postflash_readiness_flag(tmp_path):
+    cfg=profile(tmp_path)
+    cfg['require_pm']=True
+    assert '--require-pm' in campaign.postflash_cmd(cfg,tmp_path/'evidence.json')
+    cfg['require_pm']=False
+    assert '--require-pm' not in campaign.postflash_cmd(cfg,tmp_path/'evidence.json')

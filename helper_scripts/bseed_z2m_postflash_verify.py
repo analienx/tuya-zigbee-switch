@@ -30,6 +30,27 @@ def evaluate(inventory, state, expected_ieee, expected_role, expected_build, liv
     return ('postflash_candidate' if not issues else 'unconfirmed'), issues, device
 
 
+def pm_readiness(device, fresh_state):
+    """Conservative PM candidate gate; not proof of calibrated energy or change reporting."""
+    import math
+    issues=[]
+    endpoint=(device or {}).get('endpoints',{}).get('1',{})
+    rows=endpoint.get('configured_reportings',[])
+    configured=any(row.get('cluster') in ('haElectricalMeasurement',2820) and
+                   row.get('attribute',row.get('attrId')) in ('activePower',1291) and
+                   0 <= row.get('minimum_report_interval',row.get('minRepIntval',99999)) <= 10 and
+                   0 < row.get('maximum_report_interval',row.get('maxRepIntval',99999)) <= 60 and
+                   0 < row.get('reportable_change',row.get('repChange',99999)) <= 5 for row in rows)
+    if not configured:issues.append('PM activePower max-60s reporting not configured')
+    if not fresh_state:issues.append('No nonretained post-subscription PM MQTT state')
+    else:
+        for name,low,high in [('voltage',180,260),('current',0,32),('power',0,8000),('energy',0,1e9)]:
+            try:value=float(fresh_state[name]);valid=math.isfinite(value) and low<=value<=high
+            except (KeyError,TypeError,ValueError):valid=False
+            if not valid:issues.append('Missing/unscaled/implausible PM '+name)
+    return issues
+
+
 def arguments():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--device', required=True, help='Zigbee2MQTT friendly name')
@@ -40,12 +61,15 @@ def arguments():
     p.add_argument('--broker', required=True)
     p.add_argument('--output', required=True, help='Private JSON evidence file outside repository')
     p.add_argument('--observe-seconds', type=int, default=20)
+    p.add_argument('--require-pm', action='store_true', help='Gate PM periodic reporting and plausible fresh standard MQTT values')
     return p.parse_args()
 
 
 def main():
     args = arguments()
     assert 4 <= args.observe_seconds <= 180, 'Observation window must be 4..180 seconds'
+    # PM periodic reporting may legally take up to 60 s; allow a margin beyond that maximum.
+    observation_seconds = max(args.observe_seconds, 75) if args.require_pm else args.observe_seconds
     config = yaml.safe_load(Path(args.mqtt_config).read_text(encoding='utf8'))['mqtt']
     base = config.get('base_topic', 'zigbee2mqtt')
     device_topic = base + '/' + args.device
@@ -80,7 +104,7 @@ def main():
     client.loop_start()
     try:
         assert ready.wait(10), 'MQTT connection/subscription failed'
-        time.sleep(args.observe_seconds)
+        time.sleep(observation_seconds)
     finally:
         client.loop_stop()
         client.disconnect()
@@ -91,6 +115,8 @@ def main():
         except (ValueError,TimeoutError,OSError) as error:node_error=repr(error)
     result, problems, target = evaluate(snapshot['inventory'], snapshot['state'], args.ieee,
                                          args.expect_role, args.expect_build, node)
+    pm_issues = pm_readiness(target, snapshot['state']) if args.require_pm else []
+    problems.extend(pm_issues)
     if snapshot['bridge'] != 'online': problems.append('Zigbee2MQTT bridge not verified online')
     if node_error: problems.append('live ZDO probe failed: '+node_error)
     if snapshot['errors']: problems.append('target-related Zigbee2MQTT errors observed')
@@ -99,6 +125,8 @@ def main():
                 'target_name': args.device, 'target_ieee': args.ieee,
                 'expected_role': args.expect_role, 'expected_build': args.expect_build,
                 'result': result, 'issues': problems, 'bridge': snapshot['bridge'],
+                'observation_seconds': observation_seconds,
+                'pm_readiness': {'required': args.require_pm, 'issues': pm_issues},
                 'live_node_descriptor': node, 'zdo_error': node_error,
                 'cached_inventory_role_disagrees_with_live_zdo': bool(target and node and target.get('type') != node['role']),
                 'fresh_mqtt_state_observed': snapshot['state'] is not None,
