@@ -237,6 +237,7 @@ def test_real_db_preserves_mixed_alias_and_target_ux() -> None:
     assert "may require recovery firmware" in js
     assert "BSEED Echo Click / Scale 3-gang" in js
     assert "Romasku custom firmware" in js
+    assert js.count("Analienx BSEED firmware (based on Romasku)") == 3
 
     target_before = js.split('model: "EC-GL86ZPCS31"')[0]
     target = target_before.rsplit("    {", 1)[-1] + js.split('model: "EC-GL86ZPCS31"', 1)[1].split("\n    },\n    {", 1)[0]

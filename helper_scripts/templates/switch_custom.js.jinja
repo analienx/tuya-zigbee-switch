@@ -469,7 +469,11 @@ const definitions = [
         {% endif %}
         model: "{{device.model}}",
         vendor: "Tuya-custom",
+        {% if not z2m_v1 and device.db_key.startswith("OUTLET_BSEED_PM_TS011F") %}
+        description: {{ (device.human_name ~ " — Analienx BSEED firmware (based on Romasku)") | tojson }},
+        {% else %}
         description: {{ (device.human_name ~ " — Romasku custom firmware") | tojson }},
+        {% endif %}
         {% set first_endpoint = device.switchNames[0] if device.switchNames else (device.relayNames[0] if device.relayNames else device.coverNames[0]) %}
         extend: [
             {% if device.has_battery_cluster %}
