@@ -90,6 +90,12 @@ Both custom images use manufacturer code `4417`.
 
 The stock-facing wrappers use outer OTA version `0xFFFFFFFF`; after conversion, normal custom→custom updates use the target-specific custom image type and version.
 
+### PM Client: direct stock conversion versus published Router OTA
+
+The **public BSEED OTA index** offers stock `_TZ3000_b28wrpvx / TS011F` → **custom PM Router**. The **experimental PM Client** (`EndDevice`, non-routing) is a different image and is **not** published in that index. Do not infer that stock devices must first receive a custom Router image: a direct stock-Tuya → custom PM Client OTA wrapper can instead carry the Client payload with the exact stock OTA identity. A locally prepared `pm-stock-to-client-cli4-CANDIDATE.ota` demonstrates this packaging; it is a candidate, not a published or generally accepted release. HifiLeft's migration was reported as direct stock → PM Client, followed by Client updates to the manually tested `1.2.5-bseedcli6`. The historical CLI4 packaging manifest records **offline** validation only and is not independent proof of which file the device flashed.
+
+**Do not flash the public stock→Router package if the goal is a one-step Client migration.** The ordinary `from-router.ota` Client wrapper matches an *already-custom Router* and is not a stock conversion image. A new stock→`cli6` package requires separately verified stock-facing OTA header, identical expected Client firmware payload, exact board identity, controlled hardware canary, and a recovery decision for potentially irreversible stock replacement. Manual power reporting on HifiLeft is not general Client hardware acceptance. See [HifiLeft canary and migration evidence](docs/bseed_hifi_manual_canary_20260920.md).
+
 ## Quick start with Zigbee2MQTT
 
 Use the dedicated BSEED OTA index rather than historical generic fork entries:
@@ -106,7 +112,7 @@ ota:
     https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/ota/index_bseed.json
 ```
 
-The index contains exactly four manufacturer-specific paths: normal + stock-conversion OTA for each supported BSEED family.
+The index includes the accepted BSEED Router entries and their stock-conversion wrappers; experimental Client images and direct stock→Client candidates are **not** included. Consult the index for its current exact entries rather than assuming it contains only two hardware families.
 
 For complete update/conversion steps, see [Updating OTA](docs/updating.md) and the [BSEED unified V8 guide](docs/bseed_unified_v8.md).
 

@@ -115,6 +115,8 @@ https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/o
 
 It contains only the current normal and stock-conversion paths for those two BSEED families. This avoids accidentally selecting historical generic BSEED entries.
 
+**BSEED PM Client exception (experimental):** The public BSEED index currently provides stock → custom **Router**, not stock → custom **Client**. HifiLeft's direct stock → PM Client migration was reported using a locally prepared stock-facing Client candidate; there is **no mandatory intermediate Router flash** when an exact validated stock-facing Client image exists. `from-router.ota` is only for already-custom Routers, while a direct stock-facing Client wrapper must use the stock OTA identity and Client firmware payload. Do not add experimental Client images to the normal OTA index or treat HifiLeft's manual test as a general conversion/recovery qualification. See [HifiLeft canary](./bseed_hifi_manual_canary_20260920.md) for evidence and limitations.
+
 ### Choosing an index
 
 - You can install **Router** or **EndDevice** firmware
