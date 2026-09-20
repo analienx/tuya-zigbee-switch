@@ -87,7 +87,7 @@ def test_client_artifacts_are_separate_and_never_stock_or_auto_indexed():
     assert "CLIENT_IMAGE_TYPE=65025" in script
     assert "ROUTER_IMAGE_TYPE=43556" in script
     assert "ROUTER_IMAGE_TYPE=45577" in script
-    assert "FILE_VERSION_HEX='0x1205300A'" in script
+    assert "FILE_VERSION_HEX='0x1205300C'" in script
     assert "FILE_VERSION_HEX='0x1102300C'" in script
     assert "from-router.ota" in script
     assert "from_tuya" not in script.lower()

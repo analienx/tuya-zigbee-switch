@@ -20,6 +20,18 @@ void bdb_identify_callback(u8 endpoint, u16 srcAddr, u16 identifyTime);
 void zdo_leave_indication_callback(nlme_leave_ind_t *pLeaveInd);
 void zdo_leave_confirmation_callback(nlme_leave_cnf_t *pLeaveCnf);
 
+#ifdef BSEED_MAINS_CLIENT
+/* Rx-on-when-idle clients still need parent MAC-poll keepalives. One per
+ * minute is 60x lighter than the standard 1s sleepy-end-device poll. */
+#define MAINS_CLIENT_KEEPALIVE_POLL_MS 60000u
+static void configure_mains_client_keepalive(void) {
+    u8 status = zb_setPollRate(MAINS_CLIENT_KEEPALIVE_POLL_MS);
+    if (status != RET_OK) {
+        printf("Mains client keepalive setup failed: %u\r\n", status);
+    }
+}
+#endif
+
 typedef enum {
     TELINK_NETWORK_RECOVERY_IDLE = 0,
     TELINK_NETWORK_RECOVERY_STEERING,
@@ -109,6 +121,9 @@ void bdb_init_callback(u8 status, u8 joinedNetwork) {
         network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
         if (joinedNetwork) {
             ota_queryStart(OTA_QUERY_INTERVAL);
+#ifdef BSEED_MAINS_CLIENT
+            configure_mains_client_keepalive();
+#endif
 #if defined(ZB_ED_ROLE) && !defined(BSEED_MAINS_CLIENT)
             zb_setPollRate(POLL_RATE);
 #endif
@@ -128,6 +143,9 @@ void bdb_commissioning_callback(u8 status, void *arg) {
     case BDB_COMMISSION_STA_SUCCESS:
         network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
         ota_queryStart(OTA_QUERY_INTERVAL);
+#ifdef BSEED_MAINS_CLIENT
+        configure_mains_client_keepalive();
+#endif
 #if defined(ZB_ED_ROLE) && !defined(BSEED_MAINS_CLIENT)
         // Need set poll rate manually,
         // to avoid bugs related to no poll task
