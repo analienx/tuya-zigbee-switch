@@ -39,6 +39,17 @@ def wait_for_check_result(event, seconds):
     return event.wait(seconds)
 
 
+def new_campaign_allowed(previous):
+    # Legacy update_ok is only a transfer result; it must not permit another flash.
+    return not previous or previous.get('phase') in ('postflash_accepted', 'preflight_abort')
+
+
+def ota_transport_phase(response):
+    if response.get('status') == 'ok': return 'ota_transfer_ok_postflash_unverified'
+    if response.get('status') == 'error': return 'update_error'
+    return 'update_timeout_or_unconfirmed'
+
+
 def verify_image(args):
     image = Path(args.image).read_bytes()
     assert len(image) > 64 and digest(image) == args.sha256, 'Image SHA/size mismatch'
@@ -84,7 +95,7 @@ def main():
     work = Path(args.workdir); work.mkdir(parents=True, exist_ok=True)
     lock = work / 'ACTIVE_LOCK.json'
     old = json.loads(lock.read_text()) if lock.exists() else {}
-    assert not old or old.get('phase') in ('update_ok', 'preflight_abort'), 'Previous OTA incomplete or failed; inspect device and reconcile lock manually before another campaign'
+    assert new_campaign_allowed(old), 'Previous OTA incomplete, failed, or not postflash-accepted; inspect device and reconcile lock manually before another campaign'
     if args.mode == 'check':
         assert args.index_url, 'check requires one-entry index URL'
     config = yaml.safe_load(Path(args.mqtt_config).read_text(encoding='utf-8'))['mqtt']
@@ -195,11 +206,11 @@ def main():
         while not answered.wait(15) and time.monotonic() < deadline:
             log('ota_pending', {'elapsed_seconds': int(args.timeout_seconds - max(0, deadline - time.monotonic()))})
         result = state['result'] or {}
-        campaign['phase'] = 'update_ok' if result.get('status') == 'ok' else ('update_error' if result.get('status') == 'error' else 'update_timeout_or_unconfirmed')
+        campaign['phase'] = ota_transport_phase(result)
         campaign['response'] = result; campaign['completed'] = timestamp()
         lock.write_text(json.dumps(campaign, indent=2), encoding='utf-8')
         log('ota_final', {'phase': campaign['phase'], 'response': result})
-        if campaign['phase'] != 'update_ok':
+        if campaign['phase'] != 'ota_transfer_ok_postflash_unverified':
             raise RuntimeError('OTA not confirmed; inspect log/lock before any retry')
         log('postflash_pending', 'OTA service returned OK; verify firmware build, interview, role, relay and meter separately')
     except BaseException as error:

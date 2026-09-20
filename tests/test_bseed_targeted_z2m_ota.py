@@ -85,3 +85,17 @@ def test_readonly_check_wait_outlasts_z2m_device_timeout():
     done.wait.assert_called_once_with(DEFAULT_CHECK_TIMEOUT_SECONDS)
     with pytest.raises(AssertionError, match='outlast Zigbee2MQTT'):
         wait_for_check_result(done, 55)
+
+
+def test_transport_ok_is_not_postflash_accepted():
+    from bseed_targeted_z2m_ota import new_campaign_allowed, ota_transport_phase
+    phase=ota_transport_phase({'status':'ok','data':{'to':{'file_version':4294967295}}})
+    assert phase=='ota_transfer_ok_postflash_unverified'
+    assert not new_campaign_allowed({'phase':phase})
+    assert not new_campaign_allowed({'phase':'update_ok'})  # legacy transfer-only state
+    assert not new_campaign_allowed({'phase':'update_error'})
+    assert not new_campaign_allowed({'phase':'update_timeout_or_unconfirmed'})
+    assert new_campaign_allowed({'phase':'postflash_accepted'})
+    assert new_campaign_allowed({'phase':'preflight_abort'})
+    assert ota_transport_phase({'status':'error'})=='update_error'
+    assert ota_transport_phase({})=='update_timeout_or_unconfirmed'

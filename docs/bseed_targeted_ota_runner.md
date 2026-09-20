@@ -20,3 +20,21 @@ Run `python helper_scripts/bseed_targeted_z2m_ota.py --help` for options. All de
 The runner uses an exact IEEE/friendly-name pairing and a fresh, non-retained relay `/get` response; it never commands a relay change. It accepts a **matching OTA transaction with empty `data`** as a legitimate failure response, and ignores foreign transactions/targets. If an OTA was interrupted, check live device state and the Zigbee2MQTT logs before reconciling a stale lock. The local lock cannot detect OTA operations begun by other software; do not run simultaneous campaigns. A 0 W reading alone does not identify the physically connected appliance or guarantee safe power interruption.
 
 **Conservative OTA transfer size:** The runner explicitly sets `default_maximum_data_size` **per flash request**, defaulting to **50 bytes** instead of inheriting a potentially higher Zigbee2MQTT global value (the KitchenLeft bridge was configured for 100 bytes). Override with `--max-block-bytes N` only for a justified diagnostic within Zigbee2MQTT's 10–100-byte limits. The 50-byte default is a risk reduction based on Zigbee2MQTT's documented device compatibility; it is **not evidence that block size caused KitchenSocketLeft's ABORT**. No OTA settings are modified globally by the runner.
+
+## Profile-driven campaign (preferred for future sessions)
+
+Read `skills/bseed-zigbee-ota/SKILL.md` first. Copy `docs/bseed_ota_profile.example.json` to a **private location outside this repository**, replace every placeholder with independently verified values and use a unique `workdir` for each campaign. Ensure `index_output` is inside the private LAN image-server root, not in git. The image file and index must be reachable by Zigbee2MQTT at their exact HTTP URLs; a profile alone does not start the HTTP server or back up a device.
+
+```bash
+python helper_scripts/bseed_ota_campaign.py --profile /private/target.json --mode prepare
+python helper_scripts/bseed_ota_campaign.py --profile /private/target.json --mode preflight
+python helper_scripts/bseed_ota_campaign.py --profile /private/target.json --mode check
+# ONLY after explicit target authorization and a successful read-only check:
+python helper_scripts/bseed_ota_campaign.py --profile /private/target.json --mode flash --confirm-ieee 0xEXACT_TARGET_IEEE
+python helper_scripts/bseed_ota_campaign.py --profile /private/target.json --mode postflash
+python helper_scripts/bseed_ota_campaign.py --profile /private/target.json --mode status
+```
+
+`prepare` verifies image bytes, SHA-256, stock-facing OTA header/tuple, native payload identity (when supplied), the exact single matching template entry and HTTP image integrity before writing a private single-entry index. It refuses to overwrite a different existing private index. `preflight`/`check`/`flash` delegate to `bseed_targeted_z2m_ota.py` without reimplementing its safety logic. `flash` requires a second explicit exact IEEE. `postflash` uses a read-only, bounded MQTT observation, writes an immutable private JSON snapshot and returns nonzero if role/build/interview/live state cannot be verified. It **does not** restart, re-interview, pair, toggle or flash the device. MQTT state events and cached metadata alone cannot establish physical relay safety; independent hardware and functional checks are mandatory.
+
+**Lock semantics:** A successful Zigbee2MQTT OTA response now yields `ota_transfer_ok_postflash_unverified` rather than `update_ok`; this remains a blocking state until a separately verified acceptance is explicitly recorded. Legacy `update_ok` locks also block new campaigns. A separate workdir is not a way to circumvent an unresolved previous OTA: inspect other campaign locks and live Zigbee2MQTT OTA activity before beginning anything. `status` only reads the current workdir's local lock and last check.
