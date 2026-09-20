@@ -23,7 +23,7 @@ registry:
   path: supervisor/projects.yaml
 
 context:
-  project_readme: readme.md
+  project_readme: ROMASKU_ORIGINAL_README.md
   firmware_sources: src
   tests: tests
 
