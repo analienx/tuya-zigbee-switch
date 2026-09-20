@@ -133,7 +133,7 @@ class Bridge:
         elif topic == 'bridge/logging' and isinstance(data, dict):
             msg = str(data.get('message', ''))
             if self.name in msg and any(x in msg.lower() for x in ('error', 'timeout', 'failed')):
-                self.errors.append(msg[:240])
+                self.errors.append(msg[:700])
         self.wake.set()
 
     def start(self):
