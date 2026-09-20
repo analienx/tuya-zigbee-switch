@@ -166,3 +166,30 @@ def test_same_role_pm_flash_transport_failure_never_provisions(tmp_path,monkeypa
     with patch('bseed_ota_campaign.subprocess.call',return_value=2) as call:
         with pytest.raises(SystemExit) as done: campaign.main()
     assert done.value.code==2 and len(call.call_args_list)==1
+
+
+def test_router_pm_auto_provision_and_flash_fail_before_transfer(tmp_path, monkeypatch):
+    cfg=profile(tmp_path);cfg.update(require_pm=True,postflash_role='Router',
+         pm_ssh_host='test.invalid',pm_ssh_key=str(tmp_path/'key'))
+    with pytest.raises(ValueError,match='Client-only'):
+        campaign.provision_cmd(cfg,cfg['ieee'],tmp_path/'evidence.json')
+    source=tmp_path/'router_profile.json';source.write_text(json.dumps(cfg))
+    monkeypatch.setattr(sys,'argv',['campaign','--profile',str(source),'--mode',
+                                    'flash','--confirm-ieee',cfg['ieee']])
+    with patch('bseed_ota_campaign.subprocess.call') as call:
+        with pytest.raises(SystemExit,match='Router PM auto-provisioning'):
+            campaign.main()
+        call.assert_not_called()
+
+
+def test_role_aware_pm_audit_is_read_only_and_accepts_router_profile(tmp_path,monkeypatch):
+    cfg=profile(tmp_path);cfg.update(require_pm=True,postflash_role='Router',
+        pm_ssh_host='test.invalid',pm_ssh_key=str(tmp_path/'key'))
+    cmd=campaign.role_audit_cmd(cfg,tmp_path/'audit.json')
+    assert 'bseed_pm_role_audit.py' in cmd[2] and '--apply' not in cmd
+    source=tmp_path/'router_profile.json';source.write_text(json.dumps(cfg))
+    monkeypatch.setattr(sys,'argv',['campaign','--profile',str(source),'--mode','audit-pm'])
+    with patch('bseed_ota_campaign.subprocess.call',return_value=2) as call:
+        with pytest.raises(SystemExit) as done:campaign.main()
+    assert done.value.code==2
+    assert '--apply' not in call.call_args.args[0]

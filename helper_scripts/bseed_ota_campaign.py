@@ -124,6 +124,8 @@ def postflash_cmd(profile, evidence):
 def provision_cmd(profile, confirmation, evidence):
     """Explicit per-device PM repair; returns a command, never runs implicitly on status."""
     if not profile.get('require_pm'): raise ValueError('Not a PM campaign')
+    if profile['postflash_role'] != 'EndDevice':
+        raise ValueError('Client-only PM provision: Router requires separate verified configuration')
     if confirmation != profile['ieee']: raise ValueError('Confirm exact IEEE to provision PM')
     if not profile.get('pm_ssh_host') or not profile.get('pm_ssh_key'):
         raise ValueError('PM campaign requires private pm_ssh_host and pm_ssh_key')
@@ -140,13 +142,29 @@ def provision_cmd(profile, confirmation, evidence):
     return cmd
 
 
+def role_audit_cmd(profile, evidence):
+    if not profile.get('require_pm'): raise ValueError('PM role audit requires a PM profile')
+    if not profile.get('pm_ssh_host') or not profile.get('pm_ssh_key'):
+        raise ValueError('Private PM SSH settings required')
+    cmd=[sys.executable,'-u',str(ROOT/'helper_scripts/bseed_pm_role_audit.py'),
+         '--device',profile['device'],'--ieee',profile['ieee'],
+         '--expect-role',profile['postflash_role'],'--expect-build',profile['postflash_build'],
+         '--mqtt-config',profile['mqtt_config'],'--broker',profile['broker'],
+         '--ssh-host',profile['pm_ssh_host'],'--ssh-key',profile['pm_ssh_key'],
+         '--observe-seconds',str(profile.get('pm_audit_seconds',85)),'--output',str(evidence)]
+    if profile.get('pm_settings_baseline'):cmd.extend(['--baseline',profile['pm_settings_baseline']])
+    return cmd
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', required=True, help='Private JSON profile outside git')
-    parser.add_argument('--mode', choices=['prepare', 'preflight', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'provision-pm', 'postflash', 'status'], required=True)
+    parser.add_argument('--mode', choices=['prepare', 'preflight', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'provision-pm', 'audit-pm', 'postflash', 'status'], required=True)
     parser.add_argument('--confirm-ieee', help='Required for flash, transition, rejoin, metadata and provision-pm; must match profile IEEE exactly')
     args = parser.parse_args()
     profile = load_profile(args.profile)
+    if profile.get('require_pm') and profile['postflash_role'] == 'Router' and args.mode in ('flash','transition','rejoin'):
+        raise SystemExit('Router PM auto-provisioning not validated; reject OTA before transfer')
     work = Path(profile['workdir'])
     if args.mode == 'prepare':
         print(json.dumps(make_index(profile), indent=2))
@@ -156,6 +174,10 @@ def main():
             f = work / filename
             print(filename, f.read_text(encoding='utf8') if f.exists() else 'not present')
         return
+    if args.mode == 'audit-pm':
+        import uuid
+        evidence = work / ('pm_role_audit_' + uuid.uuid4().hex + '.json')
+        raise SystemExit(subprocess.call(role_audit_cmd(profile, evidence)))
     if args.mode == 'provision-pm':
         if args.confirm_ieee != profile['ieee']:
             raise SystemExit('Provision refused: confirm exact IEEE')

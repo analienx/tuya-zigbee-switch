@@ -227,6 +227,8 @@ def main():
     a = arguments()
     if not a.ieee.startswith('0x') or len(a.ieee) != 18:
         raise ValueError('Full exact IEEE required')
+    if a.expect_role != 'EndDevice':
+        raise ValueError('This provisioner implements Client-only scale semantics; Router must use independent role audit')
     if a.apply and a.confirm_ieee != a.ieee:
         raise ValueError('Explicit exact IEEE confirmation required for reporting writes')
     if not 1 <= a.max_writes <= 4: raise ValueError('Bounded reporting writes required')
