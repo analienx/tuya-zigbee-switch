@@ -20,6 +20,16 @@ SW_BUILD='1.2.5-bseedv8u4'
 # consolidated V8 release; 0x12053007 is the sleepy-child parent canary.
 FILE_VERSION_HEX='0x12053007'
 FILE_VERSION_DEC=302329863
+
+# Opt-in, BUILD-ONLY PM Router repair candidate. Published v8u4 remains immutable.
+# No OTA index or live-device operation is performed by this build script.
+if [[ "${BSEED_PM_ROUTER_CANDIDATE:-0}" == "1" ]]; then
+    SW_BUILD='1.2.5-bseedv8u5-rc1'
+    FILE_VERSION_HEX='0x1205300D'
+    FILE_VERSION_DEC=302329869
+    : "${BSEED_PM_ROUTER_CANDIDATE_OUTPUT:=build/bseed-ts011f-pm-router-v8u5-rc1}"
+    set -- "$BSEED_PM_ROUTER_CANDIDATE_OUTPUT"
+fi
 VOLTAGE_MULTIPLIER=161460
 CURRENT_MULTIPLIER=144679
 POWER_MULTIPLIER=16989
