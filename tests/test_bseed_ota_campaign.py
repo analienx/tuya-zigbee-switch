@@ -67,3 +67,32 @@ def test_flash_requires_exact_second_ieee(tmp_path,monkeypatch):
     with pytest.raises(SystemExit,match='Flash refused'):campaign.main()
     monkeypatch.setattr(sys,'argv',['campaign','--profile',str(path),'--mode','flash','--confirm-ieee','0xBAD'])
     with pytest.raises(SystemExit,match='Flash refused'):campaign.main()
+
+
+def test_cross_role_flash_is_refused_without_rejoin_orchestration(tmp_path, monkeypatch):
+    cfg=profile(tmp_path);path=tmp_path/'role.json';path.write_text(json.dumps(cfg))
+    monkeypatch.setattr(sys,'argv',['campaign','--profile',str(path),'--mode','flash',
+                                    '--confirm-ieee',cfg['ieee']])
+    with pytest.raises(SystemExit,match='Cross-role flash refused'):campaign.main()
+
+
+def test_transition_requires_scoped_rejoin_route_before_flashing(tmp_path,monkeypatch):
+    cfg=profile(tmp_path);path=tmp_path/'role.json';path.write_text(json.dumps(cfg))
+    monkeypatch.setattr(sys,'argv',['campaign','--profile',str(path),'--mode','transition',
+                                    '--confirm-ieee',cfg['ieee']])
+    with patch('bseed_ota_campaign.subprocess.call') as call:
+        with pytest.raises(ValueError,match='join_via'):campaign.main()
+        call.assert_not_called()
+
+
+def test_transition_orders_flash_join_metadata_postflash(tmp_path,monkeypatch):
+    cfg=profile(tmp_path);cfg['join_via']='KnownRouter';path=tmp_path/'role.json'
+    path.write_text(json.dumps(cfg));monkeypatch.setattr(sys,'argv',
+        ['campaign','--profile',str(path),'--mode','transition','--confirm-ieee',cfg['ieee']])
+    with patch('bseed_ota_campaign.subprocess.call',return_value=0) as call:
+        with pytest.raises(SystemExit) as done:campaign.main()
+    assert done.value.code==0
+    assert len(call.call_args_list)==4
+    invoked=[args.args[0] for args in call.call_args_list]
+    assert ['bseed_targeted_z2m_ota.py','bseed_z2m_rejoin_window.py',
+            'bseed_z2m_metadata_refresh.py','bseed_z2m_postflash_verify.py']==[Path(a[2]).name for a in invoked]

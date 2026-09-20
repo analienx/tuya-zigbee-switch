@@ -88,11 +88,41 @@ def runner_args(profile, mode):
     return cmd
 
 
+def rejoin_cmd(profile, confirmation, evidence_path):
+    if profile['preflash_role'] == profile['postflash_role']:
+        raise ValueError('Scoped rejoin is only for an explicit cross-role OTA')
+    if not profile.get('join_via'):
+        raise ValueError('Cross-role rejoin requires verified scoped Router name: join_via')
+    return [sys.executable, '-u', str(ROOT/'helper_scripts/bseed_z2m_rejoin_window.py'),
+            '--target', profile['device'], '--ieee', profile['ieee'],
+            '--confirm-ieee', confirmation, '--permit-via', profile['join_via'],
+            '--seconds', str(profile.get('join_seconds', 120)),
+            '--expect-build', profile['postflash_build'], '--expect-role', profile['postflash_role'],
+            '--mqtt-config', profile['mqtt_config'], '--broker', profile['broker'],
+            '--campaign-lock', str(Path(profile['workdir'])/'ACTIVE_LOCK.json'),
+            '--output', str(evidence_path)]
+
+
+def metadata_cmd(profile, confirmation, evidence):
+    return [sys.executable, '-u', str(ROOT/'helper_scripts/bseed_z2m_metadata_refresh.py'),
+            '--device', profile['device'], '--ieee', profile['ieee'], '--confirm-ieee', confirmation,
+            '--expect-role', profile['postflash_role'], '--expect-build', profile['postflash_build'],
+            '--mqtt-config', profile['mqtt_config'], '--broker', profile['broker'], '--output', str(evidence)]
+
+
+def postflash_cmd(profile, evidence):
+    return [sys.executable, '-u', str(ROOT/'helper_scripts/bseed_z2m_postflash_verify.py'),
+            '--device', profile['device'], '--ieee', profile['ieee'],
+            '--expect-role', profile['postflash_role'], '--expect-build', profile['postflash_build'],
+            '--mqtt-config', profile['mqtt_config'], '--broker', profile['broker'],
+            '--output', str(evidence), '--observe-seconds', str(profile.get('observe_seconds', 20))]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', required=True, help='Private JSON profile outside git')
-    parser.add_argument('--mode', choices=['prepare', 'preflight', 'check', 'flash', 'postflash', 'status'], required=True)
-    parser.add_argument('--confirm-ieee', help='Required only for flash; must match profile exactly')
+    parser.add_argument('--mode', choices=['prepare', 'preflight', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'postflash', 'status'], required=True)
+    parser.add_argument('--confirm-ieee', help='Required for flash, transition and rejoin; must match profile IEEE exactly')
     args = parser.parse_args()
     profile = load_profile(args.profile)
     work = Path(profile['workdir'])
@@ -107,19 +137,42 @@ def main():
     if args.mode == 'postflash':
         import uuid
         evidence = work / ('postflash_' + uuid.uuid4().hex + '.json')
-        cmd = [sys.executable, '-u', str(ROOT/'helper_scripts/bseed_z2m_postflash_verify.py'),
-               '--device', profile['device'], '--ieee', profile['ieee'],
-               '--expect-role', profile['postflash_role'], '--expect-build', profile['postflash_build'],
-               '--mqtt-config', profile['mqtt_config'], '--broker', profile['broker'],
-               '--output', str(evidence), '--observe-seconds', str(profile.get('observe_seconds', 20))]
+        cmd = postflash_cmd(profile, evidence)
         print('PRIVATE_EVIDENCE', evidence, flush=True)
         raise SystemExit(subprocess.call(cmd))
+    if args.mode in ('transition', 'rejoin', 'metadata'):
+        if args.confirm_ieee != profile['ieee']:
+            raise SystemExit('Transition/rejoin/metadata refused: confirm exact target IEEE')
+        if profile['preflash_role'] == profile['postflash_role']:
+            raise SystemExit('Use normal flash for same-role firmware, not transition/rejoin/metadata')
+        import uuid
+        if args.mode == 'metadata':
+            evidence = work / ('metadata_' + uuid.uuid4().hex + '.json')
+            raise SystemExit(subprocess.call(metadata_cmd(profile, args.confirm_ieee, evidence)))
+        # Resolve the scoped recovery route *before* submitting a firmware image.
+        planned_join = rejoin_cmd(profile, args.confirm_ieee, work / ('rejoin_' + uuid.uuid4().hex + '.json'))
+        if args.mode == 'transition':
+            print('ONE_DEVICE_ROLE_TRANSITION', profile['ieee'], flush=True)
+            flashed = subprocess.call(runner_args(profile, 'flash'))
+            if flashed: raise SystemExit(flashed)  # no automatic retry after failure
+        join_evidence = work / ('rejoin_' + uuid.uuid4().hex + '.json')
+        joined = subprocess.call(rejoin_cmd(profile, args.confirm_ieee, join_evidence))
+        if joined: raise SystemExit(joined)
+        metadata_evidence = work / ('metadata_' + uuid.uuid4().hex + '.json')
+        refreshed = subprocess.call(metadata_cmd(profile, args.confirm_ieee, metadata_evidence))
+        if refreshed: raise SystemExit(refreshed)
+        if args.mode == 'transition':
+            post_evidence = work / ('postflash_' + uuid.uuid4().hex + '.json')
+            raise SystemExit(subprocess.call(postflash_cmd(profile, post_evidence)))
+        return
     if args.mode == 'flash':
         if args.confirm_ieee != profile['ieee']:
             raise SystemExit('Flash refused: supply --confirm-ieee with the exact target IEEE')
+        if profile['preflash_role'] != profile['postflash_role']:
+            raise SystemExit('Cross-role flash refused: use --mode transition for scoped rejoin')
         print('EXPLICIT_FLASH_TARGET', profile['ieee'], profile['device'], flush=True)
     elif args.confirm_ieee:
-        raise SystemExit('--confirm-ieee may only be supplied for flash')
+        raise SystemExit('--confirm-ieee may only be supplied for flash, transition, rejoin or metadata')
     raise SystemExit(subprocess.call(runner_args(profile, args.mode)))
 
 

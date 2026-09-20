@@ -11,9 +11,10 @@ import time
 
 import paho.mqtt.client as mqtt
 import yaml
+from bseed_zdo_live import read_node_descriptor
 
 
-def evaluate(inventory, state, expected_ieee, expected_role, expected_build):
+def evaluate(inventory, state, expected_ieee, expected_role, expected_build, live_node=None):
     """Require fresh identity/role/build and a post-subscription state observation."""
     found = [d for d in (inventory or []) if d.get('ieee_address') == expected_ieee]
     if len(found) != 1:
@@ -21,9 +22,9 @@ def evaluate(inventory, state, expected_ieee, expected_role, expected_build):
     device = found[0]
     issues = []
     if device.get('interview_completed') is not True: issues.append('interview not completed')
-    if device.get('type') != expected_role: issues.append('expected role not verified')
+    if not live_node or live_node.get('role') != expected_role: issues.append('live ZDO role not verified')
     if device.get('software_build_id') != expected_build: issues.append('expected firmware build not verified')
-    if not state: issues.append('no live target state event after monitoring began')
+    # A successful live ZDO read proves network responsiveness even if passive MQTT telemetry is quiet.
     if state and (state.get('device') or {}).get('ieeeAddr') not in (None, expected_ieee):
         issues.append('state event belongs to another IEEE')
     return ('postflash_candidate' if not issues else 'unconfirmed'), issues, device
@@ -83,15 +84,24 @@ def main():
     finally:
         client.loop_stop()
         client.disconnect()
+    node=None; node_error=None
+    target=next((d for d in (snapshot['inventory'] or []) if d.get('ieee_address')==args.ieee),None)
+    if target and target.get('network_address') is not None:
+        try: node=read_node_descriptor(args.mqtt_config,args.broker,args.ieee,target['network_address'])
+        except (ValueError,TimeoutError,OSError) as error:node_error=repr(error)
     result, problems, target = evaluate(snapshot['inventory'], snapshot['state'], args.ieee,
-                                         args.expect_role, args.expect_build)
+                                         args.expect_role, args.expect_build, node)
     if snapshot['bridge'] != 'online': problems.append('Zigbee2MQTT bridge not verified online')
+    if node_error: problems.append('live ZDO probe failed: '+node_error)
     if snapshot['errors']: problems.append('target-related Zigbee2MQTT errors observed')
     if problems: result = 'unconfirmed'
     evidence = {'observed_at': dt.datetime.now().astimezone().isoformat(),
                 'target_name': args.device, 'target_ieee': args.ieee,
                 'expected_role': args.expect_role, 'expected_build': args.expect_build,
                 'result': result, 'issues': problems, 'bridge': snapshot['bridge'],
+                'live_node_descriptor': node, 'zdo_error': node_error,
+                'cached_inventory_role_disagrees_with_live_zdo': bool(target and node and target.get('type') != node['role']),
+                'fresh_mqtt_state_observed': snapshot['state'] is not None,
                 'inventory': ({k: target.get(k) for k in ('ieee_address', 'friendly_name',
                     'type', 'manufacturer', 'model_id', 'software_build_id', 'interview_completed')}
                     if target else None),

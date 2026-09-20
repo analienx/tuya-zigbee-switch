@@ -20,6 +20,8 @@
   "template_index": "/repo/zigbee2mqtt/ota/index_bseed.json",
   "postflash_role": "EndDevice",
   "postflash_build": "REPLACE_WITH_EXPECTED_CUSTOM_BUILD",
+  "join_via": "VERIFIED_NEIGHBOR_ROUTER_FRIENDLY_NAME",
+  "join_seconds": 120,
   "block_bytes": 32,
   "check_timeout_seconds": 90,
   "monitor_seconds": 7200,
