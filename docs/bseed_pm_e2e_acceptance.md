@@ -98,3 +98,5 @@ from a diagnostic get is NOT an `attributeReport`.
 
 **Current acceptance outcome:** converter mapping, direct loaded/unloaded ZCL reads, and unsolicited PERIODIC 30 s/60 s reports passed. Prompt, change-triggered reporting remains unverified; the first unplug test had no independently confirmed loaded attributeReport baseline and the live fixture-driven cycle has not run. Do not mark CLI6 fully repaired
 or flash additional Clients based on the converter-only success.
+
+**Subsequent manual canary (2026-09-20):** HifiLeft on CLI6 with the PR #49 converter and min=10/max=60/change=5 W reported nonzero load and returned to 0 W after manual unplug according to the device owner. Record: [HifiLeft manually tested configuration](bseed_hifi_manual_canary_20260920.md). This does not pass the separate automated loaded-to-zero release gate above.

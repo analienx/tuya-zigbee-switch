@@ -1,0 +1,13 @@
+# HifiLeft BSEED PM Client: manually tested configuration (2026-09-20)
+
+**Scope: one-device manual canary, not a general firmware release or an automated E2E pass.**
+
+- Device: `LivingRoomSocketHifiLeft`, IEEE `0xa4c138da1333dc70`; identified in live Zigbee2MQTT as `b28wrpvx` / `TS011F-BS-PM`, mains-powered `EndDevice`, successfully interviewed.
+- Installed device software: `1.2.5-bseedcli6` (PM Client); the existing Client image is unchanged by the converter/reporting work in PRs #47 and #49. This canary identifies the **combination** of firmware and Zigbee2MQTT configuration rather than asserting that CLI6 alone repaired spontaneous updates.
+- Zigbee2MQTT: BSEED external converter from PR #49; supported PM model maps endpoint-1 `power`, `current`, `voltage`, `energy` to unsuffixed standard MQTT properties, while endpoint 2 remains the relay. Converter also bounds other PM report maximums when configured: current/voltage 300 s and energy 600 s.
+- Live active-power reporting on endpoint 1: `haElectricalMeasurement.activePower`, minimum 10 s, maximum 60 s, reportable change 5 W; coordinator binding verified during reporting configuration. The 60-second maximum was verified by a raw device-originated ZCL `attributeReport(activePower=0)` and corresponding MQTT update, without a read.
+- User-reported manual acceptance: a connected load produced a nonzero power reading and after the load was removed the reported value returned to **0 W**. This addresses the originally observed stale ~25 W reading in this one device under its current live setup.
+
+**Not established by the manual report:** timestamped load-to-zero latency, an independently verified preceding loaded ZCL `attributeReport`, unattended repeated transitions, HA-state correlation, Client rejoin/OTA resilience, or validation of other physical sockets. `tests/live_bseed_pm_metering.py` remains the separate automated hardware release gate; its pass status is **pending**. Do not describe this one manual canary as a production-wide/golden Client release.
+
+**KitchenSocketLeft migration boundary:** At the time of this record it is stock `_TZ3000_b28wrpvx` / `TS011F` Router (IEEE `0xa4c138241e3de538`), not an already-custom PM Router. Its stock-to-custom path is the separate Router `from_tuya` image in the BSEED OTA index; the experimental PM Client build manifest expressly sets `stockConversion: false`. The Client `from-router.ota` wrapper is for an already-custom Router, **not** for stock TS011F. Preserve the stock device until a device-specific backup/recovery route, valid stock OTA identity, and both staged transition gates are verified; do not force the experimental Client image directly onto stock firmware.
