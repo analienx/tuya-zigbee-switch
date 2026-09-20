@@ -63,3 +63,12 @@ def test_energy_monotonic_and_freshness():
         validate_states([(1.0,a),(1.5,a)],db)
     with pytest.raises(ValueError,match='decreased'):
         validate_states([(1.0,a),(70.0,dict(a,energy=.15))],db)
+
+
+def test_idle_observation_covers_full_current_reporting_window():
+    from bseed_pm_provision import observation_policy
+    assert observation_policy(135, False) == (135, 8)
+    assert observation_policy(135, True) == (330, 310)
+    assert observation_policy(400, True) == (400, 310)
+    with pytest.raises(ValueError, match='bounded'):
+        observation_policy(500, True)

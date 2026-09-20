@@ -199,6 +199,13 @@ def validate_states(states, db, idle=False):
             'fresh_scaled_pm': True, 'idle_zero_confirmed': bool(idle)}
 
 
+def observation_policy(requested_seconds, expect_idle):
+    """An idle gate needs a full max-300s current-report window plus margin."""
+    if not 75 <= requested_seconds <= 420:
+        raise ValueError('Observation seconds must be bounded to 75..420')
+    return max(requested_seconds, 330) if expect_idle else requested_seconds, (310 if expect_idle else 8)
+
+
 def arguments():
     p = argparse.ArgumentParser(description=__doc__)
     for key in ('device', 'ieee', 'expect-role', 'expect-build', 'mqtt-config',
@@ -222,8 +229,8 @@ def main():
         raise ValueError('Full exact IEEE required')
     if a.apply and a.confirm_ieee != a.ieee:
         raise ValueError('Explicit exact IEEE confirmation required for reporting writes')
-    if not 1 <= a.max_writes <= 4 or not 75 <= a.observe_seconds <= 240:
-        raise ValueError('Bounded writes or observation requested')
+    if not 1 <= a.max_writes <= 4: raise ValueError('Bounded reporting writes required')
+    observe_seconds, minimum_span = observation_policy(a.observe_seconds, a.expect_idle)
     output = Path(a.output).expanduser().resolve()
     if output.is_relative_to(ROOT) or output.exists():
         raise ValueError('Evidence must be new and outside repository')
@@ -288,9 +295,11 @@ def main():
                              ', '.join(x[1] for x in outstanding))
         if a.apply:
             baseline = time.monotonic()
+            evidence['observation_policy'] = {'deadline_seconds': observe_seconds,
+                                              'minimum_span_seconds': minimum_span}
             bridge.wait_for(lambda: (len([x for x in bridge.states if x[0] >= baseline]) >= 2
-                            and bridge.states[-1][0] - next(x[0] for x in bridge.states if x[0] >= baseline) >= 8),
-                            a.observe_seconds, 'Insufficient passive PM telemetry')
+                            and bridge.states[-1][0] - next(x[0] for x in bridge.states if x[0] >= baseline) >= minimum_span),
+                            observe_seconds, 'Insufficient passive PM telemetry over required interval')
             observed = [x for x in bridge.states if x[0] >= baseline]
             evidence['passive_mqtt'] = [{'offset_seconds': round(t - baseline, 1),
                     'metrics': {k: d.get(k) for k in ('power', 'current', 'voltage',
