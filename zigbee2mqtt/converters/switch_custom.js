@@ -8447,7 +8447,11 @@ const definitions = [
             romasku.multiPressResetCount("multi_press_reset_count", "switch"),
             romasku.networkIndicator("network_led", "switch"),
             bseedSocketRelayOnOff(),
-            electricityMeter(),
+            // BSEED PM fallback: bounded freshness, not a substitute for change reports.
+            electricityMeter({
+                power: {max: 60}, current: {max: 300},
+                voltage: {max: 300}, energy: {max: 600, change: 1},
+            }),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),
             romasku.relayPhysicalMode("relay_physical_mode", "relay"),
