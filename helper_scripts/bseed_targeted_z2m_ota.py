@@ -80,6 +80,7 @@ def arguments():
     p.add_argument('--native-image')
     p.add_argument('--index-url', help='Single-entry OTA JSON index URL; required for read-only --mode check')
     p.add_argument('--expect-relay', choices=['ON', 'OFF'], required=True)
+    p.add_argument('--relay-get-key', choices=['state','state_relay'], default='state')
     p.add_argument('--max-reported-watts', type=float, default=1.0)
     p.add_argument('--timeout-seconds', type=int, default=2400)
     p.add_argument('--check-timeout-seconds', type=int, default=DEFAULT_CHECK_TIMEOUT_SECONDS)
@@ -161,16 +162,16 @@ def main():
         assert state['info'].get('permit_join') is False, 'Permit join unexpectedly open'
         log('inventory_ok', {k: d.get(k) for k in ('friendly_name', 'ieee_address', 'manufacturer', 'model_id', 'type', 'software_build_id')})
         state['relay'] = None
-        client.publish(base + '/' + args.device + '/get', json.dumps({'state': ''}), qos=1).wait_for_publish(5)
+        client.publish(base + '/' + args.device + '/get', json.dumps({args.relay_get_key: ''}), qos=1).wait_for_publish(5)
         until = time.monotonic() + 14
         while time.monotonic() < until and not fresh_relay.is_set():
             changed.wait(0.5); changed.clear()
         relay = state['relay'] or {}
-        assert relay.get('state') == args.expect_relay, 'Relay state not verified by read-only GET'
+        assert relay.get(args.relay_get_key) == args.expect_relay, 'Relay state not verified by read-only GET'
         power = relay.get('power')
         assert isinstance(power, (int, float)) and 0 <= power <= args.max_reported_watts, 'Power missing or above limit'
         assert not (relay.get('update') or {}).get('state') == 'updating', 'Device OTA already running'
-        log('preflight_ok', {'relay': relay.get('state'), 'reported_power_w': power, 'voltage_v': relay.get('voltage'), 'image_sha256': args.sha256, 'mode': args.mode})
+        log('preflight_ok', {'relay': relay.get(args.relay_get_key), 'relay_get_key': args.relay_get_key, 'reported_power_w': power, 'voltage_v': relay.get('voltage'), 'image_sha256': args.sha256, 'mode': args.mode})
         if args.mode == 'preflight': return
         if args.mode == 'check':
             payload = {'id': args.ieee, 'url': args.index_url, 'transaction': token}

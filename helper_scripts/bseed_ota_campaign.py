@@ -82,6 +82,8 @@ def runner_args(profile, mode):
     for key, flag in keys: cmd.extend(['--' + flag, str(profile[key])])
     if profile.get('native_image'):
         cmd.extend(['--native-image', str(profile['native_image'])])
+    if profile.get('relay_get_key'):
+        cmd.extend(['--relay-get-key', profile['relay_get_key']])
     for key, flag in [('block_bytes','max-block-bytes'), ('check_timeout_seconds','check-timeout-seconds'),
                        ('monitor_seconds','timeout-seconds')]:
         if key in profile: cmd.extend(['--' + flag, str(profile[key])])
@@ -156,6 +158,32 @@ def role_audit_cmd(profile, evidence):
     return cmd
 
 
+
+def verified_router_pm_candidate(profile):
+    """Allow only one same-role PM Router candidate proven by the cross-role binary matrix."""
+    if profile.get('preflash_role') != 'Router' or profile.get('postflash_role') != 'Router':
+        raise ValueError('Router PM candidate may not change Zigbee role')
+    path = profile.get('pm_router_matrix_evidence')
+    if not path or not Path(path).is_file():
+        raise ValueError('Router PM flash requires private cross-role build-matrix evidence')
+    matrix = json.loads(Path(path).read_text(encoding='utf8'))
+    if matrix.get('hardwareAcceptance') is not False or matrix.get('compiledBothRoles') is not True:
+        raise ValueError('Missing validated build-only Router+Client matrix')
+    roles = matrix.get('artifacts', [])
+    if len(roles) != 2 or {x.get('role') for x in roles} != {'Router', 'EndDevice'}:
+        raise ValueError('Both PM roles must appear in the matrix')
+    router = next(x for x in roles if x['role'] == 'Router')
+    if (router.get('sha256'), router.get('imageType'), router.get('build')) != (
+            profile['sha256'], int(profile['image_type']), profile['postflash_build']):
+        raise ValueError('Private Router candidate differs from validated matrix')
+    if profile.get('relay_get_key') != 'state_relay' or not profile.get('require_pm'):
+        raise ValueError('Router PM flash requires a verified relay endpoint and PM gate')
+    for key in ('pm_ssh_host','pm_ssh_key','pm_settings_baseline'):
+        if not profile.get(key): raise ValueError('Router PM flash missing '+key)
+    if not Path(profile['pm_ssh_key']).is_file() or not Path(profile['pm_settings_baseline']).is_file():
+        raise ValueError('Router PM preflash key/settings baseline is missing')
+    return True
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', required=True, help='Private JSON profile outside git')
@@ -164,7 +192,8 @@ def main():
     args = parser.parse_args()
     profile = load_profile(args.profile)
     if profile.get('require_pm') and profile['postflash_role'] == 'Router' and args.mode in ('flash','transition','rejoin'):
-        raise SystemExit('Router PM auto-provisioning not validated; reject OTA before transfer')
+        if args.mode != 'flash': raise SystemExit('Router PM role transition and auto-provisioning not validated')
+        verified_router_pm_candidate(profile)  # no Router provisioning: flash only, then audit separately
     work = Path(profile['workdir'])
     if args.mode == 'prepare':
         print(json.dumps(make_index(profile), indent=2))
@@ -225,13 +254,19 @@ def main():
             raise SystemExit('Flash refused: supply --confirm-ieee with the exact target IEEE')
         if profile['preflash_role'] != profile['postflash_role']:
             raise SystemExit('Cross-role flash refused: use --mode transition for scoped rejoin')
-        if profile.get('require_pm'):
+        if profile.get('require_pm') and profile['postflash_role'] == 'EndDevice':
             provision_cmd(profile, args.confirm_ieee, work / 'pm_prevalidated.json')
         print('EXPLICIT_FLASH_TARGET', profile['ieee'], profile['device'], flush=True)
         flashed = subprocess.call(runner_args(profile, 'flash'))
         if flashed: raise SystemExit(flashed)
         if profile.get('require_pm'):
             import uuid
+            if profile['postflash_role'] == 'Router':
+                post = work / ('postflash_' + uuid.uuid4().hex + '.json')
+                post_code = subprocess.call(postflash_cmd(profile, post))
+                audit = work / ('pm_role_audit_' + uuid.uuid4().hex + '.json')
+                audit_code = subprocess.call(role_audit_cmd(profile, audit))
+                raise SystemExit(0 if post_code == 0 and audit_code == 0 else 2)
             pm_evidence = work / ('pm_provision_' + uuid.uuid4().hex + '.json')
             provisioned = subprocess.call(provision_cmd(profile, args.confirm_ieee, pm_evidence))
             if provisioned: raise SystemExit(provisioned)

@@ -177,7 +177,7 @@ def test_router_pm_auto_provision_and_flash_fail_before_transfer(tmp_path, monke
     monkeypatch.setattr(sys,'argv',['campaign','--profile',str(source),'--mode',
                                     'flash','--confirm-ieee',cfg['ieee']])
     with patch('bseed_ota_campaign.subprocess.call') as call:
-        with pytest.raises(SystemExit,match='Router PM auto-provisioning'):
+        with pytest.raises(ValueError,match='build-matrix evidence'):
             campaign.main()
         call.assert_not_called()
 
@@ -193,3 +193,28 @@ def test_role_aware_pm_audit_is_read_only_and_accepts_router_profile(tmp_path,mo
         with pytest.raises(SystemExit) as done:campaign.main()
     assert done.value.code==2
     assert '--apply' not in call.call_args.args[0]
+
+
+def _router_candidate_profile(tmp_path):
+    cfg=profile(tmp_path);cfg.update(require_pm=True,postflash_role='Router',
+        postflash_build='1.2.5-bseedv8u5-rc1',image_type=43556,
+        relay_get_key='state_relay',pm_ssh_host='test.invalid')
+    key=tmp_path/'private.key';key.write_text('fixture');cfg['pm_ssh_key']=str(key)
+    baseline=tmp_path/'baseline.json';baseline.write_text('{}')
+    cfg['pm_settings_baseline']=str(baseline)
+    manifest=tmp_path/'ROLE_MATRIX.json'
+    manifest.write_text(json.dumps({'compiledBothRoles':True,'hardwareAcceptance':False,
+        'artifacts':[{'role':'Router','sha256':cfg['sha256'],'imageType':43556,
+                      'build':cfg['postflash_build']},{'role':'EndDevice'}]}))
+    cfg['pm_router_matrix_evidence']=str(manifest)
+    return cfg
+
+def test_router_candidate_requires_exact_matrix_and_relay_proof(tmp_path):
+    cfg=_router_candidate_profile(tmp_path)
+    assert campaign.verified_router_pm_candidate(cfg)
+    cfg['relay_get_key']='state'
+    with pytest.raises(ValueError,match='relay endpoint'):
+        campaign.verified_router_pm_candidate(cfg)
+    cfg['relay_get_key']='state_relay';cfg['sha256']='0'*64
+    with pytest.raises(ValueError,match='differs'):
+        campaign.verified_router_pm_candidate(cfg)
