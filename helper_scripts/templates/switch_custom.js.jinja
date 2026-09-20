@@ -512,7 +512,15 @@ const definitions = [
 {% endif %}
             {% endif %}
             {% if device.power_monitoring %}
+{% if device.bseed_unsuffixed_meter %}
+            // BSEED PM fallback: bounded freshness, not a substitute for change reports.
+            electricityMeter({
+                power: {max: 60}, current: {max: 300},
+                voltage: {max: 300}, energy: {max: 600, change: 1},
+            }),
+{% else %}
             electricityMeter(),
+{% endif %}
             {% endif %}
             {% if device.expose_switch_controls %}
             {% for switchName in device.switchNames %}

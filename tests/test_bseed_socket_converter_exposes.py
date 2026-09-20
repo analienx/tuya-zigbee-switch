@@ -42,7 +42,7 @@ def test_bseed_pm_outlet_hides_switch_and_dimmer_controls():
         for expose in SOCKET_ONLY_SWITCH_CONTROLS:
             assert expose not in definition
         assert "bseedSocketRelayOnOff()" in definition
-        assert 'electricityMeter()' in definition
+        assert 'electricityMeter({' in definition
         assert 'commandsOnOff({' not in definition
         assert 'commandsLevelCtrl({' not in definition
         assert 'relay_physical_mode' in definition
@@ -94,7 +94,9 @@ def test_bseed_pm_meter_uses_standard_mqtt_properties_on_endpoint_one():
         for model in ("TS011F-BS-PM",):
             definition = _definition(rendered, model)
             assert skip in definition, model
-            assert 'electricityMeter()' in definition
+            assert 'electricityMeter({' in definition
+            assert 'power: {max: 60}, current: {max: 300}' in definition
+            assert 'voltage: {max: 300}, energy: {max: 600, change: 1}' in definition
             assert '"switch": 1, "relay": 2' in definition
             assert 'meta: { multiEndpoint: true }' in definition
         assert skip not in _definition(rendered, "TS011F-BS-PM-1")
