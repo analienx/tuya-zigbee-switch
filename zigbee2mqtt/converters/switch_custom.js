@@ -8442,7 +8442,7 @@ const definitions = [
         vendor: "Tuya-custom",
         description: "BSEED PM outlet \ud83c\udd70 \u2014 Romasku custom firmware",
         extend: [
-            deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, } }),
+            deviceEndpoints({ endpoints: {"switch": 1, "relay": 2, }, multiEndpointSkip: ["power", "current", "voltage", "energy"] }),
             romasku.deviceConfig("device_config", "switch"),
             romasku.multiPressResetCount("multi_press_reset_count", "switch"),
             romasku.networkIndicator("network_led", "switch"),

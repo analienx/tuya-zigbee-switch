@@ -85,3 +85,19 @@ def test_bseed_ts0726_dimmer_keeps_full_switch_controls():
         assert "switch_left_level_move_rate" in definition
         assert "commandsOnOff({" in definition
         assert "commandsLevelCtrl({" in definition
+
+
+def test_bseed_pm_meter_uses_standard_mqtt_properties_on_endpoint_one():
+    skip = 'multiEndpointSkip: ["power", "current", "voltage", "energy"]'
+    for args in [(), ("--z2m-v1",)]:
+        rendered = _render(*args)
+        for model in ("TS011F-BS-PM",):
+            definition = _definition(rendered, model)
+            assert skip in definition, model
+            assert 'electricityMeter()' in definition
+            assert '"switch": 1, "relay": 2' in definition
+            assert 'meta: { multiEndpoint: true }' in definition
+        assert skip not in _definition(rendered, "TS011F-BS-PM-1")
+        assert skip not in _definition(rendered, "TS011F-BS-PM-2")
+        assert skip not in _definition(rendered, "TS011F-BS")
+        assert skip not in _definition(rendered, "TS0726-3-BS")
