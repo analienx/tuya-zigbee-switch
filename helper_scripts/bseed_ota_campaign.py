@@ -55,7 +55,7 @@ def make_index(profile):
     image_args = SimpleNamespace(image=profile['image'], native_image=profile.get('native_image'),
                 sha256=profile['sha256'], url=profile['url'],
                 manufacturer_code=int(profile['manufacturer_code']), image_type=int(profile['image_type']),
-                file_version=int(str(profile['file_version']), 0))
+                file_version=int(str(profile['file_version']), 0), non_pm=profile.get('non_pm') is True)
     _, header = verify_image(image_args)
     entry = dict(matches[0])
     if entry.get('fileVersion') != image_args.file_version:

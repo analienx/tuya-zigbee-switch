@@ -4,6 +4,7 @@ First run --mode preflight, then --mode check (with a one-entry index),
 then --mode flash. Never run two OTA campaigns at once.
 """
 import argparse
+import binascii
 import datetime as dt
 import hashlib
 import json
@@ -59,12 +60,28 @@ def ota_transport_phase(response):
     return 'update_timeout_or_unconfirmed'
 
 
+
+def validate_nonpm_native_ota_image(image, expected_version):
+    """Fail closed on corrupt 512K-layout BSEED non-PM Client images."""
+    assert 62 + 32 <= len(image) <= 208 * 1024, 'Non-PM OTA image length outside conservative 512K slot limit'
+    sub_type, sub_len = struct.unpack_from('<HI', image, 56)
+    assert sub_type == 0 and sub_len == len(image) - 62, 'Non-PM OTA sub-element length/type mismatch'
+    native = image[62:]
+    assert native[6:8] == b'\x5d\x02', 'Non-PM Telink OTA magic missing'
+    assert struct.unpack_from('<I', native, 8)[0] == 0x544c4e4b, 'Non-PM Telink startup flag missing'
+    assert struct.unpack_from('<I', native, 2)[0] == expected_version, 'Non-PM embedded version differs from OTA header'
+    assert struct.unpack_from('<I', native, 0x18)[0] == len(native), 'Non-PM embedded firmware length mismatch'
+    assert struct.unpack_from('<I', native, len(native)-4)[0] == (binascii.crc32(native[:-4]) ^ 0xffffffff), 'Non-PM embedded CRC mismatch'
+    return True
+
+
 def verify_image(args):
     image = Path(args.image).read_bytes()
     assert len(image) > 64 and digest(image) == args.sha256, 'Image SHA/size mismatch'
     header = struct.unpack_from('<I5HIH32sI', image)
     assert header[0] == 0x0BEEF11E and header[2] == 56 and header[9] == len(image), 'Invalid OTA header'
     assert (header[4], header[5], header[6]) == (args.manufacturer_code, args.image_type, args.file_version), 'Wrong OTA identity'
+    if getattr(args, 'non_pm', False): validate_nonpm_native_ota_image(image, args.file_version)
     if args.native_image:
         native = Path(args.native_image).read_bytes()
         assert image[56:] == native[56:], 'Stock wrapper payload differs from native firmware'
