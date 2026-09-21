@@ -24,3 +24,7 @@ A role change uses the separate *from-router* transition package and the scoped 
 ## Release blockers remaining after these configuration fixes
 
 Left's persistent loss of local response is not attributable from coordinator logs. Right's previous transfer still has unverified installed build/relay-energy retention. PM legacy-NVM migration can fail before local-control initialization; watchdog starts after `app_init()`. Client parent/rejoin fault containment and independently recoverable boot/OTA rollback remain unproven. Do not claim near-zero brick probability or fleet readiness from compiled binaries and host tests alone. Controlled one-device acceptance is the next gate.
+
+## Reproducible four-image offline gate
+
+Run the four opt-in build commands above in one clean native Telink workspace at the same Git commit, then run `python3 helper_scripts/bseed_antibrick_rc_gate.py`. The tool checks the exact expected board/role/build/version for every candidate, matching Git provenance, all available SHA-256/SHA-512 hashes, OTA header tuples, wrapper payload identity, and the blocked normal-index Client flag. It performs no device/network actions. Do not use a package assembled from mixed commits or prior build directories. A pass allows *only* consideration of a designated single-device canary after the hardware prerequisites above, not publication or a fleet update.
