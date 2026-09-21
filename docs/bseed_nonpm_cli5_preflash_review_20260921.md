@@ -29,3 +29,7 @@ Target is `BedroomSocketCabinetRight`, BSEED TS011F-BS / `o1jzcxou`, Telink TLSR
 **Decision: NO FLASH under the user's non-bricking objective until** the exact non-PM board's safe physical-load/isolation plan is established and recovery hardware is validated against its real programming interface. Preserve the untouched `cli5-rc1` candidate and prior failed PM evidence independently. A later separately authorized single-target update would require fresh no-flash qualification, expected version/role and 32-byte blocks, then one targeted re-interview and independently verified physical relay/network behavior. A completed transfer is not acceptance.
 
 This is a firmware/host-code review and documented risk gate, not a guarantee against device failure or a certification of electrical safety. Do not power a programmer or attach a clip to a mains-energized outlet PCB.
+
+### Enforced follow-up hardening
+
+The `NO FLASH` disposition is now enforced in BOTH OTA entry points, not merely documented. The separately versioned firmware bytes are unchanged. See `docs/bseed_nonpm_cli5_hardening_20260921.md` for exact private evidence schema, the immediate physical-load confirmation requirement, fail-closed file/board checks and the remaining unproven hardware recovery limitations. Existing PM firmware/campaigns are outside this non-PM gate.

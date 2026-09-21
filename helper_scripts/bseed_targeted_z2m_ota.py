@@ -120,6 +120,8 @@ def arguments():
     p.add_argument('--relay-get-key', choices=['state','state_relay'], default='state')
     p.add_argument('--max-reported-watts', type=float, default=1.0)
     p.add_argument('--non-pm', action='store_true', help='Strict non-PM TS011F-BS Client exception; never use for PM devices')
+    p.add_argument('--hardware-evidence', help='Private exact-board recovery readback attestation, non-PM flash only')
+    p.add_argument('--confirm-load-unplugged', action='store_true', help='Non-PM flash only; operator has just verified no appliance attached')
     p.add_argument('--preflash-build')
     p.add_argument('--preflash-relay-physical-mode')
     p.add_argument('--timeout-seconds', type=int, default=2400)
@@ -132,6 +134,16 @@ def main():
     args = arguments()
     assert 10 <= args.max_block_bytes <= 100, 'OTA maximum data size must be 10..100 bytes'
     assert args.check_timeout_seconds >= 70, 'OTA check wait must outlast Zigbee2MQTT 60-second device timeout'
+    if args.non_pm and args.mode == 'flash':
+        from bseed_nonpm_recovery_gate import verify_recovery
+        verify_recovery(dict(non_pm=True, manufacturer=args.manufacturer, model=args.model,
+            preflash_role=args.role, postflash_role=args.role, ieee=args.ieee,
+            sha256=args.sha256, block_bytes=args.max_block_bytes,
+            preflash_build=args.preflash_build,
+            recovery_evidence=args.hardware_evidence),
+            confirm_unloaded=args.confirm_load_unplugged)
+    elif args.hardware_evidence or args.confirm_load_unplugged:
+        raise ValueError('Non-PM hardware recovery flags are valid only for non-PM flash')
     verify_image(args)
     work = Path(args.workdir); work.mkdir(parents=True, exist_ok=True)
     if args.mode == 'check':
