@@ -79,3 +79,11 @@ means **unconfirmed**, not an automatic permission to reconstruct it from a
 later state, rerun OTA or clear the lock. Independent physical load, retained
 bindings, device-originated metering and network-parent acceptance are still
 required before deploying the image elsewhere.
+
+## Basic-cluster build-ID compatibility gate (21 Sep 2026)
+
+`genBasic.swBuildId` (0x4000) has a 16-octet maximum in zigbee-herdsman. All new firmware variants now share a compile-time guard in `src/zigbee/basic_cluster.c`: a longer compiled build ID fails the build. For example, `1.2.5-bseedv8u5-rc1` is 19 octets and can be seen on the wire while the Zigbee2MQTT device record remains at the older 15-octet `v8u4` label. An existing long-ID candidate must NOT be quietly rebuilt under its old OTA fileVersion/hash: allocate a new identity and validated image before any separately authorized flash.
+
+When the post-OTA interview says `status: ok` but its build remains stale, **do not automatically interview repeatedly, reflash, edit `database.db`, restart Zigbee2MQTT, or power-cycle**. First check a fresh lower-level, IEEE/NWK/endpoint-pinned raw `genBasic` 0x4000 read response and a separate live `genOta.currentFileVersion` response. Distinguish ZCL `status: 0` and the decoded raw string from the Zigbee2MQTT converter's possibly empty `{}` result. Capture the evidence privately, limit temporary logging to the test interval and restore its original levels. A verified running image with stale cache is a separate diagnostic state, NOT successful post-flash hardware acceptance.
+
+Check physical relay endpoint 2, power-on setting, PM endpoint-1 summation and live scales separately. Historical Zigbee2MQTT database counters/scales are not automatically an independently observed preflash device reading. Never write a past cumulative-energy number back into flash based on a cached value alone.

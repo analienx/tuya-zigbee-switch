@@ -28,6 +28,13 @@ const uint8_t hwVersion    = 0x00;
 uint8_t powerSource = POWER_SOURCE_MAINS_1_PHASE; // 0x01 default
 
 const uint16_t cluster_revision = 0x01;
+/* Zigbee Basic swBuildId (0x4000) is at most 16 octets. An oversized
+ * firmware ID can be valid on the wire yet rejected by a coordinator during
+ * attribute-read validation, leaving the previous cached build visible.
+ * Use the very same compile-time string as the ZCL attribute below.
+ * This applies to Router, Client and dimmer variants alike. */
+typedef char sw_build_id_must_fit_zcl_basic_16_bytes[
+    sizeof(STRINGIFY_VALUE(VERSION_STR)) <= 17 ? 1 : -1];
 DEF_STR(STRINGIFY_VALUE(VERSION_STR), swBuildId);
 extern network_indicator_t network_indicator;
 

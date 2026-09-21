@@ -97,3 +97,9 @@ is established. Keep the **retry** lock in
 clear the lock, power-cycle, toggle the relay or authorize another OTA based
 only on successful transport or interview. No new live firmware action was
 performed during the 2026-09-21 automation hardening.
+
+## 21 Sep follow-up: rc1 installed; metadata length defect; PM continuity open
+
+After one physical upstream mains cycle, targeted raw Zigbee read responses from KitchenSocketRight `0xa4c138075cd16ed4` confirmed endpoint-1 `genBasic.swBuildId = 1.2.5-bseedv8u5-rc1` (0x4000, status 0) and `genOta.currentFileVersion = 302329869`. **The rc1 image is executing.** The old `v8u4` string in Zigbee2MQTT inventory survived another targeted successful interview because the 19-byte rc1 build string exceeds zigbee-herdsman's 16-byte Basic `swBuildId` limit; normal higher-level read results were `{}` although the raw device reply contained the complete rc1 string. Do not flash again to fix that display, do not claim failed OTA activation, and do not rewrite the live Zigbee2MQTT database.
+
+Raw endpoint-2 OnOff = OFF, consistent with the preflash saved power-on setting OFF; switch logical endpoint-1 `state: ON` is separate. Raw endpoint-1 metering summation = 0, multiplier 1, divisor 1000. The preflash database *cache* had summation 1172 and divisor 100, but no independently captured preflash raw meter reading establishes actual energy continuity or historical scaling. Preserve original data; no automatic energy-counter injection, relay command, reset, or acceptance. The firmware build-ID guard is shared in `src/zigbee/basic_cluster.c` and requires a future uniquely versioned candidate with <=16-byte build ID; previously distributed images and OTA versions must not be rewritten.
