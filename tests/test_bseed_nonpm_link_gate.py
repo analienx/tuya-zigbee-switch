@@ -95,3 +95,45 @@ def test_gate_interruption_invalidates_previous_evidence_before_network():
     src=(ROOT/'helper_scripts/bseed_nonpm_link_gate.py').read_text()
     assert "'last_error':'link_gate_started_not_completed'" in src
     assert src.index("'last_error':'link_gate_started_not_completed'") < src.index('client.connect(')
+
+
+def test_qualify_orchestrates_only_three_readonly_stages(tmp_path,monkeypatch):
+    from tests.test_bseed_ota_campaign import profile as stock_profile
+    import bseed_ota_campaign as campaign
+    p=stock_profile(tmp_path)
+    p.update(device='BedroomSocketCabinetRight',ieee='0xa4c13824a7005afb',
+        manufacturer='o1jzcxou',model='TS011F-BS',preflash_role='EndDevice',
+        postflash_role='EndDevice',preflash_build='1.1.2-bseedcli4',
+        preflash_relay_physical_mode='follow_state',non_pm=True,require_pm=False)
+    work=Path(p['workdir']);work.mkdir()
+    (work/'LAST_CHECK.json').write_text('{"previous":"must_archive"}')
+    private=tmp_path/'client.json';private.write_text(json.dumps(p))
+    monkeypatch.setattr(sys,'argv',['campaign','--profile',str(private),'--mode','qualify'])
+    with patch('bseed_ota_campaign.subprocess.call',return_value=0) as call:
+        campaign.main()
+    cmds=[x.args[0] for x in call.call_args_list]
+    assert [Path(c[2]).name for c in cmds]==[
+        'bseed_nonpm_link_gate.py','bseed_targeted_z2m_ota.py','bseed_nonpm_link_gate.py']
+    assert cmds[1][cmds[1].index('--mode')+1]=='check'
+    assert '--mode' not in cmds[0] and '--mode' not in cmds[2]
+    assert not (work/'LAST_CHECK.json').exists()
+    assert len(list(work.glob('CHECK_ARCHIVE_*.json')))==1
+
+
+def test_qualify_stops_on_first_failed_gate_or_ota_check(tmp_path,monkeypatch):
+    from tests.test_bseed_ota_campaign import profile as stock_profile
+    import bseed_ota_campaign as campaign
+    p=stock_profile(tmp_path)
+    p.update(manufacturer='o1jzcxou',model='TS011F-BS',preflash_role='EndDevice',
+       postflash_role='EndDevice',preflash_build='1.1.2-bseedcli4',
+       preflash_relay_physical_mode='follow_state',non_pm=True,require_pm=False)
+    private=tmp_path/'client.json';private.write_text(json.dumps(p))
+    monkeypatch.setattr(sys,'argv',['campaign','--profile',str(private),'--mode','qualify'])
+    for results,count in [([2],1),([0,2],2)]:
+        with patch('bseed_ota_campaign.subprocess.call',side_effect=results) as call:
+            with pytest.raises(SystemExit) as stopped: campaign.main()
+        assert stopped.value.code==2 and call.call_count==count
+    p['require_pm']=True; private.write_text(json.dumps(p))
+    with patch('bseed_ota_campaign.subprocess.call') as call:
+        with pytest.raises(ValueError,match='require_pm=false'): campaign.main()
+        call.assert_not_called()

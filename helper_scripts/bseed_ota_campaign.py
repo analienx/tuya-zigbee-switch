@@ -221,7 +221,7 @@ def verified_router_pm_candidate(profile):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', required=True, help='Private JSON profile outside git')
-    parser.add_argument('--mode', choices=['prepare', 'preflight', 'link-gate', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'provision-pm', 'audit-pm', 'postflash', 'reinterview', 'status'], required=True)
+    parser.add_argument('--mode', choices=['prepare', 'preflight', 'link-gate', 'qualify', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'provision-pm', 'audit-pm', 'postflash', 'reinterview', 'status'], required=True)
     parser.add_argument('--confirm-ieee', help='Required for flash, transition, rejoin, metadata and provision-pm; must match profile IEEE exactly')
     args = parser.parse_args()
     profile = load_profile(args.profile)
@@ -229,6 +229,22 @@ def main():
         if args.mode != 'flash': raise SystemExit('Router PM role transition and auto-provisioning not validated')
         verified_router_pm_candidate(profile)  # no Router provisioning: flash only, then audit separately
     work = Path(profile['workdir'])
+    if args.mode == 'qualify':
+        if args.confirm_ieee or profile.get('non_pm') is not True or profile.get('require_pm') is not False or profile['preflash_role'] != 'EndDevice':
+            raise SystemExit('Read-only qualification requires non-PM EndDevice profile and no flash confirmation')
+        from bseed_targeted_z2m_ota import archive_prior_check
+        work.mkdir(parents=True, exist_ok=True)
+        archive_prior_check(work)  # Never reuse an earlier OTA check if this new sequence fails.
+        gate = [sys.executable, '-u', str(ROOT/'helper_scripts/bseed_nonpm_link_gate.py'),
+                '--profile', args.profile]
+        for stage, command in [('link_gate_before', gate), ('ota_check', runner_args(profile, 'check')),
+                               ('link_gate_after', gate)]:
+            status = subprocess.call(command)
+            if status:
+                print('QUALIFICATION_STOPPED_NO_FLASH', stage, 'exit', status, flush=True)
+                raise SystemExit(status)
+        print('QUALIFICATION_PASSED_NO_FLASH', profile['device'], flush=True)
+        return
     if args.mode == 'prepare':
         print(json.dumps(make_index(profile), indent=2))
         return
