@@ -32,10 +32,31 @@ def evaluate(before, after, response, expected_build):
     return 'build_refreshed_postflash_unverified'
 
 
+def validate_campaign(lock, ieee, name, image_sha256):
+    if (lock.get('ieee'), lock.get('device'), lock.get('sha256'), lock.get('phase')) != (
+            ieee, name, image_sha256, 'ota_transfer_ok_postflash_unverified'):
+        raise ValueError('Exact campaign identity/hash and successful OTA transport lock required')
+    response=lock.get('response')
+    if not isinstance(response,dict) or response.get('status')!='ok' or (
+            response.get('transaction')!=lock.get('token') or
+            not isinstance(response.get('data'),dict) or
+            response['data'].get('id')!=ieee):
+        raise ValueError('Campaign lock lacks matched target OTA success response')
+    return True
+
+
+def require_fresh_interview(events, fresh_inventory):
+    if not fresh_inventory:
+        raise RuntimeError('No fresh nonretained bridge inventory after interview request')
+    if not any(e.get('status')=='successful' for e in events):
+        raise RuntimeError('No successful target interview event')
+    return True
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     for key in ('device','ieee','confirm-ieee','manufacturer','model','expect-role',
-                'expect-build','mqtt-config','broker','campaign-lock','output'):
+                'expect-build','image-sha256','mqtt-config','broker','campaign-lock','output'):
         p.add_argument('--'+key,required=True)
     p.add_argument('--settle-seconds',type=int,default=10)
     p.add_argument('--timeout-seconds',type=int,default=160)
@@ -47,11 +68,11 @@ def main():
     out=Path(a.output).expanduser().resolve();repo=Path(__file__).resolve().parents[1]
     if out.is_relative_to(repo) or out.exists(): raise ValueError('Require unused private evidence path')
     lock=json.loads(Path(a.campaign_lock).read_text(encoding='utf8'))
-    if (lock.get('ieee'),lock.get('phase')) != (a.ieee,'ota_transfer_ok_postflash_unverified'):
-        raise ValueError('Matching OTA transfer OK and unverified campaign lock required')
+    validate_campaign(lock,a.ieee,a.device,a.image_sha256)
     config=yaml.safe_load(Path(a.mqtt_config).read_text(encoding='utf8'))['mqtt']
     base=config.get('base_topic','zigbee2mqtt');token='bseed-postota-interview-'+uuid.uuid4().hex
-    values={'inventory':None,'bridge':None,'response':None,'events':[]}
+    values={'inventory':None,'bridge':None,'response':None,'events':[],
+            'requested':False,'fresh_inventory':False}
     ready=threading.Event(); changed=threading.Event();sent=False
     client=mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,client_id=token)
     client.username_pw_set(config.get('user',''),config.get('password',''))
@@ -64,13 +85,17 @@ def main():
         try: data=json.loads(msg.payload)
         except (ValueError,UnicodeDecodeError):return
         if msg.topic==base+'/bridge/devices' and isinstance(data,list):
-            values['inventory']=data;changed.set()
+            values['inventory']=data
+            if values['requested'] and not msg.retain:values['fresh_inventory']=True
+            changed.set()
         elif msg.topic==base+'/bridge/state':
             values['bridge']=data.get('state') if isinstance(data,dict) else data;changed.set()
-        elif msg.topic==base+'/bridge/response/device/interview' and data.get('transaction')==token:
+        elif (msg.topic==base+'/bridge/response/device/interview' and isinstance(data,dict)
+              and values['requested'] and data.get('transaction')==token):
             values['response']=data;changed.set()
-        elif (msg.topic==base+'/bridge/event' and data.get('type')=='device_interview'
-              and (data.get('data') or {}).get('ieee_address')==a.ieee):
+        elif (msg.topic==base+'/bridge/event' and isinstance(data,dict) and values['requested']
+              and data.get('type')=='device_interview' and isinstance(data.get('data'),dict)
+              and data['data'].get('ieee_address')==a.ieee):
             values['events'].append({'type':data.get('type'),'status':(data.get('data') or {}).get('status')});changed.set()
     client.on_connect=connected;client.on_message=received
     evidence={'at':dt.datetime.now().astimezone().isoformat(),'target':a.ieee,'token':token,
@@ -92,6 +117,7 @@ def main():
         time.sleep(a.settle_seconds)
         if values['bridge']!='online':raise ValueError('Bridge became offline')
         request={'id':a.ieee,'transaction':token}
+        values['requested']=True
         published=client.publish(base+'/bridge/request/device/interview',json.dumps(request),qos=1)
         published.wait_for_publish(5)
         if not published.is_published():raise TimeoutError('Interview MQTT publish not confirmed')
@@ -102,15 +128,18 @@ def main():
         evidence['response']=values['response']
         if not values['response'] or values['response'].get('status')!='ok':
             raise RuntimeError('One target interview failed or timed out')
-        deadline=time.monotonic()+15
+        deadline=time.monotonic()+20
         while time.monotonic()<deadline:
             selection=[x for x in (values['inventory'] or []) if x.get('ieee_address')==a.ieee]
-            if len(selection)==1 and selection[0].get('software_build_id')==a.expect_build:break
+            if (values['fresh_inventory'] and
+                    any(e['status']=='successful' for e in values['events']) and
+                    len(selection)==1 and selection[0].get('software_build_id')==a.expect_build):break
             changed.wait(.3);changed.clear()
         selection=[x for x in (values['inventory'] or []) if x.get('ieee_address')==a.ieee]
         if len(selection)!=1:raise ValueError('Target disappeared after interview')
         after=identity(selection[0],a.ieee,a.device,a.manufacturer,a.model,a.expect_role)
         evidence['after']=after
+        require_fresh_interview(values['events'],values['fresh_inventory'])
         evidence['result']=evaluate(before,after,values['response'],a.expect_build)
         print('POST_INTERVIEW',json.dumps({'build':after['software_build_id'],
               'result':evidence['result']}),flush=True)
@@ -120,6 +149,7 @@ def main():
     finally:
         client.loop_stop();client.disconnect()
         evidence['events']=values['events'][-5:]
+        evidence['fresh_inventory_observed']=values['fresh_inventory']
         out.parent.mkdir(parents=True,exist_ok=True)
         with out.open('x',encoding='utf8') as handle:json.dump(evidence,handle,indent=2)
         print('PRIVATE_EVIDENCE',str(out),flush=True)

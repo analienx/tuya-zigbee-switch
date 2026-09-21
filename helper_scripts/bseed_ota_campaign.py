@@ -119,6 +119,10 @@ def postflash_cmd(profile, evidence):
             '--mqtt-config', profile['mqtt_config'], '--broker', profile['broker'],
             '--output', str(evidence), '--observe-seconds', str(profile.get('observe_seconds', 20))]
     if profile.get('require_pm'): cmd.append('--require-pm')
+    if profile['preflash_role']==profile['postflash_role']:
+        cmd.extend(['--preflash-lock',str(Path(profile['workdir'])/'ACTIVE_LOCK.json'),
+                    '--expected-image-sha256',str(profile['sha256']),
+                    '--relay-get-key',str(profile.get('relay_get_key','state'))])
     return cmd
 
 
@@ -135,6 +139,10 @@ def reinterview_cmd(profile, confirmation, evidence):
                      ('model','model'),('postflash_role','expect-role'),('postflash_build','expect-build'),
                      ('mqtt_config','mqtt-config'),('broker','broker')]:
         cmd.extend(['--'+flag,str(profile[key])])
+    for key,flag in [('postflash_manufacturer','manufacturer'),('postflash_model','model')]:
+        if profile.get(key):
+            cmd[cmd.index('--'+flag)+1]=str(profile[key])
+    cmd.extend(['--image-sha256',str(profile['sha256'])])
     cmd.extend(['--confirm-ieee',confirmation,'--campaign-lock',
                 str(Path(profile['workdir'])/'ACTIVE_LOCK.json'),'--output',str(evidence),
                 '--settle-seconds',str(profile.get('postota_settle_seconds',10))])

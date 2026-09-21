@@ -190,7 +190,9 @@ def main():
         assert time.time() - record['timestamp'] < 1800, 'OTA check is older than 30 minutes'
         assert record['response'].get('status') == 'ok', 'Previous OTA check did not succeed'
         assert args.mode == 'flash'
-        campaign = {'device': args.device, 'ieee': args.ieee, 'sha256': args.sha256, 'phase': 'preflight', 'token': token, 'started': timestamp()}
+        campaign = {'device': args.device, 'ieee': args.ieee, 'sha256': args.sha256, 'phase': 'preflight', 'token': token, 'started': timestamp(),
+                    'preflash_state': {k:relay.get(k) for k in ('state','state_relay','energy','relay_physical_mode')},
+                    'relay_get_key':args.relay_get_key}
         if old:
             (work / ('LOCK_ARCHIVE_' + token + '.json')).write_text(json.dumps(old, indent=2), encoding='utf-8')
         with lock.open('x' if not lock.exists() else 'w', encoding='utf-8') as handle:

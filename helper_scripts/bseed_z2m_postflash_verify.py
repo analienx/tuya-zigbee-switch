@@ -12,6 +12,7 @@ import time
 import paho.mqtt.client as mqtt
 import yaml
 from bseed_zdo_live import read_node_descriptor
+from bseed_z2m_postota_reinterview import validate_campaign
 
 
 def evaluate(inventory, state, expected_ieee, expected_role, expected_build, live_node=None):
@@ -51,6 +52,29 @@ def pm_readiness(device, fresh_state):
     return issues
 
 
+def assess_retained_state(before,after,relay_key,require_pm):
+    """Same-role OTA state gate; not proof of physical relay or metrology accuracy."""
+    import math
+    issues=[]
+    if not isinstance(before,dict) or not isinstance(after,dict):
+        return ['Missing fresh pre/post OTA state snapshots']
+    if before.get(relay_key) not in ('ON','OFF'):
+        issues.append('Preflash relay state missing')
+    elif after.get(relay_key)!=before[relay_key]:
+        issues.append('Relay state changed across same-role OTA')
+    if before.get('relay_physical_mode') is not None and (
+            after.get('relay_physical_mode')!=before['relay_physical_mode']):
+        issues.append('Physical relay policy changed across same-role OTA')
+    if require_pm:
+        old=before.get('energy');new=after.get('energy')
+        if (type(old) not in (int,float) or type(new) not in (int,float) or
+                not math.isfinite(old) or not math.isfinite(new) or old<0 or new<0):
+            issues.append('Missing/invalid cumulative PM energy before or after OTA')
+        elif new + 0.02 < old:
+            issues.append('Cumulative PM energy dropped across same-role OTA')
+    return issues
+
+
 def arguments():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--device', required=True, help='Zigbee2MQTT friendly name')
@@ -62,11 +86,16 @@ def arguments():
     p.add_argument('--output', required=True, help='Private JSON evidence file outside repository')
     p.add_argument('--observe-seconds', type=int, default=20)
     p.add_argument('--require-pm', action='store_true', help='Gate PM periodic reporting and plausible fresh standard MQTT values')
+    p.add_argument('--preflash-lock', help='Same-role OTA lock with captured relay/energy baseline')
+    p.add_argument('--expected-image-sha256', help='Required with --preflash-lock')
+    p.add_argument('--relay-get-key',choices=['state','state_relay'],default='state')
     return p.parse_args()
 
 
 def main():
     args = arguments()
+    if bool(args.preflash_lock)!=bool(args.expected_image_sha256):
+        raise ValueError('Baseline lock and exact OTA image SHA256 are required together')
     assert 4 <= args.observe_seconds <= 180, 'Observation window must be 4..180 seconds'
     # PM periodic reporting may legally take up to 60 s; allow a margin beyond that maximum.
     observation_seconds = max(args.observe_seconds, 75) if args.require_pm else args.observe_seconds
@@ -117,6 +146,18 @@ def main():
                                          args.expect_role, args.expect_build, node)
     pm_issues = pm_readiness(target, snapshot['state']) if args.require_pm else []
     problems.extend(pm_issues)
+    retention_issues=[]
+    if args.preflash_lock:
+        try:
+            lock=json.loads(Path(args.preflash_lock).read_text(encoding='utf8'))
+            validate_campaign(lock,args.ieee,args.device,args.expected_image_sha256)
+            if lock.get('relay_get_key')!=args.relay_get_key:
+                raise ValueError('Preflash relay endpoint differs from verification endpoint')
+            retention_issues=assess_retained_state(
+                lock.get('preflash_state'),snapshot['state'],args.relay_get_key,args.require_pm)
+        except (OSError,ValueError,TypeError,KeyError) as error:
+            retention_issues=[type(error).__name__+': '+str(error)[:180]]
+        problems.extend(retention_issues)
     if snapshot['bridge'] != 'online': problems.append('Zigbee2MQTT bridge not verified online')
     if node_error: problems.append('live ZDO probe failed: '+node_error)
     if snapshot['errors']: problems.append('target-related Zigbee2MQTT errors observed')
@@ -127,6 +168,8 @@ def main():
                 'result': result, 'issues': problems, 'bridge': snapshot['bridge'],
                 'observation_seconds': observation_seconds,
                 'pm_readiness': {'required': args.require_pm, 'issues': pm_issues},
+                'same_role_retention': {'required': bool(args.preflash_lock),
+                    'issues':retention_issues,'physical_acceptance':False},
                 'live_node_descriptor': node, 'zdo_error': node_error,
                 'cached_inventory_role_disagrees_with_live_zdo': bool(target and node and target.get('type') != node['role']),
                 'fresh_mqtt_state_observed': snapshot['state'] is not None,

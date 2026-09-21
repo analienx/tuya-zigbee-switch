@@ -245,3 +245,29 @@ def test_same_role_interview_failure_blocks_provision_and_postflash(tmp_path,mon
     assert result.value.code==2
     assert [Path(c.args[0][2]).name for c in run.call_args_list]==[
         'bseed_targeted_z2m_ota.py','bseed_z2m_postota_reinterview.py']
+
+
+def test_postota_interview_pins_image_and_separate_postflash_identity(tmp_path):
+    cfg=profile(tmp_path)
+    cfg.update(preflash_role='Router',postflash_role='Router',
+               postflash_manufacturer='b28wrpvx',postflash_model='TS011F-BS-PM')
+    cmd=campaign.reinterview_cmd(cfg,cfg['ieee'],tmp_path/'postota.json')
+    assert cmd[cmd.index('--image-sha256')+1]==cfg['sha256']
+    assert cmd[cmd.index('--manufacturer')+1]=='b28wrpvx'
+    assert cmd[cmd.index('--model')+1]=='TS011F-BS-PM'
+    assert cmd[cmd.index('--campaign-lock')+1]==str(Path(cfg['workdir'])/'ACTIVE_LOCK.json')
+    assert '--confirm-ieee' in cmd and cmd[cmd.index('--confirm-ieee')+1]==cfg['ieee']
+    assert '--apply' not in cmd and '--mode' not in cmd
+
+
+def test_same_role_postflash_requires_exact_private_relay_energy_baseline(tmp_path):
+    cfg=profile(tmp_path)
+    cfg.update(preflash_role='Router',postflash_role='Router',require_pm=True,
+               relay_get_key='state_relay')
+    cmd=campaign.postflash_cmd(cfg,tmp_path/'post.json')
+    assert cmd[cmd.index('--preflash-lock')+1]==str(Path(cfg['workdir'])/'ACTIVE_LOCK.json')
+    assert cmd[cmd.index('--expected-image-sha256')+1]==cfg['sha256']
+    assert cmd[cmd.index('--relay-get-key')+1]=='state_relay'
+    assert '--require-pm' in cmd
+    cfg['postflash_role']='EndDevice'
+    assert '--preflash-lock' not in campaign.postflash_cmd(cfg,tmp_path/'cross_role.json')

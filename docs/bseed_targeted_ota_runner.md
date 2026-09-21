@@ -57,3 +57,25 @@ If scoped rejoin fails, do not automatically delete/force-remove the device: the
 For BSEED PM socket profiles set `"require_pm": true`. The profile-driven `postflash` check then fails closed if endpoint 1 lacks `haElectricalMeasurement.activePower` reporting at min<=10 s/max<=60 s/change<=5 W or if no **fresh, non-retained** standard-property PM MQTT state with plausible voltage/current/power/energy is seen. This check adds to—not replaces—the live role/build and interview gates. It does **not** verify calibrations, physical load changes, energy accumulation or raw Zigbee `attributeReport` provenance. Keep the complete `tests/live_bseed_pm_metering.py` canary mandatory for release acceptance.
 
 KitchenSocketLeft illustrates why: after stock Router→Client conversion, the per-device PM multiplier/divisor cache and `activePower` reporting were absent. Fresh readings such as `voltage=24065`, `current=218` were displayed without scaling. A single target-only reporting configuration and subsequent `device/configure` both timed out, so **the live device is still uncorrected**. Do not fix these symptoms by copying another socket's binary/config, editing Zigbee2MQTT's live `database.db`, globally changing metering options, or repeating failed commands unattended. First restore reliable target-specific ZCL responses; then verify its actual scale attributes, configure endpoint-1 reporting and capture unsolicited corrected PM states.
+
+## Fresh same-role interview and retained-state gate (2026-09-21)
+
+An OTA `status: ok` first produces `ota_transfer_ok_postflash_unverified`.
+The profile-driven same-role `flash` checks the exact target/image SHA-256 and
+transaction-linked OTA lock, then performs **one** target-only interview. It
+requires a successful interview event and fresh non-retained `bridge/devices`
+message after the request, unchanged IEEE/NWK/role and exact expected build.
+For stock-to-custom same-role conversions with a changed manufacturer or
+model, set `postflash_manufacturer` and `postflash_model` to the target's
+independently verified Zigbee identifiers in the PRIVATE profile; the original
+`manufacturer`/`model` remain the preflash identity.
+
+At preflight, the updater saves the selected relay state, energy and physical
+relay policy in its private campaign lock. For a same-role postflash check,
+this baseline and exact image hash are mandatory. The selected relay property
+must remain unchanged, any recorded physical relay policy must agree, and PM
+cumulative energy must not unexpectedly decrease. Missing historical baseline
+means **unconfirmed**, not an automatic permission to reconstruct it from a
+later state, rerun OTA or clear the lock. Independent physical load, retained
+bindings, device-originated metering and network-parent acceptance are still
+required before deploying the image elsewhere.

@@ -74,3 +74,26 @@ showing last requested offset, device-requested `maxDataSize`, returned
 Separate device-side timeout, flash-write, image-validation and RF diagnoses;
 none is established by the information-level log or by this code change.
 Keep the failed campaign locked and preserve its independent Z2M backup.
+
+## Controlled 32-byte retry and current acceptance state (2026-09-21)
+
+KitchenSocketRight received the **same immutable `v8u5-rc1` image** in one
+separate, authorized retry. The raw Zigbee2MQTT trace confirmed device block
+requests of at most 48 bytes and actual response payloads of 32 bytes (18 on
+the final block); the OTA service returned `status: ok` at 22:18:07 Prague time
+on 2026-09-20. This supports testing conservative block sizes, but does **not**
+prove 48-byte payloads caused the original abort. Preserve the original 50-byte
+failure evidence and this retry's separate private raw trace and campaign lock.
+
+A target-only re-interview returned `status: ok` and reported successful
+interview with unchanged IEEE, NWK and Router role. Nevertheless, Zigbee2MQTT
+still reported `1.2.5-bseedv8u4` on 2026-09-21, despite the rc1 OTA payload
+containing `1.2.5-bseedv8u5-rc1`. The latest read-only state had
+`state=ON`, `state_relay=OFF`, `energy=0` and plausible mains voltage;
+before OTA the designated relay was ON and cumulative energy was 11.72 kWh.
+Neither the running rc1 build nor retention of physical relay/energy behavior
+is established. Keep the **retry** lock in
+`ota_transfer_ok_postflash_unverified`; do not claim flash/hardware acceptance,
+clear the lock, power-cycle, toggle the relay or authorize another OTA based
+only on successful transport or interview. No new live firmware action was
+performed during the 2026-09-21 automation hardening.

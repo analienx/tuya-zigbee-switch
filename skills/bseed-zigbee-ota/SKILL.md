@@ -89,3 +89,25 @@ the initial ABORT. No follow-up flash, unlock, retry, relay change or restart
 is authorized solely by a clean offline build; require independent raw
 block-level/APS evidence, a new device/network eligibility decision and
 exact single-target authorization. Keep rc1's validated hash immutable.
+
+## Same-role retention and interview-freshness hardening (2026-09-21)
+
+For a same-role OTA, the target-only post-OTA interview now verifies the original
+campaign's target name/IEEE, OTA image SHA-256, transaction token, terminal
+`status: ok` and reported response ID. A valid interview must produce both a
+`successful` target interview event and a fresh, non-retained bridge/device
+inventory observation after its request. Old retained inventory and a matching
+old cached build do not suffice. `postflash_manufacturer` and
+`postflash_model` in a PRIVATE profile may differ from the stock preflash
+identity, but must match the actual postflash Zigbee identity exactly. No
+second OTA or repeated interview is implicit on failure.
+
+The same-role flash runner records a fresh preflash relay/energy snapshot
+inside its private transaction lock. The postflash checker compares the
+**designated** relay property (`state_relay` for BSEED PM Router) and physical
+relay policy, and requires cumulative PM energy not to regress unexpectedly.
+Missing baseline data, changed relay policy, a different relay state or an
+energy reset leave the campaign `unconfirmed` pending independent evaluation.
+A passing check still does not prove physical relay safety, meter calibration,
+retained bindings or stable sleepy-child parenting. Historical campaign locks
+predating baseline capture do not qualify for this new retention gate.
