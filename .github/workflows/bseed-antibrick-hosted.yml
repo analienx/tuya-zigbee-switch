@@ -1,0 +1,64 @@
+name: BSEED anti-brick candidates — GitHub-hosted only
+
+on:
+  push:
+    branches: [fix/bseed-no-brick-20260921]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-candidates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install hosted build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make python3 python3-yaml python3-pytest curl wget unzip bzip2
+      - name: Cache pinned Telink dependencies
+        uses: actions/cache@v4
+        with:
+          path: telink_tools
+          key: telink-tools-v3.7.2.0
+      - name: Install pinned native Telink toolchain
+        run: make -C src/telink -f tools.mk sdk toolchain
+      - name: Compile all four role- and board-specific candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          BSEED_PM_ROUTER_CANDIDATE=2 bash make_scripts/build_bseed_ts011f_pm_v8.sh
+          BSEED_ANTIBRICK_RC=2 bash make_scripts/build_bseed_mains_client.sh pm
+          BSEED_ANTIBRICK_RC=2 bash make_scripts/build_bseed_mains_client.sh nonpm
+          BSEED_ANTIBRICK_RC=2 bash make_scripts/build_bseed_ts011f_nonpm_router.sh
+          python3 helper_scripts/bseed_antibrick_rc_gate.py
+      - name: Record exact-source artifact checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bseed-artifact-receipt"
+          git rev-parse HEAD > "$RUNNER_TEMP/bseed-artifact-receipt/source-commit.txt"
+          test -z "$(git status --porcelain)"
+          for dir in bseed-ts011f-pm-router-v8u5-rc3 bseed-ts011f-pm-client-antibrick-r2 bseed-ts011f-nonpm-router-antibrick-r2 bseed-ts011f-nonpm-client-antibrick-r2; do
+            find "build/$dir" -maxdepth 1 -type f \( -name '*.bin' -o -name '*.ota' -o -name 'manifest.json' \) -print0
+          done | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/bseed-artifact-receipt/SHA256SUMS"
+          sha256sum -c "$RUNNER_TEMP/bseed-artifact-receipt/SHA256SUMS"
+          cat "$RUNNER_TEMP/bseed-artifact-receipt/source-commit.txt"
+          cat "$RUNNER_TEMP/bseed-artifact-receipt/SHA256SUMS"
+      - name: Upload four remotely verified candidate sets
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseed-antibrick-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/bseed-artifact-receipt/
+            build/bseed-ts011f-pm-router-v8u5-rc3/
+            build/bseed-ts011f-pm-client-antibrick-r2/
+            build/bseed-ts011f-nonpm-router-antibrick-r2/
+            build/bseed-ts011f-nonpm-client-antibrick-r2/
