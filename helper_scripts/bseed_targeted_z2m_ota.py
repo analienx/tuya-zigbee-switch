@@ -90,9 +90,10 @@ def verify_image(args):
     return image, header
 
 
-def update_payload(ieee, url, token, max_block_bytes):
+def update_payload(ieee, url, token, max_block_bytes, block_request_timeout_ms=1800000):
     assert 10 <= max_block_bytes <= 100, 'OTA maximum data size must be 10..100 bytes'
-    return {'id': ieee, 'url': url, 'transaction': token, 'image_block_request_timeout': 600000, 'default_maximum_data_size': max_block_bytes}
+    assert 150000 <= block_request_timeout_ms <= 3600000, 'Block-request inactivity timeout must be 150000..3600000 ms'
+    return {'id': ieee, 'url': url, 'transaction': token, 'image_block_request_timeout': block_request_timeout_ms, 'default_maximum_data_size': max_block_bytes}
 
 
 def validate_metering_preflight(relay, *, non_pm, model, manufacturer, role, max_reported_watts):
@@ -126,7 +127,8 @@ def arguments():
     p.add_argument('--preflash-build')
     p.add_argument('--postflash-build')
     p.add_argument('--preflash-relay-physical-mode')
-    p.add_argument('--timeout-seconds', type=int, default=2400)
+    p.add_argument('--timeout-seconds', type=int, default=7200)
+    p.add_argument('--block-request-timeout-ms', type=int, default=1800000, help='Inactivity between device OTA image-block requests; NOT total OTA time')
     p.add_argument('--check-timeout-seconds', type=int, default=DEFAULT_CHECK_TIMEOUT_SECONDS)
     p.add_argument('--max-block-bytes', type=int, default=50, help='OTA per-request maximum; conservative 50-byte default for fragile meshes')
     return p.parse_args()
@@ -281,7 +283,7 @@ def main():
         with lock.open('x' if not lock.exists() else 'w', encoding='utf-8') as handle:
             json.dump(campaign, handle, indent=2)
         campaign['phase'] = 'ota_running'; lock.write_text(json.dumps(campaign, indent=2), encoding='utf-8')
-        payload = update_payload(args.ieee, args.url, token, args.max_block_bytes)
+        payload = update_payload(args.ieee, args.url, token, args.max_block_bytes, args.block_request_timeout_ms)
         state['sent'] = True
         pub = client.publish(req, json.dumps(payload), qos=1)
         assert pub.rc == mqtt.MQTT_ERR_SUCCESS, 'OTA publish failed'

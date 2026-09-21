@@ -104,7 +104,7 @@ def runner_args(profile, mode, *, confirm_unloaded=False, accept_risk=False):
             if key not in profile: raise ValueError('Non-PM link gate requires '+key)
             cmd.extend(['--'+flag,str(profile[key])])
     for key, flag in [('block_bytes','max-block-bytes'), ('check_timeout_seconds','check-timeout-seconds'),
-                       ('monitor_seconds','timeout-seconds')]:
+                       ('monitor_seconds','timeout-seconds'), ('block_request_timeout_ms','block-request-timeout-ms')]:
         if key in profile: cmd.extend(['--' + flag, str(profile[key])])
     return cmd
 

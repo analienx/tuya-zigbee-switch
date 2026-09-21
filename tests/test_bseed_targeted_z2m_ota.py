@@ -68,7 +68,7 @@ def test_wrong_identity_and_payload_rejected_before_network(tmp_path):
 def test_update_payload_uses_explicit_bounded_block_size():
     from bseed_targeted_z2m_ota import update_payload
     data = update_payload('0xa4c138241e3de538', 'http://example.invalid/client.ota', 'transaction-1', 50)
-    assert data == {'id': '0xa4c138241e3de538', 'url': 'http://example.invalid/client.ota', 'transaction': 'transaction-1', 'image_block_request_timeout': 600000, 'default_maximum_data_size': 50}
+    assert data == {'id': '0xa4c138241e3de538', 'url': 'http://example.invalid/client.ota', 'transaction': 'transaction-1', 'image_block_request_timeout': 1800000, 'default_maximum_data_size': 50}
     with pytest.raises(AssertionError, match='10..100'):
         update_payload('target', 'url', 'token', 101)
     with pytest.raises(AssertionError, match='10..100'):
@@ -99,3 +99,22 @@ def test_transport_ok_is_not_postflash_accepted():
     assert new_campaign_allowed({'phase':'preflight_abort'})
     assert ota_transport_phase({'status':'error'})=='update_error'
     assert ota_transport_phase({})=='update_timeout_or_unconfirmed'
+
+
+def test_ota_inactivity_timeout_configurable_and_bounded():
+    from bseed_targeted_z2m_ota import update_payload
+    args=('target','http://example.invalid/image.ota','transaction',32)
+    assert update_payload(*args,2100000)['image_block_request_timeout'] == 2100000
+    for value in (149999,3600001):
+        with pytest.raises(AssertionError,match='inactivity timeout'):
+            update_payload(*args,value)
+
+def test_campaign_transmits_timeout_without_creating_automatic_retry():
+    from bseed_ota_campaign import runner_args
+    p={'device':'BedroomSocketCabinetRight', 'ieee':'0xa4c13824a7005afb', 'non_pm':False,
+       'image':'i', 'url':'u','index_url':'idx','mqtt_config':'m','broker':'b','workdir':'w',
+       'manufacturer':'o1jzcxou','model':'TS011F-BS','preflash_role':'EndDevice',
+       'sha256':'a'*64,'manufacturer_code':4417,'image_type':65026,
+       'file_version':'0x11023013','expect_relay':'OFF','block_request_timeout_ms':2100000}
+    cmd=runner_args(p,'check')
+    assert cmd[cmd.index('--block-request-timeout-ms')+1]=='2100000'
