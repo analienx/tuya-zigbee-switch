@@ -63,6 +63,26 @@ ts0726)
     ;;
 esac
 
+# Opt-in new-version engineering images only. Defaults remain byte-for-byte
+# reproducible references for the existing experimental Client releases.
+if [[ "${BSEED_ANTIBRICK_RC:-0}" == "1" ]]; then
+    case "$TARGET" in
+    pm)
+        SW_BUILD='1.2.5-bseedcli7'
+        FILE_VERSION_HEX='0x1205300F'
+        FILE_VERSION_DEC=302329871
+        DEFAULT_OUT='build/bseed-ts011f-pm-client-antibrick-rc'
+        ;;
+    nonpm)
+        SW_BUILD='1.1.2-bseedcli6'
+        FILE_VERSION_HEX='0x11023011'
+        FILE_VERSION_DEC=285356049
+        DEFAULT_OUT='build/bseed-ts011f-nonpm-client-antibrick-rc'
+        ;;
+    *) echo 'ERROR: anti-brick RC limited to verified BSEED sockets' >&2; exit 2 ;;
+    esac
+fi
+
 MANUFACTURER_CODE=4417
 OUT_DIR="${2:-$DEFAULT_OUT}"
 mkdir -p "$OUT_DIR"

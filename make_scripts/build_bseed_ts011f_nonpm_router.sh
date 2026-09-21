@@ -15,7 +15,16 @@ STOCK_IMAGE_TYPE=54179
 SW_BUILD='1.1.3-bseedv8'
 FILE_VERSION_HEX='0x11023001'
 FILE_VERSION_DEC=285356033
-OUT_DIR="${1:-build/bseed-ts011f-nonpm-router}"
+DEFAULT_OUT='build/bseed-ts011f-nonpm-router'
+# Opt-in next-version engineering candidate; the original Router v8 build
+# remains reproducible by default and is never overwritten or published.
+if [[ "${BSEED_ANTIBRICK_RC:-0}" == "1" ]]; then
+  SW_BUILD='1.1.3-bseedv9'
+  FILE_VERSION_HEX='0x11023012'
+  FILE_VERSION_DEC=285356050
+  DEFAULT_OUT='build/bseed-ts011f-nonpm-router-antibrick-rc'
+fi
+OUT_DIR="${1:-$DEFAULT_OUT}"
 mkdir -p "$OUT_DIR"
 OUT_DIR="$(cd "$OUT_DIR" && pwd)"
 NVM_SCHEMA="$(cat NVM_MIGRATIONS_VERSION 2>/dev/null || printf '1')"
