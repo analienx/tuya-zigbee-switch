@@ -37,5 +37,7 @@ def test_campaign_only_adds_exemption_when_explicitly_enabled():
     profile['require_pm']=False
     assert '--non-pm' not in runner_args(profile,'preflight')
     profile['non_pm']=True
+    profile['preflash_build']='1.1.2-bseedcli4'
+    profile['preflash_relay_physical_mode']='follow_state'
     args=runner_args(profile,'preflight')
     assert args.count('--non-pm')==1

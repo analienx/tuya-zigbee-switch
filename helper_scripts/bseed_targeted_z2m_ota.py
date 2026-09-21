@@ -45,6 +45,14 @@ def new_campaign_allowed(previous):
     return not previous or previous.get('phase') in ('postflash_accepted', 'preflight_abort')
 
 
+def archive_prior_check(work):
+    prior = work / 'LAST_CHECK.json'
+    if not prior.exists(): return None
+    archive = work / ('CHECK_ARCHIVE_' + uuid.uuid4().hex + '.json')
+    prior.replace(archive)
+    return archive
+
+
 def ota_transport_phase(response):
     if response.get('status') == 'ok': return 'ota_transfer_ok_postflash_unverified'
     if response.get('status') == 'error': return 'update_error'
@@ -95,6 +103,8 @@ def arguments():
     p.add_argument('--relay-get-key', choices=['state','state_relay'], default='state')
     p.add_argument('--max-reported-watts', type=float, default=1.0)
     p.add_argument('--non-pm', action='store_true', help='Strict non-PM TS011F-BS Client exception; never use for PM devices')
+    p.add_argument('--preflash-build')
+    p.add_argument('--preflash-relay-physical-mode')
     p.add_argument('--timeout-seconds', type=int, default=2400)
     p.add_argument('--check-timeout-seconds', type=int, default=DEFAULT_CHECK_TIMEOUT_SECONDS)
     p.add_argument('--max-block-bytes', type=int, default=50, help='OTA per-request maximum; conservative 50-byte default for fragile meshes')
@@ -107,6 +117,20 @@ def main():
     assert args.check_timeout_seconds >= 70, 'OTA check wait must outlast Zigbee2MQTT 60-second device timeout'
     verify_image(args)
     work = Path(args.workdir); work.mkdir(parents=True, exist_ok=True)
+    if args.mode == 'check':
+        archive_prior_check(work)
+    if args.non_pm and args.mode in ('check', 'flash'):
+        from bseed_nonpm_link_gate import verify_record
+        assert args.preflash_build and args.preflash_relay_physical_mode, 'Missing pinned Client build/policy'
+        evidence = work / 'LATEST_LINK_GATE.json'
+        assert evidence.is_file(), 'Missing mandatory non-PM link gate; run campaign --mode link-gate'
+        gate_profile = dict(device=args.device, ieee=args.ieee, sha256=args.sha256, preflash_build=args.preflash_build)
+        after = None
+        if args.mode == 'flash':
+            checked = work / 'LAST_CHECK.json'
+            assert checked.is_file(), 'OTA availability check missing'
+            after = json.loads(checked.read_text(encoding='utf8'))['timestamp']
+        verify_record(json.loads(evidence.read_text(encoding='utf8')), gate_profile, after=after)
     lock = work / 'ACTIVE_LOCK.json'
     old = json.loads(lock.read_text()) if lock.exists() else {}
     assert new_campaign_allowed(old), 'Previous OTA incomplete, failed, or not postflash-accepted; inspect device and reconcile lock manually before another campaign'
@@ -181,6 +205,8 @@ def main():
             changed.wait(0.5); changed.clear()
         relay = state['relay'] or {}
         assert relay.get(args.relay_get_key) == args.expect_relay, 'Relay state not verified by read-only GET'
+        if args.non_pm:
+            assert relay.get('relay_physical_mode') == args.preflash_relay_physical_mode, 'Non-PM relay policy changed'
         assert (relay.get('device') or {}).get('ieeeAddr') == args.ieee, 'Fresh MQTT response IEEE mismatch'
         power = validate_metering_preflight(relay, non_pm=args.non_pm, model=args.model,
             manufacturer=args.manufacturer, role=args.role, max_reported_watts=args.max_reported_watts)

@@ -34,6 +34,9 @@ def load_profile(path):
         raise ValueError('Private OTA index must not be inside repository')
     if Path(data['workdir']).resolve().is_relative_to(ROOT):
         raise ValueError('Private logs and OTA lock must not be inside repository')
+    if data.get('non_pm') is True:
+        if data.get('require_pm') is not False or data.get('preflash_build') is None or not data.get('preflash_relay_physical_mode'):
+            raise ValueError('Non-PM requires explicit require_pm=false, preflash_build and preflash_relay_physical_mode')
     return data
 
 
@@ -86,6 +89,9 @@ def runner_args(profile, mode):
         cmd.extend(['--relay-get-key', profile['relay_get_key']])
     if profile.get('non_pm') is True:
         cmd.append('--non-pm')
+        for key, flag in [('preflash_build','preflash-build'),('preflash_relay_physical_mode','preflash-relay-physical-mode')]:
+            if key not in profile: raise ValueError('Non-PM link gate requires '+key)
+            cmd.extend(['--'+flag,str(profile[key])])
     for key, flag in [('block_bytes','max-block-bytes'), ('check_timeout_seconds','check-timeout-seconds'),
                        ('monitor_seconds','timeout-seconds')]:
         if key in profile: cmd.extend(['--' + flag, str(profile[key])])
@@ -215,7 +221,7 @@ def verified_router_pm_candidate(profile):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', required=True, help='Private JSON profile outside git')
-    parser.add_argument('--mode', choices=['prepare', 'preflight', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'provision-pm', 'audit-pm', 'postflash', 'reinterview', 'status'], required=True)
+    parser.add_argument('--mode', choices=['prepare', 'preflight', 'link-gate', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'provision-pm', 'audit-pm', 'postflash', 'reinterview', 'status'], required=True)
     parser.add_argument('--confirm-ieee', help='Required for flash, transition, rejoin, metadata and provision-pm; must match profile IEEE exactly')
     args = parser.parse_args()
     profile = load_profile(args.profile)
@@ -226,6 +232,12 @@ def main():
     if args.mode == 'prepare':
         print(json.dumps(make_index(profile), indent=2))
         return
+    if args.mode == 'link-gate':
+        if profile.get('non_pm') is not True or profile['preflash_role'] != 'EndDevice':
+            raise SystemExit('Link gate is only for an explicit non-PM EndDevice campaign')
+        cmd = [sys.executable, '-u', str(ROOT/'helper_scripts/bseed_nonpm_link_gate.py'),
+               '--profile', args.profile]
+        raise SystemExit(subprocess.call(cmd))
     if args.mode == 'status':
         for filename in ('ACTIVE_LOCK.json', 'LAST_CHECK.json'):
             f = work / filename

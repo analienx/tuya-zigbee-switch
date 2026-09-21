@@ -111,3 +111,9 @@ energy reset leave the campaign `unconfirmed` pending independent evaluation.
 A passing check still does not prove physical relay safety, meter calibration,
 retained bindings or stable sleepy-child parenting. Historical campaign locks
 predating baseline capture do not qualify for this new retention gate.
+
+## Non-PM mains Client parent-loss/OTA eligibility gate (2026-09-21)
+
+For `TS011F-BS` mains EndDevice canaries, read `docs/bseed_nonpm_cli5_keepalive_canary.md` before running an OTA. A retained Zigbee2MQTT `online` flag, one fresh relay state or a recent `last_seen` value is **not** a sustained-response gate. Use the exact private non-PM profile (`non_pm=true`, `require_pm=false`, `preflash_build` and `preflash_relay_physical_mode` pinned). Run `--mode link-gate`, then only after a PASS run read-only `--mode check`; a newly completed link gate **after** the successful check is required for an explicitly authorized same-role flash. Every failed/aborted probe invalidates previous pass evidence; a new/failed OTA check archives and invalidates the old check. Never use a different workdir to evade those gates.
+
+If link probing fails, stop before OTA and inspect passive parent/neighbor evidence, live target errors and physical LED/circuit safely. If three link probes pass but OTA eligibility fails, distinguish a firmware OTA-query-service issue from general link loss; do not conclude that keepalive or any parent is the root cause. No automatic OTA retry, relay command, factory reset, power-cycle, re-pair, coordinator restart or global permit-join. Preserve the unchanged candidate image SHA, private canary evidence and independent physical safety review.
