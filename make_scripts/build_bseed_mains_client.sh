@@ -7,6 +7,7 @@ set -euo pipefail
 # Usage:
 #   build_bseed_mains_client.sh pm [output-dir]
 #   build_bseed_mains_client.sh nonpm [output-dir]
+#   build_bseed_mains_client.sh nonpm-keepalive [output-dir]
 #   build_bseed_mains_client.sh ts0726 [output-dir]
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -30,6 +31,18 @@ pm)
         HLW8012_CURRENT_MULTIPLIER=144679
         HLW8012_POWER_MULTIPLIER=16989
     )
+    ;;
+nonpm-keepalive)
+    # Opt-in CLI5 candidate only: retain original CLI4 reproducibility and normal index.
+    BOARD='OUTLET_BSEED_TS011F'
+    CANONICAL='o1jzcxou;TS011F-BS;LC2;SB4u;RC3;ID2;M;'
+    ROUTER_IMAGE_TYPE=43555
+    CLIENT_IMAGE_TYPE=65026
+    SW_BUILD='1.1.2-bseedcli5-rc1'
+    FILE_VERSION_HEX='0x11023010'
+    FILE_VERSION_DEC=285356048
+    DEFAULT_OUT='build/bseed-ts011f-nonpm-client-cli5-rc1'
+    EXTRA_ARGS=()
     ;;
 nonpm)
     BOARD='OUTLET_BSEED_TS011F'
@@ -58,7 +71,7 @@ ts0726)
     )
     ;;
 *)
-    echo "usage: $0 {pm|nonpm|ts0726} [output-dir]" >&2
+    echo "usage: $0 {pm|nonpm|nonpm-keepalive|ts0726} [output-dir]" >&2
     exit 2
     ;;
 esac
