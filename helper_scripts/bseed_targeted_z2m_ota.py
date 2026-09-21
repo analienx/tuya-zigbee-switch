@@ -4,9 +4,11 @@ First run --mode preflight, then --mode check (with a one-entry index),
 then --mode flash. Never run two OTA campaigns at once.
 """
 import argparse
+import binascii
 import datetime as dt
 import hashlib
 import json
+import math
 from pathlib import Path
 import struct
 import threading
@@ -44,10 +46,33 @@ def new_campaign_allowed(previous):
     return not previous or previous.get('phase') in ('postflash_accepted', 'preflight_abort')
 
 
+def archive_prior_check(work):
+    prior = work / 'LAST_CHECK.json'
+    if not prior.exists(): return None
+    archive = work / ('CHECK_ARCHIVE_' + uuid.uuid4().hex + '.json')
+    prior.replace(archive)
+    return archive
+
+
 def ota_transport_phase(response):
     if response.get('status') == 'ok': return 'ota_transfer_ok_postflash_unverified'
     if response.get('status') == 'error': return 'update_error'
     return 'update_timeout_or_unconfirmed'
+
+
+
+def validate_nonpm_native_ota_image(image, expected_version):
+    """Fail closed on corrupt 512K-layout BSEED non-PM Client images."""
+    assert 62 + 32 <= len(image) <= 208 * 1024, 'Non-PM OTA image length outside conservative 512K slot limit'
+    sub_type, sub_len = struct.unpack_from('<HI', image, 56)
+    assert sub_type == 0 and sub_len == len(image) - 62, 'Non-PM OTA sub-element length/type mismatch'
+    native = image[62:]
+    assert native[6:8] == b'\x5d\x02', 'Non-PM Telink OTA magic missing'
+    assert struct.unpack_from('<I', native, 8)[0] == 0x544c4e4b, 'Non-PM Telink startup flag missing'
+    assert struct.unpack_from('<I', native, 2)[0] == expected_version, 'Non-PM embedded version differs from OTA header'
+    assert struct.unpack_from('<I', native, 0x18)[0] == len(native), 'Non-PM embedded firmware length mismatch'
+    assert struct.unpack_from('<I', native, len(native)-4)[0] == (binascii.crc32(native[:-4]) ^ 0xffffffff), 'Non-PM embedded CRC mismatch'
+    return True
 
 
 def verify_image(args):
@@ -56,6 +81,7 @@ def verify_image(args):
     header = struct.unpack_from('<I5HIH32sI', image)
     assert header[0] == 0x0BEEF11E and header[2] == 56 and header[9] == len(image), 'Invalid OTA header'
     assert (header[4], header[5], header[6]) == (args.manufacturer_code, args.image_type, args.file_version), 'Wrong OTA identity'
+    if getattr(args, 'non_pm', False): validate_nonpm_native_ota_image(image, args.file_version)
     if args.native_image:
         native = Path(args.native_image).read_bytes()
         assert image[56:] == native[56:], 'Stock wrapper payload differs from native firmware'
@@ -67,6 +93,17 @@ def verify_image(args):
 def update_payload(ieee, url, token, max_block_bytes):
     assert 10 <= max_block_bytes <= 100, 'OTA maximum data size must be 10..100 bytes'
     return {'id': ieee, 'url': url, 'transaction': token, 'image_block_request_timeout': 600000, 'default_maximum_data_size': max_block_bytes}
+
+
+def validate_metering_preflight(relay, *, non_pm, model, manufacturer, role, max_reported_watts):
+    """Explicit non-PM exception; PM devices must supply a bounded fresh power reading."""
+    if non_pm:
+        assert (model, manufacturer, role) == ('TS011F-BS', 'o1jzcxou', 'EndDevice'), 'Non-PM exception only for BSEED TS011F-BS Client'
+        assert 'power' not in relay, 'Non-PM preflight unexpectedly exposes PM data; inspect identity'
+        return None
+    power = relay.get('power')
+    assert type(power) in (int, float) and math.isfinite(power) and 0 <= power <= max_reported_watts, 'Power missing or above limit'
+    return power
 
 
 def arguments():
@@ -82,6 +119,13 @@ def arguments():
     p.add_argument('--expect-relay', choices=['ON', 'OFF'], required=True)
     p.add_argument('--relay-get-key', choices=['state','state_relay'], default='state')
     p.add_argument('--max-reported-watts', type=float, default=1.0)
+    p.add_argument('--non-pm', action='store_true', help='Strict non-PM TS011F-BS Client exception; never use for PM devices')
+    p.add_argument('--hardware-evidence', help='Private exact-board recovery readback attestation, non-PM flash only')
+    p.add_argument('--accept-nonrecoverable-ota-risk', action='store_true', help='One exact-canary non-PM OTA; failure may require replacement')
+    p.add_argument('--confirm-load-unplugged', action='store_true', help='Non-PM flash only; operator has just verified no appliance attached')
+    p.add_argument('--preflash-build')
+    p.add_argument('--postflash-build')
+    p.add_argument('--preflash-relay-physical-mode')
     p.add_argument('--timeout-seconds', type=int, default=2400)
     p.add_argument('--check-timeout-seconds', type=int, default=DEFAULT_CHECK_TIMEOUT_SECONDS)
     p.add_argument('--max-block-bytes', type=int, default=50, help='OTA per-request maximum; conservative 50-byte default for fragile meshes')
@@ -92,8 +136,41 @@ def main():
     args = arguments()
     assert 10 <= args.max_block_bytes <= 100, 'OTA maximum data size must be 10..100 bytes'
     assert args.check_timeout_seconds >= 70, 'OTA check wait must outlast Zigbee2MQTT 60-second device timeout'
+    if args.non_pm and args.mode == 'flash':
+        from bseed_nonpm_recovery_gate import verify_recovery
+        verify_recovery(dict(non_pm=True, manufacturer=args.manufacturer, model=args.model,
+            preflash_role=args.role, postflash_role=args.role, ieee=args.ieee,
+            sha256=args.sha256, block_bytes=args.max_block_bytes,
+            preflash_build=args.preflash_build,
+            recovery_evidence=args.hardware_evidence, device=args.device,
+            postflash_build=getattr(args, 'postflash_build', None) or ('1.1.2-bseedcli5-rc1' if getattr(args, 'file_version', None) == 0x11023010 else None), require_pm=False,
+            relay_get_key=args.relay_get_key, expect_relay=args.expect_relay,
+            preflash_relay_physical_mode=args.preflash_relay_physical_mode),
+            confirm_unloaded=args.confirm_load_unplugged,
+            accept_nonrecoverable_ota=args.accept_nonrecoverable_ota_risk)
+    elif args.hardware_evidence or args.confirm_load_unplugged or args.accept_nonrecoverable_ota_risk:
+        raise ValueError('Non-PM hardware/risk flags are valid only for exact non-PM flash')
+    from bseed_socket_version_policy import require_increasing
+    verified_build = args.postflash_build or ('1.1.2-bseedcli5-rc1' if args.non_pm and args.file_version == 0x11023010 else None)
+    require_increasing(dict(manufacturer=args.manufacturer, model=args.model,
+        preflash_build=args.preflash_build, postflash_build=verified_build,
+        file_version=args.file_version))
     verify_image(args)
     work = Path(args.workdir); work.mkdir(parents=True, exist_ok=True)
+    if args.mode == 'check':
+        archive_prior_check(work)
+    if args.non_pm and args.mode in ('check', 'flash'):
+        from bseed_nonpm_link_gate import verify_record
+        assert args.preflash_build and args.preflash_relay_physical_mode, 'Missing pinned Client build/policy'
+        evidence = work / 'LATEST_LINK_GATE.json'
+        assert evidence.is_file(), 'Missing mandatory non-PM link gate; run campaign --mode link-gate'
+        gate_profile = dict(device=args.device, ieee=args.ieee, sha256=args.sha256, preflash_build=args.preflash_build)
+        after = None
+        if args.mode == 'flash':
+            checked = work / 'LAST_CHECK.json'
+            assert checked.is_file(), 'OTA availability check missing'
+            after = json.loads(checked.read_text(encoding='utf8'))['timestamp']
+        verify_record(json.loads(evidence.read_text(encoding='utf8')), gate_profile, after=after)
     lock = work / 'ACTIVE_LOCK.json'
     old = json.loads(lock.read_text()) if lock.exists() else {}
     assert new_campaign_allowed(old), 'Previous OTA incomplete, failed, or not postflash-accepted; inspect device and reconcile lock manually before another campaign'
@@ -159,6 +236,9 @@ def main():
         assert d.get('friendly_name') == args.device, 'Friendly name does not match IEEE'
         assert (d.get('manufacturer'), d.get('model_id'), d.get('type')) == (args.manufacturer, args.model, args.role), 'Identity/role mismatch'
         assert d.get('interview_state') == 'SUCCESSFUL', 'Device interview incomplete'
+        from bseed_socket_version_policy import CANDIDATES
+        if verified_build in CANDIDATES:
+            assert args.preflash_build and d.get('software_build_id') == args.preflash_build, 'Actual installed build differs from version-policy baseline'
         assert state['info'].get('permit_join') is False, 'Permit join unexpectedly open'
         log('inventory_ok', {k: d.get(k) for k in ('friendly_name', 'ieee_address', 'manufacturer', 'model_id', 'type', 'software_build_id')})
         state['relay'] = None
@@ -168,8 +248,11 @@ def main():
             changed.wait(0.5); changed.clear()
         relay = state['relay'] or {}
         assert relay.get(args.relay_get_key) == args.expect_relay, 'Relay state not verified by read-only GET'
-        power = relay.get('power')
-        assert isinstance(power, (int, float)) and 0 <= power <= args.max_reported_watts, 'Power missing or above limit'
+        if args.non_pm:
+            assert relay.get('relay_physical_mode') == args.preflash_relay_physical_mode, 'Non-PM relay policy changed'
+        assert (relay.get('device') or {}).get('ieeeAddr') == args.ieee, 'Fresh MQTT response IEEE mismatch'
+        power = validate_metering_preflight(relay, non_pm=args.non_pm, model=args.model,
+            manufacturer=args.manufacturer, role=args.role, max_reported_watts=args.max_reported_watts)
         assert not (relay.get('update') or {}).get('state') == 'updating', 'Device OTA already running'
         log('preflight_ok', {'relay': relay.get(args.relay_get_key), 'relay_get_key': args.relay_get_key, 'reported_power_w': power, 'voltage_v': relay.get('voltage'), 'image_sha256': args.sha256, 'mode': args.mode})
         if args.mode == 'preflight': return

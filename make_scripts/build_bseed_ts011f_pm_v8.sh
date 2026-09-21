@@ -23,12 +23,19 @@ FILE_VERSION_DEC=302329863
 
 # Opt-in, BUILD-ONLY PM Router repair candidate. Published v8u4 remains immutable.
 # No OTA index or live-device operation is performed by this build script.
-if [[ "${BSEED_PM_ROUTER_CANDIDATE:-0}" == "1" ]]; then
+if [[ "${BSEED_PM_ROUTER_CANDIDATE:-0}" == "1" || "${BSEED_PM_ROUTER_CANDIDATE:-0}" == "2" ]]; then
     SW_BUILD='1.2.5-bseedv8u5-rc2'
     FILE_VERSION_HEX='0x1205300E'
     FILE_VERSION_DEC=302329870
     : "${BSEED_PM_ROUTER_CANDIDATE_OUTPUT:=build/bseed-ts011f-pm-router-v8u5-rc2}"
     set -- "$BSEED_PM_ROUTER_CANDIDATE_OUTPUT"
+    if [[ "${BSEED_PM_ROUTER_CANDIDATE}" == "2" ]]; then
+        SW_BUILD='1.2.5-bseedv8u5-rc3'
+        FILE_VERSION_HEX='0x12053010'
+        FILE_VERSION_DEC=302329872
+        : "${BSEED_PM_ROUTER_R2_OUTPUT:=build/bseed-ts011f-pm-router-v8u5-rc3}"
+        set -- "$BSEED_PM_ROUTER_R2_OUTPUT"
+    fi
 fi
 VOLTAGE_MULTIPLIER=161460
 CURRENT_MULTIPLIER=144679

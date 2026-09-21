@@ -79,3 +79,11 @@ means **unconfirmed**, not an automatic permission to reconstruct it from a
 later state, rerun OTA or clear the lock. Independent physical load, retained
 bindings, device-originated metering and network-parent acceptance are still
 required before deploying the image elsewhere.
+
+## Non-PM Client live reachability (2026-09-21)
+
+For the explicit non-PM `TS011F-BS` EndDevice profile only, pin `preflash_build`, `preflash_relay_physical_mode`, `non_pm=true` and `require_pm=false`. The profile runner now supports `--mode link-gate`: three spaced read-only target GETs, requiring fresh matching client build/relay/policy/IEEE. The gate records private immutable evidence and invalidates any earlier pass on initiation or failure. The normal `--mode check` requires a recent passing gate; it archives the old `LAST_CHECK.json` before a new attempt so a failed check cannot leave an older flash permission. The subsequent `--mode flash --confirm-ieee EXACT` requires **another** fresh passing gate begun after the successful check. Evidence expires after 10 minutes; the underlying OTA check still expires after 30 minutes. All PM Router/Client power and role gates remain mandatory and unchanged.
+
+This link gate establishes only a short run of MQTT communication, not ZCL request provenance, a confirmed parent relationship or long-term radio stability. Do not infer a firmware fix from the gate or assume that an OTA query failure is necessarily parent loss. For the physical recovery ladder and `cli5-rc1` canary evidence, consult `docs/bseed_nonpm_cli5_keepalive_canary.md`.
+
+Use `--mode qualify` with an independently verified private image server to run link-gate → read-only OTA check → new link-gate in one serial, fail-closed command; no flashing or re-pairing is performed. Each stage must return success before the next is invoked, and any previous OTA check is archived at sequence start. The individual `link-gate` and `check` modes remain available for diagnostics.
