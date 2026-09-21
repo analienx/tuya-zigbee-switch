@@ -84,11 +84,16 @@ jobs:
       - name: Install pytests and converter dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y make python3 python3-pytest python3-yaml python3-jinja2
+          sudo apt-get install -y make python3 python3-venv python3-pytest python3-yaml python3-jinja2
+          # The OTA and PM provision tests import paho-mqtt >=2 and paramiko.
+          python3 -m venv "$RUNNER_TEMP/bseed-test-venv"
+          "$RUNNER_TEMP/bseed-test-venv/bin/python" -m pip install --disable-pip-version-check 'paho-mqtt>=2,<3' 'paramiko>=3,<5' 'pytest>=8,<10' 'PyYAML>=6,<7' 'Jinja2>=3,<4'
       - name: Run tests
         shell: bash
         run: |
           set -o pipefail
+          source "$RUNNER_TEMP/bseed-test-venv/bin/activate"
+          python -c 'import paho.mqtt.client, paramiko, pytest, yaml, jinja2'
           make tests 2>&1 | tee test-output.log
       - name: Generate converter canary artifacts
         shell: bash
