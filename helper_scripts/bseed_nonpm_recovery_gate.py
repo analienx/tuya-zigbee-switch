@@ -34,13 +34,21 @@ def verify_recovery(profile, *, confirm_unloaded=False, accept_nonrecoverable_ot
         raise ValueError('Physical load not explicitly confirmed disconnected for THIS flash')
     if accept_nonrecoverable_ota:
         # This opt-in is deliberately locked to the current non-PM canary and
-        # one reviewed image. Not transferable to PM, other clients or releases.
-        if (profile.get('device'), profile.get('ieee'), profile.get('preflash_build'),
-                profile.get('postflash_build'), profile.get('sha256')) != (
-                'BedroomSocketCabinetRight', '0xa4c13824a7005afb',
-                '1.1.2-bseedcli4', '1.1.2-bseedcli5-rc1',
-                '92894009f687976a60a535170581d8ff8daf06b7cc07bb175775ae7b751330dd'):
-            raise ValueError('Non-invasive risk acceptance applies only to the signed-off Bedroom non-PM canary')
+        # two individually reviewed exact images. Not transferable to PM or other clients.
+        # Each exception pins one independently reviewed binary and transition.
+        # Never authorize another target, a rebuilt image or a different role.
+        exact = (profile.get('device'), profile.get('ieee'), profile.get('preflash_build'),
+                 profile.get('postflash_build'), profile.get('sha256'))
+        allowed = {
+            ('BedroomSocketCabinetRight', '0xa4c13824a7005afb',
+             '1.1.2-bseedcli4', '1.1.2-bseedcli5-rc1',
+             '92894009f687976a60a535170581d8ff8daf06b7cc07bb175775ae7b751330dd'),
+            ('BedroomSocketCabinetRight', '0xa4c13824a7005afb',
+             '1.1.2-bseedcli4', '1.1.2-bseedcli7',
+             '7726e53fb708eb154453bb5f03a18732ee92640acc675206405f3a307bcafedf'),
+        }
+        if exact not in allowed:
+            raise ValueError('Non-invasive risk acceptance requires an exact signed-off Bedroom image/transition')
         if profile.get('require_pm') is not False or profile.get('relay_get_key') != 'state_relay':
             raise ValueError('Non-invasive path refuses PM or unverified relay endpoints')
         if profile.get('expect_relay') != 'OFF' or profile.get('preflash_relay_physical_mode') != 'follow_state':

@@ -42,3 +42,23 @@ def test_wrapper_passes_optin_to_lower_level_only_on_explicit_flash():
     assert cmd.count('--accept-nonrecoverable-ota-risk')==1
     assert cmd.count('--confirm-load-unplugged')==1
     assert '--accept-nonrecoverable-ota-risk' not in runner_args(p,'check')
+
+
+def test_cli7_exact_hash_unloaded_canary_optin_and_all_neighboring_variants_denied():
+    p=canary();p.update(postflash_build='1.1.2-bseedcli7',
+        sha256='7726e53fb708eb154453bb5f03a18732ee92640acc675206405f3a307bcafedf')
+    with pytest.raises(ValueError,match='Physical load'):
+        verify_recovery(p,accept_nonrecoverable_ota=True)
+    with pytest.raises(ValueError,match='Recovery evidence'):
+        verify_recovery(p,confirm_unloaded=True)
+    assert verify_recovery(p,confirm_unloaded=True,
+        accept_nonrecoverable_ota=True)['recovery_available'] is False
+    for key,value in {'sha256':'0'*64,'postflash_build':'1.1.2-bseedcli8',
+        'preflash_build':'1.1.2-bseedcli5-rc1','ieee':'0x0011223344556677',
+        'device':'BedroomSocketCabinetLeft','model':'TS011F-BS-PM',
+        'preflash_role':'Router','postflash_role':'Router',
+        'block_bytes':50,'require_pm':True,'relay_get_key':'state',
+        'expect_relay':'ON','preflash_relay_physical_mode':'detached_on'}.items():
+        altered=dict(p);altered[key]=value
+        with pytest.raises(ValueError):
+            verify_recovery(altered,confirm_unloaded=True,accept_nonrecoverable_ota=True)

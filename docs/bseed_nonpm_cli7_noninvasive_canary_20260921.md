@@ -1,0 +1,13 @@
+# BedroomSocketCabinetRight cli7: exact-image non-invasive canary
+
+**Scope:** One outlet only: `BedroomSocketCabinetRight`, IEEE `0xa4c13824a7005afb`, non-PM `TS011F-BS` / `o1jzcxou`, EndDevice -> EndDevice, installed `1.1.2-bseedcli4` -> `1.1.2-bseedcli7` (`0x11023013`). This opt-in is distinct from the older `cli5-rc1` exception; neither exception applies to any other board, role, release, binary, or socket.
+
+**Immutable GitHub-hosted image:** `forward.ota`, SHA-256 `7726e53fb708eb154453bb5f03a18732ee92640acc675206405f3a307bcafedf`, size 158738, manufacturer 4417, image type 65026; source commit `9c6abd481f8289864ee8cb83eeda535540e1cc7f`. Use the unchanged hosted image rather than rebuilding it from this exception-only commit.
+
+**Operator confirmation:** In the conversation on 2026-09-21 the owner confirmed this particular outlet is physically unloaded and explicitly accepted possible permanent loss of this exact socket. The confirmation authorizes ONLY an attempt with the original exact image; it does not certify device link health, automatic rollback, or safe behavior of a failing OTA. An unavailable physical recovery route remains an acknowledged risk.
+
+**Mandatory gates retained:** Verified private backups; correct installed build, board, role, IEEE, relay OFF and `follow_state`; identical OTA header, CRC, SHA-256 and HTTP bytes; one-entry private index; 32-byte payload ceiling; no concurrent OTA; closed permit-join; fresh successful three-reply link gate, OTA eligibility check, then a NEW three-reply link gate begun after the check. A failed/expired gate or OTA check means STOP, not retry/override. Preserve all prior failure evidence. No fleet rollout, Router conversion, re-pair, reset, relay toggle, unapproved power cycle, or automatic OTA retry.
+
+**Observed warning:** The first dedicated cli7 qualification failed at third relay GET (no fresh response; ZCL read timeout), after two successful replies. This is an unresolved radio/firmware/network symptom. The explicit risk acceptance does NOT waive qualification or convert that failed gate into PASS.
+
+The recovery gate has an explicit exact-tuple SHA allowlist entry for this cli7 attempt, while maintaining the original cli5 entry and physical-readback alternative. Regression tests must pass on GitHub-hosted Actions before a new attempt. Do not interpret transfer completion alone as installed firmware acceptance. After a successful transfer, require fresh targeted re-interview, new `cli7` build, unchanged identity/role, retained settings and bindings, observed local button/relay function, and sustained stability. If any stage fails, preserve evidence and stop without reflashing.

@@ -139,3 +139,13 @@ The earlier **mandatory disassembly/full-flash-readback** gate is superseded **o
 For BSEED TS011F PM and non-PM sockets, consult `helper_scripts/bseed_socket_version_policy.py` and `docs/bseed_antibrick_ota_candidate_20260921.md` before preparing a NEW firmware image. Never reuse a custom `fileVersion` with different payload bytes or move backwards numerically when changing between Router and Client on the same board. A fresh candidate must register its board, software build and strictly higher custom fileVersion; pass the actual `preflash_build` and exact `postflash_build` in the private profile. The OTA runner checks the recorded version relationship and the target's current reported software build. Stock-facing conversion wrapper version `0xFFFFFFFF` is NOT a firmware release identifier.
 
 Preserve the `0fb79459` non-invasive CLI5-rc1 waiver for its original exact canary and original signed-off hash only. The newer `BSEED_ANTIBRICK_RC=2` / `BSEED_PM_ROUTER_CANDIDATE=2` builds are distinct offline, unaccepted candidates; they cannot inherit that waiver, skip target-specific recovery and preflash gates, or enter the general OTA index. Run the four-image native artifact gate after compiling at the exact clean Git commit; do not flash on the strength of the offline gate alone.
+
+### Exact cli7 bedroom non-invasive canary (2026-09-21)
+
+Read `docs/bseed_nonpm_cli7_noninvasive_canary_20260921.md` before any attempt.
+The owner confirmed the exact outlet physically unloaded and accepted possible permanent
+loss. The separately pinned cli7 image is authorized for an exact-target *attempt*
+only after hosted gate tests, fresh link -> OTA check -> NEW link qualification
+all pass. Earlier cli7 link qualification FAILED at the third read; operator risk
+acceptance does not waive any link, image integrity, OTA identity or concurrency gate.
+Never silently substitute the old cli5 image/qualification. No automatic retry.
