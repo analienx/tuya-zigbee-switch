@@ -121,6 +121,7 @@ def arguments():
     p.add_argument('--max-reported-watts', type=float, default=1.0)
     p.add_argument('--non-pm', action='store_true', help='Strict non-PM TS011F-BS Client exception; never use for PM devices')
     p.add_argument('--hardware-evidence', help='Private exact-board recovery readback attestation, non-PM flash only')
+    p.add_argument('--accept-nonrecoverable-ota-risk', action='store_true', help='One exact-canary non-PM OTA; failure may require replacement')
     p.add_argument('--confirm-load-unplugged', action='store_true', help='Non-PM flash only; operator has just verified no appliance attached')
     p.add_argument('--preflash-build')
     p.add_argument('--preflash-relay-physical-mode')
@@ -140,8 +141,12 @@ def main():
             preflash_role=args.role, postflash_role=args.role, ieee=args.ieee,
             sha256=args.sha256, block_bytes=args.max_block_bytes,
             preflash_build=args.preflash_build,
-            recovery_evidence=args.hardware_evidence),
-            confirm_unloaded=args.confirm_load_unplugged)
+            recovery_evidence=args.hardware_evidence, device=args.device,
+            postflash_build='1.1.2-bseedcli5-rc1', require_pm=False,
+            relay_get_key=args.relay_get_key, expect_relay=args.expect_relay,
+            preflash_relay_physical_mode=args.preflash_relay_physical_mode),
+            confirm_unloaded=args.confirm_load_unplugged,
+            accept_nonrecoverable_ota=args.accept_nonrecoverable_ota_risk)
     elif args.hardware_evidence or args.confirm_load_unplugged:
         raise ValueError('Non-PM hardware recovery flags are valid only for non-PM flash')
     verify_image(args)

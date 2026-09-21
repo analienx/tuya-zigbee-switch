@@ -107,7 +107,9 @@ def test_runner_cannot_bypass_wrapper_flash_gate(monkeypatch):
     args=SimpleNamespace(mode='flash',max_block_bytes=32,check_timeout_seconds=90,
         non_pm=True,manufacturer='o1jzcxou',model='TS011F-BS',role='EndDevice',
         ieee='0x0011223344556677',sha256='a'*64,preflash_build='1.1.2-bseedcli4',
-        hardware_evidence=None,confirm_load_unplugged=True)
+        hardware_evidence=None,confirm_load_unplugged=True,accept_nonrecoverable_ota_risk=False,
+        device="BedroomSocketCabinetRight",relay_get_key="state_relay",expect_relay="OFF",
+        preflash_relay_physical_mode="follow_state")
     with patch.object(runner,'arguments',return_value=args),patch.object(runner,'verify_image') as image:
         with pytest.raises(ValueError,match='Recovery evidence'):
             runner.main()

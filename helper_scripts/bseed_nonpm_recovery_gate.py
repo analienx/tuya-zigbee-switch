@@ -20,7 +20,7 @@ def _private_file(value, label):
     return path
 
 
-def verify_recovery(profile, *, confirm_unloaded=False):
+def verify_recovery(profile, *, confirm_unloaded=False, accept_nonrecoverable_ota=False):
     """Reject absent, foreign, untested or unverified board-specific recovery."""
     if profile.get('non_pm') is not True:
         raise ValueError('This recovery gate is strictly for non-PM Clients')
@@ -32,6 +32,21 @@ def verify_recovery(profile, *, confirm_unloaded=False):
         raise ValueError('Unproven non-PM transfer size: pin 32 bytes')
     if confirm_unloaded is not True:
         raise ValueError('Physical load not explicitly confirmed disconnected for THIS flash')
+    if accept_nonrecoverable_ota:
+        # This opt-in is deliberately locked to the current non-PM canary and
+        # one reviewed image. Not transferable to PM, other clients or releases.
+        if (profile.get('device'), profile.get('ieee'), profile.get('preflash_build'),
+                profile.get('postflash_build'), profile.get('sha256')) != (
+                'BedroomSocketCabinetRight', '0xa4c13824a7005afb',
+                '1.1.2-bseedcli4', '1.1.2-bseedcli5-rc1',
+                '92894009f687976a60a535170581d8ff8daf06b7cc07bb175775ae7b751330dd'):
+            raise ValueError('Non-invasive risk acceptance applies only to the signed-off Bedroom non-PM canary')
+        if profile.get('require_pm') is not False or profile.get('relay_get_key') != 'state_relay':
+            raise ValueError('Non-invasive path refuses PM or unverified relay endpoints')
+        if profile.get('expect_relay') != 'OFF' or profile.get('preflash_relay_physical_mode') != 'follow_state':
+            raise ValueError('Non-invasive path requires pinned relay OFF and follow_state')
+        return {'ieee': profile['ieee'], 'method': 'non-invasive single OTA canary',
+                'recovery_available': False, 'warning': 'No guaranteed OTA or physical recovery if boot fails'}
     evidence = _private_file(profile.get('recovery_evidence'), 'Recovery evidence')
     record = json.loads(evidence.read_text(encoding='utf8'))
     if record.get('schema') != 1 or record.get('target_ieee') != profile['ieee']:

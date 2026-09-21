@@ -72,7 +72,7 @@ def make_index(profile):
             'image_size': len(image), 'manufacturer_code': header[4], 'image_type': header[5]}
 
 
-def runner_args(profile, mode, *, confirm_unloaded=False):
+def runner_args(profile, mode, *, confirm_unloaded=False, accept_risk=False):
     keys = [('device','device'), ('ieee','ieee'), ('manufacturer','manufacturer'),
             ('model','model'), ('preflash_role','role'), ('image','image'),
             ('sha256','sha256'), ('url','url'), ('mqtt_config','mqtt-config'),
@@ -92,6 +92,7 @@ def runner_args(profile, mode, *, confirm_unloaded=False):
         if mode == 'flash':
             cmd.extend(['--hardware-evidence', str(profile.get('recovery_evidence', ''))])
             if confirm_unloaded: cmd.append('--confirm-load-unplugged')
+            if accept_risk: cmd.append('--accept-nonrecoverable-ota-risk')
         for key, flag in [('preflash_build','preflash-build'),('preflash_relay_physical_mode','preflash-relay-physical-mode')]:
             if key not in profile: raise ValueError('Non-PM link gate requires '+key)
             cmd.extend(['--'+flag,str(profile[key])])
@@ -226,9 +227,12 @@ def main():
     parser.add_argument('--profile', required=True, help='Private JSON profile outside git')
     parser.add_argument('--mode', choices=['prepare', 'preflight', 'link-gate', 'qualify', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'provision-pm', 'audit-pm', 'postflash', 'reinterview', 'status'], required=True)
     parser.add_argument('--confirm-ieee', help='Required for flash, transition, rejoin, metadata and provision-pm; must match profile IEEE exactly')
+    parser.add_argument('--accept-nonrecoverable-ota-risk', action='store_true', help='One-canary OTA may permanently fail; no physical readback/recovery is available')
     parser.add_argument('--confirm-load-unplugged', action='store_true', help='Non-PM flash only: operator just verified no physical appliance is connected')
     args = parser.parse_args()
     profile = load_profile(args.profile)
+    if args.accept_nonrecoverable_ota_risk and not (args.mode == 'flash' and profile.get('non_pm') is True):
+        raise SystemExit('Risk flag only allowed for exact non-PM flash')
     if args.confirm_load_unplugged and not (args.mode == 'flash' and profile.get('non_pm') is True):
         raise SystemExit('--confirm-load-unplugged is accepted only for explicitly targeted non-PM flash')
     if profile.get('require_pm') and profile['postflash_role'] == 'Router' and args.mode in ('flash','transition','rejoin'):
@@ -325,13 +329,14 @@ def main():
             raise SystemExit('Cross-role flash refused: use --mode transition for scoped rejoin')
         if profile.get('non_pm') is True:
             from bseed_nonpm_recovery_gate import verify_recovery
-            verify_recovery(profile, confirm_unloaded=args.confirm_load_unplugged)
+            verify_recovery(profile, confirm_unloaded=args.confirm_load_unplugged,
+                            accept_nonrecoverable_ota=args.accept_nonrecoverable_ota_risk)
         elif args.confirm_load_unplugged:
             raise SystemExit('Load confirmation flag is only valid for non-PM flash')
         if profile.get('require_pm') and profile['postflash_role'] == 'EndDevice':
             provision_cmd(profile, args.confirm_ieee, work / 'pm_prevalidated.json')
         print('EXPLICIT_FLASH_TARGET', profile['ieee'], profile['device'], flush=True)
-        flashed = subprocess.call(runner_args(profile, 'flash', confirm_unloaded=args.confirm_load_unplugged))
+        flashed = subprocess.call(runner_args(profile, 'flash', confirm_unloaded=args.confirm_load_unplugged, accept_risk=args.accept_nonrecoverable_ota_risk))
         if flashed: raise SystemExit(flashed)  # Never interview or retry after OTA failure.
         import uuid
         interview = work / ('postota_interview_' + uuid.uuid4().hex + '.json')
