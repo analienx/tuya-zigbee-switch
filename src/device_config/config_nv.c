@@ -482,15 +482,17 @@ bool device_config_resources_are_safe(const uint8_t *data, uint16_t size) {
 }
 
 bool device_config_prepare_for_parse(void) {
-    if (device_config_resources_are_safe(device_config_str.data,
-                                         device_config_str.size)) {
+    /* A structurally safe string can still drive the wrong board GPIOs.
+     * Apply the very same board guard at BOOT as at write/commit time. */
+    if (device_config_is_valid(device_config_str.data,
+                               device_config_str.size)) {
         return true;
     }
 
     printf("Stored device config is unsafe; using compiled default in RAM\r\n");
     load_config_copy(default_config_data);
-    if (device_config_resources_are_safe(device_config_str.data,
-                                         device_config_str.size)) {
+    if (device_config_is_valid(device_config_str.data,
+                               device_config_str.size)) {
         return true;
     }
 
@@ -637,6 +639,22 @@ static bool bseed_ts0726_3gang_config_is_valid(const uint8_t *data,
 
 #endif
 
+/* These production outlets have verified, fixed GPIO wiring. A generic
+ * syntactically valid pin map can turn a switch/LED pin into a relay output.
+ * Keep hardware mapping immutable; user preferences belong in ZCL NVM. */
+#if defined(BSEED_PM_B28WRPVX) || defined(DEVICE_CONFIG_GUARD_BSEED_TS011F_NONPM)
+static bool bseed_socket_board_config_is_valid(const uint8_t *data,
+                                               uint16_t size) {
+#ifdef BSEED_PM_B28WRPVX
+    static const char approved[] = "b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;";
+#else
+    static const char approved[] = "o1jzcxou;TS011F-BS;LC2;SB4u;RC3;ID2;M;";
+#endif
+    return size == sizeof(approved) - 1u &&
+           memcmp(data, approved, sizeof(approved) - 1u) == 0;
+}
+#endif
+
 bool device_config_is_valid(const uint8_t *data, uint16_t size) {
     if (!config_structurally_valid(data, size) ||
         !device_config_resources_are_safe(data, size)) {
@@ -645,6 +663,8 @@ bool device_config_is_valid(const uint8_t *data, uint16_t size) {
 
 #ifdef DEVICE_CONFIG_GUARD_BSEED_TS0726_3GANG
     return bseed_ts0726_3gang_config_is_valid(data, size);
+#elif defined(BSEED_PM_B28WRPVX) || defined(DEVICE_CONFIG_GUARD_BSEED_TS011F_NONPM)
+    return bseed_socket_board_config_is_valid(data, size);
 #else
     return true;
 #endif

@@ -417,9 +417,19 @@ void relay_cluster_load_attrs_from_nv(zigbee_relay_cluster *cluster) {
     if (st != HAL_NVM_SUCCESS)
         return;
 
-    cluster->startup_mode       = nv_config_buffer.startup_mode;
+    cluster->startup_mode = nv_config_buffer.startup_mode;
+    /* PREVIOUS is 0xFF; comparison against it would accept every uint8_t. */
+    if (cluster->startup_mode != ZCL_START_UP_ONOFF_SET_ONOFF_TO_OFF &&
+        cluster->startup_mode != ZCL_START_UP_ONOFF_SET_ONOFF_TO_ON &&
+        cluster->startup_mode != ZCL_START_UP_ONOFF_SET_ONOFF_TOGGLE &&
+        cluster->startup_mode != ZCL_START_UP_ONOFF_SET_ONOFF_TO_PREVIOUS) {
+        cluster->startup_mode = ZCL_START_UP_ONOFF_SET_ONOFF_TO_OFF;
+    }
     cluster->indicator_led_mode = nv_config_buffer.indicator_led_mode;
-    cluster->indicator_state    = nv_config_buffer.indicator_led_on;
+    if (cluster->indicator_led_mode > ZCL_ONOFF_INDICATOR_MODE_MAX) {
+        cluster->indicator_led_mode = ZCL_ONOFF_INDICATOR_MODE_MANUAL;
+    }
+    cluster->indicator_state = nv_config_buffer.indicator_led_on ? 1 : 0;
 }
 
 void relay_cluster_store_physical_mode_to_nv(

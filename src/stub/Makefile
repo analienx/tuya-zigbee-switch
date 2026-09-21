@@ -99,6 +99,16 @@ CFLAGS += -DDEVICE_MIGRATION_REVERT
 endif
 endif
 
+# Board/role compile flags used by the same host-side anti-brick tests.
+DEVICE_CONFIG_GUARD ?=
+STUB_END_DEVICE ?=
+ifneq ($(strip $(DEVICE_CONFIG_GUARD)),)
+CFLAGS += -DDEVICE_CONFIG_GUARD_$(DEVICE_CONFIG_GUARD)
+endif
+ifeq ($(strip $(STUB_END_DEVICE)),1)
+CFLAGS += -DEND_DEVICE
+endif
+
 # Dedicated unified BSEED PM target flags. Generic stub builds keep these off.
 BSEED_PM_B28WRPVX ?=
 BSEED_PM_B28WRPVX_PROTECTION ?=

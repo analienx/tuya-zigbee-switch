@@ -499,6 +499,12 @@ void switch_cluster_on_write_attr(zigbee_switch_cluster *cluster,
         }
     }
 
+    /* Zero-duration long press is a known upstream crash/rapid-callback
+     * hazard; validate both live writes and values restored from NVM. */
+    if (attribute_id == ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_LONG_PRESS_DUR &&
+        cluster->button->long_press_duration_ms < 100u) {
+        cluster->button->long_press_duration_ms = 800u;
+    }
     if (attribute_id == ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_RELAY_INDEX) {
         if (relay_clusters_cnt == 0) {
             cluster->relay_index = 0;
@@ -595,6 +601,20 @@ void switch_cluster_load_attrs_from_nv(zigbee_switch_cluster *cluster) {
         cluster->binded_mode     = nv_config_buffer.binded_mode;
     }
 
+    /* Never allow corrupt persistent ZCL settings to poison the button
+     * timer or command routing after an otherwise successful boot. */
+    if (cluster->button->long_press_duration_ms < 100u) {
+        cluster->button->long_press_duration_ms = 800u;
+    }
+    if (cluster->mode > ZCL_ONOFF_CONFIGURATION_SWITCH_TYPE_MOMENTARY_NC) {
+        cluster->mode = ZCL_ONOFF_CONFIGURATION_SWITCH_TYPE_TOGGLE;
+    }
+    if (cluster->relay_mode > ZCL_ONOFF_CONFIGURATION_RELAY_MODE_SHORT) {
+        cluster->relay_mode = ZCL_ONOFF_CONFIGURATION_RELAY_MODE_SHORT;
+    }
+    if (cluster->binded_mode > ZCL_ONOFF_CONFIGURATION_BINDED_MODE_SHORT) {
+        cluster->binded_mode = ZCL_ONOFF_CONFIGURATION_BINDED_MODE_DISABLED;
+    }
     // Validate relay_index to prevent out-of-bounds access.
     if (relay_clusters_cnt == 0) {
         cluster->relay_index = 0;
