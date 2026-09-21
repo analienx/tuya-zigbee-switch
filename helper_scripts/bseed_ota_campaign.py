@@ -84,6 +84,8 @@ def runner_args(profile, mode):
         cmd.extend(['--native-image', str(profile['native_image'])])
     if profile.get('relay_get_key'):
         cmd.extend(['--relay-get-key', profile['relay_get_key']])
+    if profile.get('non_pm') is True:
+        cmd.append('--non-pm')
     for key, flag in [('block_bytes','max-block-bytes'), ('check_timeout_seconds','check-timeout-seconds'),
                        ('monitor_seconds','timeout-seconds')]:
         if key in profile: cmd.extend(['--' + flag, str(profile[key])])

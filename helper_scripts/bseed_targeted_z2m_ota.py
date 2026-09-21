@@ -7,6 +7,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import math
 from pathlib import Path
 import struct
 import threading
@@ -69,6 +70,17 @@ def update_payload(ieee, url, token, max_block_bytes):
     return {'id': ieee, 'url': url, 'transaction': token, 'image_block_request_timeout': 600000, 'default_maximum_data_size': max_block_bytes}
 
 
+def validate_metering_preflight(relay, *, non_pm, model, manufacturer, role, max_reported_watts):
+    """Explicit non-PM exception; PM devices must supply a bounded fresh power reading."""
+    if non_pm:
+        assert (model, manufacturer, role) == ('TS011F-BS', 'o1jzcxou', 'EndDevice'), 'Non-PM exception only for BSEED TS011F-BS Client'
+        assert 'power' not in relay, 'Non-PM preflight unexpectedly exposes PM data; inspect identity'
+        return None
+    power = relay.get('power')
+    assert type(power) in (int, float) and math.isfinite(power) and 0 <= power <= max_reported_watts, 'Power missing or above limit'
+    return power
+
+
 def arguments():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--mode', choices=['preflight', 'check', 'flash'], required=True)
@@ -82,6 +94,7 @@ def arguments():
     p.add_argument('--expect-relay', choices=['ON', 'OFF'], required=True)
     p.add_argument('--relay-get-key', choices=['state','state_relay'], default='state')
     p.add_argument('--max-reported-watts', type=float, default=1.0)
+    p.add_argument('--non-pm', action='store_true', help='Strict non-PM TS011F-BS Client exception; never use for PM devices')
     p.add_argument('--timeout-seconds', type=int, default=2400)
     p.add_argument('--check-timeout-seconds', type=int, default=DEFAULT_CHECK_TIMEOUT_SECONDS)
     p.add_argument('--max-block-bytes', type=int, default=50, help='OTA per-request maximum; conservative 50-byte default for fragile meshes')
@@ -168,8 +181,9 @@ def main():
             changed.wait(0.5); changed.clear()
         relay = state['relay'] or {}
         assert relay.get(args.relay_get_key) == args.expect_relay, 'Relay state not verified by read-only GET'
-        power = relay.get('power')
-        assert isinstance(power, (int, float)) and 0 <= power <= args.max_reported_watts, 'Power missing or above limit'
+        assert (relay.get('device') or {}).get('ieeeAddr') == args.ieee, 'Fresh MQTT response IEEE mismatch'
+        power = validate_metering_preflight(relay, non_pm=args.non_pm, model=args.model,
+            manufacturer=args.manufacturer, role=args.role, max_reported_watts=args.max_reported_watts)
         assert not (relay.get('update') or {}).get('state') == 'updating', 'Device OTA already running'
         log('preflight_ok', {'relay': relay.get(args.relay_get_key), 'relay_get_key': args.relay_get_key, 'reported_power_w': power, 'voltage_v': relay.get('voltage'), 'image_sha256': args.sha256, 'mode': args.mode})
         if args.mode == 'preflight': return
