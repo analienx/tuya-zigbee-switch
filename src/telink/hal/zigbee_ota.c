@@ -56,15 +56,19 @@ void ota_process_msg_callback(u8 evt, u8 status) {
 #ifdef BSEED_OTA_DEFERRED_REQUERY
         hal_tasks_unschedule(&ota_abort_query_retry_task);
 #endif
+#if defined(ZB_ED_ROLE)
         if (status == ZCL_STA_SUCCESS) {
             hal_zigbee_set_ota_poll_active(true);
         }
+#endif
         return;
     }
 
+#if defined(ZB_ED_ROLE)
     if (evt == OTA_EVT_IMAGE_DONE || evt == OTA_EVT_COMPLETE) {
         hal_zigbee_set_ota_poll_active(false);
     }
+#endif
 
     if (evt == OTA_EVT_COMPLETE) {
         if (status == ZCL_STA_SUCCESS) {

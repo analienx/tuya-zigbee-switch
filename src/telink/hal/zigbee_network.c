@@ -67,11 +67,6 @@ void hal_zigbee_set_ota_poll_active(bool fast) {
 }
 #endif
 
-#if !defined(ZB_ED_ROLE) && !defined(BSEED_MAINS_CLIENT)
-void hal_zigbee_set_ota_poll_active(bool fast) {
-    (void)fast;
-}
-#endif
 
 typedef enum {
     TELINK_NETWORK_RECOVERY_IDLE = 0,

@@ -19,10 +19,15 @@
 void telink_zigbee_hal_network_init(void);
 void telink_zigbee_hal_bdb_init(af_simple_descriptor_t *endpoint_descriptor);
 
-// OTA poll management (implemented in zigbee_network.c). End devices switch
-// to fast polling while a download is in flight and restore the role rate
-// after. No-op for routers.
+// OTA poll management (implemented in zigbee_network.c, end-device builds
+// only). Routers keep byte-identical binaries: the call compiles to nothing.
+#if defined(ZB_ED_ROLE)
 void hal_zigbee_set_ota_poll_active(bool fast);
+#else
+static inline void hal_zigbee_set_ota_poll_active(bool fast) {
+    (void)fast;
+}
+#endif
 
 // ZCL module functions (implemented in zigbee_zcl.c)
 void telink_zigbee_hal_zcl_init(hal_zigbee_endpoint *endpoints,

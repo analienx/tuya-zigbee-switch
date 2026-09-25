@@ -15,6 +15,8 @@ HAL_H = (SRC / "telink_zigbee_hal.h").read_text(encoding="utf-8")
 def test_ota_callback_switches_poll_rate_around_download() -> None:
     assert "if (status == ZCL_STA_SUCCESS) {\n            hal_zigbee_set_ota_poll_active(true);" in OTA
     assert "if (evt == OTA_EVT_IMAGE_DONE || evt == OTA_EVT_COMPLETE) {\n        hal_zigbee_set_ota_poll_active(false);" in OTA
+    assert OTA.count("#if defined(ZB_ED_ROLE)") == 2
+    assert "static inline void hal_zigbee_set_ota_poll_active(bool fast) {" in HAL_H
 
 
 def test_keepalive_tick_reverifies_and_retries() -> None:
