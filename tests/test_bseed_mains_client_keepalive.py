@@ -8,7 +8,8 @@ def test_mains_client_refreshes_parent_on_initial_join_and_rejoin():
     source=(ROOT/'src/telink/hal/zigbee_network.c').read_text()
     assert '#define MAINS_CLIENT_KEEPALIVE_POLL_MS 60000u' in source
     assert 'zb_setPollRate(MAINS_CLIENT_KEEPALIVE_POLL_MS)' in source
-    assert source.count('configure_mains_client_keepalive();')==2
+    # join + commissioning-success + OTA-restore (hal_zigbee_set_ota_poll_active)
+    assert source.count('configure_mains_client_keepalive();')==3
     pat=r'#ifdef BSEED_MAINS_CLIENT\s+configure_mains_client_keepalive\(\);\s+#endif\s+#if defined\(ZB_ED_ROLE\) && !defined\(BSEED_MAINS_CLIENT\)'
     assert len(re.findall(pat,source))==2
     assert 'if (status != RET_OK)' in source
