@@ -48,3 +48,9 @@ def test_parser_requires_subcommand_and_join_args():
     args = parser.parse_args(['join', '--via', 'SomeRouter', '--seconds', '60'])
     assert args.func is ha_mqtt.cmd_join
     assert args.via == 'SomeRouter' and args.seconds == 60
+
+
+def test_join_scope_defaults_to_network_wide():
+    parser = ha_mqtt.build_parser()
+    args = parser.parse_args(['join', '--seconds', '60'])
+    assert args.via is None and args.seconds == 60

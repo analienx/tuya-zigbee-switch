@@ -24,10 +24,14 @@ DEFAULT_CONTAINER = 'app_45df7312_zigbee2mqtt'
 
 
 def ssh(host, remote, timeout=60):
-    proc = subprocess.run(['ssh', host, remote], capture_output=True,
-                          text=True, timeout=timeout)
-    if proc.returncode:
-        raise RuntimeError('ssh failed: ' + (proc.stderr or proc.stdout)[:300])
+    try:
+        proc = subprocess.run(['ssh', host, remote], capture_output=True,
+                              text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError('ssh command timed out after %ss' % timeout)
+    # NOTE: mosquitto_sub exits nonzero when its -W wait expires before -C
+    # messages arrive; that is a normal "device is quiet" outcome, not an
+    # SSH failure. Callers parse stdout and report empty results themselves.
     return proc.stdout
 
 
@@ -57,7 +61,10 @@ def bridge_devices(host, user, password, broker):
                              'zigbee2mqtt/bridge/request/devices', '{"t":"x"}')
                + '; wait $BPID')
     out = ssh(host, request, timeout=90)
-    return json.loads(out.strip().splitlines()[-1])
+    lines = out.strip().splitlines()
+    if not lines:
+        raise RuntimeError('empty bridge/devices response')
+    return json.loads(lines[-1])
 
 
 def find_device(devices, identifier):
@@ -125,11 +132,15 @@ def cmd_state(args):
 
 def cmd_join(args):
     user, password, broker = mqtt_credentials(args.ssh_host, args.config)
-    payload = json.dumps({'time': args.seconds, 'device': args.via})
+    payload = {'time': args.seconds}
+    scope = 'network-wide'
+    if args.via:
+        payload['device'] = args.via
+        scope = 'via %s' % args.via
     ssh(args.ssh_host, pub_command(user, password, broker,
                                    'zigbee2mqtt/bridge/request/permit_join',
-                                   payload))
-    print('join window opened: %ss via %s' % (args.seconds, args.via))
+                                   json.dumps(payload)))
+    print('join window opened: %ss %s' % (args.seconds, scope))
 
 
 def cmd_interview(args):
@@ -163,8 +174,9 @@ def build_parser():
     st.add_argument('--get-key', default='state')
     st.add_argument('--count', type=int, default=2)
     st.set_defaults(func=cmd_state)
-    jn = sub.add_parser('join', help='bounded router-scoped join window')
-    jn.add_argument('--via', required=True)
+    jn = sub.add_parser('join', help='bounded join window (scoped with '
+                                                 '--via, network-wide without)')
+    jn.add_argument('--via', default=None)
     jn.add_argument('--seconds', type=int, default=120)
     jn.set_defaults(func=cmd_join)
     iv = sub.add_parser('interview', help='request device interview')
