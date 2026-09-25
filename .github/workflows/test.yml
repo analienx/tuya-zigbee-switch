@@ -77,6 +77,16 @@ jobs:
           fi
           python3 helper_scripts/check_image_types.py device_db.yaml --changed-base "$base"
 
+  bseed-identity-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Gate checked-in images against the identity registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          make bseed/identity-gate
+
   test:
     runs-on: ubuntu-latest
     steps:

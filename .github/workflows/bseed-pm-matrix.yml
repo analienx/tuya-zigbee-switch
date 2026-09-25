@@ -1,0 +1,75 @@
+name: BSEED PM role matrix
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'helper_scripts/**'
+      - 'make_scripts/**'
+      - 'tests/**'
+      - 'Makefile'
+      - 'board.mk'
+      - 'VERSION'
+      - 'NVM_MIGRATIONS_VERSION'
+      - 'zigbee2mqtt/ota/bseed_identity.json'
+      - '.github/workflows/bseed-pm-matrix.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'helper_scripts/**'
+      - 'make_scripts/**'
+      - 'tests/**'
+      - 'Makefile'
+      - 'board.mk'
+      - 'VERSION'
+      - 'NVM_MIGRATIONS_VERSION'
+      - 'zigbee2mqtt/ota/bseed_identity.json'
+      - '.github/workflows/bseed-pm-matrix.yml'
+
+jobs:
+  pm-matrix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make python3 python3-pytest python3-yaml curl wget unzip bzip2
+
+      - name: Cache Telink SDK and toolchain
+        uses: actions/cache@v4
+        with:
+          path: telink_tools
+          key: telink-tools-v3.7.2.0
+
+      - name: Install pinned Telink build dependencies
+        run: make -C src/telink -f tools.mk sdk toolchain
+
+      - name: Run PM Router/Client matrix from one commit
+        shell: bash
+        run: |
+          set -o pipefail
+          make bseed/pm-matrix 2>&1 | tee "$RUNNER_TEMP/pm-matrix.log"
+
+      - name: Upload matrix evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseed-pm-role-matrix-${{ github.sha }}
+          path: |
+            build/bseed-pm-role-matrix-*/ROLE_MATRIX.json
+            build/bseed-pm-role-matrix-*/router/manifest.json
+            build/bseed-pm-role-matrix-*/client/manifest.json
+          if-no-files-found: error
+
+      - name: Upload matrix log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseed-pm-role-matrix-log-${{ github.sha }}
+          path: ${{ runner.temp }}/pm-matrix.log
+          if-no-files-found: error
