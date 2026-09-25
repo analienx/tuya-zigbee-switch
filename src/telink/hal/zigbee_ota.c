@@ -52,12 +52,19 @@ void hal_ota_cluster_setup(hal_zigbee_cluster *cluster) {
 }
 
 void ota_process_msg_callback(u8 evt, u8 status) {
-#ifdef BSEED_OTA_DEFERRED_REQUERY
     if (evt == OTA_EVT_START) {
+#ifdef BSEED_OTA_DEFERRED_REQUERY
         hal_tasks_unschedule(&ota_abort_query_retry_task);
+#endif
+        if (status == ZCL_STA_SUCCESS) {
+            hal_zigbee_set_ota_poll_active(true);
+        }
         return;
     }
-#endif
+
+    if (evt == OTA_EVT_IMAGE_DONE || evt == OTA_EVT_COMPLETE) {
+        hal_zigbee_set_ota_poll_active(false);
+    }
 
     if (evt == OTA_EVT_COMPLETE) {
         if (status == ZCL_STA_SUCCESS) {
