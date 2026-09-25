@@ -305,3 +305,12 @@ for path in paths:
 (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 print(json.dumps(manifest, indent=2, sort_keys=True))
 PY
+
+# Identity gate: refuse builds that reuse a released (image_type, file_version)
+# with different bytes or mismatch the claimed version string. Transition
+# wrappers (from-router.ota) stay unregistered by design and are validated
+# structurally above, never served from an index.
+python3 helper_scripts/bseed_ota_identity.py gate --image "$OTA" \
+  --expect-version-str "$SW_BUILD" \
+  --expect-image-type "$CLIENT_IMAGE_TYPE" \
+  --expect-file-version "$FILE_VERSION_HEX"

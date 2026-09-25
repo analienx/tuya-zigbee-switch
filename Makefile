@@ -88,6 +88,11 @@ PYTHON ?= $(shell command -v python >/dev/null 2>&1 && echo python || echo pytho
 bseed/pm-matrix:
 	$(PYTHON) helper_scripts/bseed_pm_variant_matrix.py
 
+# Offline OTA identity gate: every checked-in BSEED image must match the
+# released-identity registry (no relabels, monotonic versions, strings match).
+bseed/identity-gate:
+	$(PYTHON) helper_scripts/bseed_ota_identity.py check-index
+
 # Run pytest tests (requires stub to be built)
 tests: stub/build stub/build_end_device
 	$(PYTHON) -m pytest tests/ -v

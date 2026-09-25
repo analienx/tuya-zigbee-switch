@@ -318,3 +318,11 @@ for path in (bin_path, ota_path, from_tuya_path):
 )
 print(json.dumps(manifest, indent=2, sort_keys=True))
 PY
+
+# Identity gate: refuse builds that reuse a released (image_type, file_version)
+# with different bytes or mismatch the claimed version string. Transport
+# wrappers (from_tuya.ota) stay on the shared max-version identity by design.
+python3 helper_scripts/bseed_ota_identity.py gate --image "$OTA" \
+  --expect-version-str "$SW_BUILD" \
+  --expect-image-type "$IMAGE_TYPE" \
+  --expect-file-version "$FILE_VERSION_HEX"
