@@ -52,6 +52,19 @@ def test_private_index_stages_exact_single_image(tmp_path):
         with pytest.raises(ValueError,match='Refusing to overwrite'): campaign.make_index(cfg)
 
 
+def test_runner_args_pass_optional_paced_response_delay(tmp_path):
+    cfg=profile(tmp_path)
+    cmd=campaign.runner_args(cfg,'flash')
+    assert '--response-delay-ms' not in cmd
+    cfg['response_delay_ms']=1200
+    cmd=campaign.runner_args(cfg,'flash')
+    assert cmd[cmd.index('--response-delay-ms')+1]=='1200'
+    assert '--request-timeout-ms' not in cmd
+    cfg['request_timeout_ms']=1800000
+    cmd=campaign.runner_args(cfg,'flash')
+    assert cmd[cmd.index('--request-timeout-ms')+1]=='1800000'
+
+
 def test_runner_args_explicitly_preserve_device_and_block_limit(tmp_path):
     cfg=profile(tmp_path)
     cmd=campaign.runner_args(cfg,'flash')

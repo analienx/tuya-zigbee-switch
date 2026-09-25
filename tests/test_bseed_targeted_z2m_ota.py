@@ -65,6 +65,26 @@ def test_wrong_identity_and_payload_rejected_before_network(tmp_path):
         verify_image(a)
 
 
+def test_update_payload_paced_profile_for_sleepy_end_device():
+    from bseed_targeted_z2m_ota import update_payload
+    data = update_payload('0xa4c13824a7005afb', 'http://example.invalid/client.ota', 'transaction-2', 48, 1200)
+    assert data['image_block_response_delay'] == 1200
+    assert data['default_maximum_data_size'] == 48
+    legacy = update_payload('0xa4c13824a7005afb', 'http://example.invalid/client.ota', 'transaction-3', 48)
+    assert 'image_block_response_delay' not in legacy
+    assert legacy['image_block_request_timeout'] == 600000
+    paced = update_payload('0xa4c13824a7005afb', 'http://example.invalid/client.ota', 'transaction-4', 48, 1200, 1800000)
+    assert paced['image_block_request_timeout'] == 1800000
+    with pytest.raises(AssertionError, match='60000..3600000'):
+        update_payload('target', 'url', 'token', 48, None, 59999)
+    with pytest.raises(AssertionError, match='60000..3600000'):
+        update_payload('target', 'url', 'token', 48, None, 3600001)
+    with pytest.raises(AssertionError, match='0..10000'):
+        update_payload('target', 'url', 'token', 48, 10001)
+    with pytest.raises(AssertionError, match='0..10000'):
+        update_payload('target', 'url', 'token', 48, -1)
+
+
 def test_update_payload_uses_explicit_bounded_block_size():
     from bseed_targeted_z2m_ota import update_payload
     data = update_payload('0xa4c138241e3de538', 'http://example.invalid/client.ota', 'transaction-1', 50)
