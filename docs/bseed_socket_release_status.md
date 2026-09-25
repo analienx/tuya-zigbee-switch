@@ -1,11 +1,11 @@
 # BSEED socket firmware: golden images and role rollout
 
-Status updated on 2026-09-20. **Router goldens are released; Mains Client remains a canary and must not be advertised as a normal OTA update.** The word *golden* here means an exact, retained, hardware-accepted image for a specific board and role—not a guarantee of perfect reliability.
+Status updated on 2026-09-25. **Router goldens are released; Mains Client remains a canary and must not be advertised as a normal OTA update.** The word *golden* here means an exact, retained, hardware-accepted image for a specific board and role—not a guarantee of perfect reliability.
 
 | Socket board | Released Router | Router OTA image type | Client candidate | Client OTA image type | Client hardware status |
 |---|---|---:|---|---:|---|
-| TS011F-BS-PM (`b28wrpvx`) | `1.2.5-bseedv8u4`, `0x12053007` | `43556` | `1.2.5-bseedcli6`, `0x1205300C` | `65024` | **HifiLeft manual power-to-zero canary passed with PR #49 converter**; automated E2E/mesh/OTA gates pending |
-| TS011F-BS non-PM (`o1jzcxou`) | `1.1.3-bseedv8`, `0x11023001` | `43555` | `1.1.2-bseedcli4`, `0x1102300F` | `65026` | **Not accepted**; intermittent relay-read failure on real hardware |
+| TS011F-BS-PM (`b28wrpvx`) | `1.2.5-bseedv8u4`, `0x12053007` | `43556` | `1.2.5-bseedcli8`, `0x12053010` | `65024` | **Golden candidate, unbuilt**; shares board-wide FILEVER with Router rc3 `0x12053010`; spare-canary hardware acceptance pending |
+| TS011F-BS non-PM (`o1jzcxou`) | `1.1.3-bseedv8`, `0x11023001` | `43555` | `1.1.2-bseedcli5-rc2`, `0x11023012` | `65026` | **Not accepted**; rc1 completed 2026-09-24 but shared its OTA identity across two binaries, so rc2 carries the same keepalive source under a fresh identity; spare-first paced canary pending |
 
 The PM Router `v8u4` hardware canary passed a real IKEA RODRET child join/interview, sleepy-wake action and topology test; see [router reliability](router_reliability.md). The non-PM Router release was hardware accepted and merged in PR #27. PR #31 (Client OTA-abort recovery) and PR #28 (byte-identical non-PM Client→golden-Router recovery image) were merged on 2026-09-19. Their merge does **not** constitute a passing Client hardware acceptance test.
 

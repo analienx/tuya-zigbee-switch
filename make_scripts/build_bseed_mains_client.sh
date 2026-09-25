@@ -20,9 +20,9 @@ pm)
     CANONICAL='b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;'
     ROUTER_IMAGE_TYPE=43556
     CLIENT_IMAGE_TYPE=65024
-    SW_BUILD='1.2.5-bseedcli6'
-    FILE_VERSION_HEX='0x1205300C'
-    FILE_VERSION_DEC=302329868
+    SW_BUILD='1.2.5-bseedcli8'
+    FILE_VERSION_HEX='0x12053010'
+    FILE_VERSION_DEC=302329872
     DEFAULT_OUT='build/bseed-ts011f-pm-client'
     EXTRA_ARGS=(
         BSEED_PM_B28WRPVX=1
@@ -38,10 +38,10 @@ nonpm-keepalive)
     CANONICAL='o1jzcxou;TS011F-BS;LC2;SB4u;RC3;ID2;M;'
     ROUTER_IMAGE_TYPE=43555
     CLIENT_IMAGE_TYPE=65026
-    SW_BUILD='1.1.2-bseedcli5-rc1'
-    FILE_VERSION_HEX='0x11023010'
-    FILE_VERSION_DEC=285356048
-    DEFAULT_OUT='build/bseed-ts011f-nonpm-client-cli5-rc1'
+    SW_BUILD='1.1.2-bseedcli5-rc2'
+    FILE_VERSION_HEX='0x11023012'
+    FILE_VERSION_DEC=285356050
+    DEFAULT_OUT='build/bseed-ts011f-nonpm-client-cli5-rc2'
     EXTRA_ARGS=()
     ;;
 nonpm)

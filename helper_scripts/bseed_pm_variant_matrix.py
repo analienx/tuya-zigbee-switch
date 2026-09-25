@@ -27,10 +27,10 @@ ROLE_TESTS = {'Router': ('tests/test_bseed_pm_v8_release.py',
                          'tests/test_bseed_golden_role_distribution.py'),
               'EndDevice': ('tests/test_bseed_mains_client.py',
                             'tests/test_bseed_mains_client_keepalive.py')}
-ROUTER = {'role': 'Router', 'build': '1.2.5-bseedv8u5-rc2',
-          'version': 0x1205300E, 'type': 43556, 'artifact': 'forward.ota'}
-CLIENT = {'role': 'EndDevice', 'build': '1.2.5-bseedcli6',
-          'version': 0x1205300C, 'type': 65024, 'artifact': 'forward.ota'}
+ROUTER = {'role': 'Router', 'build': '1.2.5-bseedv8u5-rc3',
+          'version': 0x12053010, 'type': 43556, 'artifact': 'forward.ota'}
+CLIENT = {'role': 'EndDevice', 'build': '1.2.5-bseedcli8',
+          'version': 0x12053010, 'type': 65024, 'artifact': 'forward.ota'}
 
 def run(command, *, env=None):
     result = subprocess.run(command, cwd=ROOT, env=env, text=True,

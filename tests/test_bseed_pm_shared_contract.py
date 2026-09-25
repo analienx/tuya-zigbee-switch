@@ -59,6 +59,6 @@ def test_router_candidate_is_new_image_not_relabelled_published_v8u4():
     assert "SW_BUILD='1.2.5-bseedv8u4'" in build
     assert "FILE_VERSION_HEX='0x12053007'" in build
     assert 'BSEED_PM_ROUTER_CANDIDATE:-0' in build
-    assert "SW_BUILD='1.2.5-bseedv8u5-rc2'" in build
-    assert "FILE_VERSION_HEX='0x1205300E'" in build
+    assert "SW_BUILD='1.2.5-bseedv8u5-rc3'" in build
+    assert "FILE_VERSION_HEX='0x12053010'" in build
     assert 'BSEED_PM_ROUTER_CANDIDATE_OUTPUT' in build

@@ -93,6 +93,14 @@ bseed/pm-matrix:
 bseed/identity-gate:
 	$(PYTHON) helper_scripts/bseed_ota_identity.py check-index
 
+# Print the next monotonic OTA file version for every BSEED release line.
+# Release FILEVER/VERSION_STR come from emit-make-vars output, never by hand.
+bseed/suggest-next:
+	$(PYTHON) helper_scripts/bseed_ota_identity.py suggest-next --image-type 43556
+	$(PYTHON) helper_scripts/bseed_ota_identity.py suggest-next --image-type 65024
+	$(PYTHON) helper_scripts/bseed_ota_identity.py suggest-next --image-type 43555
+	$(PYTHON) helper_scripts/bseed_ota_identity.py suggest-next --image-type 65026
+
 # Run pytest tests (requires stub to be built)
 tests: stub/build stub/build_end_device
 	$(PYTHON) -m pytest tests/ -v

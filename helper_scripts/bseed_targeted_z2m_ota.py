@@ -153,7 +153,7 @@ def main():
             sha256=args.sha256, block_bytes=args.max_block_bytes,
             preflash_build=args.preflash_build,
             recovery_evidence=args.hardware_evidence, device=args.device,
-            postflash_build='1.1.2-bseedcli5-rc1', require_pm=False,
+            postflash_build='1.1.2-bseedcli5-rc2', require_pm=False,
             relay_get_key=args.relay_get_key, expect_relay=args.expect_relay,
             preflash_relay_physical_mode=args.preflash_relay_physical_mode),
             confirm_unloaded=args.confirm_load_unplugged,
