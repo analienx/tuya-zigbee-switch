@@ -114,3 +114,25 @@ def test_runner_cannot_bypass_wrapper_flash_gate(monkeypatch):
         with pytest.raises(ValueError,match='Recovery evidence'):
             runner.main()
         image.assert_not_called()
+
+
+def test_noninvasive_waiver_covers_signed_off_rc2_canary():
+    profile = dict(non_pm=True, manufacturer='o1jzcxou', model='TS011F-BS',
+        preflash_role='EndDevice', postflash_role='EndDevice', block_bytes=32,
+        device='BedroomSocketCabinetRight', ieee='0xa4c13824a7005afb',
+        sha256='e6fb2cca2a244a42ab5e8da166ed35ec438434220a46c89a37bc98086c326d1b',
+        preflash_build='1.1.2-bseedcli4', postflash_build='1.1.2-bseedcli5-rc2',
+        require_pm=False, relay_get_key='state_relay', expect_relay='OFF',
+        preflash_relay_physical_mode='follow_state')
+    out = verify_recovery(profile, confirm_unloaded=True,
+                          accept_nonrecoverable_ota=True)
+    assert out['method'] == 'non-invasive single OTA canary'
+    assert out['recovery_available'] is False
+    bad = dict(profile, sha256='0'*64)
+    with pytest.raises(ValueError, match='signed-off'):
+        verify_recovery(bad, confirm_unloaded=True,
+                        accept_nonrecoverable_ota=True)
+    pm = dict(profile, require_pm=True)
+    with pytest.raises(ValueError, match='refuses PM'):
+        verify_recovery(pm, confirm_unloaded=True,
+                        accept_nonrecoverable_ota=True)

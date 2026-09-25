@@ -33,14 +33,22 @@ def verify_recovery(profile, *, confirm_unloaded=False, accept_nonrecoverable_ot
     if confirm_unloaded is not True:
         raise ValueError('Physical load not explicitly confirmed disconnected for THIS flash')
     if accept_nonrecoverable_ota:
-        # This opt-in is deliberately locked to the current non-PM canary and
-        # one reviewed image. Not transferable to PM, other clients or releases.
+        # This opt-in is deliberately locked to explicitly signed-off non-PM
+        # canaries and one reviewed image each. Not transferable to PM, other
+        # clients, other builds or releases. Each entry below names the exact
+        # transfer the owner accepted: rc1 (signed off 2026-09-21) and rc2
+        # (owner accepted 2026-09-25 with explicit no-load confirmation;
+        # rc1 shared its OTA identity across two binaries, so rc2 carries the
+        # same keepalive source under a fresh identity).
         if (profile.get('device'), profile.get('ieee'), profile.get('preflash_build'),
-                profile.get('postflash_build'), profile.get('sha256')) != (
-                'BedroomSocketCabinetRight', '0xa4c13824a7005afb',
-                '1.1.2-bseedcli4', '1.1.2-bseedcli5-rc1',
-                '92894009f687976a60a535170581d8ff8daf06b7cc07bb175775ae7b751330dd'):
-            raise ValueError('Non-invasive risk acceptance applies only to the signed-off Bedroom non-PM canary')
+                profile.get('postflash_build'), profile.get('sha256')) not in (
+                ('BedroomSocketCabinetRight', '0xa4c13824a7005afb',
+                 '1.1.2-bseedcli4', '1.1.2-bseedcli5-rc1',
+                 '92894009f687976a60a535170581d8ff8daf06b7cc07bb175775ae7b751330dd'),
+                ('BedroomSocketCabinetRight', '0xa4c13824a7005afb',
+                 '1.1.2-bseedcli4', '1.1.2-bseedcli5-rc2',
+                 'e6fb2cca2a244a42ab5e8da166ed35ec438434220a46c89a37bc98086c326d1b')):
+            raise ValueError('Non-invasive risk acceptance applies only to the signed-off Bedroom non-PM canaries')
         if profile.get('require_pm') is not False or profile.get('relay_get_key') != 'state_relay':
             raise ValueError('Non-invasive path refuses PM or unverified relay endpoints')
         if profile.get('expect_relay') != 'OFF' or profile.get('preflash_relay_physical_mode') != 'follow_state':
