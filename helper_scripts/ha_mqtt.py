@@ -17,6 +17,7 @@ import json
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 DEFAULT_SSH_HOST = 'ha'
 DEFAULT_CONFIG = '/homeassistant/zigbee2mqtt/configuration.yaml'
@@ -160,6 +161,40 @@ def cmd_logs(args):
     print(out, end='')
 
 
+def cmd_map(args):
+    """Request a routes network map and report who links to the target."""
+    import time
+    user, password, broker = mqtt_credentials(args.ssh_host, args.config)
+    base = 'zigbee2mqtt/bridge'
+    listener = (sub_command(user, password, broker,
+                            base + '/response/networkmap', count=1, wait=150)
+                + ' & MAPBPID=$!; ')
+    trigger = pub_command(user, password, broker, base + '/request/networkmap',
+                          json.dumps({'type': 'raw', 'transaction': 'map1'}))
+    out = ssh(args.ssh_host, '%s sleep 2; %s; wait $MAPBPID; echo MAP_DONE'
+              % (listener, trigger), timeout=180)
+    try:
+        payload = json.loads(
+            [l for l in out.strip().splitlines() if l.startswith('{')][-1])
+    except (ValueError, IndexError):
+        raise RuntimeError('network map response not captured')
+    data = payload.get('data') or {}
+    if payload.get('status') != 'ok' or not isinstance(data, dict):
+        raise RuntimeError('map request failed: %s' % str(payload)[:200])
+    nodes = {n.get('ieeeAddr'): n for n in data.get('nodes', [])}
+    target = args.ieee or args.device
+    ieee = target
+    for addr, node in nodes.items():
+        if node.get('friendlyName') == target:
+            ieee = addr
+    inbound = [l for l in data.get('links', [])
+               if l.get('target') == ieee or l.get('source') == ieee]
+    print(json.dumps({'target_ieee': ieee,
+                      'in_map': ieee in nodes,
+                      'node': nodes.get(ieee),
+                      'links': inbound}, indent=1))
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--ssh-host', default=DEFAULT_SSH_HOST)
@@ -188,6 +223,11 @@ def build_parser():
     lg.add_argument('--lines', type=int, default=15)
     lg.add_argument('--container', default=DEFAULT_CONTAINER)
     lg.set_defaults(func=cmd_logs)
+    mp = sub.add_parser('map', help='routes map: who links to the target')
+    mp.add_argument('--device')
+    mp.add_argument('--ieee')
+    mp.add_argument('--output', default='networkmap.json')
+    mp.set_defaults(func=cmd_map)
     return parser
 
 

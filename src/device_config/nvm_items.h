@@ -56,4 +56,10 @@
 #define NV_ITEM_ENERGY_CALIBRATION    68
 #define NV_ITEM_OVERLOAD_CONFIG       69
 
+/* PM legacy-migration attempt counter. IDs 52..63 are free (51 is a legacy
+ * fork record, 40..50 belong to dimmer state). The counter bounds migration
+ * retries so poison legacy data can never wedge the boot in a reboot loop;
+ * once capped the legacy items are quarantined and the boot proceeds. */
+#define NV_ITEM_PM_MIGRATION_ATTEMPTS    52
+
 #endif /* DEVICE_CONFIG_NVM_ITEMS_H_ */

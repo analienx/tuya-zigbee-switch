@@ -78,21 +78,20 @@ static bool copy_item_if_destination_absent(uint16_t legacy_item,
 
 #endif
 
-bool migrate_legacy_bseed_pm_nvm(void) {
-#ifndef BSEED_PM_B28WRPVX
-    return true;
-#else
-    /* Run before parser preflight, but classify only from raw device_config.
-     * This prevents legacy item 40 (energy in the PM fork) from being confused
-     * with the TS0726 migration marker, while making the migration a complete
-     * no-op for every other identity. */
-    device_config_read_raw_from_nv();
-    const uint16_t prefix_len = (uint16_t)(sizeof(PM_IDENTITY_PREFIX) - 1u);
-    if (device_config_str.size < prefix_len ||
-        memcmp(device_config_str.data, PM_IDENTITY_PREFIX, prefix_len) != 0) {
-        return true;
-    }
+#define PM_MIGRATION_MAX_ATTEMPTS    3u
 
+static void quarantine_legacy_pm_items(void) {
+    /* Best effort: even if the flash is dying, the boot below must
+     * proceed with compiled defaults rather than loop on poison data. */
+    hal_nvm_delete(LEGACY_PM_ENERGY_EP1);
+    hal_nvm_delete(LEGACY_PM_CALIBRATION);
+    hal_nvm_delete(LEGACY_PM_OVERLOAD_CONFIG);
+    hal_nvm_delete(NV_ITEM_PM_MIGRATION_ATTEMPTS);
+    printf("PM NVM migration: quarantining legacy items, "
+           "booting with defaults\r\n");
+}
+
+static bool run_legacy_pm_copies(void) {
     uint8_t buffer[32];
     if (!copy_item_if_destination_absent(
             LEGACY_PM_ENERGY_EP1, NV_ITEM_ENERGY_ACCUMULATION(1),
@@ -109,7 +108,59 @@ bool migrate_legacy_bseed_pm_nvm(void) {
             sizeof(overload_config_t), buffer, "overload config")) {
         return false;
     }
-
     return true;
+}
+
+bool migrate_legacy_bseed_pm_nvm(void) {
+#ifndef BSEED_PM_B28WRPVX
+    return true;
+#else
+    /* Run before parser preflight, but classify only from raw device_config.
+     * This prevents legacy item 40 (energy in the PM fork) from being confused
+     * with the TS0726 migration marker, while making the migration a complete
+     * no-op for every other identity. */
+    device_config_read_raw_from_nv();
+    const uint16_t prefix_len = (uint16_t)(sizeof(PM_IDENTITY_PREFIX) - 1u);
+    if (device_config_str.size < prefix_len ||
+        memcmp(device_config_str.data, PM_IDENTITY_PREFIX, prefix_len) != 0) {
+        return true;
+    }
+
+    /* Bounded attempts: a persistently failing copy must quarantine the
+     * poison legacy items and boot with defaults, never reboot-loop. */
+    uint32_t attempts = 0;
+    hal_nvm_status_t counter_st = hal_nvm_read(
+        NV_ITEM_PM_MIGRATION_ATTEMPTS, sizeof(attempts),
+        (uint8_t *)&attempts);
+    if (counter_st == HAL_NVM_SUCCESS) {
+        if (attempts >= PM_MIGRATION_MAX_ATTEMPTS) {
+            quarantine_legacy_pm_items();
+            return true;
+        }
+    } else if (counter_st != HAL_NVM_NOT_FOUND) {
+        /* Counter itself is unreadable: fail safe toward booting, not
+         * toward looping, since attempts can no longer be proven. */
+        quarantine_legacy_pm_items();
+        return true;
+    }
+
+    if (run_legacy_pm_copies()) {
+        if (counter_st == HAL_NVM_SUCCESS) {
+            attempts = 0;
+            hal_nvm_write(NV_ITEM_PM_MIGRATION_ATTEMPTS, sizeof(attempts),
+                          (uint8_t *)&attempts);
+        }
+        return true;
+    }
+
+    attempts += 1;
+    if (hal_nvm_write(NV_ITEM_PM_MIGRATION_ATTEMPTS, sizeof(attempts),
+                      (uint8_t *)&attempts) != HAL_NVM_SUCCESS) {
+        /* Uncountable failure: quarantine now rather than risk an
+         * unbounded reboot loop on a dying flash. */
+        quarantine_legacy_pm_items();
+        return true;
+    }
+    return false;
 #endif
 }
