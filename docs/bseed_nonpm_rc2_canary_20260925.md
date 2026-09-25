@@ -34,6 +34,35 @@ matches the registry identity) and the server was stopped after the halted
 qualification. No relay, coordinator, channel, permit-join, power or pairing
 state was changed at any point.
 
+## Evening — FLASHED, upgradeEnd 19:42:06, rc2 verified running
+
+With owner confirmation (exact IEEE, no load, risk accepted) and the waiver
+extended to the exact rc2 transfer, timed flashes ran against the device's
+900 s spontaneous query cadence (later 5-min retry cadence mid-campaign).
+Two `update_error` attempts (query-stage timeouts, zero bytes each,
+reconciled per precedent) and one 40-min runner watch preceded the result.
+The transfer then flowed in paced 32-byte sessions with resume from kept
+offsets (0 → 5792 → 51008 → 157728/158738): `upgradeEndResponse` sent
+19:42:06, Z2M logged "Update successful" and "OTA update finished", the
+device rebooted, re-announced on the same NWK, and re-interviewed
+(descriptors, endpoints, modelId, manufacturerName, live Tuya datapoint
+telemetry).
+
+Postflash proof (all from the wire, not Z2M cache):
+
+- Running `fileVersion` 285356050 in the device's own spontaneous
+  `queryNextImageRequest` (19:57:36).
+- Live `readRsp`: `dateCode` "20260925", `swBuildId` "1.1.2-bseedcli5-rc2"
+  (19:42:35, seconds after the upgrade reboot). Pre-upgrade the same read
+  returned "20260921" / "1.1.2-bseedcli5-rc1".
+- Relay OFF throughout; post-upgrade link gate 3/3 fast reads; availability
+  online; no load was ever toggled.
+
+Cache lesson: Z2M `bridge/devices` kept showing the stale `cli4` string
+through two interviews. Postflash acceptance must read raw `readRsp`
+(or the device's own OTA query), never the bridge cache. The private image
+server was stopped after completion.
+
 ## Second attempt 13:04 — QUALIFIED, no flash
 
 The installed firmware queries OTA spontaneously every 900 s on the second
