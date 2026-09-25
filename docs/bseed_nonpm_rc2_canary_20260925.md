@@ -50,3 +50,28 @@ explicit load-unplugged attestation, and an applicable rc2 recovery path —
 the signed-off non-invasive waiver covers only the `cli4`→`cli5-rc1`
 transfer and does not transfer to rc2. Link evidence expires ~13:16, OTA
 eligibility ~13:35; any flash needs a fresh series anyway.
+
+## 14:51 flash attempt — update_error, reconciled (owner confirmed IEEE, no load, risk accepted)
+
+The waiver was extended to the exact rc2 transfer (repo commit) and CI is
+green on it. A timed flash fired at ~15:04:11 for the 15:04:56 spontaneous
+query failed at the query stage: `Device didn't respond to OTA request`
+after ~60 s (Z2M-side initial wait; the 30-min block timeout only governs
+after transfer starts). Zero bytes transferred; the device stayed idle and
+fast-reading. The `update_error` lock was archived verbatim and the active
+slot cleared per the kitchenleft reconcile precedent — no new workdir, no
+evasion. Lesson: the update must be fired ~50 s before a spontaneous query
+(the device queries every 900 s sharp); the qualify chain (check catches one
+query, post-gate, fire before the next) fits inside the evidence lifetimes
+(check 30 min, gate 10 min).
+
+## 15:14–15:19 stood down — third-party join operations on the mesh
+
+A fresh series for the 15:19:56 query was refused twice by the join guards
+(`Permit join open` in link-gate at 15:14:14, in check at 15:19:02 —
+correct fail-closed behavior). Logs show another actor (`aldjs`
+transactions) opening joins repeatedly, including router-scoped joins via
+HallBreakerMain (15:00:42 network-wide 254 s, 15:12:51 via HallBreakerMain,
+close 15:14:21, open again 15:15:20). No OTA is attempted while foreign join
+activity is in progress. Resume only after the owner confirms the pairing
+activity is finished and join stays closed.
