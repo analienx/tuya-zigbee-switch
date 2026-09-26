@@ -44,6 +44,16 @@ if [[ "${BSEED_PM_ROUTER_RECOVERY:-0}" == "1" ]]; then
     : "${BSEED_PM_ROUTER_RECOVERY_OUTPUT:=build/bseed-ts011f-pm-router-v8u5-rc4}"
     set -- "$BSEED_PM_ROUTER_RECOVERY_OUTPUT"
 fi
+
+# Opt-in, BUILD-ONLY PM ZCL-read/OTA-start repair candidate. The identity is
+# emitted by bseed_ota_identity.py and is newer than the sealed rc4/cli9 pair.
+if [[ "${BSEED_PM_ROUTER_READ_FIX:-0}" == "1" ]]; then
+    SW_BUILD='1.2.5-bseedv8u5-rc5'
+    FILE_VERSION_HEX='0x12053012'
+    FILE_VERSION_DEC=302329874
+    : "${BSEED_PM_ROUTER_READ_FIX_OUTPUT:=build/bseed-ts011f-pm-router-v8u5-rc5}"
+    set -- "$BSEED_PM_ROUTER_READ_FIX_OUTPUT"
+fi
 VOLTAGE_MULTIPLIER=161460
 CURRENT_MULTIPLIER=144679
 POWER_MULTIPLIER=16989

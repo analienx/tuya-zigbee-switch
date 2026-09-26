@@ -95,11 +95,27 @@ def test_bseed_pm_meter_uses_standard_mqtt_properties_on_endpoint_one():
             definition = _definition(rendered, model)
             assert skip in definition, model
             assert 'electricityMeter({' in definition
-            assert 'power: {max: 60}, current: {max: 300}' in definition
-            assert 'voltage: {max: 300}, energy: {max: 600, change: 1}' in definition
+            assert 'power: {max: 60, multiplier: 1, divisor: 1}' in definition
+            assert 'current: {max: 300, multiplier: 1, divisor: 1000}' in definition
+            assert 'voltage: {max: 300, multiplier: 1, divisor: 100}' in definition
+            assert 'energy: {max: 600, change: 1, multiplier: 1, divisor: 1000}' in definition
             assert '"switch": 1, "relay": 2' in definition
             assert 'meta: { multiEndpoint: true }' in definition
         assert skip not in _definition(rendered, "TS011F-BS-PM-1")
         assert skip not in _definition(rendered, "TS011F-BS-PM-2")
         assert skip not in _definition(rendered, "TS011F-BS")
         assert skip not in _definition(rendered, "TS0726-3-BS")
+
+
+def test_bseed_pm_fresh_configure_has_scaling_for_all_four_reportings():
+    """Forced native scales prevent setup reads from aborting bind/reporting."""
+    definition = _definition(_render(), "TS011F-BS-PM")
+    expected = {
+        "power": (1, 1),
+        "current": (1, 1000),
+        "voltage": (1, 100),
+        "energy": (1, 1000),
+    }
+    for name, (multiplier, divisor) in expected.items():
+        line = next(line for line in definition.splitlines() if f"{name}: {{max:" in line)
+        assert f"multiplier: {multiplier}, divisor: {divisor}" in line

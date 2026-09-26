@@ -85,6 +85,15 @@ def test_pm_router_recovery_candidate_pins_next_monotonic_version():
     assert "FILE_VERSION_HEX='0x12053007'" in text
 
 
+def test_pm_router_read_fix_has_new_immutable_identity():
+    text = BUILD.read_text(encoding="utf-8")
+    assert "BSEED_PM_ROUTER_READ_FIX" in text
+    assert "SW_BUILD='1.2.5-bseedv8u5-rc5'" in text
+    assert "FILE_VERSION_HEX='0x12053012'" in text
+    assert "FILE_VERSION_DEC=302329874" in text
+    assert "build/bseed-ts011f-pm-router-v8u5-rc5" in text
+
+
 def test_pm_router_builds_from_client_return_wrapper():
     text = BUILD.read_text(encoding="utf-8")
     assert "CLIENT_IMAGE_TYPE=65024" in text

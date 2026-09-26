@@ -156,12 +156,16 @@ void bdb_init_callback(u8 status, u8 joinedNetwork) {
     if (status == BDB_INIT_STATUS_SUCCESS) {
         network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
         if (joinedNetwork) {
-            ota_queryStart(OTA_QUERY_INTERVAL);
 #ifdef BSEED_MAINS_CLIENT
             configure_mains_client_keepalive();
 #endif
 #if defined(ZB_ED_ROLE) && !defined(BSEED_MAINS_CLIENT)
             zb_setPollRate(POLL_RATE);
+#endif
+#ifdef BSEED_PM_B28WRPVX
+            telink_zigbee_hal_request_ota_query();
+#else
+            ota_queryStart(OTA_QUERY_INTERVAL);
 #endif
         }
     } else {
@@ -178,7 +182,6 @@ void bdb_commissioning_callback(u8 status, void *arg) {
     switch (status) {
     case BDB_COMMISSION_STA_SUCCESS:
         network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
-        ota_queryStart(OTA_QUERY_INTERVAL);
 #ifdef BSEED_MAINS_CLIENT
         configure_mains_client_keepalive();
 #endif
@@ -188,6 +191,11 @@ void bdb_commissioning_callback(u8 status, void *arg) {
         // after fast re-connect.
         zb_setPollRate(POLL_RATE);
         printf("Set poll rate to %d\r\n", POLL_RATE);
+#endif
+#ifdef BSEED_PM_B28WRPVX
+        telink_zigbee_hal_request_ota_query();
+#else
+        ota_queryStart(OTA_QUERY_INTERVAL);
 #endif
         break;
     case BDB_COMMISSION_STA_IN_PROGRESS:

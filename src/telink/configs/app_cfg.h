@@ -53,6 +53,10 @@
 #define ZCL_GROUP_SUPPORT              1 /* Groups cluster */
 #define ZCL_OTA_SUPPORT                1 /* OTA upgrade cluster */
 #define ZCL_WINDOW_COVERING_SUPPORT    1 /* Window covering cluster */
+#ifdef BSEED_PM_B28WRPVX
+#define ZCL_ELECTRICAL_MEASUREMENT_SUPPORT 1 /* Electrical Measurement */
+#define ZCL_METERING_SUPPORT           1 /* Smart Energy Metering */
+#endif
 
 /* Zigbee Features */
 #define TOUCHLINK_SUPPORT              0 /* TouchLink commissioning */

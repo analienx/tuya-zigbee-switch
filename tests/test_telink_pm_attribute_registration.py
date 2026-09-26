@@ -1,8 +1,4 @@
-"""Regression for the Telink PM UNSUPPORTED_ATTRIBUTE root cause.
-
-Advertising a PM cluster in a simple descriptor without a cluster register
-handler does not expose the attributes to the Telink ZCL read dispatcher.
-"""
+"""Regression for the Telink PM UNSUPPORTED_ATTRIBUTE root cause."""
 
 from pathlib import Path
 
@@ -12,11 +8,26 @@ ZCL = (Path(__file__).resolve().parents[1] / "src/telink/hal/zigbee_zcl.c").read
 )
 
 
-def test_pm_clusters_have_real_attribute_registration_callbacks() -> None:
+APP_CFG = (Path(__file__).resolve().parents[1] / "src/telink/configs/app_cfg.h").read_text(
+    encoding="utf-8"
+)
+
+
+def test_bseed_pm_uses_telink_standard_cluster_registration_callbacks() -> None:
+    assert "#ifdef BSEED_PM_B28WRPVX" in APP_CFG
+    assert "#define ZCL_ELECTRICAL_MEASUREMENT_SUPPORT 1" in APP_CFG
+    assert "#define ZCL_METERING_SUPPORT" in APP_CFG
     for cluster, callback in (
-        ("ZCL_CLUSTER_MS_ELECTRICAL_MEASUREMENT", "register_pm_electrical_attrs"),
-        ("ZCL_CLUSTER_SE_METERING", "register_pm_metering_attrs"),
+        ("ZCL_CLUSTER_MS_ELECTRICAL_MEASUREMENT", "zcl_electricalMeasure_register"),
+        ("ZCL_CLUSTER_SE_METERING", "zcl_metering_register"),
     ):
-        assert f"if (cluster_id == {cluster}) {{\n        return {callback};" in ZCL
-        assert f"return zcl_registerCluster(ep, {cluster}," in ZCL
+        block = ZCL.split(f"if (cluster_id == {cluster}) {{", 1)[1].split("}", 1)[0]
+        assert "#ifdef BSEED_PM_B28WRPVX" in block
+        assert f"return {callback};" in block
+
+
+def test_non_bseed_builds_keep_lightweight_pm_registration() -> None:
+    assert "#ifndef BSEED_PM_B28WRPVX" in ZCL
+    assert "return zcl_registerCluster(ep, ZCL_CLUSTER_MS_ELECTRICAL_MEASUREMENT," in ZCL
+    assert "return zcl_registerCluster(ep, ZCL_CLUSTER_SE_METERING," in ZCL
     assert "mfr, n, attrs, NULL, cb);" in ZCL

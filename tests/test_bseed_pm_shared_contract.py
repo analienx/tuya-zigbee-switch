@@ -21,7 +21,7 @@ def test_both_roles_use_shared_pm_hal_and_meter(role,makefile,build_script):
     mk=(ROOT/makefile).read_text(encoding='utf8')
     script=(ROOT/build_script).read_text(encoding='utf8')
     hal=(ROOT/'src/telink/hal/zigbee_zcl.c').read_text(encoding='utf8')
-    for callback in ('register_pm_electrical_attrs','register_pm_metering_attrs'):
+    for callback in ('zcl_electricalMeasure_register','zcl_metering_register'):
         assert callback in hal, f'{role}: missing shared attribute registration'
     assert 'BSEED_PM_B28WRPVX=1' in script
     assert 'HLW8012_VOLTAGE_MULTIPLIER=161460' in script or 'VOLTAGE_MULTIPLIER=161460' in script
@@ -62,6 +62,15 @@ def test_router_recovery_candidate_pins_next_monotonic_version():
     assert "FILE_VERSION_DEC=302329873" in build
     assert 'BSEED_PM_ROUTER_RECOVERY_OUTPUT' in build
     assert 'FROM_CLIENT_OTA="$OUT_DIR/from-client.ota"' in build
+
+
+def test_router_read_fix_uses_automated_next_identity():
+    build = (ROOT / 'make_scripts/build_bseed_ts011f_pm_v8.sh').read_text(encoding='utf8')
+    assert 'BSEED_PM_ROUTER_READ_FIX:-0' in build
+    assert "SW_BUILD='1.2.5-bseedv8u5-rc5'" in build
+    assert "FILE_VERSION_HEX='0x12053012'" in build
+    assert "FILE_VERSION_DEC=302329874" in build
+    assert 'BSEED_PM_ROUTER_READ_FIX_OUTPUT' in build
 
 
 def test_router_candidate_is_new_image_not_relabelled_published_v8u4():
