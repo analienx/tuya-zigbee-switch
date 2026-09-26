@@ -97,10 +97,13 @@ after configure.
 - Relay is ON (owner toggled during testing; preflash baseline OFF untouched by us).
   Calibrations and EP1 reporting stay: still a raw-stream cli8, still needed.
 - Image server stopped; Z2M config untouched; join windows closed.
+- Do not use `from-client.ota` for another router-role attempt. Validate `cli10` with the
+  client `forward.ota`; validate router `rc5` only on an existing router or by a direct
+  flash that does not depend on a cross-role OTA wrapper.
 
 ## Operational context (do not "fix" these in firmware)
 
 - `WorkroomSocketCabinet` currently carries temporary Z2M percentual calibrations
   (`voltage_calibration: -99`, `current/end: -99.9`) compensating the raw stream; they must be
   **removed if/when** scaled reads work, and **kept** if the first router image still 139s
-  divisors. It is mid-transition to the rc4 router as of 2026-09-26 evening.
+  divisors. The rc4 role transition failed at apply; the socket remains cli8.

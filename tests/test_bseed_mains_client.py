@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -125,7 +126,7 @@ def test_pm_join_query_waits_until_ota_client_is_initialized():
     ready = ota.index("ota_client_initialized = true;")
     schedule = ota.index("telink_zigbee_hal_request_ota_query();", ready)
     assert init < ready < schedule
-    assert "static bool ota_query_requested" in ota
+    assert re.search(r"static\s+bool\s+ota_query_requested", ota)
     assert "OTA_JOIN_QUERY_START_DELAY_MS" in ota
     assert "hal_zigbee_get_network_status() != HAL_ZIGBEE_NETWORK_JOINED" in ota
     assert network.count("telink_zigbee_hal_request_ota_query();") == 2

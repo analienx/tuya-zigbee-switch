@@ -62,7 +62,9 @@ jobs:
           name: bseed-pm-role-matrix-${{ github.sha }}
           path: |
             build/bseed-pm-role-matrix-*/ROLE_MATRIX.json
+            build/bseed-pm-role-matrix-*/router/forward.ota
             build/bseed-pm-role-matrix-*/router/manifest.json
+            build/bseed-pm-role-matrix-*/client/forward.ota
             build/bseed-pm-role-matrix-*/client/manifest.json
           if-no-files-found: error
 
@@ -72,51 +74,4 @@ jobs:
         with:
           name: bseed-pm-role-matrix-log-${{ github.sha }}
           path: ${{ runner.temp }}/pm-matrix.log
-          if-no-files-found: error
-
-  pm-router-recovery:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout exact source
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install host dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y make python3 python3-yaml curl wget unzip bzip2
-
-      - name: Cache Telink SDK and toolchain
-        uses: actions/cache@v4
-        with:
-          path: telink_tools
-          key: telink-tools-v3.7.2.0
-
-      - name: Install pinned Telink build dependencies
-        run: make -C src/telink -f tools.mk sdk toolchain
-
-      - name: Build PM router recovery candidate
-        shell: bash
-        run: |
-          set -o pipefail
-          BSEED_PM_ROUTER_RECOVERY=1 bash make_scripts/build_bseed_ts011f_pm_v8.sh 2>&1 | tee "$RUNNER_TEMP/pm-router-recovery.log"
-
-      - name: Upload recovery images
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bseed-pm-router-recovery-${{ github.sha }}
-          path: |
-            build/bseed-ts011f-pm-router-v8u5-rc4/forward.ota
-            build/bseed-ts011f-pm-router-v8u5-rc4/from-client.ota
-            build/bseed-ts011f-pm-router-v8u5-rc4/manifest.json
-          if-no-files-found: error
-
-      - name: Upload recovery log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bseed-pm-router-recovery-log-${{ github.sha }}
-          path: ${{ runner.temp }}/pm-router-recovery.log
           if-no-files-found: error

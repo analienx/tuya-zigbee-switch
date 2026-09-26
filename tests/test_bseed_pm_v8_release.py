@@ -112,3 +112,11 @@ def test_release_handoff_scripts_parse_before_executor_use():
         str(VALIDATOR),
         "exec",
     )
+
+
+def test_pm_matrix_publishes_same_role_canaries_without_cross_role_recovery_job():
+    workflow = (ROOT / ".github/workflows/bseed-pm-matrix.yml").read_text()
+    assert "build/bseed-pm-role-matrix-*/router/forward.ota" in workflow
+    assert "build/bseed-pm-role-matrix-*/client/forward.ota" in workflow
+    assert "BSEED_PM_ROUTER_RECOVERY=1" not in workflow
+    assert "from-client.ota" not in workflow

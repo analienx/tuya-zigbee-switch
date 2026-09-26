@@ -44,28 +44,28 @@
 /*
  * ZCL Cluster Support Configuration
  */
-#define ZCL_POWER_CFG_SUPPORT          1 /* Power configuration cluster */
-#define ZCL_ON_OFF_SUPPORT             1 /* On/Off cluster */
-#define ZCL_ONOFF_CONFIGUATION         1 /* On/Off cluster configuration */
-#define ZCL_LEVEL_CTRL                 1 /* Level control cluster */
+#define ZCL_POWER_CFG_SUPPORT                 1 /* Power configuration cluster */
+#define ZCL_ON_OFF_SUPPORT                    1 /* On/Off cluster */
+#define ZCL_ONOFF_CONFIGUATION                1 /* On/Off cluster configuration */
+#define ZCL_LEVEL_CTRL                        1 /* Level control cluster */
 /* #define ZCL_IAS_ZONE_SUPPORT 1     */ /* IAS Zone cluster (disabled) */
-#define ZCL_POLL_CTRL_SUPPORT          1 /* Poll control cluster */
-#define ZCL_GROUP_SUPPORT              1 /* Groups cluster */
-#define ZCL_OTA_SUPPORT                1 /* OTA upgrade cluster */
-#define ZCL_WINDOW_COVERING_SUPPORT    1 /* Window covering cluster */
+#define ZCL_POLL_CTRL_SUPPORT                 1 /* Poll control cluster */
+#define ZCL_GROUP_SUPPORT                     1 /* Groups cluster */
+#define ZCL_OTA_SUPPORT                       1 /* OTA upgrade cluster */
+#define ZCL_WINDOW_COVERING_SUPPORT           1 /* Window covering cluster */
 #ifdef BSEED_PM_B28WRPVX
-#define ZCL_ELECTRICAL_MEASUREMENT_SUPPORT 1 /* Electrical Measurement */
-#define ZCL_METERING_SUPPORT           1 /* Smart Energy Metering */
+#define ZCL_ELECTRICAL_MEASUREMENT_SUPPORT    1 /* Electrical Measurement */
+#define ZCL_METERING_SUPPORT                  1 /* Smart Energy Metering */
 #endif
 
 /* Zigbee Features */
-#define TOUCHLINK_SUPPORT              0 /* TouchLink commissioning */
-#define FIND_AND_BIND_SUPPORT          0 /* Find and bind feature */
-#define REJOIN_FAILURE_TIMER           1 /* Rejoin failure timer */
-#define GP_SUPPORT_ENABLE              1 /* Green Power support */
+#define TOUCHLINK_SUPPORT         0      /* TouchLink commissioning */
+#define FIND_AND_BIND_SUPPORT     0      /* Find and bind feature */
+#define REJOIN_FAILURE_TIMER      1      /* Rejoin failure timer */
+#define GP_SUPPORT_ENABLE         1      /* Green Power support */
 
 /* Hardware Configuration */
-#define VOLTAGE_DETECT_ADC_PIN         0 /* ADC pin for voltage detection */
+#define VOLTAGE_DETECT_ADC_PIN    0      /* ADC pin for voltage detection */
 
 /*
  * Stack Configuration Files

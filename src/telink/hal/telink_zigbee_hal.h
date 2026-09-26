@@ -27,10 +27,12 @@ void telink_zigbee_hal_request_ota_query(void);
 // only). Routers keep byte-identical binaries: the call compiles to nothing.
 #if defined(ZB_ED_ROLE)
 void hal_zigbee_set_ota_poll_active(bool fast);
+
 #else
 static inline void hal_zigbee_set_ota_poll_active(bool fast) {
     (void)fast;
 }
+
 #endif
 
 // ZCL module functions (implemented in zigbee_zcl.c)

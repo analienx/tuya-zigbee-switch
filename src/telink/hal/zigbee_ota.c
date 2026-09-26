@@ -19,8 +19,8 @@ void ota_process_msg_callback(u8 evt, u8 status);
 #ifdef BSEED_PM_B28WRPVX
 #define OTA_JOIN_QUERY_START_DELAY_MS    1000
 static hal_task_t ota_join_query_start_task;
-static bool ota_client_initialized = false;
-static bool ota_query_requested    = false;
+static bool       ota_client_initialized = false;
+static bool       ota_query_requested    = false;
 
 static void ota_join_query_start(void *arg) {
     (void)arg;
@@ -39,10 +39,11 @@ void telink_zigbee_hal_request_ota_query(void) {
                            OTA_JOIN_QUERY_START_DELAY_MS);
     }
 }
+
 #endif
 
 #if defined(BSEED_MAINS_CLIENT) || defined(BSEED_PM_B28WRPVX)
-#define BSEED_OTA_DEFERRED_REQUERY 1
+#define BSEED_OTA_DEFERRED_REQUERY    1
 #endif
 
 #ifdef BSEED_OTA_DEFERRED_REQUERY

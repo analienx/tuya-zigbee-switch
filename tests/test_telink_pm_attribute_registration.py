@@ -1,5 +1,6 @@
 """Regression for the Telink PM UNSUPPORTED_ATTRIBUTE root cause."""
 
+import re
 from pathlib import Path
 
 
@@ -15,8 +16,8 @@ APP_CFG = (Path(__file__).resolve().parents[1] / "src/telink/configs/app_cfg.h")
 
 def test_bseed_pm_uses_telink_standard_cluster_registration_callbacks() -> None:
     assert "#ifdef BSEED_PM_B28WRPVX" in APP_CFG
-    assert "#define ZCL_ELECTRICAL_MEASUREMENT_SUPPORT 1" in APP_CFG
-    assert "#define ZCL_METERING_SUPPORT" in APP_CFG
+    assert re.search(r"^#define\s+ZCL_ELECTRICAL_MEASUREMENT_SUPPORT\s+1\b", APP_CFG, re.MULTILINE)
+    assert re.search(r"^#define\s+ZCL_METERING_SUPPORT\s+1\b", APP_CFG, re.MULTILINE)
     for cluster, callback in (
         ("ZCL_CLUSTER_MS_ELECTRICAL_MEASUREMENT", "zcl_electricalMeasure_register"),
         ("ZCL_CLUSTER_SE_METERING", "zcl_metering_register"),

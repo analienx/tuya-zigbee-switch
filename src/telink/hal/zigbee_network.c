@@ -22,16 +22,18 @@ void zdo_leave_indication_callback(nlme_leave_ind_t *pLeaveInd);
 void zdo_leave_confirmation_callback(nlme_leave_cnf_t *pLeaveCnf);
 
 #ifdef BSEED_MAINS_CLIENT
+
 /* Rx-on-when-idle clients still need parent MAC-poll keepalives. One per
  * minute is 60x lighter than the standard 1s sleepy-end-device poll. */
-#define MAINS_CLIENT_KEEPALIVE_POLL_MS 60000u
-#define KEEPALIVE_VERIFY_TICK_MS 60000u
-#define KEEPALIVE_RETRY_MS 5000u
+#define MAINS_CLIENT_KEEPALIVE_POLL_MS    60000u
+#define KEEPALIVE_VERIFY_TICK_MS          60000u
+#define KEEPALIVE_RETRY_MS                5000u
 static hal_task_t keepalive_verify_task;
-static bool ota_fast_poll_active = false;
+static bool       ota_fast_poll_active = false;
 
 static void keepalive_verify_handler(void *arg) {
     uint32_t next_ms = KEEPALIVE_VERIFY_TICK_MS;
+
     (void)arg;
     if (!ota_fast_poll_active &&
         hal_zigbee_get_poll_rate_ms() != MAINS_CLIENT_KEEPALIVE_POLL_MS) {
@@ -41,8 +43,10 @@ static void keepalive_verify_handler(void *arg) {
     }
     hal_tasks_schedule(&keepalive_verify_task, next_ms);
 }
+
 static void configure_mains_client_keepalive(void) {
     u8 status = zb_setPollRate(MAINS_CLIENT_KEEPALIVE_POLL_MS);
+
     if (status != RET_OK) {
         printf("Mains client keepalive setup failed: %u\r\n", status);
     }
@@ -59,12 +63,14 @@ void hal_zigbee_set_ota_poll_active(bool fast) {
         configure_mains_client_keepalive();
     }
 }
+
 #endif
 
 #if defined(ZB_ED_ROLE) && !defined(BSEED_MAINS_CLIENT)
 void hal_zigbee_set_ota_poll_active(bool fast) {
     hal_zigbee_set_poll_rate_ms(fast ? RESPONSE_POLL_RATE : POLL_RATE);
 }
+
 #endif
 
 

@@ -8465,8 +8465,12 @@ const definitions = [
             bseedSocketRelayOnOff(),
             // BSEED PM fallback: bounded freshness, not a substitute for change reports.
             electricityMeter({
-                power: {max: 60}, current: {max: 300},
-                voltage: {max: 300}, energy: {max: 600, change: 1},
+                // Fixed firmware scaling lets configure bind/report immediately;
+                // it must not depend on successful setup-time scale reads.
+                power: {max: 60, multiplier: 1, divisor: 1},
+                current: {max: 300, multiplier: 1, divisor: 1000},
+                voltage: {max: 300, multiplier: 1, divisor: 100},
+                energy: {max: 600, change: 1, multiplier: 1, divisor: 1000},
             }),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
             romasku.relayIndicator("relay_indicator", "relay"),

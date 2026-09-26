@@ -28,6 +28,7 @@ static hal_attribute_change_callback_t attribute_change_callback = NULL;
 static hal_zcl_activity_callback_t     zcl_activity_callback     = NULL;
 
 #ifndef BSEED_PM_B28WRPVX
+
 /* Generic builds keep lightweight attribute-only registration. The BSEED PM
  * target enables and uses the SDK's complete standard cluster handlers. */
 static status_t register_pm_electrical_attrs(u8 ep, u16 mfr, u8 n,
@@ -41,6 +42,7 @@ static status_t register_pm_metering_attrs(u8 ep, u16 mfr, u8 n,
     return zcl_registerCluster(ep, ZCL_CLUSTER_SE_METERING,
                                mfr, n, attrs, NULL, cb);
 }
+
 #endif
 
 static cluster_registerFunc_t get_register_func_by_cluster_id(u16 cluster_id) {
