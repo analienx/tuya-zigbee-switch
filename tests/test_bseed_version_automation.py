@@ -27,6 +27,6 @@ def test_emit_make_vars_matches_suggest_next():
     for image_type in IMAGE_TYPES:
         nxt = json.loads(run("suggest-next", "--image-type", str(image_type)))
         out = run("emit-make-vars", "--image-type", str(image_type),
-                  "--version-str", "9.9.9-bseedautomationprobe")
+                  "--version-str", "9.9.9-bseedprobe")
         assert f"FILE_VERSION={nxt['next_file_version_hex']}" in out
-        assert "VERSION_STR=9.9.9-bseedautomationprobe" in out
+        assert "VERSION_STR=9.9.9-bseedprobe" in out
