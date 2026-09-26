@@ -18,6 +18,25 @@ CRC, matching Router payload and both OTA identities. Only image-type bytes 12/1
 may differ between the two files. This does not validate flash contents on a device.
 No fleet index is modified. Preserve the failed campaign's evidence and lock.
 
+## Sealed CI evidence
+
+Source `57568d308533ce09fe5e65f7d1f11740fa1a0930` passed the
+[PM matrix and return-package build](https://github.com/analienx/tuya-zigbee-switch/actions/runs/36253969760)
+and [all 653 host tests](https://github.com/analienx/tuya-zigbee-switch/actions/runs/36253969763).
+The downloaded manifests identify a clean source tree at that exact commit.
+Both downloaded OTA files match their manifest SHA-256/SHA-512 values; their
+SHA-512 identities are sealed in `zigbee2mqtt/ota/bseed_identity.json`.
+
+| File | SHA-256 |
+| --- | --- |
+| `forward.ota` | `d6ecc51ddb204b7e59eb9d0c3e80a0d90c18860e693826f1594906f864dc2733` |
+| `from-client.ota` | `c1bead708b64b3772dd691c2bef2ae03cc7b3f9f37e5a4ca02e71ea1bc614ef8` |
+
+Artifact name:
+`bseed-pm-client-return-experimental-57568d308533ce09fe5e65f7d1f11740fa1a0930`.
+This is an experimental downloadable package, not hardware acceptance or proof
+that the earlier apply failure is fixed. No device was flashed for this work.
+
 ## Corrections to the proposed cli8 -> cli10 -> rc5 plan
 
 1. The Router build script already *generates* `from-client.ota`; the rc5 matrix
@@ -45,6 +64,10 @@ No fleet index is modified. Preserve the failed campaign's evidence and lock.
    can double-correct measurements.
 6. Reading relay ON is not proof of load safety or of uninterrupted power during
    reboot. The boot and role-reset paths also need physical retention checks.
+   In `src/app.c`, the Router's role-change handler currently calls
+   `hal_factory_reset()` after parser/OTA initialization; Telink maps that to
+   `zb_factoryReset()`. The Client uses a separate selective reset before parsing.
+   Do not assume those paths have identical persistence or rejoin behavior.
 
 ## What the pinned SDK actually does
 
