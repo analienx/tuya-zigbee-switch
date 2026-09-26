@@ -119,4 +119,5 @@ def test_pm_matrix_publishes_same_role_canaries_without_cross_role_recovery_job(
     assert "build/bseed-pm-role-matrix-*/router/forward.ota" in workflow
     assert "build/bseed-pm-role-matrix-*/client/forward.ota" in workflow
     assert "BSEED_PM_ROUTER_RECOVERY=1" not in workflow
-    assert "from-client.ota" not in workflow
+    same_role_upload = workflow.split('name: Upload matrix evidence', 1)[1].split('name: Upload matrix log', 1)[0]
+    assert "from-client.ota" not in same_role_upload

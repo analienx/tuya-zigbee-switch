@@ -54,6 +54,16 @@ if [[ "${BSEED_PM_ROUTER_READ_FIX:-0}" == "1" ]]; then
     : "${BSEED_PM_ROUTER_READ_FIX_OUTPUT:=build/bseed-ts011f-pm-router-v8u5-rc5}"
     set -- "$BSEED_PM_ROUTER_READ_FIX_OUTPUT"
 fi
+# Separate return candidate: cli10 and rc5 already share 0x12053012.
+# Allocated with bseed_ota_identity suggest-next/emit-make-vars after sealing
+# their CI hashes. This packages a newer Router; it is not an apply-path fix.
+if [[ "${BSEED_PM_CLIENT_RETURN:-0}" == "1" ]]; then
+    SW_BUILD='1.2.5-bseedv8u5-rc6'
+    FILE_VERSION_HEX='0x12053013'
+    FILE_VERSION_DEC=302329875
+    : "${BSEED_PM_CLIENT_RETURN_OUTPUT:=build/bseed-pm-client-return-rc6}"
+    set -- "$BSEED_PM_CLIENT_RETURN_OUTPUT"
+fi
 VOLTAGE_MULTIPLIER=161460
 CURRENT_MULTIPLIER=144679
 POWER_MULTIPLIER=16989

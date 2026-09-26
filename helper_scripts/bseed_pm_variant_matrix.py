@@ -15,6 +15,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMON_TESTS = ('tests/test_unified_pm_v8.py', 'tests/test_pm_cluster_layout_guard.py',
+                'tests/test_bseed_pm_client_return.py',
                 'tests/test_telink_pm_attribute_registration.py',
                 'tests/test_bseed_pm_shared_contract.py',
                 'tests/test_bseed_pm_variant_matrix.py',

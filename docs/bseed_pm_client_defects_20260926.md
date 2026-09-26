@@ -92,14 +92,16 @@ after configure.
 - Reconstruction: `upgradeEnd` OK 16:55:30 but the device never rebooted into the new
   image (no announce in 30 min; interim interviews failed). Owner power-cycle cleared
   what looks like a hung OTA state machine; the Telink bootloader never swapped, or the
-  reboot never happened. The client-header/router-payload wrapper (`from-client.ota`)
-  strategy fails at the apply step — transfer success does not imply role change.
+  reboot never happened. This client-header/router-payload (`from-client.ota`)
+  attempt failed to establish the new running image. The exact stage and cause
+  remain unknown; this does not prove an inherent wrapper incompatibility.
 - Relay is ON (owner toggled during testing; preflash baseline OFF untouched by us).
   Calibrations and EP1 reporting stay: still a raw-stream cli8, still needed.
 - Image server stopped; Z2M config untouched; join windows closed.
-- Do not use `from-client.ota` for another router-role attempt. Validate `cli10` with the
-  client `forward.ota`; validate router `rc5` only on an existing router or by a direct
-  flash that does not depend on a cross-role OTA wrapper.
+- Do not repeat the failed wrapper attempt without apply-stage evidence. Validate
+  `cli10` with the client `forward.ota`; rc5 shares cli10's version and cannot be
+  its next return target. The separate rc6 package and unresolved apply-stage
+  investigation are recorded in [Client-to-Router plan](bseed_pm_client_to_router_20260926.md).
 
 ## Operational context (do not "fix" these in firmware)
 

@@ -75,3 +75,17 @@ jobs:
           name: bseed-pm-role-matrix-log-${{ github.sha }}
           path: ${{ runner.temp }}/pm-matrix.log
           if-no-files-found: error
+
+      - name: Build and verify experimental Client to Router package
+        run: python3 helper_scripts/bseed_pm_client_return.py
+
+      - name: Upload experimental Client to Router package
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseed-pm-client-return-experimental-${{ github.sha }}
+          path: |
+            build/bseed-pm-client-return-rc6/forward.ota
+            build/bseed-pm-client-return-rc6/from-client.ota
+            build/bseed-pm-client-return-rc6/manifest.json
+            build/bseed-pm-client-return-rc6/CLIENT_RETURN.json
+          if-no-files-found: error
