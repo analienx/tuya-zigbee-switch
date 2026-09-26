@@ -73,6 +73,29 @@ def test_pm_validator_proves_same_sha_pm_and_ts0726_builds():
     assert "device flash" in text
 
 
+def test_pm_router_recovery_candidate_pins_next_monotonic_version():
+    text = BUILD.read_text(encoding="utf-8")
+    assert "BSEED_PM_ROUTER_RECOVERY" in text
+    assert "SW_BUILD='1.2.5-bseedv8u5-rc4'" in text
+    assert "FILE_VERSION_HEX='0x12053011'" in text
+    assert "FILE_VERSION_DEC=302329873" in text
+    assert "build/bseed-ts011f-pm-router-v8u5-rc4" in text
+    # Default release stays pinned; recovery is opt-in only.
+    assert "SW_BUILD='1.2.5-bseedv8u4'" in text
+    assert "FILE_VERSION_HEX='0x12053007'" in text
+
+
+def test_pm_router_builds_from_client_return_wrapper():
+    text = BUILD.read_text(encoding="utf-8")
+    assert "CLIENT_IMAGE_TYPE=65024" in text
+    assert 'FROM_CLIENT_OTA="$OUT_DIR/from-client.ota"' in text
+    assert 'OTA_IMAGE_TYPE="$CLIENT_IMAGE_TYPE"' in text
+    assert '"fromClientOtaHeader"' in text
+    assert '"clientReturn"' in text
+    assert "[12, 13]" in text
+    assert "from_tuya" in text.lower()
+
+
 def test_release_handoff_scripts_parse_before_executor_use():
     subprocess.run(["bash", "-n", str(BUILD)], cwd=ROOT, check=True)
     compile(

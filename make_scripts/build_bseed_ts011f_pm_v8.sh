@@ -12,6 +12,8 @@ BOARD='OUTLET_BSEED_PM_TS011F'
 CANONICAL='b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;'
 MANUFACTURER_CODE=4417
 IMAGE_TYPE=43556
+# Experimental client identity, for the from-client return wrapper only.
+CLIENT_IMAGE_TYPE=65024
 STOCK_MANUFACTURER_NAME='_TZ3000_b28wrpvx'
 STOCK_IMAGE_TYPE=54179
 SW_BUILD='1.2.5-bseedv8u4'
@@ -29,6 +31,18 @@ if [[ "${BSEED_PM_ROUTER_CANDIDATE:-0}" == "1" ]]; then
     FILE_VERSION_DEC=302329872
     : "${BSEED_PM_ROUTER_CANDIDATE_OUTPUT:=build/bseed-ts011f-pm-router-v8u5-rc3}"
     set -- "$BSEED_PM_ROUTER_CANDIDATE_OUTPUT"
+fi
+
+# Opt-in, BUILD-ONLY PM Router recovery candidate for the client-to-router
+# return path. v8u5-rc4 carries the bounded PM legacy-migration quarantine;
+# FILEVER is the next monotonic value above the cli8/from-router 0x12053010
+# pair, per bseed_ota_identity suggest-next. Published v8u4 stays immutable.
+if [[ "${BSEED_PM_ROUTER_RECOVERY:-0}" == "1" ]]; then
+    SW_BUILD='1.2.5-bseedv8u5-rc4'
+    FILE_VERSION_HEX='0x12053011'
+    FILE_VERSION_DEC=302329873
+    : "${BSEED_PM_ROUTER_RECOVERY_OUTPUT:=build/bseed-ts011f-pm-router-v8u5-rc4}"
+    set -- "$BSEED_PM_ROUTER_RECOVERY_OUTPUT"
 fi
 VOLTAGE_MULTIPLIER=161460
 CURRENT_MULTIPLIER=144679
@@ -104,6 +118,7 @@ db_mcu="${db_values[7]}"
 }
 
 BIN="$OUT_DIR/forward.bin"
+FROM_CLIENT_OTA="$OUT_DIR/from-client.ota"
 OTA="$OUT_DIR/forward.ota"
 FROM_TUYA_OTA="$OUT_DIR/from_tuya.ota"
 
@@ -146,10 +161,23 @@ make -C src/telink ota \
     OTA_IMAGE_TYPE="$STOCK_IMAGE_TYPE" \
     OTA_VERSION=0xFFFFFFFF
 
+# Already-custom client -> router return wrapper. The compiled payload is
+# identical to forward.ota after the OTA header; only the OUTER OTA image
+# type matches the existing BSEED client so the stranded client accepts it.
+# Never publish this in an index.
+make -C src/telink ota \
+    "${COMMON_ARGS[@]}" \
+    BIN_FILE="$BIN" \
+    OTA_FILE="$FROM_CLIENT_OTA" \
+    OTA_MANUFACTURER_ID="$MANUFACTURER_CODE" \
+    OTA_IMAGE_TYPE="$CLIENT_IMAGE_TYPE" \
+    OTA_VERSION="$FILE_VERSION_HEX"
+
 python3 - "$OUT_DIR" "$BOARD" "$SW_BUILD" "$FILE_VERSION_DEC" \
     "$MANUFACTURER_CODE" "$IMAGE_TYPE" "$STOCK_MANUFACTURER_NAME" \
     "$STOCK_IMAGE_TYPE" "$NVM_SCHEMA" "$CANONICAL" \
-    "$VOLTAGE_MULTIPLIER" "$CURRENT_MULTIPLIER" "$POWER_MULTIPLIER" <<'PY'
+    "$VOLTAGE_MULTIPLIER" "$CURRENT_MULTIPLIER" "$POWER_MULTIPLIER" \
+    "$CLIENT_IMAGE_TYPE" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -173,6 +201,7 @@ import sys
     voltage_multiplier,
     current_multiplier,
     power_multiplier,
+    client_image_type,
 ) = sys.argv[1:]
 out = pathlib.Path(out_dir)
 file_version = int(file_version)
@@ -180,6 +209,7 @@ manufacturer = int(manufacturer)
 image_type = int(image_type)
 stock_image_type = int(stock_image_type)
 nvm_schema = int(nvm_schema)
+client_image_type = int(client_image_type)
 voltage_multiplier = int(voltage_multiplier)
 current_multiplier = int(current_multiplier)
 power_multiplier = int(power_multiplier)
@@ -187,7 +217,8 @@ power_multiplier = int(power_multiplier)
 bin_path = out / "forward.bin"
 ota_path = out / "forward.ota"
 from_tuya_path = out / "from_tuya.ota"
-for path in (bin_path, ota_path, from_tuya_path):
+from_client_path = out / "from-client.ota"
+for path in (bin_path, ota_path, from_tuya_path, from_client_path):
     if not path.is_file() or path.stat().st_size == 0:
         raise SystemExit(f"missing/empty artifact: {path}")
 
@@ -225,6 +256,7 @@ def parse_header(path: pathlib.Path) -> dict[str, int]:
 
 
 normal_header = parse_header(ota_path)
+client_header = parse_header(from_client_path)
 stock_header = parse_header(from_tuya_path)
 if normal_header["manufacturerCode"] != manufacturer:
     raise SystemExit("normal OTA manufacturer mismatch")
@@ -238,6 +270,12 @@ if stock_header["imageType"] != stock_image_type:
     raise SystemExit("from-Tuya OTA stock image type mismatch")
 if stock_header["fileVersion"] != 0xFFFFFFFF:
     raise SystemExit("from-Tuya OTA version must be 0xFFFFFFFF")
+if client_header["manufacturerCode"] != manufacturer:
+    raise SystemExit("from-client OTA manufacturer mismatch")
+if client_header["imageType"] != client_image_type:
+    raise SystemExit("from-client OTA image type mismatch")
+if client_header["fileVersion"] != file_version:
+    raise SystemExit("from-client OTA file version mismatch")
 
 normal_bytes = ota_path.read_bytes()
 stock_bytes = from_tuya_path.read_bytes()
@@ -245,6 +283,18 @@ if len(normal_bytes) != len(stock_bytes):
     raise SystemExit("normal/from-Tuya OTA sizes differ")
 if normal_bytes[56:] != stock_bytes[56:]:
     raise SystemExit("from-Tuya wrapper changed bytes after the 56-byte OTA header")
+client_bytes = from_client_path.read_bytes()
+if len(normal_bytes) != len(client_bytes):
+    raise SystemExit("normal/from-client OTA sizes differ")
+if normal_bytes[56:] != client_bytes[56:]:
+    raise SystemExit("from-client wrapper changed bytes after the 56-byte OTA header")
+client_diff_offsets = [
+    i for i, (normal, client) in enumerate(zip(normal_bytes, client_bytes))
+    if normal != client
+]
+if client_diff_offsets != [12, 13]:
+    raise SystemExit(
+        f"unexpected from-client wrapper diff offsets {client_diff_offsets}")
 diff_offsets = [
     i for i, (normal, stock) in enumerate(zip(normal_bytes, stock_bytes))
     if normal != stock
@@ -290,6 +340,13 @@ manifest = {
         "destinationItems": {"energyEndpoint1": 64, "calibration": 68, "overload": 69},
         "copyOnly": True,
     },
+    "clientReturn": {
+        "clientManufacturerCode": manufacturer,
+        "clientImageType": client_image_type,
+        "wrapperFileVersion": file_version,
+        "headerDiffOffsets": client_diff_offsets,
+        "payloadFromByte56Identical": True,
+    },
     "stockConversion": {
         "stockManufacturerName": stock_manufacturer_name,
         "stockManufacturerCode": manufacturer,
@@ -301,10 +358,11 @@ manifest = {
     "artifacts": {},
     "otaHeader": normal_header,
     "fromTuyaOtaHeader": stock_header,
+    "fromClientOtaHeader": client_header,
     "note": "BUILD ONLY; no publication, device-config write, or device flash performed",
 }
 
-for path in (bin_path, ota_path, from_tuya_path):
+for path in (bin_path, ota_path, from_tuya_path, from_client_path):
     data = path.read_bytes()
     manifest["artifacts"][path.name] = {
         "bytes": len(data),
