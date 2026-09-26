@@ -98,6 +98,24 @@ after configure.
 - Relay is ON (owner toggled during testing; preflash baseline OFF untouched by us).
   Calibrations and EP1 reporting stay: still a raw-stream cli8, still needed.
 - Image server stopped; Z2M config untouched; join windows closed.
+
+## Outcome 2026-09-26 ~18:50 — ROUTER ACHIEVED via native rc5, with caveats
+
+- The staged rc4 wrapper taught us the device queries OTA as (4417, **43556**, 873)
+  after a transfer. Native rc5 (43556, 874) offered as a same-query-type upgrade:
+  check passed, transfer 100%, device rebooted and came back as **Router**
+  (fresh node descriptor + full re-interview 18:46, all genBasic read live).
+- Relay is **OFF** after the reboot (power-on behavior `off`); the connected load is off.
+- **Defect 4 (new): stale swBuildId string.** The running rc5 reports
+  `swBuildId "1.2.5-bseedcli8"` despite FILEVER 874 / dateCode 20260926 / Router role.
+  The build bumps the OTA header version but not the ZCL string. Campaign metadata
+  correctly refuses to accept it (postflash build mismatch).
+- **Executor read-path fix functionally ineffective on hardware.** Direct reads of EP1
+  0x0B04 (measurementType, rmsVoltage, rmsCurrent, activePower, all divisors) still
+  return 139 on the booted rc5, exactly as on cli8. Compiles green, does not work.
+  Calibrations stay; divisors still served nowhere.
+- Campaign lock remains `ota_transfer_ok_postflash_unverified` (truthful). Image server
+  stopped again; MQTT standard.
 - Do not repeat the failed wrapper attempt without apply-stage evidence. Validate
   `cli10` with the client `forward.ota`; rc5 shares cli10's version and cannot be
   its next return target. The separate rc6 package and unresolved apply-stage
