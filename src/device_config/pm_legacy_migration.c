@@ -94,6 +94,7 @@ static void quarantine_legacy_pm_items(void) {
 
 static bool run_legacy_pm_copies(void) {
     uint8_t buffer[32];
+
     if (!copy_item_if_destination_absent(
             LEGACY_PM_ENERGY_EP1, NV_ITEM_ENERGY_ACCUMULATION(1),
             sizeof(pm_energy_nv_t), buffer, "energy")) {
@@ -111,6 +112,7 @@ static bool run_legacy_pm_copies(void) {
     }
     return true;
 }
+
 #endif /* BSEED_PM_B28WRPVX quarantine helpers */
 
 bool migrate_legacy_bseed_pm_nvm(void) {
@@ -130,7 +132,7 @@ bool migrate_legacy_bseed_pm_nvm(void) {
 
     /* Bounded attempts: a persistently failing copy must quarantine the
      * poison legacy items and boot with defaults, never reboot-loop. */
-    uint32_t attempts = 0;
+    uint32_t         attempts   = 0;
     hal_nvm_status_t counter_st = hal_nvm_read(
         NV_ITEM_PM_MIGRATION_ATTEMPTS, sizeof(attempts),
         (uint8_t *)&attempts);
