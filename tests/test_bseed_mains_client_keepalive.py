@@ -6,7 +6,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 def test_mains_client_refreshes_parent_on_initial_join_and_rejoin():
     source=(ROOT/'src/telink/hal/zigbee_network.c').read_text()
-    assert '#define MAINS_CLIENT_KEEPALIVE_POLL_MS 60000u' in source
+    assert re.search(r'^#define\s+MAINS_CLIENT_KEEPALIVE_POLL_MS\s+60000u\b', source, re.MULTILINE)
     assert 'zb_setPollRate(MAINS_CLIENT_KEEPALIVE_POLL_MS)' in source
     # join + commissioning-success + OTA-restore (hal_zigbee_set_ota_poll_active)
     assert source.count('configure_mains_client_keepalive();')==3

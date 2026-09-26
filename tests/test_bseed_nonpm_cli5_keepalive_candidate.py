@@ -1,4 +1,5 @@
 """Keep the non-PM parent-keepalive candidate separate from released CLI4."""
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,7 +24,7 @@ def test_client_uses_poll_keepalive_on_initial_join_and_rejoin():
     assert '-DEND_DEVICE=1' in CLIENT
     assert '-DZB_MAC_RX_ON_WHEN_IDLE=1' in CLIENT
     assert '-DBSEED_MAINS_CLIENT=1' in CLIENT
-    assert '#define MAINS_CLIENT_KEEPALIVE_POLL_MS 60000u' in NET
+    assert re.search(r'^#define\s+MAINS_CLIENT_KEEPALIVE_POLL_MS\s+60000u\b', NET, re.MULTILINE)
     assert NET.count('configure_mains_client_keepalive();') == 3
     assert 'case BDB_COMMISSION_STA_PARENT_LOST:' in NET
     assert 'zb_rejoinReqWithBackOff(' in NET
