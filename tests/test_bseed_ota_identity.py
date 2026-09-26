@@ -133,3 +133,15 @@ def test_suggest_next_and_emit_make_vars(tmp_path):
         emit_make_vars(reg, 65026, "1.1.2-bseedcli4")
     with pytest.raises(IdentityError, match="shared-identity"):
         suggest_next(reg, 54179)
+
+
+@pytest.mark.parametrize('build', ['1.2.5-bseedv8u5-rc7', '', '1.2.5-bseedr\u00e9'])
+def test_new_build_allocation_rejects_invalid_basic_string(tmp_path, build):
+    with pytest.raises(IdentityError, match='1..16 ASCII bytes'):
+        emit_make_vars(registry(tmp_path), 65026, build)
+
+
+def test_new_build_allocation_accepts_exactly_16_bytes(tmp_path):
+    build = '1.2.5-bseedr1234'
+    assert len(build) == 16
+    assert emit_make_vars(registry(tmp_path), 65026, build)['VERSION_STR'] == build

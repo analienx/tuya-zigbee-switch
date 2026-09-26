@@ -1,4 +1,59 @@
-# PM client defects: unreadable EP1 measurement cluster, dead OTA query loop, unmetered fresh joins
+# PM investigation: reporting, OTA startup, provisioning and build identity
+
+## Latest correction: 2026-09-26 19:00 Europe/Prague
+
+WorkroomSocketCabinet is now a **Router running rc5**. Read-only inspection of
+the existing HA logs confirmed its fresh node descriptor, the actual Basic
+read response and spontaneous OTA query. Two conclusions below were incorrect:
+
+- At 18:46:17, EP1 Basic Read Attributes response, transaction 6, attribute
+  `0x4000`, status 0, contains **`1.2.5-bseedv8u5-rc5`**. Immediately afterwards
+  Herdsman logs `Ignoring attribute swBuildId from response` because the maximum
+  length is 16. The 19-byte firmware string is correct for the built image but
+  violates that limit. `cli8` is the retained database value, not the wire reply.
+  The downloaded, sealed rc5 artifact embeds rc5 and contains no cli8 string.
+- At 18:45:46 the 139 results came from `device/reporting/read`, which invokes
+  `endpoint.readReportingConfig()`. These are Read Reporting Configuration
+  results (`0x8B`, NOT_FOUND), **not Read Attributes results** (`readRsp`). They
+  do not prove measurement values or divisors are unreadable. Unsupported
+  Attribute is `0x86` (134). Missing reporting entries, including entries that
+  need not exist for fixed scale attributes, are a different question.
+- At 18:57:36 the device's own OTA query reports manufacturer 4417, image type
+  43556 and version 302329874. Together with the Router node descriptor and
+  actual rc5 wire string this corroborates the new running image.
+
+The historical observations below are retained with these corrections. Do not
+write another speculative PM read-path patch on the strength of status 139.
+The earlier optional SDK-cluster-handler change is still hardware-unverified;
+these reporting-configuration probes prove neither its success nor its failure.
+
+### Required next actions
+
+1. Keep rc5/rc6 hashes immutable. A metadata repair needs a **new version** and
+   a build ID of at most 16 ASCII bytes (for example `1.2.5-bseedr7`, subject to
+   allocation). `emit-make-vars` now rejects overlength/non-ASCII new IDs.
+   This guard prevents new allocation mistakes; it does not modify running rc5.
+2. rc6 has the same 19-byte naming defect. It is not a suitable next deployment
+   candidate. Do not flash it merely to remedy the stale cached string.
+3. Use genuine endpoint-1 ZCL **Read Attributes**, with transaction-matched raw
+   `readRsp` evidence, for measurement values and scale attributes. Verify that
+   the request is on EP1, then separately inspect reporting configuration.
+   Do not interpret an MQTT value or reporting-config reply as an attribute read.
+4. A scale read may populate Z2M's scale cache and change conversion. Coordinate
+   that test with a snapshot of the current scaling/calibration state and
+   removal of temporary compensation only when effective conversion is verified;
+   otherwise voltage/current/energy can become double-corrected. Do not remove
+   calibrations merely because firmware was offered or an interview succeeded.
+5. Retain the campaign's unverified state until the metadata contract, reporting,
+   scaling and retention checks pass. Relay OFF is the reported post-reboot state;
+   this investigation sent no relay commands, reads, configuration or OTA requests.
+
+Evidence was inspected read-only at 18:58–19:00 Europe/Prague. Full live logs and
+database remain private on HA. Protocol references: Zigbee2MQTT
+`lib/extension/bridge.ts::deviceReportingRead`, Herdsman
+`src/zspec/zcl/definition/status.ts`, and firmware `src/zigbee/basic_cluster.c`.
+
+## Historical hypotheses before raw-frame verification
 
 Fleet-proven tonight on `WorkroomSocketCabinet` (TS011F-BS-PM `b28wrpvx`, client `1.2.5-bseedcli8`)
 plus sibling clients (`cli6`) and a `v8u4` router. Router image assumed okayish; the **client
@@ -14,8 +69,9 @@ Live `reporting/read` results (Zigbee2MQTT bridge requests, per-attribute status
 - v8u4 router: measurement values read OK (status 0), divisors 139.
 
 Meanwhile device-pushed attribute **reports work everywhere** (power/voltage/current stream
-once reporting is configured). So the attribute tables are fine — the **ZCL read path** for
-HAL-registered PM clusters is broken. Source already registers everything correctly
+once reporting is configured). The initial interpretation was a broken ZCL read path;
+the reporting/configuration distinction above invalidates that inference from status 139.
+Source registers attributes in
 (`src/zigbee/electrical_measurement_cluster.c` `SETUP_ATTR` 0–26, correct 0x0600–0x0605 IDs
 in `src/zigbee/consts.h`; cli8 was built from this source). Prime suspect: the HAL
 registration in `src/telink/hal/zigbee_zcl.c` (`register_pm_electrical_attrs`, registered
@@ -106,24 +162,24 @@ after configure.
   check passed, transfer 100%, device rebooted and came back as **Router**
   (fresh node descriptor + full re-interview 18:46, all genBasic read live).
 - Relay is **OFF** after the reboot (power-on behavior `off`); the connected load is off.
-- **Defect 4 (new): stale swBuildId string.** The running rc5 reports
-  `swBuildId "1.2.5-bseedcli8"` despite FILEVER 874 / dateCode 20260926 / Router role.
-  The build bumps the OTA header version but not the ZCL string. Campaign metadata
-  correctly refuses to accept it (postflash build mismatch).
-- **Executor read-path fix functionally ineffective on hardware.** Direct reads of EP1
-  0x0B04 (measurementType, rmsVoltage, rmsCurrent, activePower, all divisors) still
-  return 139 on the booted rc5, exactly as on cli8. Compiles green, does not work.
-  Calibrations stay; divisors still served nowhere.
+- **Defect 4: invalid-length swBuildId.** Database metadata remains `cli8`, but
+  the actual wire reply is rc5. Herdsman discards the 19-byte string (limit 16).
+  Campaign metadata correctly refuses the stale cached build.
+- **PM read-path outcome remains unverified.** The EP1 status-139 probes were
+  reporting-configuration reads. They cannot establish whether measurement or
+  divisor attribute reads work. Keep calibrations pending a coordinated scale test.
 - Campaign lock remains `ota_transfer_ok_postflash_unverified` (truthful). Image server
   stopped again; MQTT standard.
-- Do not repeat the failed wrapper attempt without apply-stage evidence. Validate
-  `cli10` with the client `forward.ota`; rc5 shares cli10's version and cannot be
-  its next return target. The separate rc6 package and unresolved apply-stage
-  investigation are recorded in [Client-to-Router plan](bseed_pm_client_to_router_20260926.md).
+- Do not repeat the failed wrapper attempt or offer cli10 to this now-Router
+  socket. The former cli8-to-cli10 diagnostic proposal is superseded for this
+  device. Remaining identity/protocol issues and rc6 limitations are recorded in
+  [Client-to-Router plan](bseed_pm_client_to_router_20260926.md).
 
 ## Operational context (do not "fix" these in firmware)
 
 - `WorkroomSocketCabinet` currently carries temporary Z2M percentual calibrations
   (`voltage_calibration: -99`, `current/end: -99.9`) compensating the raw stream; they must be
-  **removed if/when** scaled reads work, and **kept** if the first router image still 139s
-  divisors. The rc4 role transition failed at apply; the socket remains cli8.
+  removed when effective scaling is verified and coordinated with the scale cache.
+  Status 139 from reporting/configuration is not evidence about divisors. The
+  socket now runs rc5 Router; its cached Basic build still says cli8 due to the
+  overlength rc5 string.

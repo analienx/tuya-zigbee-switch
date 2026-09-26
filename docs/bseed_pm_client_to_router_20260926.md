@@ -1,5 +1,27 @@
 # PM Client to Router: package and apply-path evidence
 
+## Superseding hardware evidence: 2026-09-26 19:00 Europe/Prague
+
+WorkroomSocketCabinet returned as a Router after the native rc5 offer recorded
+in `e691c26a`. Existing raw HA logs independently corroborate Router node type,
+an EP1 Basic `readRsp` containing rc5 at 18:46:17, and a spontaneous Router-type
+OTA query at version 302329874 at 18:57:36. The old cli8-to-cli10 proposal below
+is no longer the next step for this device. Do not offer a Client image to it.
+
+The rc5 wire build string is **19 bytes**; Herdsman rejects it against its
+16-byte limit and leaves cli8 in the database. rc6 has the same naming defect
+and is **withdrawn as a next deployment candidate**. Its sealed hashes remain
+historical evidence. A metadata repair requires a freshly allocated version
+and short build string; the mandatory allocator now rejects IDs over 16 bytes.
+
+The reported PM status-139 failures were Read Reporting Configuration replies,
+not Read Attributes replies. They do not establish failed divisor/value reads.
+See the [corrected evidence and next actions](bseed_pm_client_defects_20260926.md).
+Neither the earlier rc4 application failure's cause nor the PM read contract is
+settled by these observations. No further OTA or relay command was sent here.
+
+## Historical package and proposed sequence
+
 The additional offline candidate is Router `1.2.5-bseedv8u5-rc6`, version
 `0x12053013` (302329875). It contains rc5's source changes with a new compiled
 version/build identity, not a new boot/apply fix. The PM workflow builds both

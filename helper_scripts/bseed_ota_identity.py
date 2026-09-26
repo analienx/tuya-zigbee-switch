@@ -157,6 +157,11 @@ def suggest_next(registry, image_type):
 
 
 def emit_make_vars(registry, image_type, version_str):
+    # Basic 0x4000 is limited to 16 octets. Herdsman drops longer read replies
+    # and retains the previous cached build, even when the new firmware boots.
+    # Validate new allocations without relabeling immutable historical images.
+    if not version_str.isascii() or not 1 <= len(version_str) <= 16:
+        raise IdentityError("new VERSION_STR must be 1..16 ASCII bytes for ZCL swBuildId")
     nxt = suggest_next(registry, image_type)
     for entry in registry[image_type]["versions"]:
         if entry.get("version_str") == version_str:
