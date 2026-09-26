@@ -78,6 +78,7 @@ static bool copy_item_if_destination_absent(uint16_t legacy_item,
 
 #endif
 
+#ifdef BSEED_PM_B28WRPVX
 #define PM_MIGRATION_MAX_ATTEMPTS    3u
 
 static void quarantine_legacy_pm_items(void) {
@@ -110,6 +111,7 @@ static bool run_legacy_pm_copies(void) {
     }
     return true;
 }
+#endif /* BSEED_PM_B28WRPVX quarantine helpers */
 
 bool migrate_legacy_bseed_pm_nvm(void) {
 #ifndef BSEED_PM_B28WRPVX
