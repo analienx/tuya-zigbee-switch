@@ -54,6 +54,16 @@ def test_both_role_meter_scaling_is_identical_in_shared_source():
     assert 'if (current_energy >= cluster->last_energy_value)' in metering
 
 
+def test_router_recovery_candidate_pins_next_monotonic_version():
+    build = (ROOT / 'make_scripts/build_bseed_ts011f_pm_v8.sh').read_text(encoding='utf8')
+    assert 'BSEED_PM_ROUTER_RECOVERY:-0' in build
+    assert "SW_BUILD='1.2.5-bseedv8u5-rc4'" in build
+    assert "FILE_VERSION_HEX='0x12053011'" in build
+    assert "FILE_VERSION_DEC=302329873" in build
+    assert 'BSEED_PM_ROUTER_RECOVERY_OUTPUT' in build
+    assert 'FROM_CLIENT_OTA="$OUT_DIR/from-client.ota"' in build
+
+
 def test_router_candidate_is_new_image_not_relabelled_published_v8u4():
     build=(ROOT/'make_scripts/build_bseed_ts011f_pm_v8.sh').read_text(encoding='utf8')
     assert "SW_BUILD='1.2.5-bseedv8u4'" in build

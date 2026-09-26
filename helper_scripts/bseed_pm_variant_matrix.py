@@ -27,10 +27,10 @@ ROLE_TESTS = {'Router': ('tests/test_bseed_pm_v8_release.py',
                          'tests/test_bseed_golden_role_distribution.py'),
               'EndDevice': ('tests/test_bseed_mains_client.py',
                             'tests/test_bseed_mains_client_keepalive.py')}
-ROUTER = {'role': 'Router', 'build': '1.2.5-bseedv8u5-rc3',
-          'version': 0x12053010, 'type': 43556, 'artifact': 'forward.ota'}
-CLIENT = {'role': 'EndDevice', 'build': '1.2.5-bseedcli8',
-          'version': 0x12053010, 'type': 65024, 'artifact': 'forward.ota'}
+ROUTER = {'role': 'Router', 'build': '1.2.5-bseedv8u5-rc4',
+          'version': 0x12053011, 'type': 43556, 'artifact': 'forward.ota'}
+CLIENT = {'role': 'EndDevice', 'build': '1.2.5-bseedcli9',
+          'version': 0x12053011, 'type': 65024, 'artifact': 'forward.ota'}
 
 def run(command, *, env=None):
     result = subprocess.run(command, cwd=ROOT, env=env, text=True,
@@ -94,8 +94,8 @@ def main(argv=None):
         print(json.dumps(result, indent=2)); return 0
     if run(['git', 'status', '--porcelain']).strip():
         raise RuntimeError('Build matrix requires clean tracked and untracked sources')
-    router_env = dict(os.environ, BSEED_PM_ROUTER_CANDIDATE='1',
-                      BSEED_PM_ROUTER_CANDIDATE_OUTPUT=str(output / 'router'))
+    router_env = dict(os.environ, BSEED_PM_ROUTER_RECOVERY='1',
+                      BSEED_PM_ROUTER_RECOVERY_OUTPUT=str(output / 'router'))
     run(['bash', 'make_scripts/build_bseed_ts011f_pm_v8.sh'], env=router_env)
     result['artifacts'].append(verify_artifact(output / 'router', ROUTER, head))
     run(['bash', 'make_scripts/build_bseed_mains_client.sh', 'pm',
