@@ -84,6 +84,20 @@ after configure.
 - Campaign lock: `ota_transfer_ok_postflash_unverified`. Private workdir (outside git):
   `bseed-ota-workroom/campaign-workroom-return`.
 
+## Outcome 2026-09-26 ~17:45 — cross-role OTA TRANSFERRED but NOT APPLIED
+
+- After owner power-cycle + re-pair, fresh interview proves the socket still runs
+  **`1.2.5-bseedcli8` EndDevice** (new NWK 14131, interview SUCCESSFUL). No router.
+  Z2M `update.installed_version 302329873` is transfer bookkeeping, not running firmware.
+- Reconstruction: `upgradeEnd` OK 16:55:30 but the device never rebooted into the new
+  image (no announce in 30 min; interim interviews failed). Owner power-cycle cleared
+  what looks like a hung OTA state machine; the Telink bootloader never swapped, or the
+  reboot never happened. The client-header/router-payload wrapper (`from-client.ota`)
+  strategy fails at the apply step — transfer success does not imply role change.
+- Relay is ON (owner toggled during testing; preflash baseline OFF untouched by us).
+  Calibrations and EP1 reporting stay: still a raw-stream cli8, still needed.
+- Image server stopped; Z2M config untouched; join windows closed.
+
 ## Operational context (do not "fix" these in firmware)
 
 - `WorkroomSocketCabinet` currently carries temporary Z2M percentual calibrations
