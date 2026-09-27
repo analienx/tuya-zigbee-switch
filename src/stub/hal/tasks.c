@@ -27,14 +27,17 @@ void stub_tasks_poll(void) {
         tasks_executed = 0;
         for (int i = 0; i < MAX_TASKS; i++) {
             if (tasks[i].active && current_time >= tasks[i].scheduled_time) {
-                if (tasks[i].task && tasks[i].task->handler) {
+                hal_task_t *task = tasks[i].task;
+                /* Retire this event before invoking its handler. A callback
+                 * may schedule the same task again into this slot. */
+                tasks[i].active = 0;
+                if (task && task->handler) {
                     io_log("TASKS", "Executing task %p from slot %d",
-                           (void *)tasks[i].task, i);
-                    tasks[i].task->handler(tasks[i].task->arg);
+                           (void *)task, i);
+                    task->handler(task->arg);
                     tasks_executed++;
                 }
-                tasks[i].active = 0;
-                io_log("TASKS", "Task completed and removed from slot %d", i);
+                io_log("TASKS", "Task callback completed from slot %d", i);
             }
         }
     } while (tasks_executed > 0);

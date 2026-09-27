@@ -60,6 +60,17 @@ int main(void) {
     assert(active_for(&reset_task) == 1);
     assert(reset_task.handler == reboot_handler);
 
+    /* Execute the retry through the scheduler, not directly: the handler's
+     * replacement must survive retirement of the current callback. */
+    hal_tasks_unschedule(&network_reset_task);
+    now_ms = 5000;
+    stub_tasks_poll();
+    assert(active_for(&reset_task) == 1);
+    prepare_ok = 1;
+    now_ms = 10000;
+    stub_tasks_poll();
+    assert(active_for(&reset_task) == 0);
+
     return 0;
 }
 '''

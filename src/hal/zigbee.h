@@ -40,9 +40,9 @@ typedef struct {
     uint8_t *        value;
 
     /* Maximum encoded value bytes accepted from a network Write Attributes
-     * record, including any ZCL string length prefix. Zero means size.
-     * This can be stricter than storage (e.g. calibration keeps full CHAR_STR
-     * storage but accepts only the application-defined payload maximum). */
+    * record, including any ZCL string length prefix. Zero means size.
+    * This can be stricter than storage (e.g. calibration keeps full CHAR_STR
+    * storage but accepts only the application-defined payload maximum). */
     uint16_t         write_max_size;
 } hal_zigbee_attribute;
 

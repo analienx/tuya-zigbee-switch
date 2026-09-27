@@ -24,7 +24,7 @@ typedef struct {
     uint64_t             last_reported_energy;
 
     /* False after an NVM read error. While false, the accumulated total is
-     * unknown and must never be persisted over the last good NVM record. */
+    * unknown and must never be persisted over the last good NVM record. */
     uint8_t              energy_baseline_valid;
 
     /* Delta seeding: after any (re)load the first valid meter reading seeds

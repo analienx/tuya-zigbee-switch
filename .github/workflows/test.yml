@@ -93,6 +93,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v3
         with:
@@ -107,6 +108,7 @@ jobs:
       - name: Install pinned converter runtime
         run: npm ci --ignore-scripts --prefix tests/zhc_runtime
       - name: Run tests
+        timeout-minutes: 15
         env:
           NODE_PATH: ${{ github.workspace }}/tests/zhc_runtime/node_modules
         shell: bash

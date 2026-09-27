@@ -67,6 +67,7 @@ def test_on_pulse(
     duration = 0
     while latching_device.get_gpio(cfg.on_pin) is True:
         duration += 1
+        assert duration <= 200, "ON pulse failed to end"
         latching_device.step_time(1)
     assert 50 <= duration <= 200
 
@@ -81,6 +82,7 @@ def test_off_pulse(
     duration = 0
     while latching_device.get_gpio(cfg.off_pin) is True:
         duration += 1
+        assert duration <= 200, "OFF pulse failed to end"
         latching_device.step_time(1)
     assert 50 <= duration <= 200
 
@@ -164,7 +166,9 @@ def test_mutual_exclusion_between_relays(
         toggle_all_relays(0x01 if iteration % 2 == 0 else 0x00)
         tracker.refresh(0, latching_device)
 
+        deadline = tracker.current_time + 1000
         while len(tracker.ended_pulses()) < len(pins_config):
+            assert tracker.current_time < deadline, "Relay pulse queue failed to drain"
             latching_device.step_time(10)
             tracker.refresh(10, latching_device)
             assert len(tracker.active_pulses()) <= 1
@@ -182,6 +186,7 @@ def test_mutual_no_exclusion_between_relays_all_on(
     relays_activated = [False] * len(pins_config)
     time_passed = 0
     while not all(relays_activated):
+        assert time_passed <= 120, "Simultaneous relay pulses failed to start"
         for i, cfg in enumerate(pins_config):
             if not relays_activated[i]:
                 if latching_simultenious_device.get_gpio(cfg.on_pin) is True:

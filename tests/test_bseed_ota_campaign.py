@@ -36,6 +36,20 @@ def profile(tmp_path):
       'postflash_role':'EndDevice','postflash_build':'expected-client', 'block_bytes':32}
 
 
+def _seed_transfer_locks(cfg, token='composition-token'):
+    from bseed_network_campaign_lock import acquire
+    work = Path(cfg['workdir'])
+    work.mkdir(parents=True, exist_ok=True)
+    cfg.update(network_lock_dir=str(work.parent / 'network-authority'),
+               network_id='test-network', network_lock_shared=True)
+    acquire(campaign.network_lock_path(cfg, required=True),
+            network_id=cfg['network_id'], token=token, device=cfg['device'],
+            ieee=cfg['ieee'], image_sha256=cfg['sha256'])
+    (work / 'ACTIVE_LOCK.json').write_text(json.dumps(dict(
+        ieee=cfg['ieee'], sha256=cfg['sha256'], token=token,
+        phase='ota_transfer_ok_postflash_unverified')))
+
+
 def test_profile_rejects_missing_private_fields(tmp_path):
     source=tmp_path/'target.json';source.write_text('{}')
     with pytest.raises(ValueError,match='Missing profile fields'): campaign.load_profile(source)
@@ -113,6 +127,7 @@ def test_transition_requires_scoped_rejoin_route_before_flashing(tmp_path,monkey
 
 def test_transition_orders_flash_join_metadata_postflash(tmp_path,monkeypatch):
     cfg=profile(tmp_path);cfg['join_via']='KnownRouter';path=tmp_path/'role.json'
+    _seed_transfer_locks(cfg)
     path.write_text(json.dumps(cfg));monkeypatch.setattr(sys,'argv',
         ['campaign','--profile',str(path),'--mode','transition','--confirm-ieee',cfg['ieee']])
     with patch('bseed_ota_campaign.subprocess.call',return_value=0) as call:
@@ -159,6 +174,7 @@ def test_pm_transition_fails_before_firmware_write_if_provision_unavailable(tmp_
 def test_pm_transition_orders_provision_before_postflash(tmp_path,monkeypatch):
     cfg=profile(tmp_path);cfg.update(require_pm=True,join_via='KnownRouter',
            pm_ssh_host='127.0.0.1',pm_ssh_key=str(tmp_path/'key'))
+    _seed_transfer_locks(cfg)
     path=tmp_path/'role.json';path.write_text(json.dumps(cfg))
     monkeypatch.setattr(sys,'argv',['campaign','--profile',str(path),'--mode','transition',
                                     '--confirm-ieee',cfg['ieee']])
@@ -173,6 +189,7 @@ def test_pm_transition_orders_provision_before_postflash(tmp_path,monkeypatch):
 def test_same_role_pm_flash_runs_provision_and_postflash(tmp_path,monkeypatch):
     cfg=profile(tmp_path);cfg.update(require_pm=True,preflash_role='EndDevice',
         pm_ssh_host='127.0.0.1',pm_ssh_key=str(tmp_path/'key'))
+    _seed_transfer_locks(cfg)
     path=tmp_path/'pm.json';path.write_text(json.dumps(cfg))
     monkeypatch.setattr(sys,'argv',['campaign','--profile',str(path),'--mode','flash',
                                     '--confirm-ieee',cfg['ieee']])
@@ -249,6 +266,7 @@ def test_router_candidate_requires_exact_matrix_and_relay_proof(tmp_path):
 
 def test_same_role_router_interview_precedes_audit_and_postflash(tmp_path,monkeypatch):
     cfg=_router_candidate_profile(tmp_path)
+    _seed_transfer_locks(cfg)
     src=tmp_path/'router.json';src.write_text(json.dumps(cfg))
     monkeypatch.setattr(sys,'argv',['campaign','--profile',str(src),'--mode','flash',
                                     '--confirm-ieee',cfg['ieee']])
@@ -483,6 +501,7 @@ class _FakePmBridge:
 
 
 def _begin_pm_campaign_guard(tmp_path, monkeypatch, cfg, token):
+    _seed_transfer_locks(cfg, token)
     loaded = campaign.load_profile(_write_profile(tmp_path, cfg, 'pm-transition.json'))
     work = Path(loaded['workdir'])
     work.mkdir(parents=True, exist_ok=True)
