@@ -266,7 +266,7 @@ def test_overlong_calibration_restores_retained_value(tmp_path):
     assert 'ev_buf_free(arg)' in gate
     header = (ROOT / 'src/zigbee/electrical_measurement_cluster.h').read_text()
     assert 'str[255]' in header
-    assert 'ELEC_MEAS_CALIBRATION_STR_APP_MAX 36' in header
+    assert '#define ELEC_MEAS_CALIBRATION_STR_APP_MAX 36' in ' '.join(header.split())
 
 
 BLOB_CODE = r'''
