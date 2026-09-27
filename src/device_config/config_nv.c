@@ -657,6 +657,7 @@ static bool bseed_socket_board_config_is_valid(const uint8_t *data,
     return size == sizeof(approved) - 1u &&
            memcmp(data, approved, sizeof(approved) - 1u) == 0;
 }
+
 #endif
 
 bool device_config_is_valid(const uint8_t *data, uint16_t size) {

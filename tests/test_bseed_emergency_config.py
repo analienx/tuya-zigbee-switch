@@ -13,6 +13,9 @@ def test_emergency_state_is_exact_minimal_and_not_a_persistable_board_config(tmp
 #include <assert.h>
 #include "device_config/config_nv.c"
 static unsigned writes;
+hal_nvm_status_t hal_nvm_read(uint8_t item, uint16_t size, uint8_t *data) {
+    return HAL_NVM_NOT_FOUND;
+}
 hal_nvm_status_t hal_nvm_write(uint8_t item, uint16_t size, uint8_t *data) {
     writes++;
     return HAL_NVM_SUCCESS;
@@ -34,6 +37,6 @@ int main(void) {
     binary = tmp_path / 'minimal-test'
     subprocess.run(['cc', '-std=c99', '-DHAL_STUB', board,
                     '-DDEFAULT_CONFIG=bad;compiled;RB5;', '-ffunction-sections', '-fdata-sections',
-                    '-Wl,--gc-sections', '-I', str(ROOT / 'src'), '-x', 'c', '-', '-o', str(binary)],
+                    '-Wl,--gc-sections', '-I', str(ROOT / 'src'), str(ROOT / 'src/stub/hal/gpio.c'), '-x', 'c', '-', '-o', str(binary)],
                    input=code, text=True, capture_output=True, check=True)
     subprocess.run([str(binary)], check=True, timeout=5)

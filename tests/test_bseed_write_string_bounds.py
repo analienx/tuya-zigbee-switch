@@ -248,7 +248,7 @@ def _build_and_run(tmp_path, name, code):
     binary = tmp_path / name
     subprocess.run(['cc', '-std=c99', '-DHAL_STUB', '-DBSEED_PM_B28WRPVX=1',
                     '-ffunction-sections', '-fdata-sections', '-Wl,--gc-sections',
-                    '-I', str(ROOT / 'src'), '-x', 'c', '-', '-o', str(binary)],
+                    '-I', str(ROOT / 'src'), str(ROOT / 'src/stub/hal/gpio.c'), '-x', 'c', '-', '-o', str(binary)],
                    input=code, text=True, capture_output=True, check=True)
     subprocess.run([str(binary)], check=True, timeout=5)
 
@@ -349,6 +349,6 @@ def test_config_blob_restore_keeps_last_good(tmp_path):
     binary = tmp_path / 'config-blob-test'
     subprocess.run(['cc', '-std=c99', '-DHAL_STUB', '-DVERSION_STR=1.2.5-bseedr7',
                     '-ffunction-sections', '-fdata-sections', '-Wl,--gc-sections',
-                    '-I', str(ROOT / 'src'), '-x', 'c', '-', '-o', str(binary)],
+                    '-I', str(ROOT / 'src'), str(ROOT / 'src/stub/hal/gpio.c'), '-x', 'c', '-', '-o', str(binary)],
                    input=BLOB_CODE, text=True, capture_output=True, check=True)
     subprocess.run([str(binary)], check=True, timeout=5)

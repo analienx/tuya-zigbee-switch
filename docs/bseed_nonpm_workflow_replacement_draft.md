@@ -1,5 +1,11 @@
 # Proposed non-PM CI replacement — APPLIED as finding B remediation
 
+Current source status: the draft fixes are applied in PR #56. See
+[`docs/bseed_issue55_finalization.md`](https://github.com/analienx/tuya-zigbee-switch/blob/codex/issue-55-finalize-remediation/docs/bseed_issue55_finalization.md)
+for the superseding implementation and GitHub-hosted-only validation path.
+Pending-source/approval statements below are historical. Run no repository
+build, test, lint, verification or sealing on a local machine.
+
 Status: the replacement below was applied to
 `.github/workflows/bseed-nonpm-client-canary.yml` with an exact-head guard
 and pipefail-correct matrix logging. This draft is retained as the review

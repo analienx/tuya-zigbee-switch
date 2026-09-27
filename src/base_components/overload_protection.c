@@ -87,8 +87,8 @@ overload_action_t overload_protection_check(overload_protection_t *op,
 
     if (op->tripped && relay_is_on) {
         /* Protection owns re-arm.  If the physical output is energized while
-           the trip is still active, force it back off; never interpret this as
-           a manual reset of retries/lockout. */
+         * the trip is still active, force it back off; never interpret this as
+         * a manual reset of retries/lockout. */
         return OVERLOAD_ACTION_TURN_OFF;
     }
 

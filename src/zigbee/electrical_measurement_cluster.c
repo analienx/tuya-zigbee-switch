@@ -453,9 +453,9 @@ static void elec_meas_run_overload_protection(
     if (!relay || !data->valid)
         return;
 
-    int32_t power = energy_meter_get_instant_power(cluster->meter);
-    uint8_t energized = relay_cluster_is_physically_on(relay);
-    overload_action_t action = overload_protection_check(
+    int32_t           power     = energy_meter_get_instant_power(cluster->meter);
+    uint8_t           energized = relay_cluster_is_physically_on(relay);
+    overload_action_t action    = overload_protection_check(
         &cluster->overload, hal_millis(), data->voltage, data->current,
         power, energized, relay->startup_mode);
 

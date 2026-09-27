@@ -5,12 +5,12 @@
 /* ZCL foundation constants (ZCL-8 2.3.1; same values as SDK V3.7.2.0 zcl.h).
  * Kept local so this gate stays independent of the Telink SDK headers and
  * host-testable. */
-#define ZWSG_FRAME_TYPE_MASK       0x03
-#define ZWSG_FRAME_TYPE_PROFILE    0x00
-#define ZWSG_FRAME_MANU_SPECIFIC   0x04
-#define ZWSG_CMD_WRITE             0x02
-#define ZWSG_CMD_WRITE_UNDIVIDED   0x03
-#define ZWSG_CMD_WRITE_NO_RSP      0x05
+#define ZWSG_FRAME_TYPE_MASK        0x03
+#define ZWSG_FRAME_TYPE_PROFILE     0x00
+#define ZWSG_FRAME_MANU_SPECIFIC    0x04
+#define ZWSG_CMD_WRITE              0x02
+#define ZWSG_CMD_WRITE_UNDIVIDED    0x03
+#define ZWSG_CMD_WRITE_NO_RSP       0x05
 
 /* Fixed payload sizes, mirroring SDK zcl_getDataTypeLen (fixed types only).
  * Variable-length and unknown types return 0: the gate cannot size them and
@@ -24,6 +24,7 @@ static uint16_t zwsg_fixed_data_len(uint8_t data_type) {
     case ZCL_DATA_TYPE_INT8:
     case ZCL_DATA_TYPE_ENUM8:
         return 1;
+
     case ZCL_DATA_TYPE_DATA16:
     case ZCL_DATA_TYPE_BITMAP16:
     case ZCL_DATA_TYPE_UINT16:
@@ -33,11 +34,13 @@ static uint16_t zwsg_fixed_data_len(uint8_t data_type) {
     case ZCL_DATA_TYPE_CLUSTER_ID:
     case ZCL_DATA_TYPE_ATTR_ID:
         return 2;
+
     case ZCL_DATA_TYPE_DATA24:
     case ZCL_DATA_TYPE_BITMAP24:
     case ZCL_DATA_TYPE_UINT24:
     case ZCL_DATA_TYPE_INT24:
         return 3;
+
     case ZCL_DATA_TYPE_DATA32:
     case ZCL_DATA_TYPE_BITMAP32:
     case ZCL_DATA_TYPE_UINT32:
@@ -47,21 +50,25 @@ static uint16_t zwsg_fixed_data_len(uint8_t data_type) {
     case ZCL_DATA_TYPE_DATE:
     case ZCL_DATA_TYPE_BAC_OID:
         return 4;
+
     case ZCL_DATA_TYPE_DATA40:
     case ZCL_DATA_TYPE_BITMAP40:
     case ZCL_DATA_TYPE_UINT40:
     case ZCL_DATA_TYPE_INT40:
         return 5;
+
     case ZCL_DATA_TYPE_DATA48:
     case ZCL_DATA_TYPE_BITMAP48:
     case ZCL_DATA_TYPE_UINT48:
     case ZCL_DATA_TYPE_INT48:
         return 6;
+
     case ZCL_DATA_TYPE_DATA56:
     case ZCL_DATA_TYPE_BITMAP56:
     case ZCL_DATA_TYPE_UINT56:
     case ZCL_DATA_TYPE_INT56:
         return 7;
+
     case ZCL_DATA_TYPE_DATA64:
     case ZCL_DATA_TYPE_BITMAP64:
     case ZCL_DATA_TYPE_UINT64:
@@ -69,8 +76,10 @@ static uint16_t zwsg_fixed_data_len(uint8_t data_type) {
     case ZCL_DATA_TYPE_DOUBLE_PREC:
     case ZCL_DATA_TYPE_IEEE_ADDR:
         return 8;
+
     case ZCL_DATA_TYPE_128_BIT_SEC_KEY:
         return 16;
+
     default:
         return 0;
     }
@@ -101,7 +110,7 @@ static bool zwsg_string_capacity(const hal_zigbee_cluster *cluster,
             continue;
         }
         uint16_t prefix = zwsg_is_long_string(data_type) ? 2u : 1u;
-        uint16_t limit = attr->size;
+        uint16_t limit  = attr->size;
         if (attr->write_max_size && attr->write_max_size < limit) {
             limit = attr->write_max_size;
         }
@@ -131,8 +140,9 @@ bool zcl_write_string_gate_allows(const uint8_t *asdu, uint16_t asdu_len,
     if (asdu_len < header) {
         return false;
     }
+
     /* The command is the last header byte; records start immediately after
-       the 3-byte (or manufacturer-specific 5-byte) header. */
+     * the 3-byte (or manufacturer-specific 5-byte) header. */
     uint8_t cmd = asdu[header - 1u];
     if (cmd != ZWSG_CMD_WRITE && cmd != ZWSG_CMD_WRITE_UNDIVIDED &&
         cmd != ZWSG_CMD_WRITE_NO_RSP) {
@@ -180,12 +190,12 @@ bool zcl_write_string_gate_allows(const uint8_t *asdu, uint16_t asdu_len,
             uint16_t declared = record - 3u - prefix;
             uint16_t capacity = 0u;
             if (cluster && zwsg_string_capacity(cluster, attr_id, data_type,
-                                     &capacity) &&
+                                                &capacity) &&
                 declared > capacity) {
                 return false;
             }
         }
-        offset += record;
+        offset    += record;
         remaining -= record;
     }
     return true;

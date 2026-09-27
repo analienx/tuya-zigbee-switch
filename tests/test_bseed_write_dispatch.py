@@ -255,7 +255,7 @@ def test_write_dispatch_predicate_mirrors_sdk_acceptance(tmp_path):
     binary = tmp_path / 'write-dispatch-test'
     subprocess.run(['cc', '-std=c99', '-DHAL_STUB',
                     '-ffunction-sections', '-fdata-sections', '-Wl,--gc-sections',
-                    '-I', str(ROOT / 'src'), '-x', 'c', '-', '-o', str(binary)],
+                    '-I', str(ROOT / 'src'), str(ROOT / 'src/stub/hal/gpio.c'), '-x', 'c', '-', '-o', str(binary)],
                    input=PREDICATE_CODE, text=True, capture_output=True,
                    check=True)
     subprocess.run([str(binary)], check=True, timeout=5)
@@ -266,7 +266,7 @@ def test_mixed_write_dispatches_only_successful_records(tmp_path):
     subprocess.run(['cc', '-std=c99', '-DHAL_STUB', '-DVERSION_STR=1.2.5-bseedr7',
                     '-DDEFAULT_CONFIG=a;b;', '-ffunction-sections',
                     '-fdata-sections', '-Wl,--gc-sections',
-                    '-I', str(ROOT / 'src'), '-x', 'c', '-', '-o', str(binary)],
+                    '-I', str(ROOT / 'src'), str(ROOT / 'src/stub/hal/gpio.c'), '-x', 'c', '-', '-o', str(binary)],
                    input=DISPATCH_CODE, text=True, capture_output=True,
                    check=True)
     subprocess.run([str(binary)], check=True, timeout=5)

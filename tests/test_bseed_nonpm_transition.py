@@ -43,9 +43,23 @@ def test_canonical_transition_reaches_submission_only_with_exact_recovery(tmp_pa
         with pytest.raises(ValueError, match='not explicitly confirmed'): campaign.main()
         call.assert_not_called()
     monkeypatch.setattr(sys, 'argv', argv + ['--confirm-load-unplugged'])
+    # Model the runner's persistent ownership, not just its exit status.
+    from bseed_network_campaign_lock import acquire
+    cfg.update(network_lock_dir=str(tmp_path / 'authority'),
+               network_id='test-network', network_lock_shared=True)
+    path.write_text(json.dumps(cfg))
+    work = Path(cfg['workdir'])
+    work.mkdir(parents=True, exist_ok=True)
+    (work / 'ACTIVE_LOCK.json').write_text(json.dumps(dict(
+        phase='ota_transfer_ok_postflash_unverified', token='test-token')))
+    network = campaign.network_lock_path(cfg, required=True)
+    acquire(network, network_id=cfg['network_id'], token='test-token',
+            device=cfg['device'], ieee=cfg['ieee'], image_sha256=cfg['sha256'])
     with patch('bseed_ota_campaign.subprocess.call', return_value=0) as call:
         with pytest.raises(SystemExit) as done: campaign.main()
     assert done.value.code == 0
+    assert network.exists()
+    assert json.loads((work / 'ACTIVE_LOCK.json').read_text())['phase'] == 'postflash_candidate'
     first = call.call_args_list[0].args[0]
     assert '--confirm-load-unplugged' in first and '--campaign-profile' in first
     assert first[first.index('--role') + 1] == 'Router'

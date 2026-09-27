@@ -43,13 +43,13 @@ def test_three_separated_fresh_responses_are_required():
 def test_backend_probe_must_correlate_exact_read_response():
     p=profile()
     evidence=dict(schema=1,passed=True,request_id='req-1',
-        device=p['device'],ieee=p['ieee'],endpoint=1,cluster='genOnOff',
+        device=p['device'],ieee=p['ieee'],endpoint=2,cluster='genOnOff',
         attribute='onOff',response_type='readResponse',transaction=42,
         requested_at=100.1,response_at=101.0,errors=[],value='OFF')
     p['expect_relay']='OFF'
     assert verify_probe_evidence(evidence,p,'req-1',100.0) is evidence
     for field,value in (
-        ('request_id','foreign'),('ieee','0xBAD'),('endpoint',2),
+        ('request_id','foreign'),('ieee','0xBAD'),('endpoint',1),
         ('cluster','haElectricalMeasurement'),('attribute','activePower'),
         ('response_type','attributeReport'),('transaction',300),
         ('response_at',120.0),('errors',['timeout']),('value','ON')):

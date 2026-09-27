@@ -1,5 +1,11 @@
 # Independent review triage — 2026-09-27
 
+Current source status: the draft fixes are applied in PR #56. See
+[`docs/bseed_issue55_finalization.md`](https://github.com/analienx/tuya-zigbee-switch/blob/codex/issue-55-finalize-remediation/docs/bseed_issue55_finalization.md)
+for the superseding implementation and GitHub-hosted-only validation path.
+Pending-source/approval statements below are historical. Run no repository
+build, test, lint, verification or sealing on a local machine.
+
 Source: [issue 55 independent review](https://github.com/analienx/tuya-zigbee-switch/issues/55#issuecomment-5853890662).
 Reviewer snapshot: `9fa1479338ce599d5d8f35b8398b845937ecb7b36185e56856859ab7e81e288b`,
 based on `cd46953dd37210bf0b01f61977e92be2a0e39a57` plus the uncommitted candidate.

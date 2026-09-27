@@ -1,7 +1,7 @@
 """Bounded target-only non-PM Client reachability gate. No OTA or relay mutation.
 
-Fresh non-retained MQTT is a communication proxy, NOT proof of ZCL origin or
-physical load safety. Evidence stays private in the campaign workdir.
+Request-correlated backend reads prove downlink response; MQTT state is only a
+consistency check. Neither proves physical load safety. Evidence stays private.
 """
 import argparse
 import datetime as dt
@@ -9,6 +9,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -21,13 +22,16 @@ MIN_SPACING_S = 25
 MAX_LATENCY_S = 12
 MAX_EVIDENCE_AGE_S = 600
 PROBE_SCHEMA = 1
-DEFAULT_PROBE_ENDPOINT = 1
+DEFAULT_PROBE_ENDPOINT = 2
 DEFAULT_PROBE_CLUSTER = 'genOnOff'
 DEFAULT_PROBE_ATTRIBUTE = 'onOff'
 
 
 def _probe_command(profile):
     command = profile.get('link_probe_command')
+    if command is None:
+        return [sys.executable, str(Path(__file__).with_name('bseed_link_probe.py')),
+                '--mqtt-config', profile['mqtt_config'], '--broker', profile['broker']]
     if not (isinstance(command, list) and command and
             all(isinstance(part, str) and part for part in command)):
         raise ValueError(

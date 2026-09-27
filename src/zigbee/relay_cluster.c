@@ -69,9 +69,10 @@ void relay_cluster_add_to_endpoint(zigbee_relay_cluster *cluster,
                                    hal_zigbee_endpoint *endpoint) {
     relay_cluster_by_endpoint[endpoint->endpoint] = cluster;
     cluster->endpoint = endpoint->endpoint;
+
     /* The protection-trip latch is boot-volatile: every boot starts unlatched
-       and applies the persisted startup/mode policy. A persistent overload
-       re-trips once metering-driven monitoring resumes. */
+     * and applies the persisted startup/mode policy. A persistent overload
+     * re-trips once metering-driven monitoring resumes. */
     cluster->protection_tripped = 0;
     relay_cluster_load_attrs_from_nv(cluster);
     relay_cluster_load_physical_mode_from_nv(cluster);
@@ -306,7 +307,7 @@ void relay_cluster_apply_physical_mode(zigbee_relay_cluster *cluster) {
 void relay_cluster_on(zigbee_relay_cluster *cluster) {
     if (cluster->protection_tripped) {
         /* Protection owns re-arm.  A user/binding command must never bypass a
-           timed retry or lockout by clearing the physical safety latch. */
+         * timed retry or lockout by clearing the physical safety latch. */
         sync_indicator_led(cluster);
         return;
     }

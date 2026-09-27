@@ -30,7 +30,7 @@ uint8_t powerSource = POWER_SOURCE_MAINS_1_PHASE; // 0x01 default
 const uint16_t cluster_revision = 0x01;
 /* Basic 0x4000 permits 16 bytes; oversized replies are discarded by Herdsman. */
 typedef char sw_build_id_must_fit_zcl_basic_16_bytes[
-    sizeof(STRINGIFY_VALUE(VERSION_STR)) <= 17 ? 1 : -1];
+        sizeof(STRINGIFY_VALUE(VERSION_STR)) <= 17 ? 1 : -1];
 DEF_STR(STRINGIFY_VALUE(VERSION_STR), swBuildId);
 extern network_indicator_t network_indicator;
 

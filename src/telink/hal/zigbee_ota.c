@@ -129,7 +129,7 @@ void ota_process_msg_callback(u8 evt, u8 status) {
 void hal_zigbee_init_ota() {
     hal_tasks_init(&ota_checkpoint_reboot_task);
     ota_checkpoint_reboot_task.handler = ota_reboot_after_checkpoint;
-    ota_checkpoint_reboot_task.arg = NULL;
+    ota_checkpoint_reboot_task.arg     = NULL;
 #ifdef BSEED_PM_B28WRPVX
     hal_tasks_init(&ota_join_query_start_task);
     ota_join_query_start_task.handler = ota_join_query_start;

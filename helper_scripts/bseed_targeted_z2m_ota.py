@@ -412,6 +412,9 @@ def main():
         )
         from bseed_ota_campaign import network_lock_path as shared_network_lock_path
         network_lock_path = shared_network_lock_path(source_profile, required=True)
+        coordinator = (state['info'].get('coordinator') or {}).get('ieee_address')
+        if not coordinator or source_profile['network_id'] != coordinator:
+            raise ValueError('Network lock identity must match the live coordinator IEEE')
         acquire_network_lock(
             network_lock_path,
             network_id=source_profile['network_id'],

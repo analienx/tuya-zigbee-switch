@@ -189,14 +189,15 @@ static cluster_forAppCb_t get_cmd_callback_by_cluster_id(u16 cluster_id) {
 
 static void zcl_incoming_message_callback(zclIncoming_t *pInHdlrMsg) {
     uint8_t write_cmd = pInHdlrMsg->hdr.cmd;
+
     if (write_cmd == ZCL_CMD_WRITE || write_cmd == ZCL_CMD_WRITE_UNDIVIDED ||
         write_cmd == ZCL_CMD_WRITE_NO_RSP) {
         if (attribute_change_callback == NULL) {
             return;
         }
-        zclWriteCmd_t *writeCmd = (zclWriteCmd_t *)pInHdlrMsg->attrCmd;
-        uint8_t  endpoint   = pInHdlrMsg->msg->indInfo.dst_ep;
-        uint16_t cluster_id = pInHdlrMsg->msg->indInfo.cluster_id;
+        zclWriteCmd_t *writeCmd   = (zclWriteCmd_t *)pInHdlrMsg->attrCmd;
+        uint8_t        endpoint   = pInHdlrMsg->msg->indInfo.dst_ep;
+        uint16_t       cluster_id = pInHdlrMsg->msg->indInfo.cluster_id;
         if (write_cmd == ZCL_CMD_WRITE_UNDIVIDED) {
             for (u8 i = 0; i < writeCmd->numAttr; i++) {
                 if (!zcl_write_record_applied(endpoint, cluster_id,

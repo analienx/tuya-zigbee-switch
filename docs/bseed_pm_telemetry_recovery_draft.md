@@ -1,5 +1,11 @@
 # PM telemetry recovery follow-up — APPLIED as finding C remediation
 
+Current source status: the draft fixes are applied in PR #56. See
+[`docs/bseed_issue55_finalization.md`](https://github.com/analienx/tuya-zigbee-switch/blob/codex/issue-55-finalize-remediation/docs/bseed_issue55_finalization.md)
+for the superseding implementation and GitHub-hosted-only validation path.
+Pending-source/approval statements below are historical. Run no repository
+build, test, lint, verification or sealing on a local machine.
+
 Status: the bounded fix below was applied to
 `helper_scripts/bseed_z2m_metadata_refresh.py`,
 `helper_scripts/bseed_pm_telemetry_guard.py`,

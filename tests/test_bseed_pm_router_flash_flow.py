@@ -43,6 +43,10 @@ def runner_side_effect(profile, *, skip_begin):
         name = Path(argv[2]).name
         if name == 'bseed_targeted_z2m_ota.py' and not skip_begin:
             token = 'bseed-ota-' + uuid.uuid4().hex
+            from bseed_network_campaign_lock import acquire
+            acquire(campaign.network_lock_path(profile, required=True),
+                    network_id=profile['network_id'], token=token,
+                    device=profile['device'], ieee=profile['ieee'], image_sha256=profile['sha256'])
             guard.begin(profile, token)
             work = Path(profile['workdir'])
             work.mkdir(parents=True, exist_ok=True)
@@ -64,6 +68,9 @@ def runner_side_effect(profile, *, skip_begin):
 
 
 def run_flash(cfg, path, monkeypatch, *, skip_begin=False):
+    cfg.update(network_lock_dir=str(Path(cfg['workdir']).parent / 'authority'),
+               network_id='test-network', network_lock_shared=True)
+    path.write_text(json.dumps(cfg))
     monkeypatch.setattr(sys, 'argv', ['campaign', '--profile', str(path), '--mode', 'flash',
                                       '--confirm-ieee', cfg['ieee']])
     bridge = fake_bridge_for(cfg)

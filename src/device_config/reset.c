@@ -8,7 +8,7 @@
 
 static hal_task_t reset_task;
 static hal_task_t network_reset_task;
-static uint8_t reset_tasks_initialized;
+static uint8_t    reset_tasks_initialized;
 
 static void ensure_reset_tasks_initialized(void) {
     if (reset_tasks_initialized)
@@ -58,8 +58,9 @@ void schedule_network_reset(uint16_t delay_ms) {
 
 void schedule_full_reset(uint16_t delay_ms) {
     ensure_reset_tasks_initialized();
+
     /* reset_task is shared intentionally: the newest reboot/full-reset request
-       replaces the previous pending action and its deadline. */
+     * replaces the previous pending action and its deadline. */
     reset_task.handler = reset_all_handler;
     hal_tasks_schedule(&reset_task,
                        delay_ms != 0 ? delay_ms : DEFAULT_RESET_DELAY_MS);
