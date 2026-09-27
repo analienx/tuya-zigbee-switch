@@ -1,14 +1,15 @@
 schema_version: 1
 project_id: tuya-zigbee-switch
 repo: analienx/tuya-zigbee-switch
+repository_visibility: public
 lifecycle: active
 
 execution:
   schema_version: 1
-  default_mode: host_specialist
-  optional_modes: [foundry_isolated]
-  build_lane: firmware builder CI
-  host_specialist: USB device operations
+  default_mode: github_actions
+  optional_modes: []
+  build_lane: GitHub-hosted Actions only; exact candidate SHA
+  host_specialist: explicit-user-authorized USB/device operations only; never build/test/verify
 
 canonical_skill:
   source: external_github
@@ -28,10 +29,11 @@ context:
   tests: tests
 
 executor:
-  environment: windows_notebook
+  environment: github_hosted_actions
+  runtime: github_actions
+  interface: github_actions
   management_paths:
-    - local_shell
-    - usb
+    - github_actions
 
 mutation_policy:
   typed_host_actions:
