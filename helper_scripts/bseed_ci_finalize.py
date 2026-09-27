@@ -18,6 +18,16 @@ REQUIRED = ('test', 'BSEED PM role matrix', 'BSEED non-PM role matrix',
             'Telink Router TC32 validation', 'BSEED experimental mains clients')
 
 
+def api_request(url, token, binary=False):
+    req = urllib.request.Request(url, headers={'Accept': 'application/vnd.github+json'})
+    # Artifact downloads redirect to signed storage URLs. Authenticate only the
+    # initial API request; forwarding a bearer header breaks storage auth.
+    req.add_unredirected_header('Authorization', 'Bearer ' + token)
+    with urllib.request.urlopen(req, timeout=60) as response:
+        data = response.read()
+    return data if binary else json.loads(data)
+
+
 def main():
     if os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted':
         raise RuntimeError('Finalization runs only on GitHub-hosted Actions')
@@ -28,11 +38,7 @@ def main():
 
     def request(path, binary=False):
         url = 'https://api.github.com/repos/' + repo + '/' + path
-        req = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + token,
-                                                   'Accept': 'application/vnd.github+json'})
-        with urllib.request.urlopen(req, timeout=60) as response:
-            data = response.read()
-        return data if binary else json.loads(data)
+        return api_request(url, token, binary)
 
     deadline = time.monotonic() + 2400
     while True:
