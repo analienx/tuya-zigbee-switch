@@ -205,7 +205,7 @@ int main(void) {
     setup();
     char valid[36];
     memset(valid, ' ', sizeof valid);
-    memcpy(valid, "V1000A2000W3000", 14);
+    memcpy(valid, "V1000A2000W3000", sizeof("V1000A2000W3000") - 1);
     sdk_copy(36, valid, 36);
     electrical_measurement_cluster_callback_attr_write_trampoline(2,
         ZCL_ATTR_ELEC_MEAS_CUST_CALIBRATION_VALUES);

@@ -90,6 +90,11 @@ def main():
     report['registryCommitted'] = False
     (root / 'CI_SEAL_REPORT.json').write_text(json.dumps(report, indent=2), encoding='utf8')
     print(json.dumps(report, indent=2))
+    # Reviewable text counterpart to the artifact. A supervisor can commit
+    # these exact runner-produced bytes without running the sealer locally.
+    print('BEGIN_VERIFIED_REGISTRY')
+    print(registry.read_text(encoding='utf8'), end='')
+    print('END_VERIFIED_REGISTRY')
 
 
 if __name__ == '__main__':

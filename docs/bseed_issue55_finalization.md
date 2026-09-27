@@ -17,7 +17,7 @@ The finalization pass found and corrected defects in the draft remediation:
 
 - Parse the ZCL command at header byte 2 (or manufacturer-specific byte 4),
   enforce both application and storage string capacities before SDK dispatch,
-  and link the real GPIO parser into configuration harnesses.
+  and complete configuration harness dependencies.
 - Seed energy deltas when the persisted baseline becomes available, preserving
   subsequent accumulation while never replacing an unknown baseline with zero.
 - Preserve network ownership after a software `postflash_candidate`. Hardware
@@ -28,6 +28,9 @@ The finalization pass found and corrected defects in the draft remediation:
   awaited Herdsman read with a selected transaction sequence and endpoint 2.
 - Replace the TS0726 canary's overlength Basic name with a fresh short identity
   `1.1.9-bseedlv2` / `0x1102300E`; historical identities and stored bytes remain unchanged.
+- Retire stub scheduler events before invoking callbacks so a task that
+  reschedules itself stays pending. Bound relay-test loops and exercise reset
+  retries through the scheduler. Tests also enforce protection-owned rearming.
 
 ## Public CI and packaging
 
