@@ -12,18 +12,19 @@ def test_reset_tasks_initialize_once_and_reschedule_by_replacement(tmp_path):
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <setjmp.h>
 #include "hal/nvm.h"
 #include "stub/hal/tasks.c"
 
 static uint32_t now_ms;
 uint32_t hal_millis(void) { return now_ms; }
-void io_log(const char *tag, const char *fmt, ...) {(void)tag; (void)fmt;}
 
 static int prepare_ok;
 bool app_prepare_reboot(void) { return prepare_ok != 0; }
 hal_nvm_status_t hal_nvm_clear_all(void) { return HAL_NVM_SUCCESS; }
 void hal_factory_reset(void) {}
-void hal_system_reset(void) {}
+static jmp_buf reset_target;
+void hal_system_reset(void) { longjmp(reset_target, 1); }
 
 #include "device_config/reset.c"
 
@@ -68,7 +69,10 @@ int main(void) {
     assert(active_for(&reset_task) == 1);
     prepare_ok = 1;
     now_ms = 10000;
-    stub_tasks_poll();
+    if (setjmp(reset_target) == 0) {
+        stub_tasks_poll();
+        assert(0 && "reset must not return");
+    }
     assert(active_for(&reset_task) == 0);
 
     return 0;
@@ -80,6 +84,6 @@ int main(void) {
          '-ffunction-sections', '-fdata-sections', '-Wl,--gc-sections',
          '-I', str(ROOT / 'src'), '-x', 'c', '-', '-o', str(binary),
          '-lpthread'],
-        input=code, text=True, capture_output=True, check=True,
+        input=code, text=True, check=True,
     )
     subprocess.run([str(binary)], check=True, timeout=5)

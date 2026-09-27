@@ -160,6 +160,7 @@ static const energy_meter_ops_t fake_ops = {
     .get_calibration = fake_get_cal, .set_calibration = fake_set_cal,
 };
 static energy_meter_t fake_meter = {&fake_ops, 0};
+static electrical_measurement_cluster_t g_elec_meas_cluster;
 
 static struct {
     uint32_t pre;
@@ -172,6 +173,7 @@ static void setup(void) {
     guarded.pre = 0xDEADBEEF;
     guarded.post = 0xCAFEBABE;
     memset(&g_elec_meas_cluster, 0, sizeof g_elec_meas_cluster);
+    g_elec_cluster = &g_elec_meas_cluster;
     g_elec_meas_cluster.endpoint = 2;
     g_elec_meas_cluster.meter = &fake_meter;
     live_cal = (energy_meter_calibration_t){1000, 1000, 1000};
@@ -249,7 +251,7 @@ def _build_and_run(tmp_path, name, code):
     subprocess.run(['cc', '-std=c99', '-DHAL_STUB', '-DBSEED_PM_B28WRPVX=1',
                     '-ffunction-sections', '-fdata-sections', '-Wl,--gc-sections',
                     '-I', str(ROOT / 'src'), str(ROOT / 'src/stub/hal/gpio.c'), '-x', 'c', '-', '-o', str(binary)],
-                   input=code, text=True, capture_output=True, check=True)
+                   input=code, text=True, check=True)
     subprocess.run([str(binary)], check=True, timeout=5)
 
 
@@ -273,6 +275,7 @@ BLOB_CODE = r'''
 #include "device_config/config_nv.c"
 #include "zigbee/basic_cluster.c"
 
+uint8_t g_multi_press_reset_count;
 static uint8_t nvm_config[sizeof(device_config_str_t)];
 static unsigned config_item_writes;
 static unsigned reboots;
@@ -350,5 +353,5 @@ def test_config_blob_restore_keeps_last_good(tmp_path):
     subprocess.run(['cc', '-std=c99', '-DHAL_STUB', '-DVERSION_STR=1.2.5-bseedr7',
                     '-ffunction-sections', '-fdata-sections', '-Wl,--gc-sections',
                     '-I', str(ROOT / 'src'), str(ROOT / 'src/stub/hal/gpio.c'), '-x', 'c', '-', '-o', str(binary)],
-                   input=BLOB_CODE, text=True, capture_output=True, check=True)
+                   input=BLOB_CODE, text=True, check=True)
     subprocess.run([str(binary)], check=True, timeout=5)

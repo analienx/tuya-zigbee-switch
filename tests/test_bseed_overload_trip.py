@@ -14,6 +14,7 @@ def test_protection_uses_physical_state_and_cuts_in_all_modes(tmp_path):
 #include "base_components/overload_protection.c"
 
 #define RELAY_PIN 7
+uint8_t allow_simultaneous_latching_pulses;
 static uint8_t gpio_level[16];
 static unsigned gpio_writes;
 void hal_gpio_init_output(hal_gpio_pin_t pin, hal_gpio_pull_t pull, uint8_t v) {
@@ -97,11 +98,12 @@ int main(void) {
                 /* OFF never rearms. */
                 relay_cluster_off(&cluster);
                 assert(cluster.protection_tripped == 1 && gpio_level[RELAY_PIN] == 0);
-                /* Explicit ON rearms and restores the detached_on output. */
+                /* Remote ON/toggle cannot bypass protection or reset retries. */
                 relay_cluster_on(&cluster);
-                assert(cluster.protection_tripped == 0 && relay.on == 1);
-                assert(gpio_level[RELAY_PIN] == 1);
-                assert(relay_cluster_is_physically_on(&cluster) == 1);
+                relay_cluster_toggle(&cluster);
+                assert(cluster.protection_tripped == 1 && relay.on == 0);
+                assert(gpio_level[RELAY_PIN] == 0);
+                assert(relay_cluster_is_physically_on(&cluster) == 0);
             } else {
                 assert(action == OVERLOAD_ACTION_NONE);
                 assert(op.alarm == OVERLOAD_ALARM_NONE && !op.tripped);
@@ -118,7 +120,7 @@ int main(void) {
     relay_cluster_protection_trip(&cluster);
     assert(gpio_level[RELAY_PIN] == 0 && relay.on == 0);
     relay_cluster_on(&cluster);
-    assert(gpio_level[RELAY_PIN] == 1 && cluster.protection_tripped == 0);
+    assert(gpio_level[RELAY_PIN] == 0 && cluster.protection_tripped == 1);
     /* Sustained overload locks out after the bounded reconnects. */
     setup(ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED, 1,
           ZCL_START_UP_ONOFF_SET_ONOFF_TO_ON);
@@ -132,7 +134,7 @@ int main(void) {
         overload_action_t action = monitor(now_ms, 4000);
         if (cycle < 5) {
             assert(action == OVERLOAD_ACTION_TURN_ON);
-            relay_cluster_on(&cluster);
+            relay_cluster_protection_rearm(&cluster);
             assert(gpio_level[RELAY_PIN] == 1);
         } else {
             assert(action == OVERLOAD_ACTION_NONE);
@@ -141,14 +143,14 @@ int main(void) {
     assert(op.locked_out == 1 && op.alarm == OVERLOAD_ALARM_LOCKED_OUT);
     assert(op.retry_count == OVERLOAD_MAX_RETRIES);
     assert(gpio_level[RELAY_PIN] == 0);
-    /* Manual ON rearms the latch and resets the machine; a sustained
-       overload then trips fresh instead of staying locked out. */
+    /* Lockout survives remote ON/toggle and a physical-mode write. */
     relay_cluster_on(&cluster);
-    assert(gpio_level[RELAY_PIN] == 1 && cluster.protection_tripped == 0);
-    assert(monitor(now_ms, 4000) == OVERLOAD_ACTION_TURN_OFF);
-    assert(op.locked_out == 0 && op.retry_count == 0 && op.reconnect_at_ms != 0);
-    relay_cluster_protection_trip(&cluster);
-    assert(gpio_level[RELAY_PIN] == 0);
+    relay_cluster_toggle(&cluster);
+    cluster.physical_relay_mode = ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON;
+    relay_cluster_apply_physical_mode(&cluster);
+    assert(gpio_level[RELAY_PIN] == 0 && cluster.protection_tripped == 1);
+    assert(monitor(now_ms, 4000) == OVERLOAD_ACTION_NONE);
+    assert(op.locked_out == 1 && op.retry_count == OVERLOAD_MAX_RETRIES);
     /* Untouched behavior: detached ON drives nothing new; toggle still flips. */
     setup(ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON, 0,
           ZCL_START_UP_ONOFF_SET_ONOFF_TO_OFF);
@@ -181,7 +183,7 @@ int main(void) {
     subprocess.run(['cc', '-std=c99', '-DHAL_STUB', '-DBSEED_PM_B28WRPVX=1',
                     '-ffunction-sections', '-fdata-sections', '-Wl,--gc-sections',
                     '-I', str(ROOT / 'src'), '-x', 'c', '-', '-o', str(binary)],
-                   input=code, text=True, capture_output=True, check=True)
+                   input=code, text=True, check=True)
     subprocess.run([str(binary)], check=True, timeout=5)
     elec = (ROOT / 'src/zigbee/electrical_measurement_cluster.c').read_text()
     assert 'relay_cluster_is_physically_on(relay)' in elec

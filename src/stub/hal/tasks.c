@@ -28,6 +28,7 @@ void stub_tasks_poll(void) {
         for (int i = 0; i < MAX_TASKS; i++) {
             if (tasks[i].active && current_time >= tasks[i].scheduled_time) {
                 hal_task_t *task = tasks[i].task;
+
                 /* Retire this event before invoking its handler. A callback
                  * may schedule the same task again into this slot. */
                 tasks[i].active = 0;

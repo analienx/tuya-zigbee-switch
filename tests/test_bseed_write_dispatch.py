@@ -64,11 +64,18 @@ DISPATCH_CODE = r'''
 #include <string.h>
 #include "zigbee/zcl_write_dispatch.c"
 #include "zigbee/general_commands.c"
+#include "base_components/relay.c"
+#define nv_config_buffer relay_nv_config_buffer
 #include "zigbee/relay_cluster.c"
+#undef nv_config_buffer
 #include "device_config/config_nv.c"
 #include "zigbee/basic_cluster.c"
 
 #define RELAY_PIN 7
+uint8_t allow_simultaneous_latching_pulses;
+uint8_t g_multi_press_reset_count;
+/* The config fixture contains no GPIOs; pin parsing has separate coverage. */
+hal_gpio_pin_t hal_gpio_parse_pin(const char *s) {(void)s; return HAL_INVALID_PIN;}
 static uint8_t gpio_level[16];
 static unsigned gpio_writes;
 void hal_gpio_init_output(hal_gpio_pin_t pin, hal_gpio_pull_t pull, uint8_t v) {
@@ -255,7 +262,7 @@ def test_write_dispatch_predicate_mirrors_sdk_acceptance(tmp_path):
     binary = tmp_path / 'write-dispatch-test'
     subprocess.run(['cc', '-std=c99', '-DHAL_STUB',
                     '-ffunction-sections', '-fdata-sections', '-Wl,--gc-sections',
-                    '-I', str(ROOT / 'src'), str(ROOT / 'src/stub/hal/gpio.c'), '-x', 'c', '-', '-o', str(binary)],
+                    '-I', str(ROOT / 'src'), '-x', 'c', '-', '-o', str(binary)],
                    input=PREDICATE_CODE, text=True, capture_output=True,
                    check=True)
     subprocess.run([str(binary)], check=True, timeout=5)
@@ -266,7 +273,7 @@ def test_mixed_write_dispatches_only_successful_records(tmp_path):
     subprocess.run(['cc', '-std=c99', '-DHAL_STUB', '-DVERSION_STR=1.2.5-bseedr7',
                     '-DDEFAULT_CONFIG=a;b;', '-ffunction-sections',
                     '-fdata-sections', '-Wl,--gc-sections',
-                    '-I', str(ROOT / 'src'), str(ROOT / 'src/stub/hal/gpio.c'), '-x', 'c', '-', '-o', str(binary)],
+                    '-I', str(ROOT / 'src'), '-x', 'c', '-', '-o', str(binary)],
                    input=DISPATCH_CODE, text=True, capture_output=True,
                    check=True)
     subprocess.run([str(binary)], check=True, timeout=5)
