@@ -96,7 +96,8 @@ def main():
     args = arguments()
     if bool(args.preflash_lock)!=bool(args.expected_image_sha256):
         raise ValueError('Baseline lock and exact OTA image SHA256 are required together')
-    assert 4 <= args.observe_seconds <= 180, 'Observation window must be 4..180 seconds'
+    if not (4 <= args.observe_seconds <= 180):
+        raise AssertionError('Observation window must be 4..180 seconds')
     # PM periodic reporting may legally take up to 60 s; allow a margin beyond that maximum.
     observation_seconds = max(args.observe_seconds, 75) if args.require_pm else args.observe_seconds
     config = yaml.safe_load(Path(args.mqtt_config).read_text(encoding='utf8'))['mqtt']
@@ -132,7 +133,8 @@ def main():
     client.connect(args.broker, 1883, 10)
     client.loop_start()
     try:
-        assert ready.wait(10), 'MQTT connection/subscription failed'
+        if not (ready.wait(10)):
+            raise AssertionError('MQTT connection/subscription failed')
         time.sleep(observation_seconds)
     finally:
         client.loop_stop()
@@ -181,7 +183,8 @@ def main():
                     if snapshot['state'] else None), 'errors': snapshot['errors']}
     outfile = Path(args.output)
     outfile.parent.mkdir(parents=True, exist_ok=True)
-    assert not outfile.exists(), 'Refuse to overwrite previous evidence'
+    if not (not outfile.exists()):
+        raise AssertionError('Refuse to overwrite previous evidence')
     outfile.write_text(json.dumps(evidence, indent=2, default=str), encoding='utf8')
     print(json.dumps(evidence, indent=2, default=str), flush=True)
     print('Physical relay, appliance safety, parent/rejoin, metrology and retained bindings '

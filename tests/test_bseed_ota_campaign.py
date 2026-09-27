@@ -1,4 +1,5 @@
 """Offline tests of profile orchestration; no live MQTT, HTTP or firmware changes."""
+import datetime as dt
 import hashlib
 import json
 import sys
@@ -8,6 +9,15 @@ from unittest.mock import patch
 import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'helper_scripts'))
 import bseed_ota_campaign as campaign
+import bseed_pm_telemetry_guard as telemetry_guard
+from bseed_pm_telemetry_guard import release as real_telemetry_release
+
+
+@pytest.fixture(autouse=True)
+def mock_telemetry_release_for_subprocess_composition(monkeypatch):
+    # These tests mock successful interview subprocesses and do not generate
+    # their private evidence. Real release validation has its own negative suite.
+    monkeypatch.setattr('bseed_pm_telemetry_guard.release', lambda *args: None)
 
 
 def profile(tmp_path):
@@ -38,7 +48,10 @@ def test_image_index_requires_exact_tuple_and_hash(tmp_path):
     with pytest.raises(ValueError,match='exactly one'): campaign.make_index(cfg)
 
 
-def test_private_index_stages_exact_single_image(tmp_path):
+def test_private_index_stages_exact_single_image(tmp_path, monkeypatch):
+    # This test covers index composition with synthetic non-firmware bytes.
+    # Registry/payload policy is exercised with complete OTA fixtures separately.
+    monkeypatch.setattr('bseed_socket_version_policy.require_increasing', lambda *args: {})
     cfg=profile(tmp_path)
     with patch('bseed_targeted_z2m_ota.verify_image',return_value=(b'', [0,0,0,0,4417,54179])):
         result=campaign.make_index(cfg)
@@ -284,3 +297,413 @@ def test_same_role_postflash_requires_exact_private_relay_energy_baseline(tmp_pa
     assert '--require-pm' in cmd
     cfg['postflash_role']='EndDevice'
     assert '--preflash-lock' not in campaign.postflash_cmd(cfg,tmp_path/'cross_role.json')
+
+def _pm_profile(tmp_path):
+    cfg = profile(tmp_path)
+    cfg.update(manufacturer='b28wrpvx', model='TS011F-BS-PM',
+               preflash_role='EndDevice', postflash_role='EndDevice',
+               postflash_build='1.2.5-bseedcli11')
+    return cfg
+
+
+def _nonpm_profile(tmp_path):
+    cfg = profile(tmp_path)
+    cfg.update(manufacturer='o1jzcxou', model='TS011F-BS', non_pm=True,
+               require_pm=False, preflash_role='EndDevice',
+               postflash_role='EndDevice', preflash_build='1.1.3-bseedc6',
+               preflash_relay_physical_mode='follow_state',
+               postflash_build='1.1.3-bseedc6')
+    return cfg
+
+
+def _write_profile(tmp_path, cfg, name='profile.json'):
+    path = tmp_path / name
+    path.write_text(json.dumps(cfg))
+    return path
+
+
+@pytest.mark.parametrize('bad', [False, 0, 1, 'true', 'false', 'True', '', [], {}, ['x']])
+def test_custom_pm_profile_rejects_non_boolean_require_pm(tmp_path, bad):
+    cfg = _pm_profile(tmp_path)
+    cfg['require_pm'] = bad
+    with pytest.raises(ValueError, match='require_pm=true|explicit Boolean'):
+        campaign.load_profile(_write_profile(tmp_path, cfg))
+
+
+def test_custom_pm_profile_rejects_missing_require_pm(tmp_path):
+    cfg = _pm_profile(tmp_path)
+    assert 'require_pm' not in cfg
+    with pytest.raises(ValueError, match='require_pm=true'):
+        campaign.load_profile(_write_profile(tmp_path, cfg))
+
+
+def test_custom_pm_profile_with_boolean_true_loads(tmp_path):
+    cfg = _pm_profile(tmp_path)
+    cfg['require_pm'] = True
+    assert campaign.load_profile(_write_profile(tmp_path, cfg))['require_pm'] is True
+
+
+def test_custom_pm_profile_rejects_non_pm_mode_and_model_mismatch(tmp_path):
+    cfg = _pm_profile(tmp_path)
+    cfg.update(require_pm=True, non_pm=True, preflash_build='x',
+               preflash_relay_physical_mode='y')
+    with pytest.raises(ValueError, match='require_pm=true'):
+        campaign.load_profile(_write_profile(tmp_path, cfg))
+    cfg = _pm_profile(tmp_path)
+    cfg.update(require_pm=True, model='TS011F')
+    with pytest.raises(ValueError, match='require_pm=true'):
+        campaign.load_profile(_write_profile(tmp_path, cfg, 'mismatch.json'))
+
+
+def test_custom_pm_missing_require_pm_fails_before_prepare_and_check(tmp_path, monkeypatch):
+    cfg = _pm_profile(tmp_path)
+    path = _write_profile(tmp_path, cfg)
+    monkeypatch.setattr(sys, 'argv', ['campaign', '--profile', str(path), '--mode', 'prepare'])
+    with patch('bseed_ota_campaign.subprocess.call', side_effect=AssertionError('no subprocess')) as call:
+        with pytest.raises(ValueError, match='require_pm=true'):
+            campaign.main()
+    call.assert_not_called()
+    assert not Path(cfg['index_output']).exists()
+    monkeypatch.setattr(sys, 'argv', ['campaign', '--profile', str(path), '--mode', 'check'])
+    with patch('bseed_ota_campaign.subprocess.call', side_effect=AssertionError('no subprocess')) as call:
+        with pytest.raises(ValueError, match='require_pm=true'):
+            campaign.main()
+    call.assert_not_called()
+
+
+def test_custom_nonpm_profile_with_boolean_false_loads(tmp_path):
+    loaded = campaign.load_profile(_write_profile(tmp_path, _nonpm_profile(tmp_path)))
+    assert loaded['require_pm'] is False and loaded['non_pm'] is True
+
+
+@pytest.mark.parametrize('mutation', [
+    {'require_pm': True}, {'require_pm': 'false'}, {'require_pm': 0},
+    {'non_pm': False}, {'non_pm': 'yes'}, {'model': 'TS011F'},
+    {'preflash_build': None},
+])
+def test_custom_nonpm_profile_rejects_contradictions(tmp_path, mutation):
+    cfg = _nonpm_profile(tmp_path)
+    if 'preflash_build' in mutation:
+        cfg.pop('preflash_build')
+    else:
+        cfg.update(mutation)
+    with pytest.raises(ValueError, match='require_pm=false|explicit Boolean'):
+        campaign.load_profile(_write_profile(tmp_path, cfg))
+
+
+def test_custom_nonpm_profile_rejects_missing_non_pm_flag(tmp_path):
+    cfg = _nonpm_profile(tmp_path)
+    cfg.pop('non_pm')
+    with pytest.raises(ValueError, match='require_pm=false'):
+        campaign.load_profile(_write_profile(tmp_path, cfg))
+
+
+def _ts0726_profile(tmp_path):
+    cfg = profile(tmp_path)
+    cfg.update(manufacturer='iedhxgyi', model='TS0726-3-BS', require_pm=False,
+               preflash_role='Router', postflash_role='Router',
+               postflash_build='1.1.8-bseedv8')
+    return cfg
+
+
+def test_custom_ts0726_profile_with_boolean_false_loads(tmp_path):
+    loaded = campaign.load_profile(_write_profile(tmp_path, _ts0726_profile(tmp_path)))
+    assert loaded['require_pm'] is False
+
+
+def test_custom_ts0726_profile_rejects_missing_require_pm(tmp_path):
+    cfg = _ts0726_profile(tmp_path)
+    cfg.pop('require_pm')
+    with pytest.raises(ValueError, match='require_pm=false'):
+        campaign.load_profile(_write_profile(tmp_path, cfg))
+
+
+@pytest.mark.parametrize('mutation', [{'require_pm': True}, {'require_pm': 'false'},
+    {'model': 'TS011F'}, {'manufacturer': 'b28wrpvx'}])
+def test_custom_ts0726_profile_rejects_contradictions(tmp_path, mutation):
+    cfg = _ts0726_profile(tmp_path)
+    cfg.update(mutation)
+    with pytest.raises(ValueError, match='require_pm'):
+        campaign.load_profile(_write_profile(tmp_path, cfg))
+
+
+def test_stock_ts0726_profile_keeps_separate_contract(tmp_path):
+    cfg = _ts0726_profile(tmp_path)
+    cfg.update(manufacturer='_TZ3002_iedhxgyi', model='TS0726')
+    cfg.pop('require_pm')
+    loaded = campaign.load_profile(_write_profile(tmp_path, cfg, 'stock-ts0726.json'))
+    assert 'require_pm' not in loaded
+
+
+def test_runner_check_rejects_invalid_pm_campaign_profile_before_network(tmp_path, monkeypatch):
+    cfg = _pm_profile(tmp_path)  # missing require_pm
+    path = _write_profile(tmp_path, cfg)
+    import bseed_targeted_z2m_ota as runner
+    argv = ['runner', '--mode', 'check', '--device', cfg['device'], '--ieee', cfg['ieee'],
+           '--manufacturer', cfg['manufacturer'], '--model', cfg['model'], '--role', 'EndDevice',
+           '--image', cfg['image'], '--sha256', cfg['sha256'], '--url', cfg['url'],
+           '--mqtt-config', cfg['mqtt_config'], '--broker', cfg['broker'],
+           '--workdir', cfg['workdir'], '--manufacturer-code', '4417',
+           '--image-type', '65024', '--file-version', '0x12053014',
+           '--expect-relay', 'ON', '--index-url', cfg['index_url'],
+           '--campaign-profile', str(path)]
+    monkeypatch.setattr(sys, 'argv', argv)
+    with pytest.raises(ValueError, match='require_pm=true'):
+        runner.main()
+
+
+def _pm_transition_profile(tmp_path):
+    cfg = _pm_profile(tmp_path)
+    cfg.update(require_pm=True, preflash_role='Router', postflash_role='EndDevice',
+               postflash_build='1.2.5-bseedcli11', join_via='KnownRouter',
+               pm_ssh_host='127.0.0.1', pm_ssh_key=str(tmp_path / 'key'))
+    return cfg
+
+
+class _FakePmBridge:
+    """No MQTT: exact-target identity with the candidate converter option."""
+
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.state = 'online'
+        self.requests = []
+        self.inventory = [dict(ieee_address=cfg['ieee'], friendly_name=cfg['device'],
+            manufacturer='b28wrpvx', model_id='TS011F-BS-PM', type=cfg['postflash_role'],
+            software_build_id=cfg['postflash_build'],
+            definition={'options': [{'property': telemetry_guard.OPTION}]})]
+
+    def start(self): pass
+    def stop(self): pass
+
+    def request(self, operation, payload, *, full_response):
+        assert operation == 'options' and full_response is True
+        self.requests.append(payload)
+        return dict(status='ok', data=dict(id=self.cfg['ieee'], to=payload['options'],
+            **{'from': {telemetry_guard.OPTION: False}}, restart_required=False))
+
+
+def _begin_pm_campaign_guard(tmp_path, monkeypatch, cfg, token):
+    loaded = campaign.load_profile(_write_profile(tmp_path, cfg, 'pm-transition.json'))
+    work = Path(loaded['workdir'])
+    work.mkdir(parents=True, exist_ok=True)
+    bridge = _FakePmBridge(cfg)
+    monkeypatch.setattr(telemetry_guard, 'bridge_for', lambda profile: bridge)
+    telemetry_guard.begin(loaded, token)
+    (work / 'ACTIVE_LOCK.json').write_text(json.dumps(dict(
+        ieee=cfg['ieee'], sha256=cfg['sha256'], token=token,
+        phase='ota_transfer_ok_postflash_unverified')))
+    return loaded, work, bridge
+
+
+def _metadata_body(cfg, **overrides):
+    body = dict(at=dt.datetime.now(dt.timezone.utc).isoformat(), ieee=cfg['ieee'],
+        device=cfg['device'], result='metadata_refreshed', error=None, interview_ok=True,
+        fresh_inventory_observed=True, live_zdo_after={'role': cfg['postflash_role']},
+        after=dict(ieee_address=cfg['ieee'], software_build_id=cfg['postflash_build'],
+            type=cfg['postflash_role']))
+    body.update(overrides)
+    return body
+
+
+def test_pm_transition_releases_with_final_metadata_not_stale_rejoin(tmp_path, monkeypatch):
+    cfg = _pm_transition_profile(tmp_path)
+    token = 'campaign-token-1'
+    loaded, work, _ = _begin_pm_campaign_guard(tmp_path, monkeypatch, cfg, token)
+    released = []
+
+    def recording_release(profile, evidence_path):
+        released.append(Path(evidence_path).name)
+        return real_telemetry_release(profile, evidence_path)
+
+    monkeypatch.setattr(telemetry_guard, 'release', recording_release)
+
+    def fake_call(cmd):
+        name = Path(cmd[2]).name
+        if name in ('bseed_z2m_rejoin_window.py', 'bseed_z2m_metadata_refresh.py'):
+            out = Path(cmd[cmd.index('--output') + 1])
+            if name == 'bseed_z2m_rejoin_window.py':
+                # Stale pre-metadata inventory still says Router: the guard
+                # must not consume this file for release.
+                body = dict(observed_at=_metadata_body(cfg)['at'], ieee=cfg['ieee'],
+                    result='postflash_candidate', fresh_inventory_during_window=True,
+                    inventory=dict(ieee_address=cfg['ieee'],
+                        software_build_id=cfg['postflash_build'], type='Router'),
+                    live_node_descriptor={'role': 'EndDevice'})
+            else:
+                body = _metadata_body(cfg)
+            out.write_text(json.dumps(body))
+        return 0
+
+    monkeypatch.setattr(sys, 'argv', ['campaign', '--profile', loaded['_profile_path'],
+                                      '--mode', 'transition', '--confirm-ieee', cfg['ieee']])
+    with patch('bseed_ota_campaign.subprocess.call', side_effect=fake_call):
+        with pytest.raises(SystemExit) as done:
+            campaign.main()
+    assert done.value.code == 0
+    assert len(released) == 1 and released[0].startswith('metadata_')
+    assert not (work / 'PM_TELEMETRY_GUARD.json').exists()
+    assert (work / ('PM_TELEMETRY_RELEASED_' + token + '.json')).exists()
+
+
+def test_pm_transition_keeps_guard_when_final_metadata_is_stale(tmp_path, monkeypatch):
+    cfg = _pm_transition_profile(tmp_path)
+    token = 'campaign-token-2'
+    loaded, work, _ = _begin_pm_campaign_guard(tmp_path, monkeypatch, cfg, token)
+    monkeypatch.setattr(telemetry_guard, 'release', real_telemetry_release)
+
+    def fake_call(cmd):
+        if Path(cmd[2]).name == 'bseed_z2m_metadata_refresh.py':
+            out = Path(cmd[cmd.index('--output') + 1])
+            out.write_text(json.dumps(_metadata_body(cfg, fresh_inventory_observed=False)))
+        return 0
+
+    monkeypatch.setattr(sys, 'argv', ['campaign', '--profile', loaded['_profile_path'],
+                                      '--mode', 'transition', '--confirm-ieee', cfg['ieee']])
+    with patch('bseed_ota_campaign.subprocess.call', side_effect=fake_call):
+        with pytest.raises(ValueError, match='fresh nonretained inventory'):
+            campaign.main()
+    assert (work / 'PM_TELEMETRY_GUARD.json').exists()
+    assert not list(work.glob('PM_TELEMETRY_RELEASED_*'))
+
+
+def test_pm_metadata_resume_releases_matching_guard(tmp_path, monkeypatch):
+    cfg = _pm_transition_profile(tmp_path)
+    token = 'campaign-token-3'
+    loaded, work, _ = _begin_pm_campaign_guard(tmp_path, monkeypatch, cfg, token)
+    released = []
+
+    def recording_release(profile, evidence_path):
+        released.append(Path(evidence_path).name)
+        return real_telemetry_release(profile, evidence_path)
+
+    monkeypatch.setattr(telemetry_guard, 'release', recording_release)
+
+    def fake_call(cmd):
+        out = Path(cmd[cmd.index('--output') + 1])
+        out.write_text(json.dumps(_metadata_body(cfg, result='metadata_already_correct')))
+        return 0
+
+    monkeypatch.setattr(sys, 'argv', ['campaign', '--profile', loaded['_profile_path'],
+                                      '--mode', 'metadata', '--confirm-ieee', cfg['ieee']])
+    with patch('bseed_ota_campaign.subprocess.call', side_effect=fake_call) as call:
+        assert campaign.main() is None
+    assert call.call_count == 1
+    assert len(released) == 1 and released[0].startswith('metadata_')
+    assert (work / ('PM_TELEMETRY_RELEASED_' + token + '.json')).exists()
+
+
+def test_pm_metadata_resume_keeps_guard_when_release_rejected(tmp_path, monkeypatch):
+    cfg = _pm_transition_profile(tmp_path)
+    token = 'campaign-token-4'
+    loaded, work, _ = _begin_pm_campaign_guard(tmp_path, monkeypatch, cfg, token)
+    monkeypatch.setattr(telemetry_guard, 'release', real_telemetry_release)
+    before = (work / 'PM_TELEMETRY_GUARD.json').read_bytes()
+
+    def fake_call(cmd):
+        out = Path(cmd[cmd.index('--output') + 1])
+        out.write_text(json.dumps(_metadata_body(cfg, interview_ok=False)))
+        return 0
+
+    monkeypatch.setattr(sys, 'argv', ['campaign', '--profile', loaded['_profile_path'],
+                                      '--mode', 'metadata', '--confirm-ieee', cfg['ieee']])
+    with patch('bseed_ota_campaign.subprocess.call', side_effect=fake_call) as call:
+        with pytest.raises(SystemExit) as done:
+            campaign.main()
+    assert done.value.code == 3
+    assert call.call_count == 1  # no OTA submission or retry after release refusal
+    assert (work / 'PM_TELEMETRY_GUARD.json').read_bytes() == before
+    assert len(list(work.glob('metadata_*.json'))) == 1  # evidence preserved
+    assert not list(work.glob('PM_TELEMETRY_RELEASED_*'))
+
+
+def test_metadata_failure_never_attempts_release(tmp_path, monkeypatch):
+    cfg = _pm_transition_profile(tmp_path)
+    loaded = campaign.load_profile(_write_profile(tmp_path, cfg, 'pm-meta.json'))
+    monkeypatch.setattr(sys, 'argv', ['campaign', '--profile', loaded['_profile_path'],
+                                      '--mode', 'metadata', '--confirm-ieee', cfg['ieee']])
+    with patch('bseed_ota_campaign.subprocess.call', return_value=2) as call:
+        with patch('bseed_pm_telemetry_guard.release',
+                   side_effect=AssertionError('release must not run')):
+            with pytest.raises(SystemExit) as done:
+                campaign.main()
+    assert done.value.code == 2
+    assert call.call_count == 1
+
+
+def test_nonpm_metadata_resume_skips_release(tmp_path, monkeypatch):
+    cfg = _nonpm_profile(tmp_path)
+    cfg.update(preflash_role='Router', postflash_role='EndDevice')
+    loaded = campaign.load_profile(_write_profile(tmp_path, cfg, 'nonpm-meta.json'))
+    monkeypatch.setattr(sys, 'argv', ['campaign', '--profile', loaded['_profile_path'],
+                                      '--mode', 'metadata', '--confirm-ieee', cfg['ieee']])
+    with patch('bseed_ota_campaign.subprocess.call', return_value=0) as call:
+        with patch('bseed_pm_telemetry_guard.release',
+                   side_effect=AssertionError('non-PM must not release')):
+            assert campaign.main() is None
+    assert call.call_count == 1
+
+
+def _networked_profile(tmp_path, work_name):
+    cfg = profile(tmp_path)
+    cfg['workdir'] = str(tmp_path / work_name)
+    cfg.update(network_lock_dir=str(tmp_path / 'shared-network-authority'),
+               network_id='zigbee-pan-test', network_lock_shared=True)
+    return cfg
+
+
+def test_network_authority_is_shared_across_workdirs_and_outside_repo(tmp_path):
+    first = _networked_profile(tmp_path, 'work-a')
+    second = _networked_profile(tmp_path, 'work-b')
+    path_a = campaign.network_lock_path(first, required=True)
+    path_b = campaign.network_lock_path(second, required=True)
+    assert path_a == path_b
+    assert Path(path_a).parent == Path(first['network_lock_dir']).resolve()
+    assert campaign.network_lock_path(profile(tmp_path)) is None
+    inside = dict(first, network_lock_dir=str(campaign.ROOT / 'network-authority'))
+    with pytest.raises(ValueError, match='outside repository'):
+        campaign.network_lock_path(inside, required=True)
+
+
+def test_postflash_candidate_retains_shared_network_ownership(tmp_path):
+    from bseed_network_campaign_lock import acquire
+    cfg = _networked_profile(tmp_path, 'work-a')
+    work = Path(cfg['workdir'])
+    work.mkdir(parents=True)
+    network_path = campaign.network_lock_path(cfg, required=True)
+    acquire(network_path, network_id=cfg['network_id'], token='token-1',
+            device=cfg['device'], ieee=cfg['ieee'], image_sha256=cfg['sha256'])
+    (work / 'ACTIVE_LOCK.json').write_text(json.dumps(dict(
+        phase='ota_transfer_ok_postflash_unverified', token='token-1')))
+    assert campaign.record_postflash_candidate(cfg) is True
+    assert network_path.exists()
+    record = json.loads((work / 'ACTIVE_LOCK.json').read_text())
+    assert record['phase'] == 'postflash_candidate'
+
+
+def test_acceptance_refuses_ineligible_or_foreign_campaign_state(tmp_path):
+    from bseed_network_campaign_lock import acquire, read_lock
+    cfg = _networked_profile(tmp_path, 'work-a')
+    work = Path(cfg['workdir'])
+    work.mkdir(parents=True)
+    network_path = campaign.network_lock_path(cfg, required=True)
+    acquire(network_path, network_id=cfg['network_id'], token='token-1',
+            device=cfg['device'], ieee=cfg['ieee'], image_sha256=cfg['sha256'])
+    with pytest.raises(RuntimeError, match='missing'):
+        campaign.record_postflash_candidate(cfg)
+    (work / 'ACTIVE_LOCK.json').write_text(json.dumps(dict(
+        phase='ota_transfer_ok_postflash_unverified')))
+    with pytest.raises(RuntimeError, match='token'):
+        campaign.record_postflash_candidate(cfg)
+    (work / 'ACTIVE_LOCK.json').write_text(json.dumps(dict(
+        phase='ota_running', token='token-1')))
+    with pytest.raises(RuntimeError, match='eligible'):
+        campaign.record_postflash_candidate(cfg)
+    (work / 'ACTIVE_LOCK.json').write_text(json.dumps(dict(
+        phase='ota_transfer_ok_postflash_unverified', token='foreign')))
+    with pytest.raises(RuntimeError, match='mismatch'):
+        campaign.record_postflash_candidate(cfg)
+    assert network_path.exists()
+    assert read_lock(network_path)['token'] == 'token-1'
+    # A foreign token leaves both ownership records unchanged.
+    record = json.loads((work / 'ACTIVE_LOCK.json').read_text())
+    assert record['phase'] == 'ota_transfer_ok_postflash_unverified'

@@ -80,18 +80,16 @@ overload_action_t overload_protection_check(overload_protection_t *op,
     if (!op)
         return OVERLOAD_ACTION_NONE;
 
-    if (op->tripped && relay_is_on) {
-        op->tripped         = 0;
-        op->locked_out      = 0;
-        op->retry_count     = 0;
-        op->over_since_ms   = 0;
-        op->reconnect_at_ms = 0;
-        op->alarm           = OVERLOAD_ALARM_NONE;
-    }
-
     if (op->locked_out) {
         op->alarm = OVERLOAD_ALARM_LOCKED_OUT;
         return relay_is_on ? OVERLOAD_ACTION_TURN_OFF : OVERLOAD_ACTION_NONE;
+    }
+
+    if (op->tripped && relay_is_on) {
+        /* Protection owns re-arm.  If the physical output is energized while
+           the trip is still active, force it back off; never interpret this as
+           a manual reset of retries/lockout. */
+        return OVERLOAD_ACTION_TURN_OFF;
     }
 
     if (op->tripped && !relay_is_on) {

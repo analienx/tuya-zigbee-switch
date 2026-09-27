@@ -12,6 +12,7 @@
 #include "hal/zigbee_ota.h"
 #include "zigbee/battery_cluster.h"
 #include "zigbee/general_commands.h"
+#include "zigbee/metering_cluster.h"
 #ifdef END_DEVICE
 #include "zigbee/poll_control_cluster.h"
 #endif
@@ -97,8 +98,7 @@ void process_device_type_change() {
         stored_device_type = CURRENT_DEVICE_TYPE;
         hal_nvm_write(NV_ITEM_DEVICE_TYPE, sizeof(stored_device_type),
                       (uint8_t *)&stored_device_type);
-        hal_factory_reset();
-        schedule_reboot(2000);
+        schedule_network_reset(1);
     }
 }
 
@@ -144,6 +144,11 @@ void app_init(void) {
 }
 
 static bool boot_announce_sent = false;
+
+bool app_prepare_reboot(void) {
+    energy_monitoring_tick();
+    return metering_cluster_checkpoint();
+}
 
 void app_task() {
     /* Meter sampling/protection/persistence is intentionally independent of

@@ -82,6 +82,10 @@ jobs:
           import json
           from pathlib import Path
 
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit('distribution index rejected: ' + message)
+
           previous = json.loads(Path('/tmp/index_bseed-before.json').read_text())
           generated = json.loads(Path('/tmp/index_bseed-generated.json').read_text())
 
@@ -92,9 +96,9 @@ jobs:
           pm_entries = [e for e in generated if e['manufacturerName'][0] in pm_names]
           ts0726_entries = [e for e in previous if e['manufacturerName'][0] in ts0726_names]
           nonpm_entries = [e for e in previous if e['manufacturerName'][0] in nonpm_names]
-          assert len(pm_entries) == 2, pm_entries
-          assert len(ts0726_entries) == 2, ts0726_entries
-          assert len(nonpm_entries) in (0, 2), nonpm_entries
+          require(len(pm_entries) == 2, 'expected 2 PM entries, got %r' % (pm_entries,))
+          require(len(ts0726_entries) == 2, 'expected 2 TS0726 entries, got %r' % (ts0726_entries,))
+          require(len(nonpm_entries) in (0, 2), 'expected 0 or 2 non-PM entries, got %r' % (nonpm_entries,))
 
           out = pm_entries + nonpm_entries + ts0726_entries
           Path('zigbee2mqtt/ota/index_bseed.json').write_text(
@@ -142,9 +146,13 @@ jobs:
           from pathlib import Path
           import yaml
 
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit('distribution validation rejected: ' + message)
+
           entries = json.loads(Path('zigbee2mqtt/ota/index_bseed.json').read_text())
           previous = json.loads(Path('/tmp/index_bseed-before.json').read_text())
-          assert len(entries) in (4, 6)
+          require(len(entries) in (4, 6), 'expected 4 or 6 index entries, got %d' % len(entries))
           pm_version = int(os.environ['BSEED_PM_VERSION_DEC'])
           nonpm_version = int(os.environ['BSEED_NONPM_VERSION_DEC'])
           expected = {
@@ -159,7 +167,7 @@ jobs:
                   ('o1jzcxou', 43555, nonpm_version),
                   ('_TZ3000_o1jzcxou', 54179, 0xFFFFFFFF),
               }
-          assert actual == expected
+          require(actual == expected, 'index identity set mismatch: %r' % (actual,))
 
           old_ts = {
               e['manufacturerName'][0]: e
@@ -171,21 +179,22 @@ jobs:
               for e in entries
               if e['manufacturerName'][0] in {'iedhxgyi', '_TZ3002_iedhxgyi'}
           }
-          assert new_ts == old_ts, 'PM-only release changed TS0726 index entries'
+          require(new_ts == old_ts, 'PM-only release changed TS0726 index entries')
 
           for entry in entries:
               path = Path('zigbee2mqtt/ota/bseed') / entry['fileName']
               data = path.read_bytes()
-              assert len(data) == entry['fileSize']
-              assert hashlib.sha512(data).hexdigest() == entry['sha512']
-              assert entry['url'].endswith('/' + entry['fileName'])
+              require(len(data) == entry['fileSize'], '%s size mismatch' % entry['fileName'])
+              require(hashlib.sha512(data).hexdigest() == entry['sha512'], '%s sha512 mismatch' % entry['fileName'])
+              require(entry['url'].endswith('/' + entry['fileName']), '%s url mismatch' % entry['fileName'])
 
           db = yaml.safe_load(Path('device_db.yaml').read_text())
           pm = db['OUTLET_BSEED_PM_TS011F']
-          assert pm['status'] == 'fully_supported'
-          assert pm['stock_manufacturer_name'] == '_TZ3000_b28wrpvx'
-          assert pm['stock_image_type'] == 54179
-          assert pm['firmware_image_type'] == 43556
+          require(pm['status'] == 'fully_supported', 'PM status is not fully_supported')
+          require(pm['stock_manufacturer_name'] == '_TZ3000_b28wrpvx', 'PM stock manufacturer drift')
+          require(pm['stock_image_type'] == 54179, 'PM stock image type drift')
+          require(pm['firmware_image_type'] == 43556, 'PM firmware image type drift')
+          print('staged distribution validation: PASS')
           PY
 
       - name: Upload immutable distribution evidence

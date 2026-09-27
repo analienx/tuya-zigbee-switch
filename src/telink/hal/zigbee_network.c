@@ -28,40 +28,44 @@ void zdo_leave_confirmation_callback(nlme_leave_cnf_t *pLeaveCnf);
 #define MAINS_CLIENT_KEEPALIVE_POLL_MS    60000u
 #define KEEPALIVE_VERIFY_TICK_MS          60000u
 #define KEEPALIVE_RETRY_MS                5000u
+#define OTA_POLL_VERIFY_MS                1000u
 static hal_task_t keepalive_verify_task;
 static bool       ota_fast_poll_active = false;
 
+static uint32_t desired_mains_client_poll_ms(void) {
+    return ota_fast_poll_active ? RESPONSE_POLL_RATE : MAINS_CLIENT_KEEPALIVE_POLL_MS;
+}
+
 static void keepalive_verify_handler(void *arg) {
-    uint32_t next_ms = KEEPALIVE_VERIFY_TICK_MS;
+    uint32_t next_ms = ota_fast_poll_active ? OTA_POLL_VERIFY_MS : KEEPALIVE_VERIFY_TICK_MS;
 
     (void)arg;
-    if (!ota_fast_poll_active &&
-        hal_zigbee_get_poll_rate_ms() != MAINS_CLIENT_KEEPALIVE_POLL_MS) {
-        if (zb_setPollRate(MAINS_CLIENT_KEEPALIVE_POLL_MS) != RET_OK) {
-            next_ms = KEEPALIVE_RETRY_MS;
+    if (hal_zigbee_get_poll_rate_ms() != desired_mains_client_poll_ms()) {
+        if (zb_setPollRate(desired_mains_client_poll_ms()) != RET_OK) {
+            next_ms = ota_fast_poll_active ? OTA_POLL_VERIFY_MS : KEEPALIVE_RETRY_MS;
         }
     }
     hal_tasks_schedule(&keepalive_verify_task, next_ms);
 }
 
 static void configure_mains_client_keepalive(void) {
-    u8 status = zb_setPollRate(MAINS_CLIENT_KEEPALIVE_POLL_MS);
+    u8 status = zb_setPollRate(desired_mains_client_poll_ms());
 
     if (status != RET_OK) {
         printf("Mains client keepalive setup failed: %u\r\n", status);
     }
     keepalive_verify_task.handler = keepalive_verify_handler;
     keepalive_verify_task.arg     = NULL;
-    hal_tasks_schedule(&keepalive_verify_task, KEEPALIVE_VERIFY_TICK_MS);
+    hal_tasks_schedule(&keepalive_verify_task,
+                       ota_fast_poll_active ? OTA_POLL_VERIFY_MS :
+                       (status == RET_OK ? KEEPALIVE_VERIFY_TICK_MS : KEEPALIVE_RETRY_MS));
 }
 
 void hal_zigbee_set_ota_poll_active(bool fast) {
     ota_fast_poll_active = fast;
-    if (fast) {
-        hal_zigbee_set_poll_rate_ms(RESPONSE_POLL_RATE);
-    } else {
-        configure_mains_client_keepalive();
-    }
+    // Also retry failed fast-poll setup; a join callback during OTA must not
+    // restore the slow keepalive rate while blocks are still being exchanged.
+    configure_mains_client_keepalive();
 }
 
 #endif

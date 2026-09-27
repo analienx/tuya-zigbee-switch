@@ -86,6 +86,9 @@ void switch_cluster_report_action(zigbee_switch_cluster *cluster);
 
 void switch_cluster_callback_attr_write_trampoline(uint8_t endpoint,
                                                    uint16_t attribute_id) {
+    if (endpoint >= 10 || switch_cluster_by_endpoint[endpoint] == NULL) {
+        return;
+    }
     switch_cluster_on_write_attr(switch_cluster_by_endpoint[endpoint],
                                  attribute_id);
 }
@@ -499,6 +502,10 @@ void switch_cluster_on_write_attr(zigbee_switch_cluster *cluster,
         }
     }
 
+    if (attribute_id == ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_LONG_PRESS_DUR &&
+        cluster->button->long_press_duration_ms < 100u) {
+        cluster->button->long_press_duration_ms = 800u;
+    }
     if (attribute_id == ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_RELAY_INDEX) {
         if (relay_clusters_cnt == 0) {
             cluster->relay_index = 0;
@@ -595,6 +602,19 @@ void switch_cluster_load_attrs_from_nv(zigbee_switch_cluster *cluster) {
         cluster->binded_mode     = nv_config_buffer.binded_mode;
     }
 
+    // Sanitize corrupt persisted settings before button timers or routing use.
+    if (cluster->button->long_press_duration_ms < 100u) {
+        cluster->button->long_press_duration_ms = 800u;
+    }
+    if (cluster->mode > ZCL_ONOFF_CONFIGURATION_SWITCH_TYPE_MOMENTARY_NC) {
+        cluster->mode = ZCL_ONOFF_CONFIGURATION_SWITCH_TYPE_TOGGLE;
+    }
+    if (cluster->relay_mode > ZCL_ONOFF_CONFIGURATION_RELAY_MODE_SHORT) {
+        cluster->relay_mode = ZCL_ONOFF_CONFIGURATION_RELAY_MODE_SHORT;
+    }
+    if (cluster->binded_mode > ZCL_ONOFF_CONFIGURATION_BINDED_MODE_SHORT) {
+        cluster->binded_mode = ZCL_ONOFF_CONFIGURATION_BINDED_MODE_DISABLED;
+    }
     // Validate relay_index to prevent out-of-bounds access.
     if (relay_clusters_cnt == 0) {
         cluster->relay_index = 0;

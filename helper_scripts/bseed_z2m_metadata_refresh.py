@@ -1,4 +1,10 @@
-"""Refresh stale Zigbee2MQTT role metadata after a cross-role OTA, without removing a device."""
+"""Refresh stale Zigbee2MQTT role metadata after a cross-role OTA, without removing a device.
+
+Always performs exactly one transaction-matched target interview and requires a
+fresh non-retained inventory plus a final live ZDO descriptor, so the evidence
+is sufficient for quarantine release. A cached build plus fresh ZDO alone is
+never labeled a fresh identity check.
+"""
 import argparse, datetime as dt, json, threading, time, uuid
 from pathlib import Path
 import paho.mqtt.client as mqtt
@@ -31,7 +37,7 @@ def main():
     if args.confirm_ieee!=args.ieee or len(args.ieee)!=18:raise ValueError('Exact IEEE confirmation required')
     config=yaml.safe_load(Path(args.mqtt_config).read_text(encoding='utf8'))['mqtt']
     base=config.get('base_topic','zigbee2mqtt');token='bseed-metadata-'+uuid.uuid4().hex
-    state={'inventory':None,'bridge':None,'response':None};changed=threading.Event();ready=threading.Event()
+    state={'inventory':None,'bridge':None,'response':None,'requested':False,'fresh_inventory':False};changed=threading.Event();ready=threading.Event()
     client=mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,client_id=token)
     client.username_pw_set(config.get('user',''),config.get('password',''))
     def on_connect(c,_u,_f,reason,_p):
@@ -41,13 +47,16 @@ def main():
     def on_message(_c,_u,m):
         try:d=json.loads(m.payload)
         except (ValueError,UnicodeDecodeError):return
-        if m.topic==base+'/bridge/devices' and isinstance(d,list):state['inventory']=d;changed.set()
+        if m.topic==base+'/bridge/devices' and isinstance(d,list):
+            state['inventory']=d
+            if state['requested'] and not m.retain:state['fresh_inventory']=True
+            changed.set()
         elif m.topic==base+'/bridge/state':state['bridge']=d.get('state') if isinstance(d,dict) else d;changed.set()
-        elif m.topic==base+'/bridge/response/device/interview' and d.get('transaction')==token:
+        elif m.topic==base+'/bridge/response/device/interview' and state['requested'] and d.get('transaction')==token:
             state['response']=d;changed.set()
     client.on_connect=on_connect;client.on_message=on_message
     client.connect(args.broker,1883,10);client.loop_start()
-    before=None;after=None;live=None;result='unconfirmed';reason=None
+    before=None;after=None;live=None;live_after=None;result='unconfirmed';reason=None;interview_ok=False
     try:
         if not ready.wait(10):raise TimeoutError('MQTT did not subscribe')
         deadline=time.monotonic()+12
@@ -58,21 +67,26 @@ def main():
         if len(selected)!=1 or selected[0].get('friendly_name')!=args.device:
             raise ValueError('Exact target name/IEEE mismatch')
         live=read_node_with_retries(args.mqtt_config,args.broker,args.ieee,selected[0]['network_address'])
-        before,correct=metadata_status(state['inventory'],args.ieee,args.expect_role,args.expect_build,live)
-        if not correct:
-            client.publish(base+'/bridge/request/device/interview',
-                json.dumps({'id':args.ieee,'transaction':token}),qos=1).wait_for_publish(5)
-            deadline=time.monotonic()+150
-            while time.monotonic()<deadline and state['response'] is None:
-                changed.wait(.3);changed.clear()
-            if not state['response'] or state['response'].get('status')!='ok':
-                raise RuntimeError('Targeted interview failed or timed out: '+repr(state['response']))
-            deadline=time.monotonic()+12
-            while time.monotonic()<deadline:
-                observed=state['inventory'] or []
-                match=next((d for d in observed if d.get('ieee_address')==args.ieee),{})
-                if match.get('type')==args.expect_role:break
-                changed.wait(.3);changed.clear()
+        before,_already_correct=metadata_status(state['inventory'],args.ieee,args.expect_role,args.expect_build,live)
+        # One bounded interview per invocation, even when cached metadata looks
+        # correct: release-grade evidence requires fresh proof, not a cache hit.
+        state['requested']=True
+        client.publish(base+'/bridge/request/device/interview',
+            json.dumps({'id':args.ieee,'transaction':token}),qos=1).wait_for_publish(5)
+        deadline=time.monotonic()+150
+        while time.monotonic()<deadline and state['response'] is None:
+            changed.wait(.3);changed.clear()
+        if not state['response'] or state['response'].get('status')!='ok':
+            raise RuntimeError('Targeted interview failed or timed out: '+repr(state['response']))
+        interview_ok=True
+        deadline=time.monotonic()+12
+        while time.monotonic()<deadline:
+            observed=state['inventory'] or []
+            match=next((d for d in observed if d.get('ieee_address')==args.ieee),{})
+            if state['fresh_inventory'] and match.get('type')==args.expect_role:break
+            changed.wait(.3);changed.clear()
+        if not state['fresh_inventory']:
+            raise RuntimeError('No fresh nonretained bridge inventory after interview')
         live_after=read_node_with_retries(args.mqtt_config,args.broker,args.ieee,before['network_address'])
         after,correct=metadata_status(state['inventory'],args.ieee,args.expect_role,args.expect_build,live_after)
         if not correct:raise RuntimeError('Interview succeeded but cached role remains stale; do not remove device automatically')
@@ -84,8 +98,12 @@ def main():
     finally:
         client.loop_stop();client.disconnect()
         evidence={'at':dt.datetime.now().astimezone().isoformat(),'ieee':args.ieee,'device':args.device,
-            'result':result,'error':reason,'live_zdo_before':live,'inventory_role_before':before.get('type') if before else None,
-            'inventory_role_after':after.get('type') if after else None,'interview_response':state['response'],
+            'result':result,'error':reason,'interview_ok':interview_ok,
+            'fresh_inventory_observed':state['fresh_inventory'],
+            'live_zdo_before':live,'live_zdo_after':live_after,
+            'inventory_role_before':before.get('type') if before else None,
+            'inventory_role_after':after.get('type') if after else None,
+            'after':after,'interview_response':state['response'],
             'automatic_remove_or_factory_reset':False}
         output.parent.mkdir(parents=True,exist_ok=True)
         output.write_text(json.dumps(evidence,indent=2,default=str),encoding='utf8')

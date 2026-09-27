@@ -8,10 +8,12 @@ Do not interpret Zigbee2MQTT OTA `status:ok` or 100% as a confirmed boot. Never 
 
 For any live Home Assistant access, Zigbee2MQTT NWK/address mapping or route-error investigation, load the **single canonical** [Home Assistant read-only skill](https://github.com/analienx/config/blob/main/skills/home-assistant-readonly/SKILL.md) from `analienx/config` (main). It provides the existing SSH alias, a host-key-verified Paramiko fallback for Windows OpenSSH exit-255 failures, and the reusable `ha_readonly.py` live inventory helper. Keep implementation and credentials in the canonical location; do not copy the helper or SSH settings here. This does not authorize Zigbee firmware flashing, HA mutations or bypass of this repository's own safety/deployment rules.
 
-## CI is the gate of record (public repo)
+## Public-repository execution policy
 
-This is a public GitHub project: all offline verification (host tests, `bseed/pm-matrix`, `bseed/identity-gate`, distribution and reproducibility builds) runs on GitHub Actions runners, never on a personal checkout. Local and WSL builds are iteration aids only; a green local run never substitutes CI green. Do not merge or release from a head commit that is not CI-green on its exact SHA.
+This is a **public GitHub repository**. All repository execution — build, test, lint, verification, packaging, reproducibility checks, benchmarks, and acceptance evidence — must run on **GitHub-hosted Actions runners** from the exact candidate SHA. Never run those workloads in local WSL, on a personal workstation Executor, or on a self-hosted runner. There is no local/WSL “iteration aid” exception.
+
+A local checkout may be inspected or edited to prepare changes, but local results are non-authoritative and must not be used as validation evidence. Local host access is reserved only for a separately authorized hardware/live-device action that cannot run on GitHub-hosted infrastructure; that exception never authorizes local repository verification. If local/WSL execution residue is discovered, stop the local Executor, remove only executor-owned temporary artifacts, preserve repository work, and reproduce any claimed result on GitHub-hosted CI before acceptance.
 
 ## Required BSEED shared PM firmware gate
 
-Before releasing any BSEED TS011F-BS-PM source change, run `make bseed/pm-matrix` in a clean Linux checkout with the Telink toolchain. This builds and validates the Router and mains Client from the exact same commit, not merely host tests. Read `docs/bseed_pm_variant_matrix.md`. Keep role-specific OTA identities and live hardware gates separate; a green offline matrix never authorizes flashing.
+Before releasing any BSEED TS011F-BS-PM source change, run `make bseed/pm-matrix` on public GitHub Actions in a clean Linux checkout with the Telink toolchain. This builds and validates the Router and mains Client from the exact same commit, not merely host tests. Read `docs/bseed_pm_variant_matrix.md` and `skills/bseed-zigbee-ota/references/build-and-verify.md`. Keep role-specific OTA identities and live hardware gates separate; a green offline matrix never authorizes flashing.

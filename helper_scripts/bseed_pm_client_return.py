@@ -13,10 +13,9 @@ import struct
 
 from bseed_ota_identity import DEFAULT_REGISTRY, gate_image, load_registry, parse_ota_header
 from bseed_pm_variant_matrix import ROOT, run, verify_artifact
+from bseed_pm_release import CLIENT, RETURN, verify_native_image
 
-RETURN = {'role': 'Router', 'build': '1.2.5-bseedv8u5-rc6',
-          'version': 0x12053013, 'type': 43556, 'artifact': 'forward.ota'}
-CLIENT_VERSION = 0x12053012
+CLIENT_VERSION = CLIENT['version']
 
 
 def verify_return(native, wrapper, registry, installed_version=CLIENT_VERSION):
@@ -49,6 +48,7 @@ def verify_return(native, wrapper, registry, installed_version=CLIENT_VERSION):
         raise ValueError('native firmware CRC mismatch')
     # Wrapper identities are real OTA tuples too: never collide with cli11 etc.
     for data, image_type in ((native, 43556), (wrapper, 65024)):
+        verify_native_image(data, RETURN, transport_type=image_type)
         gate_image(data, registry, RETURN['build'], image_type, RETURN['version'])
     return {'sourceRole': 'EndDevice', 'destinationRole': 'Router',
             'minimumTestedSourceBuild': None, 'baselineClientVersion': installed_version,
@@ -63,7 +63,7 @@ def verify_return(native, wrapper, registry, installed_version=CLIENT_VERSION):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output-dir', default='build/bseed-pm-client-return-rc6')
+    parser.add_argument('--output-dir', default='build/bseed-pm-client-return-r8')
     args = parser.parse_args()
     out = (ROOT / args.output_dir).resolve()
     if not out.is_relative_to((ROOT / 'build').resolve()) or out.exists():

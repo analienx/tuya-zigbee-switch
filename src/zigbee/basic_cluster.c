@@ -28,6 +28,9 @@ const uint8_t hwVersion    = 0x00;
 uint8_t powerSource = POWER_SOURCE_MAINS_1_PHASE; // 0x01 default
 
 const uint16_t cluster_revision = 0x01;
+/* Basic 0x4000 permits 16 bytes; oversized replies are discarded by Herdsman. */
+typedef char sw_build_id_must_fit_zcl_basic_16_bytes[
+    sizeof(STRINGIFY_VALUE(VERSION_STR)) <= 17 ? 1 : -1];
 DEF_STR(STRINGIFY_VALUE(VERSION_STR), swBuildId);
 extern network_indicator_t network_indicator;
 
@@ -223,6 +226,8 @@ void basic_cluster_add_to_endpoint(zigbee_basic_cluster *cluster,
                ATTR_READONLY, cluster_revision);
     SETUP_ATTR(11, ZCL_ATTR_BASIC_DEVICE_CONFIG, ZCL_DATA_TYPE_LONG_CHAR_STR,
                ATTR_WRITABLE, device_config_str);
+    cluster->attr_infos[11].write_max_size =
+        (uint16_t)(2u + sizeof(device_config_str.data) - 1u);
     SETUP_ATTR(12, ZCL_ATTR_BASIC_MULTI_PRESS_RESET_COUNT, ZCL_DATA_TYPE_UINT8,
                ATTR_WRITABLE, g_multi_press_reset_count);
     if (network_indicator.has_dedicated_led) {

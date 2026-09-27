@@ -1,13 +1,14 @@
 """Offline non-PM reachability evidence and OTA sequencing guards."""
 import json
 import sys
+import time
 from pathlib import Path
 from unittest.mock import patch
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'helper_scripts'))
-from bseed_nonpm_link_gate import verify_record
+from bseed_nonpm_link_gate import verify_record, verify_probe_evidence
 from bseed_ota_campaign import runner_args, load_profile
 
 
@@ -23,7 +24,9 @@ def record():
     p=profile()
     return dict(schema=1,passed=True,device=p['device'],ieee=p['ieee'],
         image_sha256=p['sha256'],build=p['preflash_build'],
-        samples=[dict(valid=True,requested_at=x,latency_s=1.1) for x in (800,830,860)],
+        samples=[dict(valid=True,backend_proven=True,
+            probe_request_id='req-'+str(i),transaction=i,response_type='readResponse',
+            requested_at=x,latency_s=1.1) for i,x in enumerate((800,830,860),1)],
         completed_at=862)
 
 
@@ -35,6 +38,55 @@ def test_three_separated_fresh_responses_are_required():
         with pytest.raises(AssertionError): verify_record(changed,p,now=870)
     r['samples'][1]['valid']=False
     with pytest.raises(AssertionError,match='Unresponsive'): verify_record(r,p,now=870)
+
+
+def test_backend_probe_must_correlate_exact_read_response():
+    p=profile()
+    evidence=dict(schema=1,passed=True,request_id='req-1',
+        device=p['device'],ieee=p['ieee'],endpoint=1,cluster='genOnOff',
+        attribute='onOff',response_type='readResponse',transaction=42,
+        requested_at=100.1,response_at=101.0,errors=[],value='OFF')
+    p['expect_relay']='OFF'
+    assert verify_probe_evidence(evidence,p,'req-1',100.0) is evidence
+    for field,value in (
+        ('request_id','foreign'),('ieee','0xBAD'),('endpoint',2),
+        ('cluster','haElectricalMeasurement'),('attribute','activePower'),
+        ('response_type','attributeReport'),('transaction',300),
+        ('response_at',120.0),('errors',['timeout']),('value','ON')):
+        changed=dict(evidence,**{field:value})
+        with pytest.raises(AssertionError):
+            verify_probe_evidence(changed,p,'req-1',100.0)
+
+
+def test_mqtt_only_samples_can_never_pass_link_gate():
+    p=profile(); r=record()
+    for sample in r['samples']:
+        sample.pop('backend_proven')
+        sample.pop('probe_request_id')
+        sample.pop('transaction')
+        sample.pop('response_type')
+    with pytest.raises(AssertionError,match='uncorrelated'):
+        verify_record(r,p,now=870)
+
+
+def test_reused_probe_evidence_across_samples_is_rejected():
+    p=profile();r=record()
+    r['samples'][2]['probe_request_id']=r['samples'][0]['probe_request_id']
+    with pytest.raises(AssertionError,match='reuse'):
+        verify_record(r,p,now=870)
+
+
+def test_failed_backend_read_probe_aborts_without_sample(tmp_path):
+    import bseed_nonpm_link_gate as gate
+    p=profile()
+    p.update(expect_relay='OFF',
+        link_probe_command=[sys.executable,'-c','import sys;sys.exit(3)'])
+    with pytest.raises(AssertionError,match='failed'):
+        gate.run_probe(p,tmp_path,1,time.time())
+    p['link_probe_command']=[sys.executable,'-c','pass']
+    with pytest.raises(AssertionError,match='no evidence file'):
+        gate.run_probe(p,tmp_path,1,time.time())
+    assert list(tmp_path.glob('.link_probe_*'))==[]
 
 
 def test_reject_wrong_target_build_firmware_age_or_reused_precheck_gate():
@@ -69,6 +121,10 @@ def test_campaign_only_gates_opted_in_client_and_pins_runtime_baseline(tmp_path)
 def test_link_gate_never_issues_ota_relay_set_join_or_interview():
     src=(ROOT/'helper_scripts/bseed_nonpm_link_gate.py').read_text()
     assert "'/get'" in src
+    assert "profile['device'] + '/get'" in src
+    assert "{profile['relay_get_key']: ''}" in src
+    assert "profile.get('relay_get_key') != 'state_relay'" in src
+    assert src.index("'/get'") < src.index('probe = run_probe(')
     for forbidden in ('/set', 'ota_update/', 'permit_join', 'device/interview',
                       'device/remove', 'factory_reset', 'relay/set'):
         if forbidden == 'permit_join':

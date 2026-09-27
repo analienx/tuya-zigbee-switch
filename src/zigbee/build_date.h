@@ -53,6 +53,15 @@
 /* Function to initialize build date at runtime - works with any compiler */
 static inline void zb_build_date_init(char *dest) {
     dest[0] = 8;               /* Length */
+#ifdef BSEED_BUILD_DATE
+    /* Release builds pin this input; TC32 need not support SOURCE_DATE_EPOCH. */
+    static const char release_date[] = STRINGIFY_VALUE(BSEED_BUILD_DATE);
+    typedef char release_date_must_have_eight_digits[sizeof(release_date) == 9 ? 1 : -1];
+    (void)sizeof(release_date_must_have_eight_digits);
+    for (unsigned int i = 0; i < 8; i++) {
+        dest[i + 1] = release_date[i];
+    }
+#else
     dest[1] = __DATE__[7];     /* Year digit 1 */
     dest[2] = __DATE__[8];     /* Year digit 2 */
     dest[3] = __DATE__[9];     /* Year digit 3 */
@@ -61,6 +70,7 @@ static inline void zb_build_date_init(char *dest) {
     dest[6] = MONTH_ONES_CHAR; /* Month ones */
     dest[7] = DAY_TENS_CHAR;   /* Day tens */
     dest[8] = DAY_ONES_CHAR;   /* Day ones */
+#endif
 }
 
 /* Static buffer that gets initialized once */

@@ -298,6 +298,8 @@ void electrical_measurement_cluster_add_to_endpoint(
     SETUP_ATTR(16, ZCL_ATTR_ELEC_MEAS_CUST_CALIBRATION_VALUES,
                ZCL_DATA_TYPE_CHAR_STR, ATTR_WRITABLE,
                cluster->calibration_values);
+    cluster->attr_infos[16].write_max_size =
+        (uint16_t)(1u + ELEC_MEAS_CALIBRATION_STR_APP_MAX);
     SETUP_ATTR(17, ZCL_ATTR_ELEC_MEAS_CUST_OVERLOAD_POWER_LIMIT,
                ZCL_DATA_TYPE_UINT16, ATTR_WRITABLE,
                cluster->overload_power_limit);
@@ -390,6 +392,11 @@ void electrical_measurement_cluster_callback_attr_write_trampoline(
         cluster->calibrate_power = 0;
         break;
     case ZCL_ATTR_ELEC_MEAS_CUST_CALIBRATION_VALUES:
+        if (cluster->calibration_values.len >
+            ELEC_MEAS_CALIBRATION_STR_APP_MAX) {
+            elec_meas_refresh_calibration_values(cluster);
+            return;
+        }
         elec_meas_apply_calibration_values(cluster);
         elec_meas_refresh_calibration_values(cluster);
         return;
@@ -446,15 +453,16 @@ static void elec_meas_run_overload_protection(
     if (!relay || !data->valid)
         return;
 
-    int32_t           power  = energy_meter_get_instant_power(cluster->meter);
+    int32_t power = energy_meter_get_instant_power(cluster->meter);
+    uint8_t energized = relay_cluster_is_physically_on(relay);
     overload_action_t action = overload_protection_check(
         &cluster->overload, hal_millis(), data->voltage, data->current,
-        power, relay->relay->on, relay->startup_mode);
+        power, energized, relay->startup_mode);
 
-    if (action == OVERLOAD_ACTION_TURN_OFF && relay->relay->on) {
-        relay_cluster_off(relay);
-    } else if (action == OVERLOAD_ACTION_TURN_ON && !relay->relay->on) {
-        relay_cluster_on(relay);
+    if (action == OVERLOAD_ACTION_TURN_OFF && energized) {
+        relay_cluster_protection_trip(relay);
+    } else if (action == OVERLOAD_ACTION_TURN_ON && !energized) {
+        relay_cluster_protection_rearm(relay);
     }
 
     if (cluster->overload_alarm != (uint8_t)cluster->overload.alarm) {

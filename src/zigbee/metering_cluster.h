@@ -2,6 +2,7 @@
 #define _METERING_CLUSTER_H_
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "hal/zigbee.h"
 #include "base_components/energy_meter.h"
 
@@ -21,6 +22,15 @@ typedef struct {
     uint32_t             last_nvm_save_time;
     uint32_t             last_report_time;
     uint64_t             last_reported_energy;
+    /* False after an NVM read error. While false, the accumulated total is
+       unknown and must never be persisted over the last good NVM record. */
+    uint8_t              energy_baseline_valid;
+    /* Delta seeding: after any (re)load the first valid meter reading seeds
+       last_energy_value without accumulating, so a restored total is never
+       double-counted against a live meter. */
+    uint8_t              last_energy_value_seeded;
+    /* Stamped on every baseline load; throttles retries while invalid. */
+    uint32_t             last_baseline_retry_time;
 } metering_cluster_t;
 
 void metering_cluster_init(metering_cluster_t *cluster, energy_meter_t *meter);
@@ -30,6 +40,8 @@ void metering_cluster_update(metering_cluster_t *cluster);
 void metering_cluster_report(metering_cluster_t *cluster);
 void metering_cluster_load_energy(metering_cluster_t *cluster);
 void metering_cluster_save_energy(metering_cluster_t *cluster);
+/* Save and verify the active meter before controlled reboot; no meter is OK. */
+bool metering_cluster_checkpoint(void);
 void metering_cluster_reset_energy(metering_cluster_t *cluster);
 void metering_cluster_callback_attr_write_trampoline(uint8_t endpoint,
                                                      uint16_t attribute_id);

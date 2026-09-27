@@ -29,11 +29,20 @@ on:
 jobs:
   pm-matrix:
     runs-on: ubuntu-latest
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout exact source
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact candidate head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
 
       - name: Install host dependencies
         run: |
@@ -59,7 +68,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bseed-pm-role-matrix-${{ github.sha }}
+          name: bseed-pm-role-matrix-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             build/bseed-pm-role-matrix-*/ROLE_MATRIX.json
             build/bseed-pm-role-matrix-*/router/forward.ota
@@ -72,7 +81,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bseed-pm-role-matrix-log-${{ github.sha }}
+          name: bseed-pm-role-matrix-log-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/pm-matrix.log
           if-no-files-found: error
 
@@ -82,10 +91,10 @@ jobs:
       - name: Upload experimental Client to Router package
         uses: actions/upload-artifact@v4
         with:
-          name: bseed-pm-client-return-experimental-${{ github.sha }}
+          name: bseed-pm-client-return-experimental-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
-            build/bseed-pm-client-return-rc6/forward.ota
-            build/bseed-pm-client-return-rc6/from-client.ota
-            build/bseed-pm-client-return-rc6/manifest.json
-            build/bseed-pm-client-return-rc6/CLIENT_RETURN.json
+            build/bseed-pm-client-return-r8/forward.ota
+            build/bseed-pm-client-return-r8/from-client.ota
+            build/bseed-pm-client-return-r8/manifest.json
+            build/bseed-pm-client-return-r8/CLIENT_RETURN.json
           if-no-files-found: error

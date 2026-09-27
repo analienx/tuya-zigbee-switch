@@ -21,12 +21,27 @@ def _private_file(value, label):
 
 
 def verify_recovery(profile, *, confirm_unloaded=False, accept_nonrecoverable_ota=False):
+    return _verify_recovery(profile, confirm_unloaded=confirm_unloaded,
+                            accept_nonrecoverable_ota=accept_nonrecoverable_ota)
+
+
+def verify_transition_recovery(profile, *, confirm_unloaded=False, accept_nonrecoverable_ota=False):
+    roles = (profile.get('preflash_role'), profile.get('postflash_role'))
+    if roles not in (('Router', 'EndDevice'), ('EndDevice', 'Router')):
+        raise ValueError('Non-PM transition requires distinct supported source and target roles')
+    if accept_nonrecoverable_ota:
+        raise ValueError('Historical same-role risk waiver cannot authorize a role transition')
+    return _verify_recovery(profile, confirm_unloaded=confirm_unloaded, roles=roles)
+
+
+def _verify_recovery(profile, *, confirm_unloaded=False, accept_nonrecoverable_ota=False,
+                     roles=('EndDevice', 'EndDevice')):
     """Reject absent, foreign, untested or unverified board-specific recovery."""
     if profile.get('non_pm') is not True:
         raise ValueError('This recovery gate is strictly for non-PM Clients')
     if (profile.get('manufacturer'), profile.get('model'),
             profile.get('preflash_role'), profile.get('postflash_role')) != (
-            'o1jzcxou', 'TS011F-BS', 'EndDevice', 'EndDevice'):
+            'o1jzcxou', 'TS011F-BS', *roles):
         raise ValueError('Non-PM recovery identity/role mismatch')
     if profile.get('block_bytes') != 32:
         raise ValueError('Unproven non-PM transfer size: pin 32 bytes')

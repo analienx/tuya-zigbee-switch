@@ -54,14 +54,30 @@ if [[ "${BSEED_PM_ROUTER_READ_FIX:-0}" == "1" ]]; then
     : "${BSEED_PM_ROUTER_READ_FIX_OUTPUT:=build/bseed-ts011f-pm-router-v8u5-rc5}"
     set -- "$BSEED_PM_ROUTER_READ_FIX_OUTPUT"
 fi
-# Separate return candidate: cli10 and rc5 already share 0x12053012.
+# Consolidated same-source Router companion to PM Client cli11.
+RELEASE_DATE_OVERRIDE=''
+if [[ "${BSEED_PM_CONSOLIDATED:-0}" == "1" ]]; then
+    readarray -t release_vars < <(python3 helper_scripts/bseed_pm_release.py vars --role router)
+    [[ ${#release_vars[@]} == 4 ]] || exit 2
+    SW_BUILD="${release_vars[0]}"
+    FILE_VERSION_HEX="${release_vars[1]}"
+    FILE_VERSION_DEC="${release_vars[2]}"
+    RELEASE_DATE_OVERRIDE="${release_vars[3]}"
+    : "${BSEED_PM_CONSOLIDATED_OUTPUT:=build/bseed-pm-router-r7}"
+    set -- "$BSEED_PM_CONSOLIDATED_OUTPUT"
+fi
+
+# Separate return candidate: cli11 and r7 share 0x12053014.
 # Allocated with bseed_ota_identity suggest-next/emit-make-vars after sealing
 # their CI hashes. This packages a newer Router; it is not an apply-path fix.
 if [[ "${BSEED_PM_CLIENT_RETURN:-0}" == "1" ]]; then
-    SW_BUILD='1.2.5-bseedv8u5-rc6'
-    FILE_VERSION_HEX='0x12053013'
-    FILE_VERSION_DEC=302329875
-    : "${BSEED_PM_CLIENT_RETURN_OUTPUT:=build/bseed-pm-client-return-rc6}"
+    readarray -t release_vars < <(python3 helper_scripts/bseed_pm_release.py vars --role return)
+    [[ ${#release_vars[@]} == 4 ]] || exit 2
+    SW_BUILD="${release_vars[0]}"
+    FILE_VERSION_HEX="${release_vars[1]}"
+    FILE_VERSION_DEC="${release_vars[2]}"
+    RELEASE_DATE_OVERRIDE="${release_vars[3]}"
+    : "${BSEED_PM_CLIENT_RETURN_OUTPUT:=build/bseed-pm-client-return-r8}"
     set -- "$BSEED_PM_CLIENT_RETURN_OUTPUT"
 fi
 VOLTAGE_MULTIPLIER=161460
@@ -143,6 +159,7 @@ OTA="$OUT_DIR/forward.ota"
 FROM_TUYA_OTA="$OUT_DIR/from_tuya.ota"
 
 COMMON_ARGS=(
+    BSEED_BUILD_DATE="$RELEASE_DATE_OVERRIDE"
     VERSION_STR="$SW_BUILD"
     FILE_VERSION="$FILE_VERSION_HEX"
     NVM_MIGRATIONS_VERSION="$NVM_SCHEMA"
@@ -193,7 +210,7 @@ make -C src/telink ota \
     OTA_IMAGE_TYPE="$CLIENT_IMAGE_TYPE" \
     OTA_VERSION="$FILE_VERSION_HEX"
 
-python3 - "$OUT_DIR" "$BOARD" "$SW_BUILD" "$FILE_VERSION_DEC" \
+BSEED_MANIFEST_BUILD_DATE="$RELEASE_DATE_OVERRIDE" python3 - "$OUT_DIR" "$BOARD" "$SW_BUILD" "$FILE_VERSION_DEC" \
     "$MANUFACTURER_CODE" "$IMAGE_TYPE" "$STOCK_MANUFACTURER_NAME" \
     "$STOCK_IMAGE_TYPE" "$NVM_SCHEMA" "$CANONICAL" \
     "$VOLTAGE_MULTIPLIER" "$CURRENT_MULTIPLIER" "$POWER_MULTIPLIER" \
@@ -201,6 +218,7 @@ python3 - "$OUT_DIR" "$BOARD" "$SW_BUILD" "$FILE_VERSION_DEC" \
 from __future__ import annotations
 
 import hashlib
+import os
 import json
 import pathlib
 import struct
@@ -338,6 +356,7 @@ manifest = {
     "sourceDirty": source_dirty,
     "board": board,
     "swBuildId": sw_build,
+    "buildDate": os.environ['BSEED_MANIFEST_BUILD_DATE'] or None,
     "fileVersion": file_version,
     "manufacturerCode": manufacturer,
     "imageType": image_type,

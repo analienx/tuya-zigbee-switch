@@ -18,6 +18,7 @@ def package():
     fw[6:12] = b'\x5d\x02KNLT'
     struct.pack_into('<I', fw, 0x18, len(fw))
     build = RETURN['build'].encode()
+    fw[39] = len(build)
     fw[40:40+len(build)] = build
     struct.pack_into('<I', fw, len(fw)-4, binascii.crc32(fw[:-4]) ^ 0xffffffff)
     payload = struct.pack('<HI', 0, len(fw)) + fw

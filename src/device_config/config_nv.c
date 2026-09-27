@@ -21,7 +21,15 @@ const char default_config_data[] = "unknown;TS0012-CUSTOM;";
 const char default_config_data[] = STRINGIFY(DEFAULT_CONFIG);
 #endif
 
+/* Recovery-only state: two identity fields and NO hardware/configuration
+ * tokens. It initializes no relay, button, indicator or meter GPIO. This is
+ * deliberately not accepted by the normal exact-board replacement policy. */
 static const char emergency_config_data[] = "unknown;TS0012-CUSTOM;";
+
+static bool emergency_config_is_minimal(const uint8_t *data, uint16_t size) {
+    return size == sizeof(emergency_config_data) - 1u &&
+           memcmp(data, emergency_config_data, size) == 0;
+}
 
 device_config_str_t device_config_str;
 static bool         parser_preflight_enabled = false;
@@ -482,21 +490,22 @@ bool device_config_resources_are_safe(const uint8_t *data, uint16_t size) {
 }
 
 bool device_config_prepare_for_parse(void) {
-    if (device_config_resources_are_safe(device_config_str.data,
-                                         device_config_str.size)) {
+    if (device_config_is_valid(device_config_str.data,
+                               device_config_str.size)) {
         return true;
     }
 
     printf("Stored device config is unsafe; using compiled default in RAM\r\n");
     load_config_copy(default_config_data);
-    if (device_config_resources_are_safe(device_config_str.data,
-                                         device_config_str.size)) {
+    if (device_config_is_valid(device_config_str.data,
+                               device_config_str.size)) {
         return true;
     }
 
     printf("Compiled default config is unsafe; using emergency minimal config\r\n");
     load_config_copy(emergency_config_data);
-    return device_config_resources_are_safe(device_config_str.data,
+    return emergency_config_is_minimal(device_config_str.data, device_config_str.size) &&
+           device_config_resources_are_safe(device_config_str.data,
                                             device_config_str.size);
 }
 
@@ -637,6 +646,19 @@ static bool bseed_ts0726_3gang_config_is_valid(const uint8_t *data,
 
 #endif
 
+#if defined(BSEED_PM_B28WRPVX) || defined(DEVICE_CONFIG_GUARD_BSEED_TS011F_NONPM)
+static bool bseed_socket_board_config_is_valid(const uint8_t *data,
+                                               uint16_t size) {
+#ifdef BSEED_PM_B28WRPVX
+    static const char approved[] = "b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;";
+#else
+    static const char approved[] = "o1jzcxou;TS011F-BS;LC2;SB4u;RC3;ID2;M;";
+#endif
+    return size == sizeof(approved) - 1u &&
+           memcmp(data, approved, sizeof(approved) - 1u) == 0;
+}
+#endif
+
 bool device_config_is_valid(const uint8_t *data, uint16_t size) {
     if (!config_structurally_valid(data, size) ||
         !device_config_resources_are_safe(data, size)) {
@@ -645,6 +667,8 @@ bool device_config_is_valid(const uint8_t *data, uint16_t size) {
 
 #ifdef DEVICE_CONFIG_GUARD_BSEED_TS0726_3GANG
     return bseed_ts0726_3gang_config_is_valid(data, size);
+#elif defined(BSEED_PM_B28WRPVX) || defined(DEVICE_CONFIG_GUARD_BSEED_TS011F_NONPM)
+    return bseed_socket_board_config_is_valid(data, size);
 #else
     return true;
 #endif

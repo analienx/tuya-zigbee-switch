@@ -3,6 +3,7 @@
 Use a PRIVATE profile outside git. `flash` requires exact IEEE typed a second time.
 """
 import argparse
+import datetime as dt
 import hashlib
 import json
 from pathlib import Path
@@ -15,6 +16,42 @@ REQUIRED = ('device', 'ieee', 'manufacturer', 'model', 'preflash_role',
             'image', 'sha256', 'url', 'mqtt_config', 'broker', 'workdir',
             'manufacturer_code', 'image_type', 'file_version', 'expect_relay',
             'index_url', 'index_output', 'template_index', 'postflash_role', 'postflash_build')
+
+
+def validate_pm_mode(data):
+    """Fail-closed hardware-class/mode check; runs inside load_profile.
+
+    The PM/non-PM hardware class is derived from the validated board
+    identity (manufacturer/model), never from require_pm itself. Custom
+    PM campaigns must carry Boolean require_pm=true; custom non-PM
+    campaigns must carry Boolean require_pm=false with non_pm=true. Custom
+    TS0726 campaigns must carry Boolean require_pm=false; the version policy
+    additionally restricts that board to Router-only sealed updates.
+    Stock (_TZ3000_* and _TZ3002_*) and other boards keep their existing separate
+    contracts and are only subject to the Boolean-type checks here.
+    """
+    for key in ('require_pm', 'non_pm'):
+        if key in data and data[key] is not True and data[key] is not False:
+            raise ValueError('Campaign flag %s must be an explicit Boolean' % key)
+    manufacturer, model = data.get('manufacturer', ''), data.get('model', '')
+    if not isinstance(manufacturer, str) or not isinstance(model, str):
+        raise ValueError('Campaign manufacturer/model must be strings')
+    custom = not manufacturer.startswith(('_TZ3000_', '_TZ3002_'))
+    board = manufacturer.removeprefix('_TZ3000_').removeprefix('_TZ3002_')
+    if custom and board == 'b28wrpvx':
+        if model != 'TS011F-BS-PM' or data.get('require_pm') is not True or data.get('non_pm') is True:
+            raise ValueError('Custom PM campaign b28wrpvx/TS011F-BS-PM requires matching board/model,'
+                             ' explicit Boolean require_pm=true and no non-PM mode')
+        return True
+    if custom and board == 'o1jzcxou':
+        if model != 'TS011F-BS' or data.get('non_pm') is not True or data.get('require_pm') is not False or data.get('preflash_build') is None or not data.get('preflash_relay_physical_mode'):
+            raise ValueError('Non-PM requires explicit require_pm=false, preflash_build and preflash_relay_physical_mode')
+        return False
+    if custom and board == 'iedhxgyi':
+        if model != 'TS0726-3-BS' or data.get('require_pm') is not False:
+            raise ValueError('TS0726 campaign iedhxgyi/TS0726-3-BS requires matching board/model and explicit Boolean require_pm=false')
+        return False
+    return data.get('require_pm')
 
 
 def load_profile(path):
@@ -30,13 +67,17 @@ def load_profile(path):
         raise ValueError('Unexpected postflash role')
     for key in ('image', 'mqtt_config', 'workdir', 'index_output', 'template_index'):
         data[key] = str(Path(data[key]).expanduser().resolve())
+    if data.get('network_lock_dir'):
+        data['network_lock_dir'] = str(
+            Path(data['network_lock_dir']).expanduser().resolve())
     if Path(data['index_output']).resolve().is_relative_to(ROOT):
         raise ValueError('Private OTA index must not be inside repository')
     if Path(data['workdir']).resolve().is_relative_to(ROOT):
         raise ValueError('Private logs and OTA lock must not be inside repository')
-    if data.get('non_pm') is True:
-        if data.get('require_pm') is not False or data.get('preflash_build') is None or not data.get('preflash_relay_physical_mode'):
-            raise ValueError('Non-PM requires explicit require_pm=false, preflash_build and preflash_relay_physical_mode')
+    if data.get('network_lock_dir') and Path(data['network_lock_dir']).is_relative_to(ROOT):
+        raise ValueError('Network lock authority must not be inside repository')
+    validate_pm_mode(data)
+    data['_profile_path'] = str(source)
     return data
 
 
@@ -57,6 +98,8 @@ def make_index(profile):
                 manufacturer_code=int(profile['manufacturer_code']), image_type=int(profile['image_type']),
                 file_version=int(str(profile['file_version']), 0), non_pm=profile.get('non_pm') is True)
     _, header = verify_image(image_args)
+    from bseed_socket_version_policy import require_increasing
+    require_increasing(profile)
     entry = dict(matches[0])
     if entry.get('fileVersion') != image_args.file_version:
         raise ValueError('Template entry version differs from signed-off OTA header')
@@ -72,6 +115,48 @@ def make_index(profile):
             'image_size': len(image), 'manufacturer_code': header[4], 'image_type': header[5]}
 
 
+def network_lock_path(profile, *, required=False):
+    configured = any(profile.get(k) is not None for k in (
+        'network_lock_dir', 'network_id', 'network_lock_shared'))
+    if not (required or configured):
+        return None
+    from bseed_network_campaign_lock import require_profile_authority
+    path = require_profile_authority(profile)
+    if path.resolve().is_relative_to(ROOT):
+        raise ValueError('Network lock authority must be private/outside repository')
+    return path
+
+
+def record_postflash_candidate(profile):
+    """Record software evidence without granting hardware acceptance or releasing
+    network ownership. A passing postflash probe never authorizes another OTA."""
+    from bseed_network_campaign_lock import read_lock, update
+    work_lock = Path(profile['workdir']) / 'ACTIVE_LOCK.json'
+    if not work_lock.is_file():
+        raise RuntimeError('Campaign work lock missing at postflash acceptance')
+    record = json.loads(work_lock.read_text(encoding='utf8'))
+    token = record.get('token')
+    if not token:
+        raise RuntimeError('Campaign work lock missing token')
+    if record.get('phase') not in (
+            'ota_transfer_ok_postflash_unverified', 'postflash_candidate'):
+        raise RuntimeError('Campaign is not eligible for postflash acceptance')
+    network_path = network_lock_path(profile, required=True)
+    network = read_lock(network_path)
+    if not network or network.get('token') != token:
+        raise RuntimeError('Network campaign lock token mismatch')
+    for field, expected in (('device', profile['device']), ('ieee', profile['ieee']),
+                            ('image_sha256', profile['sha256'])):
+        if network.get(field) != expected:
+            raise RuntimeError('Network campaign identity mismatch: ' + field)
+    record['phase'] = 'postflash_candidate'
+    record['candidate_at'] = dt.datetime.now(dt.timezone.utc).isoformat()
+    work_lock.write_text(json.dumps(record, indent=2), encoding='utf8')
+    update(network_path, token, 'postflash_candidate',
+           candidate_at=record['candidate_at'])
+    return True
+
+
 def runner_args(profile, mode, *, confirm_unloaded=False, accept_risk=False):
     keys = [('device','device'), ('ieee','ieee'), ('manufacturer','manufacturer'),
             ('model','model'), ('preflash_role','role'), ('image','image'),
@@ -83,6 +168,8 @@ def runner_args(profile, mode, *, confirm_unloaded=False, accept_risk=False):
     cmd = [sys.executable, '-u', str(ROOT/'helper_scripts/bseed_targeted_z2m_ota.py'),
            '--mode', mode]
     for key, flag in keys: cmd.extend(['--' + flag, str(profile[key])])
+    if profile.get('_profile_path'):
+        cmd.extend(['--campaign-profile', profile['_profile_path']])
     if profile.get('native_image'):
         cmd.extend(['--native-image', str(profile['native_image'])])
     if profile.get('relay_get_key'):
@@ -96,6 +183,11 @@ def runner_args(profile, mode, *, confirm_unloaded=False, accept_risk=False):
         for key, flag in [('preflash_build','preflash-build'),('preflash_relay_physical_mode','preflash-relay-physical-mode')]:
             if key not in profile: raise ValueError('Non-PM link gate requires '+key)
             cmd.extend(['--'+flag,str(profile[key])])
+    from bseed_socket_version_policy import split_manufacturer as _split_board
+    if _split_board(profile.get('manufacturer', ''))[0] == 'iedhxgyi':
+        if profile.get('non_pm') is True:
+            raise ValueError('TS0726 campaigns must not set the socket non-PM mode')
+        cmd.append('--ts0726')
     for key, flag in [('block_bytes','max-block-bytes'), ('check_timeout_seconds','check-timeout-seconds'),
                        ('monitor_seconds','timeout-seconds'), ('response_delay_ms','response-delay-ms'),
                        ('request_timeout_ms','request-timeout-ms')]:
@@ -232,16 +324,16 @@ def main():
     parser.add_argument('--confirm-load-unplugged', action='store_true', help='Non-PM flash only: operator just verified no physical appliance is connected')
     args = parser.parse_args()
     profile = load_profile(args.profile)
-    if args.accept_nonrecoverable_ota_risk and not (args.mode == 'flash' and profile.get('non_pm') is True):
+    if args.accept_nonrecoverable_ota_risk and not (args.mode in ('flash', 'transition') and profile.get('non_pm') is True):
         raise SystemExit('Risk flag only allowed for exact non-PM flash')
-    if args.confirm_load_unplugged and not (args.mode == 'flash' and profile.get('non_pm') is True):
+    if args.confirm_load_unplugged and not (args.mode in ('flash', 'transition') and profile.get('non_pm') is True):
         raise SystemExit('--confirm-load-unplugged is accepted only for explicitly targeted non-PM flash')
     if profile.get('require_pm') and profile['postflash_role'] == 'Router' and args.mode in ('flash','transition','rejoin'):
         if args.mode != 'flash': raise SystemExit('Router PM role transition and auto-provisioning not validated')
         verified_router_pm_candidate(profile)  # no Router provisioning: flash only, then audit separately
     work = Path(profile['workdir'])
     if args.mode == 'qualify':
-        if args.confirm_ieee or profile.get('non_pm') is not True or profile.get('require_pm') is not False or profile['preflash_role'] != 'EndDevice':
+        if args.confirm_ieee or profile.get('non_pm') is not True or profile.get('require_pm') is not False or profile['preflash_role'] not in ('EndDevice', 'Router'):
             raise SystemExit('Read-only qualification requires non-PM EndDevice profile and no flash confirmation')
         from bseed_targeted_z2m_ota import archive_prior_check
         work.mkdir(parents=True, exist_ok=True)
@@ -260,7 +352,7 @@ def main():
         print(json.dumps(make_index(profile), indent=2))
         return
     if args.mode == 'link-gate':
-        if profile.get('non_pm') is not True or profile['preflash_role'] != 'EndDevice':
+        if profile.get('non_pm') is not True or profile['preflash_role'] not in ('EndDevice', 'Router'):
             raise SystemExit('Link gate is only for an explicit non-PM EndDevice campaign')
         cmd = [sys.executable, '-u', str(ROOT/'helper_scripts/bseed_nonpm_link_gate.py'),
                '--profile', args.profile]
@@ -269,6 +361,11 @@ def main():
         for filename in ('ACTIVE_LOCK.json', 'LAST_CHECK.json'):
             f = work / filename
             print(filename, f.read_text(encoding='utf8') if f.exists() else 'not present')
+        network = network_lock_path(profile)
+        if network is not None:
+            print('NETWORK_LOCK', network,
+                  network.read_text(encoding='utf8') if network.exists()
+                  else 'not present')
         return
     if args.mode == 'audit-pm':
         import uuid
@@ -280,7 +377,11 @@ def main():
         import uuid
         evidence = work / ('postota_interview_' + uuid.uuid4().hex + '.json')
         print('PRIVATE_EVIDENCE', evidence, flush=True)
-        raise SystemExit(subprocess.call(reinterview_cmd(profile, args.confirm_ieee, evidence)))
+        status = subprocess.call(reinterview_cmd(profile, args.confirm_ieee, evidence))
+        if status == 0 and profile.get('require_pm'):
+            from bseed_pm_telemetry_guard import release
+            release(profile, evidence)
+        raise SystemExit(status)
     if args.mode == 'provision-pm':
         if args.confirm_ieee != profile['ieee']:
             raise SystemExit('Provision refused: confirm exact IEEE')
@@ -292,7 +393,10 @@ def main():
         evidence = work / ('postflash_' + uuid.uuid4().hex + '.json')
         cmd = postflash_cmd(profile, evidence)
         print('PRIVATE_EVIDENCE', evidence, flush=True)
-        raise SystemExit(subprocess.call(cmd))
+        status = subprocess.call(cmd)
+        if status == 0:
+            record_postflash_candidate(profile)
+        raise SystemExit(status)
     if args.mode in ('transition', 'rejoin', 'metadata'):
         if args.confirm_ieee != profile['ieee']:
             raise SystemExit('Transition/rejoin/metadata refused: confirm exact target IEEE')
@@ -301,13 +405,28 @@ def main():
         import uuid
         if args.mode == 'metadata':
             evidence = work / ('metadata_' + uuid.uuid4().hex + '.json')
-            raise SystemExit(subprocess.call(metadata_cmd(profile, args.confirm_ieee, evidence)))
+            status = subprocess.call(metadata_cmd(profile, args.confirm_ieee, evidence))
+            if status:
+                raise SystemExit(status)
+            if profile.get('require_pm'):
+                from bseed_pm_telemetry_guard import release
+                try:
+                    release(profile, evidence)
+                except ValueError as error:
+                    print('TELEMETRY_GUARD_STAYS_ACTIVE', repr(error), flush=True)
+                    raise SystemExit(3)
+            return
         # Resolve the scoped recovery route *before* submitting a firmware image.
         planned_join = rejoin_cmd(profile, args.confirm_ieee, work / ('rejoin_' + uuid.uuid4().hex + '.json'))
         if profile.get('require_pm'): provision_cmd(profile, args.confirm_ieee, work / 'pm_prevalidated.json')
         if args.mode == 'transition':
+            if profile.get('non_pm') is True:
+                from bseed_nonpm_recovery_gate import verify_transition_recovery
+                verify_transition_recovery(profile, confirm_unloaded=args.confirm_load_unplugged,
+                                           accept_nonrecoverable_ota=args.accept_nonrecoverable_ota_risk)
             print('ONE_DEVICE_ROLE_TRANSITION', profile['ieee'], flush=True)
-            flashed = subprocess.call(runner_args(profile, 'flash'))
+            flashed = subprocess.call(runner_args(profile, 'flash', confirm_unloaded=args.confirm_load_unplugged,
+                                                 accept_risk=args.accept_nonrecoverable_ota_risk))
             if flashed: raise SystemExit(flashed)  # no automatic retry after failure
         join_evidence = work / ('rejoin_' + uuid.uuid4().hex + '.json')
         joined = subprocess.call(rejoin_cmd(profile, args.confirm_ieee, join_evidence))
@@ -316,12 +435,17 @@ def main():
         refreshed = subprocess.call(metadata_cmd(profile, args.confirm_ieee, metadata_evidence))
         if refreshed: raise SystemExit(refreshed)
         if profile.get('require_pm'):
+            from bseed_pm_telemetry_guard import release
+            release(profile, metadata_evidence)
             pm_evidence = work / ('pm_provision_' + uuid.uuid4().hex + '.json')
             provisioned = subprocess.call(provision_cmd(profile, args.confirm_ieee, pm_evidence))
             if provisioned: raise SystemExit(provisioned)
         if args.mode == 'transition':
             post_evidence = work / ('postflash_' + uuid.uuid4().hex + '.json')
-            raise SystemExit(subprocess.call(postflash_cmd(profile, post_evidence)))
+            post_status = subprocess.call(postflash_cmd(profile, post_evidence))
+            if post_status == 0:
+                record_postflash_candidate(profile)
+            raise SystemExit(post_status)
         return
     if args.mode == 'flash':
         if args.confirm_ieee != profile['ieee']:
@@ -346,20 +470,31 @@ def main():
             print('POSTOTA_INTERVIEW_UNCONFIRMED', interview, flush=True)
             raise SystemExit(interviewed)  # No provisioning or hardware acceptance on stale build.
         if profile.get('require_pm'):
+            from bseed_pm_telemetry_guard import release
+            release(profile, interview)
             import uuid
             if profile['postflash_role'] == 'Router':
                 post = work / ('postflash_' + uuid.uuid4().hex + '.json')
                 post_code = subprocess.call(postflash_cmd(profile, post))
                 audit = work / ('pm_role_audit_' + uuid.uuid4().hex + '.json')
                 audit_code = subprocess.call(role_audit_cmd(profile, audit))
-                raise SystemExit(0 if post_code == 0 and audit_code == 0 else 2)
+                status = 0 if post_code == 0 and audit_code == 0 else 2
+                if status == 0:
+                    record_postflash_candidate(profile)
+                raise SystemExit(status)
             pm_evidence = work / ('pm_provision_' + uuid.uuid4().hex + '.json')
             provisioned = subprocess.call(provision_cmd(profile, args.confirm_ieee, pm_evidence))
             if provisioned: raise SystemExit(provisioned)
             post_evidence = work / ('postflash_' + uuid.uuid4().hex + '.json')
-            raise SystemExit(subprocess.call(postflash_cmd(profile, post_evidence)))
+            post_status = subprocess.call(postflash_cmd(profile, post_evidence))
+            if post_status == 0:
+                record_postflash_candidate(profile)
+            raise SystemExit(post_status)
         post = work / ('postflash_' + uuid.uuid4().hex + '.json')
-        raise SystemExit(subprocess.call(postflash_cmd(profile, post)))
+        post_status = subprocess.call(postflash_cmd(profile, post))
+        if post_status == 0:
+            record_postflash_candidate(profile)
+        raise SystemExit(post_status)
     elif args.confirm_ieee:
         raise SystemExit('--confirm-ieee may only be supplied for flash, transition, rejoin, metadata, reinterview or provision-pm')
     raise SystemExit(subprocess.call(runner_args(profile, args.mode)))

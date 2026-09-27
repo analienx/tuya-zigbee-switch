@@ -1,4 +1,4 @@
-"""Keep the non-PM parent-keepalive candidate separate from released CLI4."""
+"""Consolidated non-PM builds must not regenerate historical CLI4/CLI5 identities."""
 import re
 from pathlib import Path
 
@@ -8,17 +8,13 @@ NET = (ROOT / 'src/telink/hal/zigbee_network.c').read_text()
 CLIENT = (ROOT / 'src/telink/client.mk').read_text()
 
 
-def test_candidate_is_opt_in_and_has_distinct_ota_version():
+def test_historical_cli5_build_is_refused_and_current_candidate_uses_allocator_definition():
     assert 'nonpm-keepalive)' in BUILD
     candidate = BUILD.split('nonpm-keepalive)\n', 1)[1].split('\nnonpm)\n', 1)[0]
-    assert "BOARD='OUTLET_BSEED_TS011F'" in candidate
-    assert "CANONICAL='o1jzcxou;TS011F-BS;LC2;SB4u;RC3;ID2;M;'" in candidate
-    assert 'CLIENT_IMAGE_TYPE=65026' in candidate
-    assert "SW_BUILD='1.1.2-bseedcli5-rc2'" in candidate
-    assert "FILE_VERSION_HEX='0x11023012'" in candidate
-    assert 'FILE_VERSION_DEC=285356050' in candidate
-    assert "SW_BUILD='1.1.2-bseedcli4'" in BUILD
-    assert "FILE_VERSION_HEX='0x1102300F'" in BUILD
+    assert 'exit 2' in candidate
+    assert 'original source/artifact' in candidate
+    assert 'bseed_nonpm_release.py vars --role client' in BUILD
+    assert "SW_BUILD='1.1.2-bseedcli4'" not in BUILD
 
 def test_client_uses_poll_keepalive_on_initial_join_and_rejoin():
     assert '-DEND_DEVICE=1' in CLIENT
@@ -32,9 +28,9 @@ def test_client_uses_poll_keepalive_on_initial_join_and_rejoin():
 
 
 def test_candidate_keeps_router_and_pm_images_separate():
-    candidate = BUILD.split('nonpm-keepalive)\n', 1)[1].split('\nnonpm)\n', 1)[0]
+    candidate = BUILD.split('\nnonpm)\n', 1)[1].split(';;', 1)[0]
     assert 'ROUTER_IMAGE_TYPE=43555' in candidate
-    assert "DEFAULT_OUT='build/bseed-ts011f-nonpm-client-cli5-rc2'" in candidate
-    assert 'EXTRA_ARGS=()' in candidate
+    assert "DEFAULT_OUT='build/bseed-ts011f-nonpm-client'" in candidate
+    assert 'DEVICE_CONFIG_GUARD=BSEED_TS011F_NONPM' in candidate
     assert 'BSEED_PM_B28WRPVX=1' not in candidate
     assert '"normalOtaIndex": False' in BUILD

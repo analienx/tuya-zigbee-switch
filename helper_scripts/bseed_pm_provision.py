@@ -115,7 +115,7 @@ class Bridge:
         if reason.is_failure: return
         topics = [self.base + '/bridge/' + t for t in ('devices', 'info', 'state', 'logging')]
         topics += [self.base + '/bridge/response/device/' + t for t in
-                   ('configure', 'reporting/configure', 'reporting/read')]
+                   ('configure', 'reporting/configure', 'reporting/read', 'options')]
         topics += [self.base + '/' + self.name]
         c.subscribe([(t, 1) for t in topics]); self.ready.set()
 
@@ -154,7 +154,7 @@ class Bridge:
             self.wake.clear()
         if not predicate(): raise TimeoutError(error)
 
-    def request(self, operation, payload, timeout=28):
+    def request(self, operation, payload, timeout=28, *, full_response=False):
         token = 'bseed-pm-' + uuid.uuid4().hex
         payload = dict(payload, transaction=token)
         topic = self.base + '/bridge/request/device/' + operation
@@ -167,7 +167,7 @@ class Bridge:
         if response.get('status') != 'ok':
             raise RuntimeError('Target request returned failure: ' + operation + ' ' +
                                str(response.get('error', 'unknown'))[:180])
-        return {'operation': operation, 'status': 'ok'}
+        return response if full_response else {'operation': operation, 'status': 'ok'}
 
 
 def validate_states(states, db, idle=False):

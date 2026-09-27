@@ -15,6 +15,7 @@ def _render(*extra: str) -> str:
 
 
 def _definition(text: str, zigbee_model: str) -> str:
+    text = text[text.index('const definitions ='):]
     marker = f'"{zigbee_model}"'
     marker_pos = text.index(marker)
     start = text.rfind("\n    {\n", 0, marker_pos)
@@ -42,7 +43,7 @@ def test_bseed_pm_outlet_hides_switch_and_dimmer_controls():
         for expose in SOCKET_ONLY_SWITCH_CONTROLS:
             assert expose not in definition
         assert "bseedSocketRelayOnOff()" in definition
-        assert 'electricityMeter({' in definition
+        assert 'bseedPmElectricityMeter()' in definition
         assert 'commandsOnOff({' not in definition
         assert 'commandsLevelCtrl({' not in definition
         assert 'relay_physical_mode' in definition
@@ -94,11 +95,7 @@ def test_bseed_pm_meter_uses_standard_mqtt_properties_on_endpoint_one():
         for model in ("TS011F-BS-PM",):
             definition = _definition(rendered, model)
             assert skip in definition, model
-            assert 'electricityMeter({' in definition
-            assert 'power: {max: 60, multiplier: 1, divisor: 1}' in definition
-            assert 'current: {max: 300, multiplier: 1, divisor: 1000}' in definition
-            assert 'voltage: {max: 300, multiplier: 1, divisor: 100}' in definition
-            assert 'energy: {max: 600, change: 1, multiplier: 1, divisor: 1000}' in definition
+            assert 'bseedPmElectricityMeter()' in definition
             assert '"switch": 1, "relay": 2' in definition
             assert 'meta: { multiEndpoint: true }' in definition
         assert skip not in _definition(rendered, "TS011F-BS-PM-1")
@@ -109,7 +106,7 @@ def test_bseed_pm_meter_uses_standard_mqtt_properties_on_endpoint_one():
 
 def test_bseed_pm_fresh_configure_has_scaling_for_all_four_reportings():
     """Forced native scales prevent setup reads from aborting bind/reporting."""
-    definition = _definition(_render(), "TS011F-BS-PM")
+    definition = _render().split('// BSEED_PM_METER_START')[1].split('// BSEED_PM_METER_END')[0]
     expected = {
         "power": (1, 1),
         "current": (1, 1000),
@@ -117,5 +114,6 @@ def test_bseed_pm_fresh_configure_has_scaling_for_all_four_reportings():
         "energy": (1, 1000),
     }
     for name, (multiplier, divisor) in expected.items():
-        line = next(line for line in definition.splitlines() if f"{name}: {{max:" in line)
+        line = next(line for line in definition.splitlines()
+                    if f"{name}: {{min:" in line and 'multiplier:' in line)
         assert f"multiplier: {multiplier}, divisor: {divisor}" in line

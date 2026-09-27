@@ -10,9 +10,9 @@ def test_nonpm_router_release_identity_is_separate_from_pm():
     assert "IMAGE_TYPE=43555" in SCRIPT
     assert "STOCK_MANUFACTURER_NAME='_TZ3000_o1jzcxou'" in SCRIPT
     assert "STOCK_IMAGE_TYPE=54179" in SCRIPT
-    assert "SW_BUILD='1.1.3-bseedv8'" in SCRIPT
-    assert "FILE_VERSION_HEX='0x11023001'" in SCRIPT
-    assert "FILE_VERSION_DEC=285356033" in SCRIPT
+    assert 'bseed_nonpm_release.py vars --role router' in SCRIPT
+    assert 'DEVICE_CONFIG_GUARD=BSEED_TS011F_NONPM' in SCRIPT
+    assert 'BSEED_BUILD_DATE="$RELEASE_DATE_OVERRIDE"' in SCRIPT
 
 
 def test_nonpm_router_release_does_not_enable_pm_backend():
@@ -27,4 +27,4 @@ def test_nonpm_router_release_keeps_router_and_payload_identity_guards():
     assert "DEVICE_TYPE=router" in SCRIPT
     assert "payloadFromByte56Identical" in SCRIPT
     assert "sourceDirty" in SCRIPT
-    assert "stock['fileVersion'] == 0xFFFFFFFF" in SCRIPT
+    assert "stock['fileVersion'] == 4294967295" in SCRIPT

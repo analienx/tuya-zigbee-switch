@@ -21,6 +21,11 @@ typedef struct {
     relay_t *            relay;
     led_t *              indicator_led;
     uint8_t              indicator_state;
+    /* Protection-trip latch: while set, the physical output is forced off
+       regardless of physical_relay_mode (including detached/Always-on).
+       Boot-volatile. Ordinary ON/OFF commands never clear it; only the
+       overload state machine's explicit reconnect path may rearm. */
+    uint8_t              protection_tripped;
 } zigbee_relay_cluster;
 
 void relay_cluster_add_to_endpoint(zigbee_relay_cluster *cluster,
@@ -29,6 +34,23 @@ void relay_cluster_add_to_endpoint(zigbee_relay_cluster *cluster,
 void relay_cluster_on(zigbee_relay_cluster *cluster);
 void relay_cluster_off(zigbee_relay_cluster *cluster);
 void relay_cluster_toggle(zigbee_relay_cluster *cluster);
+
+/* Protection-trip cut-off: forces logical OFF and drives the physical output
+   off in every physical mode, then latches. Ordinary commands cannot clear the
+   latch. Startup/reboot starts unlatched; a persistent overload re-trips once
+   monitoring resumes. */
+void relay_cluster_protection_trip(zigbee_relay_cluster *cluster);
+
+/* Called only by the overload state machine after its reconnect delay/retry
+   policy admits a retry. Clears the physical trip latch and restores ON using
+   the configured physical mode. */
+void relay_cluster_protection_rearm(zigbee_relay_cluster *cluster);
+
+/* Effective physical energization: 0 while protection-tripped, otherwise the
+   mode-resolved output state. Protection monitoring must use this, never the
+   logical state alone: in detached modes the contact can be energized while
+   the logical state is off and vice versa. */
+uint8_t relay_cluster_is_physically_on(const zigbee_relay_cluster *cluster);
 
 // Update only the locally tracked/intended direct-binding On/Off state.
 // This never emits a Zigbee command and never changes logical or mains state.

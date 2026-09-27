@@ -32,8 +32,16 @@ typedef struct {
     uint16_t         attribute_id;
     uint8_t          data_type_id;
     hal_attr_flags_t flag;
-    uint8_t          size;
+    /* Full storage extent in bytes, including any string length prefix.
+       Bounds the Telink foundation-write string gate; must always equal
+       sizeof() of the registered field. */
+    uint16_t         size;
     uint8_t *        value;
+    /* Maximum encoded value bytes accepted from a network Write Attributes
+       record, including any ZCL string length prefix. Zero means size.
+       This can be stricter than storage (e.g. calibration keeps full CHAR_STR
+       storage but accepts only the application-defined payload maximum). */
+    uint16_t         write_max_size;
 } hal_zigbee_attribute;
 
 /** Function called when cluster receives a command */

@@ -61,6 +61,16 @@ void hal_tasks_schedule(hal_task_t *task, uint32_t delay_ms) {
         exit(1);
     }
 
+    /* Match the hardware schedulers: scheduling the same task replaces its
+       pending event rather than creating a second callback with shared mutable
+       handler state. */
+    for (int i = 0; i < MAX_TASKS; i++) {
+        if (tasks[i].active && tasks[i].task == task) {
+            tasks[i].active = 0;
+            break;
+        }
+    }
+
     // Find free slot
     int slot = -1;
     for (int i = 0; i < MAX_TASKS; i++) {

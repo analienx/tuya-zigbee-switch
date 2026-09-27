@@ -13,3 +13,4 @@ __pycache__
 *.pyc
 *.pyo
 *.pydwget-log
+tests/zhc_runtime/node_modules/

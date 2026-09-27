@@ -11,10 +11,22 @@
 #include "hal/zigbee_ota.h"
 #include "telink_zigbee_hal.h"
 #include "version_cfg.h"
+#include "app.h"
 
 // Forward declarations
 
 void ota_process_msg_callback(u8 evt, u8 status);
+
+static hal_task_t ota_checkpoint_reboot_task;
+
+static void ota_reboot_after_checkpoint(void *arg) {
+    (void)arg;
+    if (!app_prepare_reboot()) {
+        hal_tasks_schedule(&ota_checkpoint_reboot_task, 5000);
+        return;
+    }
+    ota_mcuReboot();
+}
 
 #ifdef BSEED_PM_B28WRPVX
 #define OTA_JOIN_QUERY_START_DELAY_MS    1000
@@ -99,7 +111,7 @@ void ota_process_msg_callback(u8 evt, u8 status) {
 
     if (evt == OTA_EVT_COMPLETE) {
         if (status == ZCL_STA_SUCCESS) {
-            ota_mcuReboot();
+            ota_reboot_after_checkpoint(NULL);
         } else {
 #ifdef BSEED_OTA_DEFERRED_REQUERY
             // Telink uses one shared OTA timer for block-response waits and
@@ -115,6 +127,9 @@ void ota_process_msg_callback(u8 evt, u8 status) {
 }
 
 void hal_zigbee_init_ota() {
+    hal_tasks_init(&ota_checkpoint_reboot_task);
+    ota_checkpoint_reboot_task.handler = ota_reboot_after_checkpoint;
+    ota_checkpoint_reboot_task.arg = NULL;
 #ifdef BSEED_PM_B28WRPVX
     hal_tasks_init(&ota_join_query_start_task);
     ota_join_query_start_task.handler = ota_join_query_start;

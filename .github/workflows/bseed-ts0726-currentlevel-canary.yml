@@ -61,18 +61,22 @@ jobs:
           import os
           from pathlib import Path
 
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit('canary identity rejected: ' + message)
+
           out = Path('build/bseed-ts0726-currentlevel-canary')
           manifest = json.loads((out / 'manifest.json').read_text())
-          assert manifest['sourceCommit'] == os.environ['EXPECTED_HEAD']
-          assert manifest['sourceDirty'] is False
-          assert manifest['board'] == 'SWITCH_BSEED_TS0726_3GANG'
-          assert manifest['swBuildId'] == '1.1.9-bseedlevel1'
-          assert manifest['fileVersion'] == 0x1102300D
-          assert manifest['otaHeader']['manufacturerCode'] == 4417
-          assert manifest['otaHeader']['imageType'] == 45577
-          assert manifest['otaHeader']['fileVersion'] == 0x1102300D
-          assert manifest['stockConversion']['payloadFromByte56Identical'] is True
-          assert (out / 'forward.ota').stat().st_size > 56
+          require(manifest['sourceCommit'] == os.environ['EXPECTED_HEAD'], 'sourceCommit is not the candidate head')
+          require(manifest['sourceDirty'] is False, 'built from dirty source')
+          require(manifest['board'] == 'SWITCH_BSEED_TS0726_3GANG', 'board mismatch')
+          require(manifest['swBuildId'] == '1.1.9-bseedlevel1', 'build ID mismatch')
+          require(manifest['fileVersion'] == 0x1102300D, 'file version mismatch')
+          require(manifest['otaHeader']['manufacturerCode'] == 4417, 'manufacturer mismatch')
+          require(manifest['otaHeader']['imageType'] == 45577, 'image type mismatch')
+          require(manifest['otaHeader']['fileVersion'] == 0x1102300D, 'header version mismatch')
+          require(manifest['stockConversion']['payloadFromByte56Identical'] is True, 'wrapper payload changed')
+          require((out / 'forward.ota').stat().st_size > 56, 'truncated OTA')
           print('Validated source SHA, image identity and wrapper integrity')
           PY
           git diff --exit-code -- zigbee2mqtt/ota/index_bseed.json
@@ -80,7 +84,7 @@ jobs:
       - name: Upload isolated canary, not a public OTA index
         uses: actions/upload-artifact@v4
         with:
-          name: bseed-ts0726-currentlevel-canary
+          name: bseed-ts0726-currentlevel-canary-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             build/bseed-ts0726-currentlevel-canary/forward.bin
             build/bseed-ts0726-currentlevel-canary/forward.ota

@@ -1,0 +1,10 @@
+{
+  "name": "bseed-converter-contract-tests",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "zigbee-herdsman": "10.9.1",
+    "zigbee-herdsman-converters": "26.103.0"
+  },
+  "overrides": {"zigbee-herdsman": "$zigbee-herdsman"}
+}

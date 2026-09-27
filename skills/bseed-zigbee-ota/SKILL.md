@@ -1,11 +1,37 @@
 ---
 name: bseed-zigbee-ota
-description: Single-device, auditable Zigbee2MQTT OTA campaigns with post-flash hardware acceptance gates.
+description: Build, verify and seal BSEED firmware candidates and conduct single-device Zigbee2MQTT OTA campaigns with hardware acceptance gates.
 ---
 
 # BSEED Zigbee OTA maintenance
 
-Use this skill for BSEED OTA flashes, transfer failures, role transitions, rejoin diagnostics and handoffs. Read `docs/bseed_targeted_ota_runner.md` and the target's latest evidence before any firmware write. Do not substitute conversational recollection for current hardware identity.
+Use this skill for BSEED firmware builds, release tooling, OTA flashes, transfer failures, role transitions, rejoin diagnostics and handoffs. Read `docs/bseed_targeted_ota_runner.md` and the target's latest evidence before any firmware write. Do not substitute conversational recollection for current hardware identity.
+
+## Current build workflow (2026-09-27)
+
+For consolidated PM candidates, read [build-and-verify.md](references/build-and-verify.md).
+It supersedes historical build-version recommendations below, not incident evidence.
+`helper_scripts/bseed_pm_release.py` defines the current Client/Router/return tuple;
+the identity registry seals bytes. Run required verification on public GitHub CI
+at the exact SHA, download its artifacts, and use `bseed_pm_seal.py` to verify and
+seal them. Offline build/tooling work authorized by the user does not require
+separate flashing permission. A green build does not establish hardware acceptance.
+
+Current four-variant remediation is **HOLD**, following the independent review
+in issue 55. Read `docs/bseed_independent_review_triage_20260927.md` before using
+the candidate workflow. Non-PM Router/Client identities are separately defined
+in `helper_scripts/bseed_nonpm_release.py`; do not reuse PM tuples or pin maps.
+The legacy non-PM CI was replaced by the exact-head role-matrix workflow and the
+PM telemetry-recovery follow-up is applied in source. The version policy covers
+the separate TS0726 campaign as Router-only sealed updates with a strict no-metering preflight. No finding is closed and no current candidate is fleet-approved.
+
+Basic `swBuildId` must fit 16 ASCII bytes. A fresh wire read can show that a
+longer string was rejected by Herdsman while its cache remains stale. Preserve
+the actual command and response: Read Reporting Configuration status 139 is
+NOT_FOUND, not an unsupported Read Attributes response (134). An OTA Query
+Next Image's image type is a transport identity, not a ZDO role descriptor.
+Confirm each independently. Do not infer missed code changes from stale cache
+or confuse a Client-header Router payload with a Client firmware release.
 
 ## Project identity and current Router canary
 
@@ -68,7 +94,7 @@ For PM Routers, a live scale/energy read on the verified Router canary returned 
 
 ## Shared PM core regression gate (Router and mains Client)
 
-Before changing or distributing PM firmware, read `docs/bseed_pm_variant_matrix.md` and run `make bseed/pm-matrix` in a clean local Linux toolchain checkout. This runs common PM/ZCL/scaling/NVM tests, role-specific suites and builds both role images at one source SHA with separate OTA identities. The published Router v8u4 predates the Telink PM attribute registration fix; do not rebuild or relabel it as an updated release. Use only a separately versioned, verified Router candidate and a target-only canary before any promotion. Never apply Client-only reporting or cached scales to a Router automatically.
+Before changing or distributing PM firmware, read `docs/bseed_pm_variant_matrix.md` and run `make bseed/pm-matrix` on the public GitHub Actions Linux runner. This runs common PM/ZCL/scaling/NVM tests, role-specific suites and builds both role images at one source SHA with separate OTA identities. The published Router v8u4 predates the Telink PM attribute registration fix; do not rebuild or relabel it as an updated release. Use only a separately versioned, verified Router candidate and a target-only canary before any promotion. Never apply Client-only reporting or cached scales to a Router automatically.
 
 ## Failed PM Router OTA: mandatory offline diagnostics (2026-09-20)
 

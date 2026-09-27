@@ -20,14 +20,12 @@ def test_ota_callback_switches_poll_rate_around_download() -> None:
 
 
 def test_keepalive_tick_reverifies_and_retries() -> None:
-    assert "hal_zigbee_get_poll_rate_ms() != MAINS_CLIENT_KEEPALIVE_POLL_MS" in NET
-    assert "if (!ota_fast_poll_active &&" in NET
+    assert "hal_zigbee_get_poll_rate_ms() != desired_mains_client_poll_ms()" in NET
     assert "hal_tasks_schedule(&keepalive_verify_task, next_ms);" in NET
-    assert "next_ms = KEEPALIVE_RETRY_MS;" in NET
-    assert "hal_tasks_schedule(&keepalive_verify_task, KEEPALIVE_VERIFY_TICK_MS);" in NET
+    assert "OTA_POLL_VERIFY_MS : KEEPALIVE_RETRY_MS" in NET
 
 
 def test_ota_poll_mode_is_role_aware() -> None:
     assert "void hal_zigbee_set_ota_poll_active(bool fast);" in HAL_H
-    assert "hal_zigbee_set_poll_rate_ms(RESPONSE_POLL_RATE);" in NET
+    assert "ota_fast_poll_active ? RESPONSE_POLL_RATE : MAINS_CLIENT_KEEPALIVE_POLL_MS" in NET
     assert "hal_zigbee_set_poll_rate_ms(fast ? RESPONSE_POLL_RATE : POLL_RATE);" in NET

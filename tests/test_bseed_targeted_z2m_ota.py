@@ -119,3 +119,12 @@ def test_transport_ok_is_not_postflash_accepted():
     assert new_campaign_allowed({'phase':'preflight_abort'})
     assert ota_transport_phase({'status':'error'})=='update_error'
     assert ota_transport_phase({})=='update_timeout_or_unconfirmed'
+
+
+def test_flash_uses_single_shared_network_authority_before_submit():
+    src = (Path(__file__).resolve().parents[1] / 'helper_scripts/bseed_targeted_z2m_ota.py').read_text()
+    assert 'shared_network_lock_path(source_profile, required=True)' in src
+    assert 'require_profile_authority' not in src
+    assert src.index('shared_network_lock_path(source_profile, required=True)') < src.index('acquire_network_lock(')
+    assert src.index('acquire_network_lock(') < src.index('payload = update_payload(')
+    assert src.index('if active_updates:') < src.index('acquire_network_lock(')
