@@ -34,6 +34,13 @@ The finalization pass found and corrected defects in the draft remediation:
 
 ## Public CI and packaging
 
+The six socket candidate identities are sealed in the registry to bytes built
+from `9bd93fc3157041bd2c1dcab34af7a6d75ff8864c`. The exact-source run passed
+935 tests, formatting, converter drift checks and all native build gates.
+The [Actions finalization report](https://github.com/analienx/tuya-zigbee-switch/actions/runs/36336421938)
+records the verified hashes and prerequisite runs. This is candidate sealing;
+registry status/notes do not grant hardware or fleet release acceptance.
+
 All builds, tests, formatting, verification and sealing run on GitHub-hosted
 Actions. `BSEED candidate finalization` waits for successful exact-head test,
 PM matrix, non-PM matrix, Router and experimental Client workflows. It downloads
@@ -82,3 +89,7 @@ sudden power loss retain their separately documented energy limitations.
 
 The original review and remediation issue remains open for these acceptance
 requirements; no fleet release is implied by PR #56.
+
+The PM Client-to-Router return wrapper is still experimental: its report keeps
+`applyPathFix: false` and `deploymentReady: false`. Its verified package does not
+establish a repair of the live apply path or the observed idle-downlink failure.
