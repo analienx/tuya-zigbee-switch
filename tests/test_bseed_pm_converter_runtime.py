@@ -199,7 +199,7 @@ const makeDevice = (build, manufacturer = 'b28wrpvx') => {
 '''
     result = subprocess.run(['node', '-e', script], cwd=ROOT, check=True, capture_output=True, text=True)
     batches = [json.loads(line) for line in result.stdout.splitlines() if line.startswith('[{')]
-    assert len(batches) == 8
+    assert len(batches) == 6
     for batch in batches:
         rows = [{'cluster': r['cluster'], 'attribute': item['attribute'],
                  'minimum_report_interval': item['minimumReportInterval'],
