@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'helper_scripts'))
 from bseed_pm_telemetry_guard import (validate_release, validate_timeout_reconcile_release,
-                                      set_option, OPTION)
+                                      validate_source_unchanged_release, set_option, OPTION)
 import bseed_pm_telemetry_guard as guard
 
 
@@ -111,6 +111,32 @@ def test_timeout_reconcile_keeps_quarantine_without_exact_installed_proof(failur
     if failure == 'old': e['at'] = '2026-09-26T10:00:00+00:00'
     with pytest.raises(ValueError):
         validate_timeout_reconcile_release(p, r, e, lock)
+
+
+def test_source_unchanged_release_requires_exact_preflash_identity_and_pending_update():
+    p, r, _, lock = fixture()
+    p.update(preflash_build='1.2.5-bseedcli12', preflash_role='EndDevice')
+    lock['phase'] = 'source_unchanged_reconciled'
+    evidence = dict(
+        at='2026-09-27T11:00:00+00:00',
+        result='source_unchanged_reconciled',
+        ieee=p['ieee'],
+        source_build=p['preflash_build'],
+        source_role=p['preflash_role'],
+        update_available=True,
+        ota_transport_success=False,
+    )
+    validate_source_unchanged_release(p, r, evidence, lock)
+    for key, value in (
+        ('source_build', 'wrong-build'),
+        ('source_role', 'Router'),
+        ('update_available', False),
+        ('ota_transport_success', True),
+    ):
+        broken = copy.deepcopy(evidence)
+        broken[key] = value
+        with pytest.raises(ValueError):
+            validate_source_unchanged_release(p, r, broken, lock)
 
 
 def test_effective_option_ack_is_required():
