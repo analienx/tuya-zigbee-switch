@@ -92,6 +92,22 @@ byte identities cannot be reused; there is no current build, seal, CI artifact o
 deployment path for it. PM role-interchange acceptance uses FORCE around the exact
 sealed `r9`/`cli12` candidates instead.
 
+## Live hardware status
+
+The current PM canary evidence is recorded in
+[`bseed_force_hardware_acceptance_20260928.md`](bseed_force_hardware_acceptance_20260928.md).
+As of 2026-09-28, `KitchenSocketLeft` has passed the tested Client -> Router
+transition: exact `1.2.5-bseedr9`, fresh live ZDO Router descriptor, working
+relay/PM telemetry, and successful pairing/interview of a fresh IKEA RODRET
+through a permit-join window scoped only to this Router. The return Router ->
+Client transition is still pending.
+
+The same run exposed one tooling gap: the outer `--mode transition` process
+recorded terminal OTA success but exited before producing its intended rejoin /
+metadata / role-audit evidence. Those gates were completed separately without
+another flash. Do not treat that orchestration defect as a failed firmware role
+transition.
+
 ## What FORCE does not prove
 
 A successful transfer proves neither boot nor role acceptance. After each role

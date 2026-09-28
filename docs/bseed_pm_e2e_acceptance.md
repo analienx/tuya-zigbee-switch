@@ -100,3 +100,13 @@ from a diagnostic get is NOT an `attributeReport`.
 or flash additional Clients based on the converter-only success.
 
 **Subsequent manual canary (2026-09-20):** HifiLeft on CLI6 with the PR #49 converter and min=10/max=60/change=5 W reported nonzero load and returned to 0 W after manual unplug according to the device owner. Record: [HifiLeft manually tested configuration](bseed_hifi_manual_canary_20260920.md). This does not pass the separate automated loaded-to-zero release gate above.
+
+**Current PM role-transition canary (2026-09-28):** `KitchenSocketLeft` on exact
+`1.2.5-bseedcli12` passed manual loaded -> zero PM behavior and cumulative-energy
+retention, then transitioned by private FORCE transport to exact
+`1.2.5-bseedr9 / Router`. Router PM remained responsive across a kettle load and
+a lower-power power-bank load after the normal short reporting delay; energy was
+preserved. A fresh IKEA RODRET also joined and completed interview through a
+permit-join window scoped only to this Router. This is role-transition hardware
+evidence, not a replacement for the separate unattended fixture-driven PM gate.
+See [the 2026-09-28 FORCE hardware acceptance record](bseed_force_hardware_acceptance_20260928.md).
