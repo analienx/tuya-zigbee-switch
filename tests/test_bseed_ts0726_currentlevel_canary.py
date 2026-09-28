@@ -10,9 +10,9 @@ def test_ts0726_currentlevel_candidate_does_not_replace_v8_default():
     assert "SW_BUILD='1.1.8-bseedv8'" in script
     assert "FILE_VERSION_HEX='0x1102300A'" in script
     assert 'BSEED_TS0726_RELEASE_CHANNEL' in script
-    assert "SW_BUILD='1.1.9-bseedlv2'" in script
-    assert "FILE_VERSION_HEX='0x1102300E'" in script
-    assert 'FILE_VERSION_DEC=285356046' in script
+    assert "SW_BUILD='1.1.9-bseedlv3'" in script
+    assert "FILE_VERSION_HEX='0x1102300F'" in script
+    assert 'FILE_VERSION_DEC=285356047' in script
     assert "BSEED_TS0726_RELEASE_CHANNEL=currentlevel-canary" in wrapper
     assert 'build_bseed_ts0726_v8.sh' in wrapper
     assert 'exec bash' in wrapper
@@ -22,5 +22,5 @@ def test_ts0726_currentlevel_candidate_does_not_replace_v8_default():
 def test_canary_version_does_not_collide_with_published_router_index():
     index = json.loads((ROOT / 'zigbee2mqtt/ota/index_bseed.json').read_text())
     router_versions = [entry['fileVersion'] for entry in index if entry['imageType'] == 45577]
-    assert router_versions and max(router_versions) < 0x1102300E
-    assert not any(entry['imageType'] == 45577 and entry['fileVersion'] == 0x1102300E for entry in index)
+    assert router_versions and max(router_versions) < 0x1102300F
+    assert not any(entry['imageType'] == 45577 and entry['fileVersion'] == 0x1102300F for entry in index)

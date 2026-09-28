@@ -108,7 +108,7 @@ const makeDevice = (build, manufacturer = 'b28wrpvx') => {
 ''' + helper + r'''
 (async () => {
     let sequence = 1;
-    for (const build of ['1.2.5-bseedcli6', '1.2.5-bseedcli11', '1.2.5-bseedr7', '1.2.5-bseedr8']) {
+    for (const build of ['1.2.5-bseedcli6', '1.2.5-bseedcli12', '1.2.5-bseedr9', '1.2.5-bseedr10']) {
       for (const staleCache of [false, true]) {
         const device = makeDevice(build), ep = device.endpoints[0];
         if (staleCache) ep.cache = {haElectricalMeasurement: {acVoltageDivisor: 1}, seMetering: {divisor: 100}};
@@ -120,6 +120,28 @@ const makeDevice = (build, manufacturer = 'b28wrpvx') => {
         assert.deepEqual(early('haElectricalMeasurement', {rmsVoltage: 23000, rmsCurrent: 1250, activePower: 288}),
             {voltage: 230, current: 1.25, power: 288});
         assert.deepEqual(early('seMetering', {currentSummDelivered: 12345}), {energy: 12.345});
+        // Decode real ZCL UINT48 frames with the pinned Herdsman runtime, then
+        // pass them through the real ZHC converter. Invalid totals must never
+        // become a numeric spike or zero, and must not poison a later report.
+        const {Zcl} = require('zigbee-herdsman');
+        for (const type of ['attributeReport', 'readResponse']) {
+            for (const [raw, expected] of [[12345, 12.345], [0xffffffffffff, undefined], [12346, 12.346]]) {
+                const payload = type === 'attributeReport'
+                    ? Buffer.from([0x18, sequence++, 0x0a, 0, 0, 0x25, 0, 0, 0, 0, 0, 0])
+                    : Buffer.from([0x18, sequence++, 0x01, 0, 0, 0, 0x25, 0, 0, 0, 0, 0, 0]);
+                payload.writeUIntLE(raw, payload.length - 6, 6);
+                const frame = Zcl.Frame.fromBuffer(0x0702, Zcl.Header.fromBuffer(payload), payload, {});
+                const data = {currentSummDelivered: frame.payload[0].attrData, instantaneousDemand: 7};
+                const msg = {cluster: 'seMetering', data, device, endpoint: ep, type,
+                    meta: {zclTransactionSequenceNumber: sequence++}};
+                const snapshot = structuredClone(data);
+                const result = extension.fromZigbee.find(f => f.cluster === 'seMetering')
+                    .convert(earlyModel, msg, () => {}, {}, {device});
+                assert.equal(result.energy, expected);
+                assert.equal(result.power, 7); // unrelated reading survives
+                assert.deepEqual(data, snapshot); // never mutate a shared message
+            }
+        }
         // Still test configure independently from the early-report repair.
         ep.cache = staleCache ? {haElectricalMeasurement: {acVoltageDivisor: 1}, seMetering: {divisor: 100}} : {};
         for (const configure of extension.configure) await configure(device, {}, {});

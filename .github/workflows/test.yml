@@ -107,6 +107,10 @@ jobs:
           node-version: 24
       - name: Install pinned converter runtime
         run: npm ci --ignore-scripts --prefix tests/zhc_runtime
+      - name: Fetch pinned SDK write-handler source for fault injection
+        run: |
+          mkdir -p build/test-sdk
+          curl --fail --location --retry 3 https://raw.githubusercontent.com/telink-semi/telink_zigbee_sdk/V3.7.2.0/tl_zigbee_sdk/zigbee/zcl/zcl.c -o build/test-sdk/zcl.c
       - name: Run tests
         timeout-minutes: 15
         env:

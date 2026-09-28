@@ -52,7 +52,7 @@ def main():
             if state['requested'] and not m.retain:state['fresh_inventory']=True
             changed.set()
         elif m.topic==base+'/bridge/state':state['bridge']=d.get('state') if isinstance(d,dict) else d;changed.set()
-        elif m.topic==base+'/bridge/response/device/interview' and state['requested'] and d.get('transaction')==token:
+        elif m.topic==base+'/bridge/response/device/interview' and isinstance(d,dict) and not m.retain and state['requested'] and d.get('transaction')==token:
             state['response']=d;changed.set()
     client.on_connect=on_connect;client.on_message=on_message
     client.connect(args.broker,1883,10);client.loop_start()
@@ -63,11 +63,15 @@ def main():
         while time.monotonic()<deadline and (state['inventory'] is None or state['bridge'] is None):
             changed.wait(.3);changed.clear()
         if state['bridge']!='online':raise RuntimeError('Zigbee2MQTT bridge not online')
-        selected=[d for d in state['inventory'] if d.get('ieee_address')==args.ieee]
+        selected=[d for d in (state['inventory'] or []) if d.get('ieee_address')==args.ieee]
         if len(selected)!=1 or selected[0].get('friendly_name')!=args.device:
             raise ValueError('Exact target name/IEEE mismatch')
         live=read_node_with_retries(args.mqtt_config,args.broker,args.ieee,selected[0]['network_address'])
-        before,_already_correct=metadata_status(state['inventory'],args.ieee,args.expect_role,args.expect_build,live)
+        if not live or live.get('role')!=args.expect_role:
+            raise ValueError('Live ZDO role does not match intended firmware')
+        # Cached build and interview status are the data this interview repairs.
+        # Only the final fresh inventory may establish the expected identity.
+        before=selected[0]
         # One bounded interview per invocation, even when cached metadata looks
         # correct: release-grade evidence requires fresh proof, not a cache hit.
         state['requested']=True
@@ -83,7 +87,8 @@ def main():
         while time.monotonic()<deadline:
             observed=state['inventory'] or []
             match=next((d for d in observed if d.get('ieee_address')==args.ieee),{})
-            if state['fresh_inventory'] and match.get('type')==args.expect_role:break
+            if (state['fresh_inventory'] and match.get('type')==args.expect_role and
+                    match.get('software_build_id')==args.expect_build and match.get('interview_completed') is True):break
             changed.wait(.3);changed.clear()
         if not state['fresh_inventory']:
             raise RuntimeError('No fresh nonretained bridge inventory after interview')
@@ -92,7 +97,7 @@ def main():
         if not correct:raise RuntimeError('Interview succeeded but cached role remains stale; do not remove device automatically')
         if before['ieee_address']!=after['ieee_address'] or before['network_address']!=after['network_address']:
             raise RuntimeError('IEEE or NWK address changed during metadata refresh')
-        result='metadata_refreshed' if before.get('type')!=after.get('type') else 'metadata_already_correct'
+        result='metadata_refreshed' if any(before.get(key)!=after.get(key) for key in ('type','software_build_id','interview_completed')) else 'metadata_already_correct'
     except (ValueError,RuntimeError,TimeoutError,OSError,KeyError) as error:
         reason=repr(error)
     finally:

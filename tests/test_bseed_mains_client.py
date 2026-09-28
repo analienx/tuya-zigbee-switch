@@ -111,7 +111,7 @@ def test_client_artifacts_are_separate_and_never_stock_or_auto_indexed():
     assert "ROUTER_IMAGE_TYPE=43555" in script
     assert "ROUTER_IMAGE_TYPE=45577" in script
     assert 'bseed_pm_release.py vars --role client' in script
-    assert "FILE_VERSION_HEX='0x1102300C'" in script
+    assert "FILE_VERSION_HEX='0x1102300F'" in script
     assert "from-router.ota" in script
     assert "from_tuya" not in script.lower()
     assert "make_z2m_ota_index" not in script

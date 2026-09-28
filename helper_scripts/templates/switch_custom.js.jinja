@@ -81,6 +81,7 @@ const bseedPmElectricityMeter = () => {
     const knownBuilds = new Set([
         "1.2.5-bseedcli6", "1.2.5-bseedcli8", "1.2.5-bseedcli9",
         "1.2.5-bseedcli10", "1.2.5-bseedcli11", "1.2.5-bseedr7", "1.2.5-bseedr8",
+        "1.2.5-bseedcli12", "1.2.5-bseedr9", "1.2.5-bseedr10",
     ]);
     const hasFixedScaleContract = device => device?.modelID === "TS011F-BS-PM" &&
         device.manufacturerName === "b28wrpvx" && knownBuilds.has(device.softwareBuildID);
@@ -103,6 +104,14 @@ const bseedPmElectricityMeter = () => {
                 Object.entries(values).some(([key, value]) => msg.endpoint.getClusterAttributeValue(msg.cluster, key) !== value)) {
                 msg.endpoint.saveClusterAttributeKeyValue(msg.cluster, values);
                 msg.endpoint.save();
+            }
+            // ZCL UINT48 all-ones means unknown (e.g. an unreadable NVM
+            // baseline). ZHC otherwise scales it into an enormous energy total.
+            // Preserve other attributes and the shared incoming message.
+            if (msg.cluster === 'seMetering' && msg.data.currentSummDelivered === 0xffffffffffff) {
+                const data = {...msg.data};
+                delete data.currentSummDelivered;
+                msg = {...msg, data};
             }
             return converter.convert(model, msg, publish, options, meta);
         },
