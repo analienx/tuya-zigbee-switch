@@ -16,6 +16,7 @@ from bseed_network_campaign_lock import (
     release_accepted,
     release_preflight_abort,
     release_reconciled,
+    release_source_unchanged,
     require_profile_authority,
     update,
 )
@@ -83,6 +84,21 @@ def test_installed_image_reconciled_has_its_own_nonacceptance_release(tmp_path):
     with pytest.raises(RuntimeError):
         release_accepted(path, 'one')
     assert release_reconciled(path, 'one')
+    assert not path.exists()
+
+
+def test_source_unchanged_reconciled_has_its_own_release(tmp_path):
+    p = profile(tmp_path, 'work-a')
+    path = require_profile_authority(p)
+    acquire(path, network_id=p['network_id'], token='one',
+            device='SocketA', ieee='0x00124b0000000001',
+            image_sha256='a' * 64)
+    with pytest.raises(RuntimeError):
+        release_source_unchanged(path, 'one')
+    update(path, 'one', 'source_unchanged_reconciled')
+    with pytest.raises(RuntimeError):
+        release_accepted(path, 'one')
+    assert release_source_unchanged(path, 'one')
     assert not path.exists()
 
 
