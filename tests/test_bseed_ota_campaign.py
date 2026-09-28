@@ -536,6 +536,50 @@ def test_runner_check_rejects_invalid_pm_campaign_profile_before_network(tmp_pat
         runner.main()
 
 
+def test_same_role_timeout_reconcile_runs_fresh_metadata_and_releases_only_pm_guard(tmp_path, monkeypatch):
+    cfg = _pm_profile(tmp_path)
+    cfg.update(require_pm=True, preflash_role='EndDevice', postflash_role='EndDevice',
+               postflash_build='1.2.5-bseedcli12')
+    work = Path(cfg['workdir'])
+    work.mkdir(parents=True, exist_ok=True)
+    lock = {'device': cfg['device'], 'ieee': cfg['ieee'], 'sha256': cfg['sha256'],
+            'phase': 'update_timeout_or_unconfirmed', 'token': 'old-timeout'}
+    (work / 'ACTIVE_LOCK.json').write_text(json.dumps(lock))
+    source = _write_profile(tmp_path, cfg, 'pm-timeout-reconcile.json')
+    monkeypatch.setattr(sys, 'argv', ['campaign', '--profile', str(source),
+                                      '--mode', 'reconcile-installed',
+                                      '--confirm-ieee', cfg['ieee']])
+    with patch('bseed_ota_campaign.subprocess.call', return_value=0) as run, \
+         patch('bseed_pm_telemetry_guard.release_reconciled') as release:
+        campaign.main()
+    assert Path(run.call_args.args[0][2]).name == 'bseed_z2m_metadata_refresh.py'
+    release.assert_called_once()
+    assert json.loads((work / 'ACTIVE_LOCK.json').read_text())['phase'] == 'update_timeout_or_unconfirmed'
+
+
+@pytest.mark.parametrize('failure', ['wrong_phase', 'cross_role'])
+def test_timeout_reconcile_refuses_wrong_campaign_shape_before_network(tmp_path, monkeypatch, failure):
+    cfg = _pm_profile(tmp_path)
+    cfg.update(require_pm=True, preflash_role='EndDevice', postflash_role='EndDevice',
+               postflash_build='1.2.5-bseedcli12')
+    if failure == 'cross_role':
+        cfg['postflash_role'] = 'Router'
+    work = Path(cfg['workdir'])
+    work.mkdir(parents=True, exist_ok=True)
+    (work / 'ACTIVE_LOCK.json').write_text(json.dumps({
+        'device': cfg['device'], 'ieee': cfg['ieee'], 'sha256': cfg['sha256'],
+        'phase': 'update_error' if failure == 'wrong_phase' else 'update_timeout_or_unconfirmed',
+        'token': 'old-timeout'}))
+    source = _write_profile(tmp_path, cfg, 'bad-timeout-reconcile.json')
+    monkeypatch.setattr(sys, 'argv', ['campaign', '--profile', str(source),
+                                      '--mode', 'reconcile-installed',
+                                      '--confirm-ieee', cfg['ieee']])
+    with patch('bseed_ota_campaign.subprocess.call') as run:
+        with pytest.raises(SystemExit, match='same-role|exact timed-out'):
+            campaign.main()
+    run.assert_not_called()
+
+
 def test_force_pm_client_to_router_transition_uses_audit_not_client_provisioner(tmp_path, monkeypatch):
     cfg = _pm_profile(tmp_path)
     native = tmp_path / 'pm-router-native.ota'; native.write_bytes(b'private native fixture')
