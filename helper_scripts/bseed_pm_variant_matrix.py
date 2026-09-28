@@ -33,7 +33,7 @@ COMMON_TESTS = ('tests/test_unified_pm_v8.py', 'tests/test_pm_cluster_layout_gua
                 'tests/test_bseed_pm_native_image.py',
                 'tests/test_bseed_pm_seal.py',
                 'tests/test_pm_legacy_migration_quarantine.py',
-                'tests/test_bseed_pm_client_return.py',
+                'tests/test_bseed_force_test_wrapper.py',
                 'tests/test_telink_pm_attribute_registration.py',
                 'tests/test_bseed_pm_shared_contract.py',
                 'tests/test_bseed_pm_variant_matrix.py',

@@ -94,15 +94,16 @@ def test_pm_router_read_fix_has_new_immutable_identity():
     assert "build/bseed-ts011f-pm-router-v8u5-rc5" in text
 
 
-def test_pm_router_builds_from_client_return_wrapper():
+def test_pm_router_build_has_no_legacy_client_return_wrapper():
     text = BUILD.read_text(encoding="utf-8")
-    assert "CLIENT_IMAGE_TYPE=65024" in text
-    assert 'FROM_CLIENT_OTA="$OUT_DIR/from-client.ota"' in text
-    assert 'OTA_IMAGE_TYPE="$CLIENT_IMAGE_TYPE"' in text
-    assert '"fromClientOtaHeader"' in text
-    assert '"clientReturn"' in text
-    assert "[12, 13]" in text
+    assert "CLIENT_IMAGE_TYPE=65024" not in text
+    assert "from-client.ota" not in text
+    assert '"fromClientOtaHeader"' not in text
+    assert '"clientReturn"' not in text
     assert "from_tuya" in text.lower()
+    force = (ROOT / "helper_scripts/bseed_force_test_wrapper.py").read_text(encoding="utf-8")
+    assert "FORCE_TEST_VERSION" in force
+    assert "force-test wrapper" in force
 
 
 def test_release_handoff_scripts_parse_before_executor_use():

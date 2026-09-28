@@ -110,7 +110,8 @@ def test_sealer_inputs_are_produced_by_candidate_workflows():
     assert "build/bseed-pm-role-matrix-*/ROLE_MATRIX.json" in pm_matrix
     assert "build/bseed-pm-role-matrix-*/router/forward.ota" in pm_matrix
     assert "build/bseed-pm-role-matrix-*/client/forward.ota" in pm_matrix
-    assert "CLIENT_RETURN.json" in pm_matrix
+    assert "CLIENT_RETURN.json" not in pm_matrix
+    assert "bseed_pm_client_return.py" not in pm_matrix
     canary = (WORKFLOWS / "bseed-nonpm-client-canary.yml").read_text(encoding="utf8")
     assert "build/bseed-nonpm-role-matrix-*/ROLE_MATRIX.json" in canary
     assert "build/bseed-nonpm-role-matrix-*/router/*" in canary

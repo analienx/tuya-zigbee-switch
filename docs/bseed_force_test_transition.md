@@ -61,10 +61,11 @@ The intended same-hardware A/B/A sequence is:
 The first step uses normal monotonic OTA when the installed candidate is older.
 FORCE is used only where equal-version cross-role testing would otherwise no-op.
 
-The PM `1.2.5-bseedr10 / 0x12053017` return package remains historical
-sealed evidence for the earlier version-bump approach. It is not the preferred
-role-interchange acceptance target and its presence does not make it
-deployment-ready.
+The PM `1.2.5-bseedr10 / 0x12053017` version-bump return experiment is retired.
+Its already-public native/wrapper tuples remain registry tombstones only, so those
+byte identities cannot be reused; there is no current build, seal, CI artifact or
+deployment path for it. PM role-interchange acceptance uses FORCE around the exact
+sealed `r9`/`cli12` candidates instead.
 
 ## What FORCE does not prove
 

@@ -12,9 +12,8 @@ from pathlib import Path
 import re
 
 from bseed_ota_identity import DEFAULT_REGISTRY, IdentityError, gate_image
-from bseed_pm_release import CLIENT, ROUTER, RETURN
+from bseed_pm_release import CLIENT, ROUTER
 from bseed_pm_variant_matrix import verify_artifact
-from bseed_pm_client_return import verify_return
 
 
 def seal_entries(document, artifacts, source_commit):
@@ -43,10 +42,10 @@ def seal_entries(document, artifacts, source_commit):
     return result
 
 
-def verify_bundle(matrix_dir, return_dir, source_commit, document):
+def verify_bundle(matrix_dir, source_commit, document):
     if not re.fullmatch('[0-9a-f]{40}', source_commit):
         raise IdentityError('source commit must be the full lowercase Git SHA')
-    matrix_dir, return_dir = Path(matrix_dir), Path(return_dir)
+    matrix_dir = Path(matrix_dir)
     matrix = json.loads((matrix_dir / 'ROLE_MATRIX.json').read_text())
     if (matrix.get('sourceCommit') != source_commit or matrix.get('hostTests') != 'passed'
             or matrix.get('compiledBothRoles') is not True
@@ -54,48 +53,30 @@ def verify_bundle(matrix_dir, return_dir, source_commit, document):
             or matrix.get('hardwareAcceptance') is not False):
         raise IdentityError('missing clean, reproduced role-matrix evidence')
     artifacts, report = [], []
-    # Seal the shared version BEFORE the higher return version. The board-wide
-    # monotonic gate intentionally refuses first-time bytes below the maximum.
-    for role, candidate in (('router', ROUTER), ('client', CLIENT), ('return', RETURN)):
-        folder = return_dir if role == 'return' else matrix_dir / role
+    for role, candidate in (('router', ROUTER), ('client', CLIENT)):
+        folder = matrix_dir / role
         verified = verify_artifact(folder, candidate, source_commit)
-        if role != 'return':
-            matching = [a for a in matrix['artifacts'] if a['role'] == candidate['role']]
-            if len(matching) != 1 or matching[0]['sha256'] != verified['sha256']:
-                raise IdentityError('role matrix artifact hash mismatch')
+        matching = [a for a in matrix['artifacts'] if a['role'] == candidate['role']]
+        if len(matching) != 1 or matching[0]['sha256'] != verified['sha256']:
+            raise IdentityError('role matrix artifact hash mismatch')
         data = (folder / 'forward.ota').read_bytes()
         artifacts.append((data, candidate, candidate['type']))
         report.append(verified)
-    staged = seal_entries(document, artifacts[:2], source_commit)
-    registry = {int(line['image_type']): line for line in staged['lines']}
-    native, wrapper = (return_dir / 'forward.ota').read_bytes(), (return_dir / 'from-client.ota').read_bytes()
-    verified_return = verify_return(native, wrapper, registry)
-    manifest = json.loads((return_dir / 'manifest.json').read_text())
-    wrapper_hash = hashlib.sha256(wrapper).hexdigest()
-    if manifest['artifacts']['from-client.ota']['sha256'] != wrapper_hash:
-        raise IdentityError('return wrapper manifest hash mismatch')
-    evidence = json.loads((return_dir / 'CLIENT_RETURN.json').read_text())
-    if (evidence.get('sourceCommit') != source_commit or evidence.get('sha256') != wrapper_hash
-            or evidence.get('hardwareAcceptance') is not False
-            or evidence.get('deploymentReady') is not False):
-        raise IdentityError('return report differs from verified artifact')
-    artifacts.append((wrapper, RETURN, 65024))
     sealed = seal_entries(document, artifacts, source_commit)
     return sealed, {'sourceCommit': source_commit, 'artifacts': report,
-                    'returnWrapper': verified_return, 'hardwareAcceptance': False}
+                    'hardwareAcceptance': False}
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--matrix-dir', required=True)
-    p.add_argument('--return-dir', required=True)
     p.add_argument('--nonpm-dir', required=True, help='verified non-PM role matrix from the same source')
     p.add_argument('--source-commit', required=True)
     p.add_argument('--registry', type=Path, default=DEFAULT_REGISTRY)
     p.add_argument('--write', action='store_true', help='seal only after independently confirming exact-SHA CI green')
     a = p.parse_args()
     original = a.registry.read_text(encoding='utf8')
-    sealed, report = verify_bundle(a.matrix_dir, a.return_dir, a.source_commit, json.loads(original))
+    sealed, report = verify_bundle(a.matrix_dir, a.source_commit, json.loads(original))
     from bseed_nonpm_variant_matrix import verify_bundle as verify_nonpm_bundle
     from bseed_nonpm_release import CANDIDATES as NONPM
     report['nonpmArtifacts'] = verify_nonpm_bundle(a.nonpm_dir, a.source_commit)

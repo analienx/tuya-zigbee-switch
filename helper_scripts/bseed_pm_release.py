@@ -10,9 +10,7 @@ CLIENT = {'role': 'EndDevice', 'build': '1.2.5-bseedcli12',
           'version': 0x12053016, 'type': 65024, 'artifact': 'forward.ota'}
 ROUTER = {'role': 'Router', 'build': '1.2.5-bseedr9',
           'version': 0x12053016, 'type': 43556, 'artifact': 'forward.ota'}
-RETURN = {'role': 'Router', 'build': '1.2.5-bseedr10',
-          'version': 0x12053017, 'type': 43556, 'artifact': 'forward.ota'}
-CANDIDATES = {'client': CLIENT, 'router': ROUTER, 'return': RETURN}
+CANDIDATES = {'client': CLIENT, 'router': ROUTER}
 RELEASE_DATE = '20260928'  # Immutable input for this candidate set, not wall-clock build time.
 
 
@@ -22,9 +20,9 @@ def validate_candidate_set():
     for item in CANDIDATES.values():
         if not item['build'].isascii() or not 1 <= len(item['build']) <= 16:
             raise IdentityError('candidate Basic build ID must fit 16 ASCII bytes')
-    if CLIENT['version'] != ROUTER['version'] or RETURN['version'] <= CLIENT['version']:
-        raise IdentityError('return identity must follow the shared Client/Router version')
-    if CLIENT['type'] != 65024 or ROUTER['type'] != 43556 or RETURN['type'] != 43556:
+    if CLIENT['version'] != ROUTER['version']:
+        raise IdentityError('PM Client/Router candidates must share one native version')
+    if CLIENT['type'] != 65024 or ROUTER['type'] != 43556:
         raise IdentityError('unexpected PM role image type')
 
 

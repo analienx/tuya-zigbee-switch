@@ -76,7 +76,6 @@ def main():
 
     pm = download('BSEED PM role matrix', 'bseed-pm-role-matrix-' + sha, root / 'pm')
     nonpm = download('BSEED non-PM role matrix', 'bseed-nonpm-role-matrix-' + sha, root / 'nonpm')
-    ret = download('BSEED PM role matrix', 'bseed-pm-client-return-experimental-' + sha, root / 'return')
     # upload-artifact may preserve the fixed directory preceding a wildcard.
     def containing(folder, filename):
         matches = list(folder.rglob(filename))
@@ -88,7 +87,6 @@ def main():
     command = [sys.executable, 'helper_scripts/bseed_pm_seal.py',
                '--matrix-dir', str(containing(pm, 'ROLE_MATRIX.json')),
                '--nonpm-dir', str(containing(nonpm, 'ROLE_MATRIX.json')),
-               '--return-dir', str(containing(ret, 'CLIENT_RETURN.json')),
                '--source-commit', sha, '--registry', str(registry), '--write']
     report = json.loads(subprocess.check_output(command, text=True))
     report['publicActions'] = {name: r['html_url'] for name, r in selected.items()}

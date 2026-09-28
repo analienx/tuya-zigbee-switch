@@ -81,18 +81,20 @@ has been changed during remediation.
 | 4 | Link-gate assertions are explicit exceptions. The optimized subprocess test submits forged evidence and requires rejection. |
 | 5 | PM Router CI selects the consolidated candidate. New non-PM native matrix code builds/rebuilds both roles using fresh identities. **Legacy non-PM workflow replacement is pending explicit approval after automatic approval review rejected removing the old CI control.** The current workflow remains incompatible with the new candidate. See the separate workflow draft. |
 | 6 | PM and non-PM central release definitions pin `20260927`; actual make inputs and simulated different compiler dates have CI tests. New non-PM r9/c6 identities are reserved, unsealed; no historical hashes changed. |
-| 7 | `bseed_socket_version_policy.py` requires sealed bytes, exact board/native role/build, matching transport payload and strictly increasing versions before index generation and live check/flash. Wrapper entries gain explicit payload-role metadata when sealed. Equal-version r7/cli11 and r9/c6 transitions are rejected. Tests cover both TS011F boards and role directions. The new policy currently supports these two socket boards only; existing TS0726 campaign compatibility needs separate scope review before that path is used. |
+| 7 | `bseed_socket_version_policy.py` requires sealed bytes, exact board/native role/build, matching transport payload and strictly increasing versions before ordinary index generation and live check/flash. Equal-version role changes remain rejected by the normal release path. A separately explicit `force_test_transition=true` exception is limited to already-custom PM/non-PM sockets, requires an exact sealed native image/SHA and permits only a private `0xFFFFFFFF` outer wrapper that changes role; it is never a release identity. Tests cover both TS011F boards and role directions. TS0726 remains outside FORCE scope. |
 | 8 | The converter suppresses PM measurement decoding while a per-device OTA quarantine is acknowledged active. Release requires matching private lock/token, fresh identity evidence and the expected installed build/role. Known/unknown/stale builds are tested against the real pinned converter runtime. **Recovery follow-up remains open:** metadata-only recovery must release a matching guard, and cross-role release must use corrected post-metadata evidence rather than a possibly stale rejoin inventory. That live-tooling patch is pending approval after automatic review rejected it. |
 | 9 | Text extraction starts at the definitions array. Prepared-definition tests additionally exercise actual dispatch and endpoint behavior. |
 | 10 | All `bseed*.py` runtime assertions and inline native build validators have explicit exceptions; the low-level runner also retains its optimized-mode refusal. Router CI manifest checks now use explicit failures. **Assertions in the legacy non-PM workflow remain pending its approved replacement.** |
 | 11 | Checked-in converter regenerated from the template. Public CI now fails on generated/checked-in drift and tests the generated file with pinned ZHC/Herdsman. |
 | 12 | Minimal emergency fallback is explicitly restricted to identity fields with no GPIO mapping, and cannot be persisted as the approved board config. New C harness cases cover both boards with invalid saved and compiled defaults. |
 
-Additional offline tests verify non-PM bundles and combined six-tuple sealing:
-four native board/role candidates plus the PM return native/wrapper pair. They
-reject stale source, wrong board/date, changed bytes, missing reproduction,
-duplicate roles and conflicting wrapper payload metadata. Synthetic fixtures
-are never firmware artifacts or hardware evidence.
+Additional offline tests verify the four native PM/non-PM board/role candidates
+and atomic native sealing. Separate FORCE-wrapper tests prove that a private
+cross-role transport can wrap only an already-sealed native candidate, changes
+only the outer source-role query tuple/version, and remains deployment-ineligible.
+They reject stale source, wrong board/date, changed bytes, missing reproduction,
+duplicate roles and invalid FORCE targets. Synthetic fixtures are never firmware
+artifacts or hardware evidence.
 
 Remaining sequence: resolve the two pending approval items; review the final
 source and test diff; obtain publication authorization; run full tests/lint and

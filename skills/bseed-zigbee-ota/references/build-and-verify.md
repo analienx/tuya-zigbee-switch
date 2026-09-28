@@ -23,9 +23,12 @@ as a side effect of building.
    65024` and `emit-make-vars --image-type 65024 --version-str SHORT_BUILD_ID`.
    New Basic IDs must be 1..16 ASCII bytes. Update the single definition in
    `helper_scripts/bseed_pm_release.py`. Router and Client share the next
-   board-wide version, with separate image types 43556/65024. Allocate the
-   experimental return at a strictly greater version and a different build ID.
-   Never reuse a sealed tuple for changed bytes, even for a one-line fix.
+   board-wide native version, with separate image types 43556/65024. Do **not**
+   allocate an extra release merely to move a canary between roles. Equal-version
+   cross-role hardware testing uses the private `0xFFFFFFFF` FORCE transport in
+   `docs/bseed_force_test_transition.md`, wrapping an already-sealed native
+   candidate without changing its embedded version/build. Never reuse a sealed
+   tuple for changed bytes, even for a one-line fix.
    Pin `RELEASE_DATE` for that candidate set. Both scripts pass it as
    `BSEED_BUILD_DATE`; compiler `__DATE__` must not change sealed bytes on a later
    rebuild. Do not change the pinned date after sealing.
@@ -33,12 +36,10 @@ as a side effect of building.
    type 65026, and allocate against that board's own maximum. Both actual native
    scripts must pass `DEVICE_CONFIG_GUARD=BSEED_TS011F_NONPM`. PM and non-PM
    are separate images; power-management `PM_ENABLE` is unrelated to metering.
-   Equal numeric versions cannot role-transition: same-release r7/cli11 or
-   r9/c6 needs a separately allocated strictly newer destination to change role.
-3. Reserve the shared version first. Do not reserve a higher return version
-   before first-build shared-role artifacts are verified/sealed: the monotonic
-   board gate would correctly reject unsealed lower-version bytes. Historical
-   sealed builds may rebuild identically; do not bypass with allow-downgrade.
+3. Seal only native release identities. FORCE wrappers, their one-entry indexes
+   and campaign profiles stay private and outside git; they are never registry
+   candidates. Historical sealed builds may rebuild identically; do not bypass
+   the native monotonic gate with allow-downgrade.
 4. Implement narrowly supported fixes and regression tests. The PM socket's
    canonical GPIO configuration must survive malformed/wrong-board NVM.
    Preserve valid startup preferences, including PREVIOUS=255. Use executable
@@ -48,32 +49,32 @@ as a side effect of building.
    `BSEED PM role matrix`, the approved non-PM role matrix and Router CI green on
    that exact SHA. CI runs full host tests, pinned real ZHC runtime tests,
    C formatting, identity gates, native Telink Router+Client builds and an
-   independent clean rebuild of each role with identical hashes. The return
-   package is also built from that SHA. Local compilation is not release proof.
-   If lint fails, use the CI `lint-diagnostics` artifact, inspect the patch,
-   then commit and rerun. A corrected source SHA needs its own green runs.
-6. Download the role-matrix, experimental return and generated converter
-   artifacts into ignored `build/ci-SHA/`. Check successful GitHub conclusions
-   and their `headSha`; a downloaded report is not authentication of CI success.
-   Run:
+   independent clean rebuild of each role with identical hashes. No FORCE
+   wrapper is built or uploaded as a release artifact. Local compilation is not
+   release proof. If lint fails, use the CI `lint-diagnostics` artifact,
+   inspect the patch, then commit and rerun. A corrected source SHA needs its
+   own green runs.
+6. Download the PM/non-PM role-matrix and generated converter artifacts into
+   ignored `build/ci-SHA/`. Check successful GitHub conclusions and their
+   `headSha`; a downloaded report is not authentication of CI success. Run:
 
    ```text
-   python helper_scripts/bseed_pm_seal.py --matrix-dir MATRIX_DIR --return-dir RETURN_DIR --nonpm-dir NONPM_MATRIX_DIR --source-commit FULL_SHA
+   python helper_scripts/bseed_pm_seal.py --matrix-dir MATRIX_DIR --nonpm-dir NONPM_MATRIX_DIR --source-commit FULL_SHA
    ```
 
    This verifies clean-source manifests, actual OTA/native versions, length,
-   startup marker, CRC, exact embedded length-prefixed Basic ID, role hashes,
-   reproducibility report and byte-identical Router payload in the return
-   wrapper. It does not claim the firmware booted or the downlink works.
+   startup marker, CRC, exact embedded length-prefixed Basic ID, role hashes and
+   reproducibility reports for the four native socket candidates. It does not
+   claim the firmware booted or the downlink works.
 7. Once exact-SHA CI is green, repeat with `--write`. Review and commit the
-   registry diff; no old sealed hash may change. The tool seals all six tuples
-   atomically and is idempotent for identical artifacts. Run CI again on the
-   registry commit, verifying unchanged binaries pass the sealed identity gate.
-   Record source SHA, run URLs, filenames, SHA-256/512 and pending hardware
-   gates in the release document. Never commit downloaded binaries or logs.
-   The six tuples are four native board/role variants plus the PM return native
-   and Client-header wrapper. A transport wrapper's registry line does not
-   establish its payload role; preserve explicit payload-role metadata.
+   registry diff; no old sealed hash may change. The tool seals the four native
+   PM/non-PM role tuples atomically and is idempotent for identical artifacts.
+   FORCE wrappers remain private and unregistered. The retired PM `.17`
+   return-experiment tuples stay tombstoned only to prevent future byte-identity
+   reuse. Run CI again on the registry commit, verifying unchanged binaries pass
+   the sealed identity gate. Record source SHA, run URLs, filenames, SHA-256/512
+   and pending hardware gates in the release document. Never commit downloaded
+   binaries, private FORCE wrappers or logs.
 
 ## Converter and hardware distinctions
 

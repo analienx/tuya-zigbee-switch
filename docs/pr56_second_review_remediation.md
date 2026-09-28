@@ -12,7 +12,6 @@ Fresh firmware candidates replace the previously sealed source set:
 | --- | --- | --- |
 | PM Router | 1.2.5-bseedr9 | 0x12053016 |
 | PM Client | 1.2.5-bseedcli12 | 0x12053016 |
-| PM return Router | 1.2.5-bseedr10 | 0x12053017 |
 | Non-PM Router | 1.1.3-bseedr10 | 0x11023014 |
 | Non-PM Client | 1.1.3-bseedc7 | 0x11023014 |
 | TS0726 currentLevel Router | 1.1.9-bseedlv3 | 0x1102300F |
@@ -30,8 +29,7 @@ The [finalizer](https://github.com/analienx/tuya-zigbee-switch/actions/runs/3637
 | --- | --- |
 | 1.2.5-bseedr9 | `b371ac3cb39bb28fb416eb3617d8af5d383d533198c1c1623ab05830a054253e` |
 | 1.2.5-bseedcli12 | `64b1eea15dd3f682a0aacd245c3c9802565de253dfda6c91252b428a1ad11d44` |
-| 1.2.5-bseedr10 | `8bded61cd90e16b4baae5634265a5e907fa3a0f53411e1fbe3ce2c2bab47b55d` |
 | 1.1.3-bseedr10 | `c2bb21dee350fd375586029eefb03f85791b0941bd386882a0b8653bb15bdb96` |
 | 1.1.3-bseedc7 | `f0a499ea9e351265cb47fa26717f00246450cecaf727adad3298552bb1d8a94f` |
 
-PM return transport wrapper SHA-256: `92e20866318c77052216f2dabc2f68ed022ed86b36ff66aa45f54996a0fb1f9b`. It remains experimental: `applyPathFix: false`, `deploymentReady: false`. The successful offline checks do not establish boot, relay operation, retention, radio behavior or soak acceptance on hardware. The registry-only follow-up must pass the same public CI against these sealed bytes before review completion.
+The former PM `1.2.5-bseedr10 / 0x12053017` version-bump return package has been retired from build, sealing and CI paths. Its already-public native/wrapper tuples remain only as `retired` registry tombstones so those byte identities can never be reused. Cross-role hardware acceptance now uses the private FORCE transport documented in `bseed_force_test_transition.md`, wrapping the exact sealed `r9`/`cli12` native payloads without creating another release version. FORCE wrappers are never release-sealed or fleet-published; hardware boot, relay, retention, radio and soak acceptance remain separate gates.

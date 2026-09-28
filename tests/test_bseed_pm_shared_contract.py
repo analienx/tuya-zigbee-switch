@@ -68,7 +68,7 @@ def test_router_recovery_candidate_pins_next_monotonic_version():
     assert "FILE_VERSION_HEX='0x12053011'" in build
     assert "FILE_VERSION_DEC=302329873" in build
     assert 'BSEED_PM_ROUTER_RECOVERY_OUTPUT' in build
-    assert 'FROM_CLIENT_OTA="$OUT_DIR/from-client.ota"' in build
+    assert 'from-client.ota' not in build
 
 
 def test_router_read_fix_uses_automated_next_identity():

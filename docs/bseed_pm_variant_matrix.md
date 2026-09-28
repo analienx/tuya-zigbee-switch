@@ -20,17 +20,18 @@ radio-report proof, fixture calibration or Router child-parenting verification.
 
 Published Router `1.2.5-bseedv8u4` (`0x12053007`) must remain byte-stable.
 Current candidates are defined in `helper_scripts/bseed_pm_release.py`:
-`BSEED_PM_CONSOLIDATED=1` builds `1.2.5-bseedr7` (`0x12053014`, type 43556),
-and the PM Client build produces `1.2.5-bseedcli11` (same version, type 65024).
+`BSEED_PM_CONSOLIDATED=1` builds `1.2.5-bseedr9` (`0x12053016`, type 43556),
+and the PM Client build produces `1.2.5-bseedcli12` (same version, type 65024).
 Neither is hardware-accepted or a golden release. Historical candidate modes
-are not a current-source rebuild path; preserve their sealed old artifacts.
-The separate experimental r8 return package uses `0x12053015` and Router payload.
-See [consolidated release](bseed_pm_consolidated_cli11_20260927.md) and the
+remain immutable evidence and are not a current-source rebuild path.
+See [FORCE role-transition testing](bseed_force_test_transition.md) and the
 [build/sealing procedure](../skills/bseed-zigbee-ota/references/build-and-verify.md).
-Both roles share one board-wide FILEVER: versions rise across both roles of
-a board, so a new release moves Router and Client together.
-Do not use either image as the other role or put the experimental Client in a
-normal OTA index. No old Router artifact may be relabeled with a newer version.
+Both native roles share one board-wide FILEVER: versions rise across both roles
+for ordinary releases. Equal-version cross-role canary testing does not allocate
+another release; it privately wraps the exact sealed destination payload with
+outer `0xFFFFFFFF` and the source-role query type. FORCE wrappers are never
+sealed/published fleet identities. The old PM `.17` return experiment is
+retired/tombstoned only to prevent tuple reuse. No old artifact may be relabeled.
 
 Shared code changes (including Telink PM ZCL attribute registration) must run this
 matrix against every affected PM role. Client-only join/backoff changes must also

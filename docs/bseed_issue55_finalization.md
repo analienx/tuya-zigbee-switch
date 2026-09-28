@@ -90,6 +90,9 @@ sudden power loss retain their separately documented energy limitations.
 The original review and remediation issue remains open for these acceptance
 requirements; no fleet release is implied by PR #56.
 
-The PM Client-to-Router return wrapper is still experimental: its report keeps
-`applyPathFix: false` and `deploymentReady: false`. Its verified package does not
-establish a repair of the live apply path or the observed idle-downlink failure.
+The former version-bumped PM Client-to-Router return package is retired from
+current build, seal and CI paths. Its `.17` tuples remain registry tombstones only
+to prevent identity reuse. Equal-version Router/Client canary interchange uses the
+private FORCE test transport around the exact sealed native candidates; that test
+transport is not a fleet release and does not establish boot, radio or hardware
+acceptance by itself.

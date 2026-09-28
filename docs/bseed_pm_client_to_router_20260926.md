@@ -1,5 +1,11 @@
 # PM Client to Router: package and apply-path evidence
 
+> **Historical/superseded:** PR #56 no longer builds, seals or uploads a
+> version-bumped PM return package. The current hardware-test path is the private
+> FORCE transport in `bseed_force_test_transition.md`, wrapping the exact sealed
+> native Router/Client candidates. The package details below are retained only as
+> incident history and reserved byte-identity evidence.
+
 ## Superseding hardware evidence: 2026-09-26 19:00 Europe/Prague
 
 WorkroomSocketCabinet returned as a Router after the native rc5 offer recorded

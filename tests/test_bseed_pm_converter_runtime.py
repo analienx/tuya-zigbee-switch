@@ -108,7 +108,7 @@ const makeDevice = (build, manufacturer = 'b28wrpvx') => {
 ''' + helper + r'''
 (async () => {
     let sequence = 1;
-    for (const build of ['1.2.5-bseedcli6', '1.2.5-bseedcli12', '1.2.5-bseedr9', '1.2.5-bseedr10']) {
+    for (const build of ['1.2.5-bseedcli6', '1.2.5-bseedcli12', '1.2.5-bseedr9']) {
       for (const staleCache of [false, true]) {
         const device = makeDevice(build), ep = device.endpoints[0];
         if (staleCache) ep.cache = {haElectricalMeasurement: {acVoltageDivisor: 1}, seMetering: {divisor: 100}};

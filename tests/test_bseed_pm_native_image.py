@@ -6,7 +6,7 @@ import sys
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'helper_scripts'))
-from bseed_pm_release import CANDIDATES, CLIENT, verify_native_image, validate_candidate_set
+from bseed_pm_release import CANDIDATES, CLIENT, ROUTER, verify_native_image, validate_candidate_set
 from bseed_ota_identity import IdentityError
 from tests.bseed_image_fixture import image_for
 
@@ -37,9 +37,9 @@ def test_correct_crc_does_not_mask_wrong_basic_string_length():
         verify_native_image(bytes(data), CLIENT)
 
 
-def test_candidate_set_rejects_equal_version_return(monkeypatch):
-    monkeypatch.setitem(CANDIDATES['return'], 'version', CLIENT['version'])
-    with pytest.raises(IdentityError, match='return identity'):
+def test_candidate_set_rejects_mismatched_shared_version(monkeypatch):
+    monkeypatch.setitem(ROUTER, 'version', CLIENT['version'] + 1)
+    with pytest.raises(IdentityError, match='share one native version'):
         validate_candidate_set()
 
 

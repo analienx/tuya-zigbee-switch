@@ -7,23 +7,24 @@ description: Build, verify and seal BSEED firmware candidates and conduct single
 
 Use this skill for BSEED firmware builds, release tooling, OTA flashes, transfer failures, role transitions, rejoin diagnostics and handoffs. Read `docs/bseed_targeted_ota_runner.md` and the target's latest evidence before any firmware write. Do not substitute conversational recollection for current hardware identity.
 
-## Current build workflow (2026-09-27)
+## Current build workflow (2026-09-28)
 
 For consolidated PM candidates, read [build-and-verify.md](references/build-and-verify.md).
 It supersedes historical build-version recommendations below, not incident evidence.
-`helper_scripts/bseed_pm_release.py` defines the current Client/Router/return tuple;
-the identity registry seals bytes. Run required verification on public GitHub CI
-at the exact SHA, download its artifacts, and use `bseed_pm_seal.py` to verify and
-seal them. Offline build/tooling work authorized by the user does not require
-separate flashing permission. A green build does not establish hardware acceptance.
+`helper_scripts/bseed_pm_release.py` defines the current native Client/Router pair;
+the identity registry seals those bytes. Cross-role canary interchange uses only
+the private FORCE transport in `docs/bseed_force_test_transition.md`. Run required
+verification on public GitHub CI at the exact SHA, download its artifacts, and use
+`bseed_pm_seal.py` to verify and seal them. Offline build/tooling work authorized
+by the user does not require separate flashing permission. A green build does not
+establish hardware acceptance.
 
-Current four-variant remediation is **HOLD**, following the independent review
-in issue 55. Read `docs/bseed_independent_review_triage_20260927.md` before using
-the candidate workflow. Non-PM Router/Client identities are separately defined
-in `helper_scripts/bseed_nonpm_release.py`; do not reuse PM tuples or pin maps.
-The legacy non-PM CI was replaced by the exact-head role-matrix workflow and the
-PM telemetry-recovery follow-up is applied in source. The version policy covers
-the separate TS0726 campaign as Router-only sealed updates with a strict no-metering preflight. No finding is closed and no current candidate is fleet-approved.
+PR #56 contains the four-variant source/tooling remediation and exact-head CI
+workflow. Read `docs/bseed_issue55_finalization.md` and the independent-review
+triage for the findings/history. PM and non-PM Router/Client identities remain
+separate; no current candidate is hardware- or fleet-approved until its own
+physical/radio/retention/soak gates pass. The version policy also covers TS0726
+as Router-only sealed updates; FORCE is limited to the two TS011F socket boards.
 
 Basic `swBuildId` must fit 16 ASCII bytes. A fresh wire read can show that a
 longer string was rejected by Herdsman while its cache remains stale. Preserve

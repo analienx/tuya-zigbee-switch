@@ -1,5 +1,11 @@
 # Consolidated PM Client cli11 and build-process repair
 
+> **Historical/superseded:** PR #56 has since advanced the native PM pair to
+> `cli12/r9` at `0x12053016`. The version-bumped PM return candidate described
+> below is retired; current cross-role hardware testing uses the private FORCE
+> transport in `bseed_force_test_transition.md`. This file remains as candidate
+> history and rationale, not the current build/sealing procedure.
+
 Status: uncommitted candidate awaiting exact-source public CI; no device flashed and no
 fleet acceptance claimed. This record supersedes cli10 as the proposed next
 KitchenSocketLeft candidate once its CI artifacts are verified and sealed.

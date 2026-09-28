@@ -1,7 +1,6 @@
 import copy
 import hashlib
 import json
-import struct
 import sys
 from pathlib import Path
 
@@ -9,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'helper_scripts'))
 from bseed_ota_identity import IdentityError
-from bseed_pm_release import CLIENT, ROUTER, RETURN
+from bseed_pm_release import CLIENT, ROUTER
 from bseed_pm_seal import seal_entries, verify_bundle
 from bseed_image_fixture import image_for as ota_image
 from test_bseed_pm_variant_matrix import sample_artifact
@@ -32,6 +31,7 @@ def test_seal_records_verified_hash_without_mutating_input_and_is_idempotent():
     assert seal_entries(sealed, artifacts, 'b' * 40) == sealed
 
 
+
 def test_seal_rejects_relabel_and_wrong_reservation_without_mutating_registry():
     data = registry()
     blob = ota_image(CLIENT)
@@ -49,60 +49,53 @@ def test_seal_rejects_relabel_and_wrong_reservation_without_mutating_registry():
 def bundle(tmp_path):
     matrix = tmp_path / 'matrix'; matrix.mkdir()
     reports = []
-    for name, candidate in (('client', CLIENT), ('router', ROUTER), ('return', RETURN)):
+    for name, candidate in (('client', CLIENT), ('router', ROUTER)):
         parent = tmp_path / ('fixture-' + name); parent.mkdir()
         folder, manifest = sample_artifact(parent, candidate)
         manifest['sourceCommit'] = 'a' * 40
-        if name == 'return':
-            returned = folder
-            wrapper = bytearray((folder / 'forward.ota').read_bytes())
-            struct.pack_into('<H', wrapper, 12, 65024)
-            (folder / 'from-client.ota').write_bytes(wrapper)
-            digest = hashlib.sha256(wrapper).hexdigest()
-            manifest['artifacts']['from-client.ota'] = {'sha256': digest}
-            (folder / 'CLIENT_RETURN.json').write_text(json.dumps({
-                'sourceCommit': 'a' * 40, 'sha256': digest,
-                'hardwareAcceptance': False, 'deploymentReady': False}))
-        else:
-            reports.append({'role': candidate['role'], 'sha256': manifest['artifacts']['forward.ota']['sha256']})
-            folder = folder.rename(matrix / name)
+        reports.append({'role': candidate['role'],
+                        'sha256': manifest['artifacts']['forward.ota']['sha256']})
+        folder = folder.rename(matrix / name)
         (folder / 'manifest.json').write_text(json.dumps(manifest))
     (matrix / 'ROLE_MATRIX.json').write_text(json.dumps({
         'sourceCommit': 'a' * 40, 'hostTests': 'passed', 'compiledBothRoles': True,
         'reproducedBothRoles': True, 'hardwareAcceptance': False, 'artifacts': reports}))
-    return matrix, returned
+    return matrix
 
 
-def test_complete_bundle_seals_four_distinct_tuples_idempotently(tmp_path):
-    matrix, returned = bundle(tmp_path)
-    sealed, report = verify_bundle(matrix, returned, 'a' * 40, registry())
-    assert len([e for line in sealed['lines'] for e in line['versions']]) == 4
-    assert all(e['sha512'] for line in sealed['lines'] for e in line['versions'])
+def test_complete_bundle_seals_two_native_pm_tuples_idempotently(tmp_path):
+    matrix = bundle(tmp_path)
+    sealed, report = verify_bundle(matrix, 'a' * 40, registry())
+    entries = [e for line in sealed['lines'] for e in line['versions']]
+    assert len(entries) == 2 and all(e['sha512'] for e in entries)
     assert not report['hardwareAcceptance']
-    assert verify_bundle(matrix, returned, 'a' * 40, sealed)[0] == sealed
+    assert verify_bundle(matrix, 'a' * 40, sealed)[0] == sealed
+
 
 
 def test_nonpm_bundle_can_be_sealed_with_pm_without_crossing_board_identity(tmp_path):
     from bseed_nonpm_release import CANDIDATES
     from bseed_nonpm_variant_matrix import verify_bundle as verify_nonpm
     from test_bseed_nonpm_variant_matrix import bundle as nonpm_bundle
-    matrix, returned = bundle(tmp_path)
+    matrix = bundle(tmp_path)
     nonpm_root = tmp_path / 'nonpm-fixtures'; nonpm_root.mkdir()
     nonpm = nonpm_bundle(nonpm_root)
     original = registry()
     for candidate in CANDIDATES.values():
         original['lines'].append(dict(image_type=candidate['type'], board_key='o1jzcxou', versions=[
             dict(file_version=candidate['version'], version_str=candidate['build'], sha512=None)]))
-    sealed, _ = verify_bundle(matrix, returned, 'a' * 40, original)
+    sealed, _ = verify_bundle(matrix, 'a' * 40, original)
     verify_nonpm(nonpm, 'a' * 40)
     artifacts = [((nonpm / role / 'forward.ota').read_bytes(), c, c['type'])
                  for role, c in CANDIDATES.items()]
     sealed = seal_entries(sealed, artifacts, 'a' * 40)
     entries = [entry for line in sealed['lines'] for entry in line['versions']]
-    assert len(entries) == 6 and all(entry['sha512'] for entry in entries)
+    assert len(entries) == 4 and all(entry['sha512'] for entry in entries)
     assert seal_entries(sealed, artifacts, 'a' * 40) == sealed
-    wrapper = next(line for line in sealed['lines'] if line['image_type'] == 65024)['versions'][-1]
-    assert wrapper['payload_role'] == 'Router' and wrapper['payload_image_type'] == 43556
+    pm_client = next(line for line in sealed['lines'] if line['image_type'] == 65024)['versions'][0]
+    pm_router = next(line for line in sealed['lines'] if line['image_type'] == 43556)['versions'][0]
+    assert pm_client['payload_role'] == 'EndDevice' and pm_client['payload_image_type'] == 65024
+    assert pm_router['payload_role'] == 'Router' and pm_router['payload_image_type'] == 43556
 
 
 def test_sealer_refuses_conflicting_payload_role_metadata():
@@ -114,10 +107,12 @@ def test_sealer_refuses_conflicting_payload_role_metadata():
     assert data == before
 
 
-@pytest.mark.parametrize('fault', ['not_reproduced', 'stale_source', 'wrong_board', 'dirty',
-                                  'matrix_hash', 'wrapper_hash', 'return_report', 'native_bytes'])
+
+@pytest.mark.parametrize('fault', [
+    'not_reproduced', 'stale_source', 'wrong_board', 'dirty', 'matrix_hash', 'native_bytes',
+])
 def test_bundle_refuses_incomplete_or_inconsistent_evidence(tmp_path, fault):
-    matrix, returned = bundle(tmp_path)
+    matrix = bundle(tmp_path)
     path = matrix / 'ROLE_MATRIX.json'
     data = json.loads(path.read_text())
     if fault == 'not_reproduced': data['reproducedBothRoles'] = False
@@ -129,19 +124,11 @@ def test_bundle_refuses_incomplete_or_inconsistent_evidence(tmp_path, fault):
     if fault == 'wrong_board': data['board'] = 'OUTLET_BSEED_TS011F'
     if fault == 'dirty': data['sourceDirty'] = True
     path.write_text(json.dumps(data))
-    if fault == 'wrapper_hash':
-        path = returned / 'manifest.json'; data = json.loads(path.read_text())
-        data['artifacts']['from-client.ota']['sha256'] = 'wrong'
-        path.write_text(json.dumps(data))
-    if fault == 'return_report':
-        path = returned / 'CLIENT_RETURN.json'; data = json.loads(path.read_text())
-        data['deploymentReady'] = True
-        path.write_text(json.dumps(data))
     if fault == 'native_bytes':
         path = matrix / 'client' / 'forward.ota'
         changed = bytearray(path.read_bytes()); changed[-5] ^= 1
         path.write_bytes(changed)
     original = registry(); before = copy.deepcopy(original)
     with pytest.raises(IdentityError):
-        verify_bundle(matrix, returned, 'a' * 40, original)
+        verify_bundle(matrix, 'a' * 40, original)
     assert original == before
