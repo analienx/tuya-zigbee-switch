@@ -19,6 +19,7 @@ import tempfile
 SCHEMA = 1
 ACCEPTED_PHASE = 'postflash_accepted'
 RECONCILED_PHASE = 'installed_image_reconciled'
+SOURCE_UNCHANGED_PHASE = 'source_unchanged_reconciled'
 
 
 def now_iso():
@@ -146,3 +147,12 @@ def release_reconciled(path, token):
     evidence validator.
     """
     return _release_phase(path, token, RECONCILED_PHASE)
+
+
+def release_source_unchanged(path, token):
+    """Release ownership only after fresh proof that the preflash image/role
+    is still installed and the attempted OTA is no longer active.
+
+    This is not transport success and not hardware acceptance.
+    """
+    return _release_phase(path, token, SOURCE_UNCHANGED_PHASE)
