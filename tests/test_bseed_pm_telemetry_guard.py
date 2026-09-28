@@ -9,7 +9,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'helper_scripts'))
-from bseed_pm_telemetry_guard import validate_release, set_option, OPTION
+from bseed_pm_telemetry_guard import (validate_release, validate_timeout_reconcile_release,
+                                      set_option, OPTION)
 import bseed_pm_telemetry_guard as guard
 
 
@@ -85,6 +86,33 @@ def test_metadata_recovery_keeps_guard_active_without_final_proof(failure):
     with pytest.raises(ValueError): validate_release(p, r, e, lock)
 
 
+def test_timeout_reconcile_allows_only_fresh_exact_metadata_identity():
+    p, r, e, lock = metadata_fixture()
+    lock['phase'] = 'update_timeout_or_unconfirmed'
+    validate_timeout_reconcile_release(p, r, e, lock)
+    with pytest.raises(ValueError, match='transfer to have succeeded'):
+        validate_release(p, r, e, lock)
+
+
+@pytest.mark.parametrize('failure', [
+    'wrong_phase', 'wrong_token', 'no_interview', 'stale_inventory',
+    'wrong_live_role', 'wrong_build', 'wrong_ieee', 'old',
+])
+def test_timeout_reconcile_keeps_quarantine_without_exact_installed_proof(failure):
+    p, r, e, lock = metadata_fixture()
+    lock['phase'] = 'update_timeout_or_unconfirmed'
+    if failure == 'wrong_phase': lock['phase'] = 'update_error'
+    if failure == 'wrong_token': lock['token'] = 'campaign-2'
+    if failure == 'no_interview': e['interview_ok'] = False
+    if failure == 'stale_inventory': e['fresh_inventory_observed'] = False
+    if failure == 'wrong_live_role': e['live_zdo_after'] = {'role': 'Router'}
+    if failure == 'wrong_build': e['after']['software_build_id'] = 'another-build'
+    if failure == 'wrong_ieee': e['ieee'] = '0x0000000000000000'
+    if failure == 'old': e['at'] = '2026-09-26T10:00:00+00:00'
+    with pytest.raises(ValueError):
+        validate_timeout_reconcile_release(p, r, e, lock)
+
+
 def test_effective_option_ack_is_required():
     p, _, _, _ = fixture()
     class Bridge:
@@ -151,6 +179,23 @@ def release_evidence(profile, evidence, lock):
     path = directory / 'interview.json'
     path.write_text(json.dumps(evidence))
     return path
+
+
+def test_timeout_reconcile_release_archives_guard_but_preserves_campaign_lock(tmp_path, monkeypatch):
+    p, _, lock, bridge = lifecycle(tmp_path, monkeypatch)
+    guard.begin(p, lock['token'])
+    active = guard.guard_path(p)
+    _, _, evidence, _ = metadata_fixture()
+    lock['phase'] = 'update_timeout_or_unconfirmed'
+    path = release_evidence(p, evidence, lock)
+    guard.release_reconciled(p, path)
+    assert not active.exists()
+    archive = active.with_name('PM_TELEMETRY_RELEASED_RECONCILED_' + lock['token'] + '.json')
+    record = json.loads(archive.read_text())
+    assert record['phase'] == 'released_after_timeout_identity_reconcile'
+    assert record['transport_phase_preserved'] == 'update_timeout_or_unconfirmed'
+    assert json.loads((Path(p['workdir']) / 'ACTIVE_LOCK.json').read_text())['phase'] == 'update_timeout_or_unconfirmed'
+    assert [r['options'][OPTION] for r in bridge.requests] == [True, False]
 
 
 def test_guard_lifecycle_preserves_and_archives_exact_campaign(tmp_path, monkeypatch):
