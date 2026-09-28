@@ -76,7 +76,8 @@ def test_stale_build_allows_interview_candidate_only_after_fresh_inventory_and_l
                 pending.append(lambda: self.emit('bridge/devices', inventory, retained))
             return SimpleNamespace(wait_for_publish=lambda *args: None)
 
-    monkeypatch.setattr(module.mqtt, 'Client', Client)
+    monkeypatch.setattr(module, 'mqtt', SimpleNamespace(
+        Client=Client, CallbackAPIVersion=SimpleNamespace(VERSION2=2)))
     monkeypatch.setattr(module.threading, 'Event', Event)
     monkeypatch.setattr(module, 'read_node_descriptor', lambda *args: {'role': live_role})
     monkeypatch.setattr(module.time, 'monotonic', lambda counter=itertools.count(): next(counter))

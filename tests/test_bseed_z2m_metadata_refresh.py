@@ -72,7 +72,8 @@ def test_main_repairs_stale_build_but_requires_fresh_final_identity(
             self.emit('bridge/devices', [final], retained)
             return SimpleNamespace(wait_for_publish=lambda *args: None)
 
-    monkeypatch.setattr(module.mqtt, 'Client', Client)
+    monkeypatch.setattr(module, 'mqtt', SimpleNamespace(
+        Client=Client, CallbackAPIVersion=SimpleNamespace(VERSION2=2)))
     monkeypatch.setattr(module, 'read_node_with_retries', lambda *args: {'role': role})
     monkeypatch.setattr(module.time, 'monotonic', lambda counter=itertools.count(step=20): next(counter))
     monkeypatch.setattr(sys, 'argv', ['metadata', '--device', REC['friendly_name'],
