@@ -18,6 +18,7 @@ import tempfile
 
 SCHEMA = 1
 ACCEPTED_PHASE = 'postflash_accepted'
+RECONCILED_PHASE = 'installed_image_reconciled'
 
 
 def now_iso():
@@ -135,3 +136,13 @@ def release_preflight_abort(path, token):
 
 def release_accepted(path, token):
     return _release_phase(path, token, ACCEPTED_PHASE)
+
+
+def release_reconciled(path, token):
+    """Release network ownership after exact installed-image reconciliation.
+
+    This is intentionally distinct from hardware/postflash acceptance and may
+    only release a lock already moved to RECONCILED_PHASE by the dedicated
+    evidence validator.
+    """
+    return _release_phase(path, token, RECONCILED_PHASE)

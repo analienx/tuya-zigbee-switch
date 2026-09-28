@@ -49,7 +49,8 @@ def wait_for_check_result(event, seconds):
 
 def new_campaign_allowed(previous):
     # Legacy update_ok is only a transfer result; it must not permit another flash.
-    return not previous or previous.get('phase') in ('postflash_accepted', 'preflight_abort')
+    return not previous or previous.get('phase') in (
+        'postflash_accepted', 'installed_image_reconciled', 'preflight_abort')
 
 
 def archive_prior_check(work):
