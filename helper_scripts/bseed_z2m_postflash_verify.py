@@ -135,6 +135,13 @@ def main():
     try:
         if not (ready.wait(10)):
             raise AssertionError('MQTT connection/subscription failed')
+        # Same-role non-PM sockets can be completely quiet after OTA. The
+        # retention gate must not depend on unsolicited telemetry: request the
+        # pinned read-only relay/policy state after subscriptions are active.
+        if args.preflash_lock and not args.require_pm:
+            client.publish(device_topic + '/get', json.dumps({
+                args.relay_get_key: '', 'relay_physical_mode': ''
+            }), qos=1, retain=False).wait_for_publish(5)
         time.sleep(observation_seconds)
     finally:
         client.loop_stop()
