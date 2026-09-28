@@ -121,7 +121,13 @@ and child-parenting evidence; Client acceptance requires receiver-on parent-loss
 and rejoin behavior. PM release acceptance still requires a controlled known-load
 to zero test and soak.
 
-The non-PM recovery gate is intentionally unchanged. Creating a FORCE wrapper
-does not grant a new no-disassembly risk waiver for BedroomSocketCabinetRight;
-a non-PM role transition still needs the separately authorized recovery/risk
-requirements before the campaign runner will write hardware.
+The non-PM recovery gate remains exact-target and fail-closed, but the reviewed
+BedroomSocketCabinetRight canary now has the same narrow no-disassembly test
+path as the PM role canary. It is pinned to IEEE `0xa4c13824a7005afb`, 32-byte
+blocks, non-PM `o1jzcxou / TS011F-BS`, `state_relay`, `follow_state`, explicit
+load-unplugged plus nonrecoverable-risk acknowledgement, and only the sealed
+`1.1.3-bseedc7` / `1.1.3-bseedr10` pair. Same-role `cli4 -> c7` requires the
+exact c7 SHA. FORCE `c7 <-> r10` additionally requires the exact sealed native
+destination SHA; the canonical runner independently proves the private wrapper
+payload is byte-identical to that native image. Other devices/builds remain
+blocked without SWire/readback recovery evidence.
