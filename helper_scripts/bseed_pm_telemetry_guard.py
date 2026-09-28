@@ -139,6 +139,57 @@ def validate_timeout_reconcile_release(profile, record, evidence, lock):
     return True
 
 
+def validate_source_unchanged_release(profile, record, evidence, lock):
+    """Release quarantine only when the attempted OTA stopped and fresh
+    evidence proves the exact preflash build/role is still installed."""
+    if (record.get('ieee'), record.get('sha256'), record.get('phase')) != (
+            profile['ieee'], profile['sha256'], 'enabled'):
+        raise ValueError('telemetry guard does not match this enabled campaign')
+    if (lock.get('ieee'), lock.get('sha256'), lock.get('token'), lock.get('phase')) != (
+            profile['ieee'], profile['sha256'], record.get('token'),
+            'source_unchanged_reconciled'):
+        raise ValueError('source-unchanged release requires this exact reconciled campaign')
+    observed = evidence.get('at') or evidence.get('observed_at')
+    if not observed or dt.datetime.fromisoformat(observed) < dt.datetime.fromisoformat(record['started']):
+        raise ValueError('source-unchanged evidence predates telemetry quarantine')
+    if evidence.get('result') != 'source_unchanged_reconciled':
+        raise ValueError('wrong source-unchanged evidence result')
+    if (evidence.get('ieee'), evidence.get('source_build'), evidence.get('source_role')) != (
+            profile['ieee'], profile['preflash_build'], profile['preflash_role']):
+        raise ValueError('fresh source identity does not match preflash build/role')
+    if evidence.get('update_available') is not True or evidence.get('ota_transport_success') is not False:
+        raise ValueError('source-unchanged reconciliation requires pending exact update and no transport success')
+    return True
+
+
+def release_source_unchanged(profile, evidence_path):
+    if profile.get('require_pm') is not True:
+        return
+    path = guard_path(profile)
+    record = json.loads(path.read_text(encoding='utf8'))
+    evidence = json.loads(Path(evidence_path).read_text(encoding='utf8'))
+    lock = json.loads((path.parent / 'ACTIVE_LOCK.json').read_text(encoding='utf8'))
+    validate_source_unchanged_release(profile, record, evidence, lock)
+    bridge = bridge_for(profile)
+    try:
+        bridge.start()
+        device = target(bridge, profile)
+        if (device.get('software_build_id'), device.get('type')) != (
+                profile['preflash_build'], profile['preflash_role']):
+            raise ValueError('current source identity changed since reconciliation evidence')
+        set_option(bridge, profile, False)
+        record.update(
+            phase='released_source_unchanged',
+            evidence=str(evidence_path),
+            transport_phase_preserved='source_unchanged_reconciled',
+        )
+        path.write_text(json.dumps(record, indent=2), encoding='utf8')
+        path.rename(path.with_name(
+            'PM_TELEMETRY_RELEASED_SOURCE_UNCHANGED_' + str(lock['token']) + '.json'))
+    finally:
+        bridge.stop()
+
+
 def release_reconciled(profile, evidence_path):
     """Release only PM telemetry quarantine after timeout identity reconciliation.
 
