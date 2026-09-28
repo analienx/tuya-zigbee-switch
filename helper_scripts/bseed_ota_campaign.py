@@ -371,7 +371,7 @@ def main():
                '--profile', args.profile]
         raise SystemExit(subprocess.call(cmd))
     if args.mode == 'status':
-        for filename in ('ACTIVE_LOCK.json', 'LAST_CHECK.json'):
+        for filename in ('LIVE_STATUS.json', 'ACTIVE_LOCK.json', 'LAST_CHECK.json'):
             f = work / filename
             print(filename, f.read_text(encoding='utf8') if f.exists() else 'not present')
         network = network_lock_path(profile)
