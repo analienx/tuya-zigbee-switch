@@ -144,6 +144,7 @@ def test_transport_ok_is_not_postflash_accepted():
     assert not new_campaign_allowed({'phase':'update_timeout_or_unconfirmed'})
     assert new_campaign_allowed({'phase':'postflash_accepted'})
     assert new_campaign_allowed({'phase':'installed_image_reconciled'})
+    assert new_campaign_allowed({'phase':'source_unchanged_reconciled'})
     assert new_campaign_allowed({'phase':'preflight_abort'})
     assert ota_transport_phase({'status':'error'})=='update_error'
     assert ota_transport_phase({})=='update_timeout_or_unconfirmed'
