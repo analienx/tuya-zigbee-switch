@@ -326,7 +326,7 @@ def verified_router_pm_candidate(profile):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', required=True, help='Private JSON profile outside git')
-    parser.add_argument('--mode', choices=['prepare', 'preflight', 'link-gate', 'qualify', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'provision-pm', 'audit-pm', 'postflash', 'reinterview', 'status'], required=True)
+    parser.add_argument('--mode', choices=['prepare', 'preflight', 'link-gate', 'qualify', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'reconcile-installed', 'provision-pm', 'audit-pm', 'postflash', 'reinterview', 'status'], required=True)
     parser.add_argument('--confirm-ieee', help='Required for flash, transition, rejoin, metadata and provision-pm; must match profile IEEE exactly')
     parser.add_argument('--accept-nonrecoverable-ota-risk', action='store_true', help='One-canary OTA may permanently fail; no physical readback/recovery is available')
     parser.add_argument('--confirm-load-unplugged', action='store_true', help='Non-PM flash only: operator just verified no physical appliance is connected')
@@ -384,6 +384,30 @@ def main():
         import uuid
         evidence = work / ('pm_role_audit_' + uuid.uuid4().hex + '.json')
         raise SystemExit(subprocess.call(role_audit_cmd(profile, evidence)))
+    if args.mode == 'reconcile-installed':
+        if args.confirm_ieee != profile['ieee']:
+            raise SystemExit('Installed-image reconciliation refused: confirm exact IEEE')
+        if profile['preflash_role'] != profile['postflash_role']:
+            raise SystemExit('Installed-image reconciliation is only for a same-role timed-out campaign')
+        lock_path = work / 'ACTIVE_LOCK.json'
+        if not lock_path.is_file():
+            raise SystemExit('Installed-image reconciliation requires the existing campaign lock')
+        lock = json.loads(lock_path.read_text(encoding='utf8'))
+        if (lock.get('device'), lock.get('ieee'), lock.get('sha256'), lock.get('phase')) != (
+                profile['device'], profile['ieee'], profile['sha256'], 'update_timeout_or_unconfirmed'):
+            raise SystemExit('Installed-image reconciliation requires this exact timed-out campaign')
+        import uuid
+        evidence = work / ('metadata_reconcile_' + uuid.uuid4().hex + '.json')
+        print('PRIVATE_EVIDENCE', evidence, flush=True)
+        status = subprocess.call(metadata_cmd(profile, args.confirm_ieee, evidence))
+        if status:
+            raise SystemExit(status)
+        if profile.get('require_pm'):
+            from bseed_pm_telemetry_guard import release_reconciled
+            release_reconciled(profile, evidence)
+        print('INSTALLED_IDENTITY_RECONCILED_NETWORK_LOCK_REMAINS_HELD',
+              profile['ieee'], flush=True)
+        return
     if args.mode == 'reinterview':
         if args.confirm_ieee != profile['ieee']:
             raise SystemExit('Target re-interview refused: confirm exact IEEE')
@@ -519,7 +543,7 @@ def main():
             record_postflash_candidate(profile)
         raise SystemExit(post_status)
     elif args.confirm_ieee:
-        raise SystemExit('--confirm-ieee may only be supplied for flash, transition, rejoin, metadata, reinterview or provision-pm')
+        raise SystemExit('--confirm-ieee may only be supplied for flash, transition, rejoin, metadata, reconcile-installed, reinterview or provision-pm')
     raise SystemExit(subprocess.call(runner_args(profile, args.mode)))
 
 
