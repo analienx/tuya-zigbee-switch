@@ -326,7 +326,7 @@ def verified_router_pm_candidate(profile):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', required=True, help='Private JSON profile outside git')
-    parser.add_argument('--mode', choices=['prepare', 'preflight', 'link-gate', 'qualify', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'reconcile-installed', 'provision-pm', 'audit-pm', 'postflash', 'reinterview', 'status'], required=True)
+    parser.add_argument('--mode', choices=['prepare', 'preflight', 'link-gate', 'qualify', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'reconcile-installed', 'reconcile-source', 'provision-pm', 'audit-pm', 'postflash', 'reinterview', 'status'], required=True)
     parser.add_argument('--confirm-ieee', help='Required for flash, transition, rejoin, metadata and provision-pm; must match profile IEEE exactly')
     parser.add_argument('--accept-nonrecoverable-ota-risk', action='store_true', help='One-canary OTA may permanently fail; no physical readback/recovery is available')
     parser.add_argument('--confirm-load-unplugged', action='store_true', help='Non-PM flash only: operator just verified no physical appliance is connected')
@@ -380,6 +380,12 @@ def main():
                   network.read_text(encoding='utf8') if network.exists()
                   else 'not present')
         return
+    if args.mode == 'reconcile-source':
+        if args.confirm_ieee != profile['ieee']:
+            raise SystemExit('Source reconciliation refused: confirm exact IEEE')
+        cmd = [sys.executable, '-u', str(ROOT/'helper_scripts/bseed_ota_source_reconcile.py'),
+               '--profile', args.profile, '--confirm-ieee', args.confirm_ieee]
+        raise SystemExit(subprocess.call(cmd))
     if args.mode == 'audit-pm':
         import uuid
         evidence = work / ('pm_role_audit_' + uuid.uuid4().hex + '.json')
@@ -543,7 +549,7 @@ def main():
             record_postflash_candidate(profile)
         raise SystemExit(post_status)
     elif args.confirm_ieee:
-        raise SystemExit('--confirm-ieee may only be supplied for flash, transition, rejoin, metadata, reconcile-installed, reinterview or provision-pm')
+        raise SystemExit('--confirm-ieee may only be supplied for flash, transition, rejoin, metadata, reconcile-installed, reconcile-source, reinterview or provision-pm')
     raise SystemExit(subprocess.call(runner_args(profile, args.mode)))
 
 
