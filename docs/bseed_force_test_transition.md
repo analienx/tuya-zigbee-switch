@@ -49,6 +49,31 @@ The resulting private campaign sets `force_test_transition: true`,
 source role's image type and `file_version: 0xffffffff`. The expected
 postflash role/build always describe the native payload, not the wrapper.
 
+
+## Progress visibility and interrupted observers
+
+Start FORCE transfers through the canonical profile-driven campaign, not a
+one-off MQTT sender. The campaign runner may continue in a visible terminal
+while the operator/assistant stops polling; this preserves transaction-matched
+terminal evidence and writes a private `LIVE_STATUS.json` that is shown by
+`--mode status`. Zigbee2MQTT frontend notifications are a UI initiation detail
+and are not a transfer gate.
+
+`request_timeout_ms` is the per-block-request inactivity limit. It must not be
+confused with the total OTA duration. For the Kitchen cli12 acceptance profile
+the reviewed value is 180000 ms (3 min), with a separate generous outer monitor
+deadman. Progress continuing beyond the outer monitor used by an older run must
+not be mislabeled as a device OTA timeout.
+
+If the runner/observer is lost and the private lock remains `ota_running`,
+never retry merely to discover state. Use
+`bseed_ota_campaign.py --mode reconcile-source --confirm-ieee EXACT`. That
+path releases stale ownership only after it freshly proves the exact preflash
+build and role are still installed, observes no active OTA for a bounded quiet
+window, and confirms the exact FORCE candidate is still offered. The resulting
+`source_unchanged_reconciled` state explicitly records
+`ota_transport_success=false` and is not hardware acceptance.
+
 ## Acceptance matrix
 
 The intended same-hardware A/B/A sequence is:
