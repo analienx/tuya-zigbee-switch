@@ -89,11 +89,42 @@ separately without reflashing or reopening permit-join. The orchestration gap
 should be fixed before relying on `--mode transition` as a fully self-contained
 role-transition acceptance record.
 
+## Router -> Client FORCE return
+
+The same socket was then returned from exact `1.2.5-bseedr9 / Router` to the
+same sealed `1.2.5-bseedcli12 / EndDevice` payload using the private FORCE
+transport. Zigbee2MQTT reported terminal OTA success and the same IEEE remained
+present.
+
+Fresh return evidence confirmed:
+
+- exact `1.2.5-bseedcli12` build and `EndDevice` inventory role;
+- fresh live ZDO `logicalType = 2` with `rxOnWhenIdle = 1`;
+- interview complete and metadata already correct;
+- fresh non-retained PM state within the conservative 75-second verifier window;
+- 0 W / 0 A idle with plausible mains voltage;
+- cumulative energy retained and advanced to about 0.033 kWh;
+- current PM bindings/reporting point only at the current coordinator and retain
+  the 60 s active-power fallback plus current/voltage/energy reporting;
+- no target-related Zigbee2MQTT errors during the postflash verifier.
+
+The strict settings comparison again found only the manual Indicator LED state
+attribute changing, this time `0xFF02: 1 -> 0`. Indicator mode remains `same`,
+so this byte is inert in the active configuration. All other sampled settings
+persisted.
+
+No second kettle/load cycle was required for the return because the destination
+is the exact same sealed CLI12 payload already exercised on this same socket.
+The return verifier instead required fresh PM telemetry and role/build evidence.
+
 ## Current gate
 
-PM Client -> Router hardware acceptance is **passed for the tested canary**,
-subject to the noted inert LED-state persistence drift and orchestration follow-up.
+The PM same-device A/B/A role matrix is **hardware-verified for this canary**:
+exact `cli12 / EndDevice` -> exact `r9 / Router` -> exact `cli12 / EndDevice`.
+Both PM native role candidates may therefore be treated as the current golden
+hardware canaries for further PM rollout evaluation.
 
-Next planned hardware step: preserve this evidence, then FORCE the same socket
-from exact `r9 / Router` back to exact `cli12 / EndDevice` and repeat the
-Client-specific acceptance gates.
+This does not erase the separate fleet gates: longer soak, broader mesh behavior,
+explicit parent-loss/rejoin stress if required by the rollout policy, and the
+separate unattended fixture-driven PM release test remain distinct from this
+role-matrix acceptance.

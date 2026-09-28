@@ -96,11 +96,13 @@ sealed `r9`/`cli12` candidates instead.
 
 The current PM canary evidence is recorded in
 [`bseed_force_hardware_acceptance_20260928.md`](bseed_force_hardware_acceptance_20260928.md).
-As of 2026-09-28, `KitchenSocketLeft` has passed the tested Client -> Router
-transition: exact `1.2.5-bseedr9`, fresh live ZDO Router descriptor, working
-relay/PM telemetry, and successful pairing/interview of a fresh IKEA RODRET
-through a permit-join window scoped only to this Router. The return Router ->
-Client transition is still pending.
+As of 2026-09-28, `KitchenSocketLeft` has completed the full PM same-device
+A/B/A sequence: exact `1.2.5-bseedcli12 / EndDevice` -> exact
+`1.2.5-bseedr9 / Router` -> exact `1.2.5-bseedcli12 / EndDevice`. Fresh live
+ZDO descriptors verified both roles; Router relay/PM telemetry worked and a fresh
+IKEA RODRET joined through a Router-scoped permit window; the returned Client
+reported `rxOnWhenIdle = 1`, fresh PM telemetry and retained cumulative energy.
+The PM role pair is therefore hardware-verified on this canary.
 
 The same run exposed one tooling gap: the outer `--mode transition` process
 recorded terminal OTA success but exited before producing its intended rejoin /
