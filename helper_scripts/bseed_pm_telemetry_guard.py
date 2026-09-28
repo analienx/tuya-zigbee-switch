@@ -109,6 +109,69 @@ def validate_release(profile, record, evidence, lock):
         raise ValueError('post-update identity does not match quarantined campaign')
 
 
+def validate_timeout_reconcile_release(profile, record, evidence, lock):
+    """Allow only fresh installed-identity proof to release PM quarantine after
+    an OTA response timeout. This never upgrades the OTA/network lock phase and
+    never claims transport success."""
+    if (record.get('ieee'), record.get('sha256'), record.get('expected_build'),
+        record.get('expected_role'), record.get('phase')) != (
+            profile['ieee'], profile['sha256'], profile['postflash_build'], profile['postflash_role'], 'enabled'):
+        raise ValueError('telemetry guard does not match this enabled campaign')
+    if (lock.get('ieee'), lock.get('sha256'), lock.get('token'), lock.get('phase')) != (
+            profile['ieee'], profile['sha256'], record.get('token'), 'update_timeout_or_unconfirmed'):
+        raise ValueError('timeout reconciliation requires this exact unresolved campaign')
+    observed = evidence.get('at') or evidence.get('observed_at')
+    if not observed or dt.datetime.fromisoformat(observed) < dt.datetime.fromisoformat(record['started']):
+        raise ValueError('identity evidence predates telemetry quarantine')
+    if evidence.get('result') not in ('metadata_refreshed', 'metadata_already_correct'):
+        raise ValueError('timeout reconciliation requires fresh metadata evidence')
+    if evidence.get('error') is not None or evidence.get('ieee') != profile['ieee']:
+        raise ValueError('metadata reconciliation targeted another device or reported an error')
+    if evidence.get('interview_ok') is not True or evidence.get('fresh_inventory_observed') is not True:
+        raise ValueError('timeout reconciliation requires one successful fresh target interview')
+    live = evidence.get('live_zdo_after') or {}
+    if live.get('role') != profile['postflash_role']:
+        raise ValueError('timeout reconciliation lacks final live role evidence')
+    identity = evidence.get('after') or {}
+    if (identity.get('ieee_address'), identity.get('software_build_id'), identity.get('type')) != (
+            profile['ieee'], profile['postflash_build'], profile['postflash_role']):
+        raise ValueError('installed identity does not match quarantined campaign')
+    return True
+
+
+def release_reconciled(profile, evidence_path):
+    """Release only PM telemetry quarantine after timeout identity reconciliation.
+
+    The campaign/network lock deliberately stays unresolved. Hardware acceptance
+    and permission for another OTA are separate later decisions.
+    """
+    if profile.get('require_pm') is not True:
+        return
+    path = guard_path(profile)
+    record = json.loads(path.read_text(encoding='utf8'))
+    evidence = json.loads(Path(evidence_path).read_text(encoding='utf8'))
+    lock = json.loads((path.parent / 'ACTIVE_LOCK.json').read_text(encoding='utf8'))
+    validate_timeout_reconcile_release(profile, record, evidence, lock)
+    bridge = bridge_for(profile)
+    try:
+        bridge.start()
+        device = target(bridge, profile)
+        if (device.get('software_build_id'), device.get('type')) != (
+                profile['postflash_build'], profile['postflash_role']):
+            raise ValueError('current identity changed since timeout reconciliation evidence')
+        set_option(bridge, profile, False)
+        record.update(
+            phase='released_after_timeout_identity_reconcile',
+            evidence=str(evidence_path),
+            transport_phase_preserved=lock.get('phase'),
+        )
+        path.write_text(json.dumps(record, indent=2), encoding='utf8')
+        path.rename(path.with_name(
+            'PM_TELEMETRY_RELEASED_RECONCILED_' + str(lock['token']) + '.json'))
+    finally:
+        bridge.stop()
+
+
 def release(profile, evidence_path):
     if profile.get('require_pm') is not True:
         return
