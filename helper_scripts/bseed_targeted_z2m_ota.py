@@ -50,7 +50,8 @@ def wait_for_check_result(event, seconds):
 def new_campaign_allowed(previous):
     # Legacy update_ok is only a transfer result; it must not permit another flash.
     return not previous or previous.get('phase') in (
-        'postflash_accepted', 'installed_image_reconciled', 'preflight_abort')
+        'postflash_accepted', 'installed_image_reconciled',
+        'source_unchanged_reconciled', 'preflight_abort')
 
 
 def archive_prior_check(work):
@@ -59,6 +60,27 @@ def archive_prior_check(work):
     archive = work / ('CHECK_ARCHIVE_' + uuid.uuid4().hex + '.json')
     prior.replace(archive)
     return archive
+
+
+def write_live_status(work, **fields):
+    """Atomically persist the latest OTA state for detached/status-only views.
+
+    This file is observational only. ACTIVE_LOCK.json and the shared network
+    lock remain the campaign authorities.
+    """
+    path = Path(work) / 'LIVE_STATUS.json'
+    current = {}
+    if path.is_file():
+        try:
+            current = json.loads(path.read_text(encoding='utf8'))
+        except (ValueError, OSError):
+            current = {}
+    current.update(fields)
+    current['observed_at'] = timestamp()
+    tmp = path.with_name(path.name + '.tmp')
+    tmp.write_text(json.dumps(current, indent=2, default=str) + '\n', encoding='utf8')
+    tmp.replace(path)
+    return current
 
 
 def ota_transport_phase(response):
@@ -317,6 +339,14 @@ def main():
             if isinstance(data, dict):
                 if not message.retain:
                     state['relay'] = data; fresh_relay.set()
+                update_state = data.get('update')
+                if isinstance(update_state, dict):
+                    write_live_status(
+                        work, device=args.device, ieee=args.ieee,
+                        token=token if state['sent'] else None,
+                        phase='ota_running' if update_state.get('state') == 'updating' else 'device_state',
+                        update=update_state,
+                    )
                 if state['sent'] and not message.retain:
                     log('device_state', {k: data.get(k) for k in ('state', 'state_relay', 'power', 'current', 'voltage', 'update')})
                 changed.set()
@@ -460,6 +490,12 @@ def main():
         if not (pub.is_published()):
             raise AssertionError('OTA publish not confirmed')
         log('ota_request_sent', {'ieee': args.ieee, 'image_sha256': args.sha256, 'transaction': token, 'default_maximum_data_size': args.max_block_bytes, 'image_block_response_delay': response_delay_ms, 'image_block_request_timeout': request_timeout_ms})
+        write_live_status(
+            work, device=args.device, ieee=args.ieee, token=token,
+            phase='ota_running', image_sha256=args.sha256,
+            request_timeout_ms=request_timeout_ms,
+            block_bytes=args.max_block_bytes,
+        )
         deadline = time.monotonic() + args.timeout_seconds
         while not answered.wait(15) and time.monotonic() < deadline:
             log('ota_pending', {'elapsed_seconds': int(args.timeout_seconds - max(0, deadline - time.monotonic()))})
@@ -471,6 +507,10 @@ def main():
             network_lock_path, token, campaign['phase'],
             completed=campaign['completed'])
         log('ota_final', {'phase': campaign['phase'], 'response': result})
+        write_live_status(
+            work, device=args.device, ieee=args.ieee, token=token,
+            phase=campaign['phase'], response=result,
+        )
         if campaign['phase'] != 'ota_transfer_ok_postflash_unverified':
             raise RuntimeError('OTA not confirmed; inspect log/lock before any retry')
         log('postflash_pending', 'OTA service returned OK; verify firmware build, interview, role, relay and meter separately')
@@ -498,6 +538,12 @@ def main():
                 update_network_lock_on_error(
                     network_lock_path, token, phase,
                     exception=repr(error))
+        write_live_status(
+            work, device=args.device, ieee=args.ieee, token=token,
+            phase=(campaign.get('phase') if isinstance(locals().get('campaign'), dict)
+                   else 'preflight_abort'),
+            error=repr(error), ota_was_sent=state['sent'],
+        )
         log('campaign_error', {'error': repr(error), 'ota_was_sent': state['sent']})
         raise
     finally:
