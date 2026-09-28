@@ -198,10 +198,11 @@ def main():
         for key, value in (('image', args.image), ('workdir', args.workdir)):
             if Path(campaign[key]).resolve() != Path(value).resolve():
                 raise ValueError('Runner path differs from canonical profile: ' + key)
+        native_arg = getattr(args, 'native_image', None)
         if campaign.get('native_image'):
-            if not args.native_image or Path(campaign['native_image']).resolve() != Path(args.native_image).resolve():
+            if not native_arg or Path(campaign['native_image']).resolve() != Path(native_arg).resolve():
                 raise ValueError('Runner path differs from canonical profile: native_image')
-        elif args.native_image:
+        elif native_arg:
             raise ValueError('Runner supplied native_image absent from canonical profile')
         for key, value in (('manufacturer_code', args.manufacturer_code), ('image_type', args.image_type),
                            ('file_version', args.file_version)):
