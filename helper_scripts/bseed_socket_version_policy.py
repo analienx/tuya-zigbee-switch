@@ -5,6 +5,7 @@ and registry lines identify the role being installed; these are not interchangea
 """
 import hashlib
 from pathlib import Path
+import struct
 
 from bseed_ota_identity import DEFAULT_REGISTRY, IdentityError, load_registry, parse_ota_header, gate_image
 
@@ -17,6 +18,7 @@ BOARDS = {
                      roles=('Router',)),
 }
 ROLES = {'Router': 'router', 'EndDevice': 'client'}
+FORCE_TEST_VERSION = 0xffffffff
 
 
 def number(value):
@@ -33,6 +35,9 @@ def split_manufacturer(manufacturer):
 
 def require_increasing(profile, registry=None):
     registry = load_registry(DEFAULT_REGISTRY) if registry is None else registry
+    if 'force_test_transition' in profile and profile['force_test_transition'] is not True and profile['force_test_transition'] is not False:
+        raise IdentityError('force_test_transition must be an explicit Boolean')
+    force_test = profile.get('force_test_transition') is True
     manufacturer = profile.get('manufacturer', '')
     board, stock_prefix = split_manufacturer(manufacturer)
     spec = BOARDS.get(board)
@@ -62,6 +67,11 @@ def require_increasing(profile, registry=None):
     if hashlib.sha256(transport).hexdigest() != profile['sha256']:
         raise IdentityError('campaign image hash mismatch')
     payload = Path(profile.get('native_image') or profile['image']).read_bytes()
+    if force_test:
+        if not profile.get('native_image') or not profile.get('native_sha256'):
+            raise IdentityError('force-test transition requires native_image and native_sha256')
+        if hashlib.sha256(payload).hexdigest() != profile['native_sha256']:
+            raise IdentityError('force-test native image hash mismatch')
     outer, native = parse_ota_header(transport), parse_ota_header(payload)
     if (outer['manufacturer_code'] != 4417 or outer['manufacturer_code'] != number(profile['manufacturer_code']) or
             outer['image_type'] != number(profile['image_type']) or
@@ -88,6 +98,8 @@ def require_increasing(profile, registry=None):
     if stock_prefix is not None:
         # Stock versions use a different numbering scheme. Stock conversion
         # is only the separately validated stock wrapper into a custom Router.
+        if force_test:
+            raise IdentityError('force-test transition is only for already-custom socket firmware')
         if source_role != 'Router' or target_role != 'Router' or outer['image_type'] != 54179 or outer['file_version'] != 0xffffffff:
             raise IdentityError('stock conversion requires stock-wrapper to Router')
         return {'board': board, 'source': 'stock', 'target_version': native['file_version']}
@@ -99,14 +111,29 @@ def require_increasing(profile, registry=None):
         raise IdentityError('pin an unambiguous preflash build/role/version from live evidence')
     if source[0].get('payload_role', source_role) != source_role:
         raise IdentityError('source role contradicts the registered payload role')
-    if native['file_version'] <= source[0]['file_version']:
-        raise IdentityError('target must be strictly newer across both roles; equal-version transitions are no-ops')
     query_type = number(profile.get('preflash_query_image_type', source_type))
     board_types = {typ for typ, line in registry.items()
                    if line.get('board_key') == board and line.get('role') in ROLES.values()
                    and not line.get('shared_identity')}
     if query_type not in board_types:
         raise IdentityError('query type belongs to a different board or unsupported transport')
+
+    if force_test:
+        if board not in ('b28wrpvx', 'o1jzcxou') or source_role == target_role:
+            raise IdentityError('force-test mode is limited to cross-role BSEED socket transitions')
+        if outer['image_type'] != query_type or outer['file_version'] != FORCE_TEST_VERSION:
+            raise IdentityError('force-test wrapper must answer the source query type at 0xFFFFFFFF')
+        expected = bytearray(payload)
+        struct.pack_into('<H', expected, 12, query_type)
+        struct.pack_into('<I', expected, 14, FORCE_TEST_VERSION)
+        if transport != bytes(expected):
+            raise IdentityError('force-test wrapper may change only outer image type and file version')
+        return {'board': board, 'source_version': source[0]['file_version'],
+                'target_version': native['file_version'], 'source_role': source_role,
+                'target_role': target_role, 'force_test_transition': True}
+
+    if native['file_version'] <= source[0]['file_version']:
+        raise IdentityError('target must be strictly newer across both roles; equal-version transitions are no-ops')
     if outer['image_type'] != query_type or outer['file_version'] != native['file_version']:
         raise IdentityError('custom update must answer the pinned query type at the native new version')
     return {'board': board, 'source_version': source[0]['file_version'],

@@ -90,6 +90,47 @@ def replace_transport(profile, *, image_type, version=None):
     profile['sha256'] = hashlib.sha256(blob).hexdigest()
 
 
+def force_fixture(tmp_path, board='b28wrpvx', source_role='Router', target_role='EndDevice'):
+    p, registry = fixture(tmp_path, board, source_role, target_role)
+    source_name = 'router' if source_role == 'Router' else 'client'
+    source_type = next(t for t, line in registry.items() if line['role'] == source_name)
+    registry[source_type]['versions'][0]['file_version'] = 101
+    replace_transport(p, image_type=source_type, version=0xffffffff)
+    p.update(force_test_transition=True,
+             native_sha256=hashlib.sha256(Path(p['native_image']).read_bytes()).hexdigest())
+    return p, registry
+
+
+def test_force_test_allows_equal_version_cross_role_only_with_sealed_native_payload(tmp_path):
+    p, registry = force_fixture(tmp_path)
+    verdict = require_increasing(p, registry)
+    assert verdict['force_test_transition'] is True
+    assert verdict['source_version'] == verdict['target_version'] == 101
+
+
+@pytest.mark.parametrize('mutation', ['missing_native_hash', 'bad_native_hash', 'wrong_force_version',
+                                      'wrong_query_type', 'unsealed', 'non_boolean'])
+def test_force_test_rejects_unpinned_or_malformed_transport(tmp_path, mutation):
+    p, registry = force_fixture(tmp_path)
+    if mutation == 'missing_native_hash': p.pop('native_sha256')
+    if mutation == 'bad_native_hash': p['native_sha256'] = '0' * 64
+    if mutation == 'wrong_force_version': replace_transport(p, image_type=p['image_type'], version=102)
+    if mutation == 'wrong_query_type': p['preflash_query_image_type'] = 65026
+    if mutation == 'unsealed': registry[65024]['versions'][0]['sha512'] = None
+    if mutation == 'non_boolean': p['force_test_transition'] = 'true'
+    with pytest.raises(IdentityError):
+        require_increasing(p, registry)
+
+
+def test_force_test_rejects_same_role_even_with_max_transport_version(tmp_path):
+    p, registry = fixture(tmp_path, source_role='Router', target_role='Router')
+    replace_transport(p, image_type=43556, version=0xffffffff)
+    p.update(force_test_transition=True,
+             native_sha256=hashlib.sha256(Path(p['native_image']).read_bytes()).hexdigest())
+    with pytest.raises(IdentityError, match='cross-role'):
+        require_increasing(p, registry)
+
+
 @pytest.mark.parametrize('board', ['b28wrpvx', 'o1jzcxou'])
 def test_stock_wrapper_can_only_convert_into_native_router(tmp_path, board):
     p, registry = fixture(tmp_path, board, 'Router', 'Router')

@@ -65,8 +65,14 @@ def load_profile(path):
         raise ValueError('Expected full 0x-prefixed IEEE address')
     if data['postflash_role'] not in ('EndDevice', 'Router'):
         raise ValueError('Unexpected postflash role')
+    if 'force_test_transition' in data and data['force_test_transition'] is not True and data['force_test_transition'] is not False:
+        raise ValueError('force_test_transition must be an explicit Boolean')
+    if data.get('force_test_transition') is True and (not data.get('native_image') or not data.get('native_sha256')):
+        raise ValueError('force-test transition requires native_image and native_sha256')
     for key in ('image', 'mqtt_config', 'workdir', 'index_output', 'template_index'):
         data[key] = str(Path(data[key]).expanduser().resolve())
+    if data.get('native_image'):
+        data['native_image'] = str(Path(data['native_image']).expanduser().resolve())
     if data.get('network_lock_dir'):
         data['network_lock_dir'] = str(
             Path(data['network_lock_dir']).expanduser().resolve())
@@ -101,7 +107,9 @@ def make_index(profile):
     from bseed_socket_version_policy import require_increasing
     require_increasing(profile)
     entry = dict(matches[0])
-    if entry.get('fileVersion') != image_args.file_version:
+    if profile.get('force_test_transition') is True:
+        entry['fileVersion'] = image_args.file_version
+    elif entry.get('fileVersion') != image_args.file_version:
         raise ValueError('Template entry version differs from signed-off OTA header')
     entry.update(fileName=Path(profile['image']).name, fileSize=len(image),
                  url=profile['url'], sha512=hashlib.sha512(image).hexdigest())
@@ -329,8 +337,13 @@ def main():
     if args.confirm_load_unplugged and not (args.mode in ('flash', 'transition') and profile.get('non_pm') is True):
         raise SystemExit('--confirm-load-unplugged is accepted only for explicitly targeted non-PM flash')
     if profile.get('require_pm') and profile['postflash_role'] == 'Router' and args.mode in ('flash','transition','rejoin'):
-        if args.mode != 'flash': raise SystemExit('Router PM role transition and auto-provisioning not validated')
-        verified_router_pm_candidate(profile)  # no Router provisioning: flash only, then audit separately
+        if profile.get('force_test_transition') is True:
+            if args.mode == 'flash':
+                raise SystemExit('Force-test PM Router role change requires --mode transition')
+        else:
+            if args.mode != 'flash':
+                raise SystemExit('Router PM role transition requires an explicit force-test profile')
+            verified_router_pm_candidate(profile)  # same-role Router flash, then audit separately
     work = Path(profile['workdir'])
     if args.mode == 'qualify':
         if args.confirm_ieee or profile.get('non_pm') is not True or profile.get('require_pm') is not False or profile['preflash_role'] not in ('EndDevice', 'Router'):
@@ -418,7 +431,11 @@ def main():
             return
         # Resolve the scoped recovery route *before* submitting a firmware image.
         planned_join = rejoin_cmd(profile, args.confirm_ieee, work / ('rejoin_' + uuid.uuid4().hex + '.json'))
-        if profile.get('require_pm'): provision_cmd(profile, args.confirm_ieee, work / 'pm_prevalidated.json')
+        if profile.get('require_pm'):
+            if profile['postflash_role'] == 'EndDevice':
+                provision_cmd(profile, args.confirm_ieee, work / 'pm_prevalidated.json')
+            else:
+                role_audit_cmd(profile, work / 'pm_router_audit_prevalidated.json')
         if args.mode == 'transition':
             if profile.get('non_pm') is True:
                 from bseed_nonpm_recovery_gate import verify_transition_recovery
@@ -437,15 +454,21 @@ def main():
         if profile.get('require_pm'):
             from bseed_pm_telemetry_guard import release
             release(profile, metadata_evidence)
-            pm_evidence = work / ('pm_provision_' + uuid.uuid4().hex + '.json')
-            provisioned = subprocess.call(provision_cmd(profile, args.confirm_ieee, pm_evidence))
-            if provisioned: raise SystemExit(provisioned)
+            if profile['postflash_role'] == 'EndDevice':
+                pm_evidence = work / ('pm_provision_' + uuid.uuid4().hex + '.json')
+                provisioned = subprocess.call(provision_cmd(profile, args.confirm_ieee, pm_evidence))
+                if provisioned: raise SystemExit(provisioned)
         if args.mode == 'transition':
             post_evidence = work / ('postflash_' + uuid.uuid4().hex + '.json')
             post_status = subprocess.call(postflash_cmd(profile, post_evidence))
-            if post_status == 0:
+            audit_status = 0
+            if profile.get('require_pm') and profile['postflash_role'] == 'Router':
+                audit_evidence = work / ('pm_role_audit_' + uuid.uuid4().hex + '.json')
+                audit_status = subprocess.call(role_audit_cmd(profile, audit_evidence))
+            status = 0 if post_status == 0 and audit_status == 0 else 2
+            if status == 0:
                 record_postflash_candidate(profile)
-            raise SystemExit(post_status)
+            raise SystemExit(status)
         return
     if args.mode == 'flash':
         if args.confirm_ieee != profile['ieee']:

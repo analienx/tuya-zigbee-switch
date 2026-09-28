@@ -97,11 +97,17 @@ def verify_image(args):
         raise AssertionError('Invalid OTA header')
     if not ((header[4], header[5], header[6]) == (args.manufacturer_code, args.image_type, args.file_version)):
         raise AssertionError('Wrong OTA identity')
-    if getattr(args, 'non_pm', False): validate_nonpm_native_ota_image(image, args.file_version)
+    native = image
+    native_header = header
     if args.native_image:
         native = Path(args.native_image).read_bytes()
+        native_header = struct.unpack_from('<I5HIH32sI', native)
+        if not (len(native) > 64 and native_header[0] == 200208670 and native_header[2] == 56 and native_header[9] == len(native)):
+            raise AssertionError('Invalid native OTA image')
         if not (image[56:] == native[56:]):
-            raise AssertionError('Stock wrapper payload differs from native firmware')
+            raise AssertionError('Transport wrapper payload differs from native firmware')
+    if getattr(args, 'non_pm', False):
+        validate_nonpm_native_ota_image(native, native_header[6])
     with urllib.request.urlopen(args.url, timeout=12) as reply:
         if not (reply.status == 200 and digest(reply.read()) == args.sha256):
             raise AssertionError('HTTP image mismatch')
@@ -192,6 +198,11 @@ def main():
         for key, value in (('image', args.image), ('workdir', args.workdir)):
             if Path(campaign[key]).resolve() != Path(value).resolve():
                 raise ValueError('Runner path differs from canonical profile: ' + key)
+        if campaign.get('native_image'):
+            if not args.native_image or Path(campaign['native_image']).resolve() != Path(args.native_image).resolve():
+                raise ValueError('Runner path differs from canonical profile: native_image')
+        elif args.native_image:
+            raise ValueError('Runner supplied native_image absent from canonical profile')
         for key, value in (('manufacturer_code', args.manufacturer_code), ('image_type', args.image_type),
                            ('file_version', args.file_version)):
             if number(campaign[key]) != value:

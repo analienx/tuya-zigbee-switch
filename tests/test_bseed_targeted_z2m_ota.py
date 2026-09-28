@@ -10,6 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'helper_scripts'))
 from bseed_targeted_z2m_ota import verify_image
+from tests.bseed_image_fixture import image_for
 
 
 def fixture(tmp_path):
@@ -36,6 +37,32 @@ def test_verified_wrapper_and_http(tmp_path):
     with patch('bseed_targeted_z2m_ota.urllib.request.urlopen', return_value=FakeResponse()):
         actual, header = verify_image(a)
     assert actual == binary and header[5] == 54179
+
+
+def test_nonpm_force_wrapper_validates_embedded_native_version_not_ffffffff(tmp_path):
+    candidate = dict(build='1.1.3-bseedc7', version=0x11023014, type=65026)
+    native = image_for(candidate)
+    wrapper = bytearray(native)
+    struct.pack_into('<H', wrapper, 12, 43555)
+    struct.pack_into('<I', wrapper, 14, 0xffffffff)
+    wrapper = bytes(wrapper)
+    image = tmp_path / 'forced.ota'; image.write_bytes(wrapper)
+    native_path = tmp_path / 'native.ota'; native_path.write_bytes(native)
+    args = SimpleNamespace(
+        image=str(image), native_image=str(native_path), non_pm=True,
+        sha256=hashlib.sha256(wrapper).hexdigest(), manufacturer_code=4417,
+        image_type=43555, file_version=0xffffffff,
+        url='http://example.invalid/forced.ota')
+
+    class FakeResponse:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read(self): return wrapper
+
+    with patch('bseed_targeted_z2m_ota.urllib.request.urlopen', return_value=FakeResponse()):
+        actual, header = verify_image(args)
+    assert actual == wrapper and header[6] == 0xffffffff
 
 
 def test_response_with_matching_transaction_and_no_id_is_ours():

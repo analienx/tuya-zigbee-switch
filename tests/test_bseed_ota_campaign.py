@@ -55,6 +55,29 @@ def test_profile_rejects_missing_private_fields(tmp_path):
     with pytest.raises(ValueError,match='Missing profile fields'): campaign.load_profile(source)
 
 
+def test_force_profile_requires_boolean_flag_native_image_and_hash(tmp_path):
+    cfg = profile(tmp_path)
+    cfg['force_test_transition'] = 'true'
+    source = tmp_path / 'bad-force.json'; source.write_text(json.dumps(cfg))
+    with pytest.raises(ValueError, match='explicit Boolean'):
+        campaign.load_profile(source)
+
+    cfg = profile(tmp_path)
+    cfg['force_test_transition'] = True
+    source = tmp_path / 'missing-native-force.json'; source.write_text(json.dumps(cfg))
+    with pytest.raises(ValueError, match='native_image and native_sha256'):
+        campaign.load_profile(source)
+
+    cfg = profile(tmp_path)
+    native = tmp_path / 'native.ota'; native.write_bytes(b'native fixture')
+    cfg.update(force_test_transition=True, native_image=str(native),
+               native_sha256=hashlib.sha256(native.read_bytes()).hexdigest())
+    source = tmp_path / 'force.json'; source.write_text(json.dumps(cfg))
+    loaded = campaign.load_profile(source)
+    assert loaded['force_test_transition'] is True
+    assert loaded['native_image'] == str(native.resolve())
+
+
 def test_image_index_requires_exact_tuple_and_hash(tmp_path):
     cfg=profile(tmp_path);cfg['sha256']='0'*64
     with pytest.raises(ValueError,match='SHA256'): campaign.make_index(cfg)
@@ -79,6 +102,28 @@ def test_private_index_stages_exact_single_image(tmp_path, monkeypatch):
         with pytest.raises(ValueError,match='Refusing to overwrite'): campaign.make_index(cfg)
 
 
+def test_force_private_index_uses_transport_version_without_weakening_normal_template_gate(tmp_path, monkeypatch):
+    monkeypatch.setattr('bseed_socket_version_policy.require_increasing', lambda *args: {})
+    cfg = profile(tmp_path)
+    native = tmp_path / 'native.ota'; native.write_bytes(Path(cfg['image']).read_bytes())
+    cfg.update(force_test_transition=True, native_image=str(native),
+               native_sha256=hashlib.sha256(native.read_bytes()).hexdigest())
+    template = json.loads(Path(cfg['template_index']).read_text())
+    template[0]['fileVersion'] = 123
+    Path(cfg['template_index']).write_text(json.dumps(template))
+    with patch('bseed_targeted_z2m_ota.verify_image', return_value=(b'', [0,0,0,0,4417,54179])):
+        campaign.make_index(cfg)
+    assert json.loads(Path(cfg['index_output']).read_text())[0]['fileVersion'] == 0xffffffff
+
+    normal = profile(tmp_path)
+    template = json.loads(Path(normal['template_index']).read_text())
+    template[0]['fileVersion'] = 123
+    Path(normal['template_index']).write_text(json.dumps(template))
+    with patch('bseed_targeted_z2m_ota.verify_image', return_value=(b'', [0,0,0,0,4417,54179])):
+        with pytest.raises(ValueError, match='Template entry version'):
+            campaign.make_index(normal)
+
+
 def test_runner_args_pass_optional_paced_response_delay(tmp_path):
     cfg=profile(tmp_path)
     cmd=campaign.runner_args(cfg,'flash')
@@ -90,6 +135,27 @@ def test_runner_args_pass_optional_paced_response_delay(tmp_path):
     cfg['request_timeout_ms']=1800000
     cmd=campaign.runner_args(cfg,'flash')
     assert cmd[cmd.index('--request-timeout-ms')+1]=='1800000'
+
+
+def test_direct_runner_cannot_substitute_native_image_from_canonical_profile(tmp_path, monkeypatch):
+    import bseed_targeted_z2m_ota as runner
+    cfg = profile(tmp_path)
+    native = tmp_path / 'native.ota'; native.write_bytes(b'canonical native')
+    other = tmp_path / 'other.ota'; other.write_bytes(b'other native')
+    cfg['native_image'] = str(native)
+    source = tmp_path / 'native-pinned-profile.json'; source.write_text(json.dumps(cfg))
+    argv = ['runner', '--mode', 'check', '--device', cfg['device'], '--ieee', cfg['ieee'],
+            '--manufacturer', cfg['manufacturer'], '--model', cfg['model'], '--role', cfg['preflash_role'],
+            '--image', cfg['image'], '--native-image', str(other), '--sha256', cfg['sha256'],
+            '--url', cfg['url'], '--mqtt-config', cfg['mqtt_config'], '--broker', cfg['broker'],
+            '--workdir', cfg['workdir'], '--manufacturer-code', str(cfg['manufacturer_code']),
+            '--image-type', str(cfg['image_type']), '--file-version', str(cfg['file_version']),
+            '--expect-relay', cfg['expect_relay'], '--index-url', cfg['index_url'],
+            '--campaign-profile', str(source)]
+    monkeypatch.setattr(sys, 'argv', argv)
+    monkeypatch.setattr('bseed_socket_version_policy.require_increasing', lambda *args: {})
+    with pytest.raises(ValueError, match='native_image'):
+        runner.main()
 
 
 def test_runner_args_explicitly_preserve_device_and_block_limit(tmp_path):
@@ -468,6 +534,43 @@ def test_runner_check_rejects_invalid_pm_campaign_profile_before_network(tmp_pat
     monkeypatch.setattr(sys, 'argv', argv)
     with pytest.raises(ValueError, match='require_pm=true'):
         runner.main()
+
+
+def test_force_pm_client_to_router_transition_uses_audit_not_client_provisioner(tmp_path, monkeypatch):
+    cfg = _pm_profile(tmp_path)
+    native = tmp_path / 'pm-router-native.ota'; native.write_bytes(b'private native fixture')
+    cfg.update(require_pm=True, preflash_role='EndDevice', postflash_role='Router',
+               postflash_build='1.2.5-bseedr9', force_test_transition=True,
+               native_image=str(native), native_sha256=hashlib.sha256(native.read_bytes()).hexdigest(),
+               join_via='KnownRouter', pm_ssh_host='127.0.0.1',
+               pm_ssh_key=str(tmp_path / 'private.key'))
+    source = _write_profile(tmp_path, cfg, 'pm-force-router.json')
+    monkeypatch.setattr(sys, 'argv', ['campaign', '--profile', str(source), '--mode', 'transition',
+                                      '--confirm-ieee', cfg['ieee']])
+    with patch('bseed_ota_campaign.record_postflash_candidate', return_value=True), \
+         patch('bseed_ota_campaign.subprocess.call', return_value=0) as run:
+        with pytest.raises(SystemExit) as done:
+            campaign.main()
+    assert done.value.code == 0
+    names = [Path(call.args[0][2]).name for call in run.call_args_list]
+    assert names == ['bseed_targeted_z2m_ota.py', 'bseed_z2m_rejoin_window.py',
+                     'bseed_z2m_metadata_refresh.py', 'bseed_z2m_postflash_verify.py',
+                     'bseed_pm_role_audit.py']
+    assert 'bseed_pm_provision.py' not in names
+
+
+def test_nonforce_pm_client_to_router_transition_remains_blocked(tmp_path, monkeypatch):
+    cfg = _pm_profile(tmp_path)
+    cfg.update(require_pm=True, preflash_role='EndDevice', postflash_role='Router',
+               postflash_build='1.2.5-bseedr9', join_via='KnownRouter',
+               pm_ssh_host='127.0.0.1', pm_ssh_key=str(tmp_path / 'private.key'))
+    source = _write_profile(tmp_path, cfg, 'pm-normal-router-transition.json')
+    monkeypatch.setattr(sys, 'argv', ['campaign', '--profile', str(source), '--mode', 'transition',
+                                      '--confirm-ieee', cfg['ieee']])
+    with patch('bseed_ota_campaign.subprocess.call') as run:
+        with pytest.raises(SystemExit, match='force-test'):
+            campaign.main()
+    run.assert_not_called()
 
 
 def _pm_transition_profile(tmp_path):
