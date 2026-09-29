@@ -31,7 +31,7 @@ import bseed_ota_campaign as campaign
 SUPERVISOR_FILE = "OTA_SUPERVISOR.json"
 RECONCILABLE_PHASES = {"ota_running", "update_error", "update_timeout_or_unconfirmed"}
 READY_PHASE = "source_unchanged_reconciled"
-JOIN_STRATEGIES = ("none", "scoped", "all", "auto")
+JOIN_STRATEGIES = ("none", "scoped", "coordinator", "all", "auto")
 
 
 def now() -> str:
@@ -283,7 +283,7 @@ def resume_transition(profile_path: Path, confirm_ieee: str, *,
     profile = campaign.load_profile(profile_path)
     resolved_join_strategy = join_strategy or profile.get("source_rejoin_strategy", "auto")
     if resolved_join_strategy not in JOIN_STRATEGIES:
-        raise ValueError("join strategy must be one of none/scoped/all/auto")
+        raise ValueError("join strategy must be one of none/scoped/coordinator/all/auto")
     resolved_global_fallback = (
         bool(profile.get("allow_join_all_fallback", False))
         if allow_join_all_fallback is None else bool(allow_join_all_fallback)

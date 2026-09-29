@@ -261,18 +261,20 @@ def test_join_strategy_plan_is_generic_and_fail_closed():
         "scoped", router_available=True, allow_join_all_fallback=False
     ) == ["scoped"]
     assert rejoin.resolve_join_plan(
+        "coordinator", router_available=False, allow_join_all_fallback=False
+    ) == ["coordinator"]
+    assert rejoin.resolve_join_plan(
         "auto", router_available=True, allow_join_all_fallback=False
-    ) == ["scoped"]
+    ) == ["scoped", "coordinator"]
     assert rejoin.resolve_join_plan(
         "auto", router_available=True, allow_join_all_fallback=True
-    ) == ["scoped", "all"]
+    ) == ["scoped", "coordinator", "all"]
+    assert rejoin.resolve_join_plan(
+        "auto", router_available=False, allow_join_all_fallback=False
+    ) == ["coordinator"]
     assert rejoin.resolve_join_plan(
         "auto", router_available=False, allow_join_all_fallback=True
-    ) == ["all"]
-    with pytest.raises(ValueError, match="no verified join_via"):
-        rejoin.resolve_join_plan(
-            "auto", router_available=False, allow_join_all_fallback=False
-        )
+    ) == ["coordinator", "all"]
     with pytest.raises(ValueError, match="no verified join_via"):
         rejoin.resolve_join_plan(
             "scoped", router_available=False, allow_join_all_fallback=True
@@ -296,6 +298,20 @@ def test_join_all_payload_omits_router_and_scoped_payload_names_it():
         "transaction": "tx-scoped",
         "device": "AnyVerifiedRouter",
     }
+
+    coordinator_payload = rejoin.permit_payload(
+        "coordinator", seconds=120, transaction="tx-coordinator", router_name=None
+    )
+    assert coordinator_payload == {
+        "time": 120,
+        "transaction": "tx-coordinator",
+        "device": "coordinator",
+    }
+
+    assert rejoin.adapter_transport_error({
+        "status": "error",
+        "error": "SRSP - ZDO - mgmtPermitJoinReq after 6000ms",
+    }) is True
 
 
 def test_supervisor_source_rejoin_command_carries_policy(tmp_path):

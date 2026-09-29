@@ -28,9 +28,10 @@ The supervisor performs this sequence:
    longer alive, attempt canonical `reconcile-source`.
 4. If and only if that latest reconciliation failure is exactly `Fresh target
    GET response missing`, run `bseed_source_rejoin_recovery.py` with the resolved
-   recovery policy: `none`, `scoped`, `all`, or `auto`. `scoped` uses the
-   profile's verified `join_via` router; `all` opens a bounded network-wide
-   permit-join window; `auto` prefers scoped and may fall back to Join All when
+   recovery policy: `none`, `scoped`, `coordinator`, `all`, or `auto`.
+   `scoped` uses the profile's verified `join_via` router; `coordinator` opens
+   only the coordinator; `all` opens a bounded network-wide permit-join window;
+   `auto` prefers scoped, then coordinator, and may fall back to Join All when
    `allow_join_all_fallback` is explicitly enabled. Every opened window is
    closed in `finally`. Recovery succeeds only when a fresh read from the exact
    target IEEE is observed; unrelated joins never count. Identity/hash/lock/
@@ -54,8 +55,10 @@ known-good transfer envelope: 32-byte blocks, >=1200 ms response delay,
 
 ## Rejoin policy
 
-Profiles may declare `source_rejoin_strategy` as `none`, `scoped`, `all`, or
-`auto`. `auto` is the default. `allow_join_all_fallback` defaults to false.
+Profiles may declare `source_rejoin_strategy` as `none`, `scoped`,
+`coordinator`, `all`, or `auto`. `auto` is the default and tries the narrowest
+available route first: verified scoped router, then coordinator. `allow_join_all_fallback`
+defaults to false and controls only the broadest network-wide fallback.
 CLI flags override the profile for one run. `all` is intentionally supported as
 a reusable recovery mechanism; its broader join window does not weaken target
 acceptance because success still requires a fresh response carrying the exact
@@ -64,6 +67,7 @@ campaign IEEE, followed by canonical source reconciliation.
 Recommended defaults:
 
 - stable local router known: `auto`, fallback false;
+- no trusted router but coordinator path is sufficient: `coordinator`;
 - topology uncertain but bounded Join All is acceptable: `auto`, fallback true;
 - explicitly force network-wide join for recovery: `all`;
 - recovery must never open permit-join: `none`.

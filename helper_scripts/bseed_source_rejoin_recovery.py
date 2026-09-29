@@ -35,7 +35,7 @@ ELIGIBLE_PHASES = {
     "update_timeout_or_unconfirmed",
     "source_unchanged_reconciled",
 }
-JOIN_STRATEGIES = ("none", "scoped", "all", "auto")
+JOIN_STRATEGIES = ("none", "scoped", "coordinator", "all", "auto")
 
 
 def now() -> str:
@@ -90,20 +90,24 @@ def resolve_join_plan(
         if not router_available:
             raise ValueError("Scoped join requested but no verified join_via router is available")
         return ["scoped"]
+    if strategy == "coordinator":
+        return ["coordinator"]
     if strategy == "all":
         return ["all"]
 
-    # auto: use the narrowest working mechanism first.
-    if router_available:
-        plan = ["scoped"]
-        if allow_join_all_fallback:
-            plan.append("all")
-        return plan
+    # auto: use the narrowest mechanism first. Coordinator-only is always
+    # available while the bridge itself is online; Join All is the broadest
+    # fallback and therefore remains explicit.
+    plan = ["scoped"] if router_available else []
+    plan.append("coordinator")
     if allow_join_all_fallback:
-        return ["all"]
-    raise ValueError(
-        "Auto join recovery has no verified join_via router and Join All fallback is not allowed"
-    )
+        plan.append("all")
+    return plan
+
+
+def adapter_transport_error(response: dict | None) -> bool:
+    error = str((response or {}).get("error", ""))
+    return "SRSP" in error and "after 6000ms" in error
 
 
 def permit_payload(mode: str, *, seconds: int, transaction: str, router_name: str | None) -> dict:
@@ -112,6 +116,8 @@ def permit_payload(mode: str, *, seconds: int, transaction: str, router_name: st
         if not router_name:
             raise ValueError("Scoped permit-join requires router_name")
         payload["device"] = router_name
+    elif mode == "coordinator":
+        payload["device"] = "coordinator"
     elif mode != "all":
         raise ValueError(f"Unsupported permit-join mode {mode!r}")
     return payload
@@ -256,6 +262,7 @@ def main(argv=None) -> None:
         if not plan:
             raise RuntimeError("Source-link recovery disabled by join strategy 'none'")
 
+        fatal_error = None
         for mode in plan:
             fresh.clear()
             state["target"] = None
@@ -264,6 +271,7 @@ def main(argv=None) -> None:
             open_response = None
             close_response = None
             probes = 0
+            open_attempted = False
             opened = False
             attempt = {
                 "mode": mode,
@@ -278,6 +286,7 @@ def main(argv=None) -> None:
                     transaction=open_tx,
                     router_name=router_name,
                 )
+                open_attempted = True
                 client.publish(
                     base + "/bridge/request/permit_join",
                     json.dumps(payload),
@@ -290,6 +299,10 @@ def main(argv=None) -> None:
                 open_response = state["permit_responses"].get(open_tx)
                 attempt["open_response"] = open_response
                 if not open_response or open_response.get("status") != "ok":
+                    if adapter_transport_error(open_response):
+                        raise RuntimeError(
+                            f"ADAPTER_TRANSPORT:{mode} permit-join failed: {open_response!r}"
+                        )
                     raise RuntimeError(
                         f"{mode} permit-join not confirmed: {open_response!r}"
                     )
@@ -326,8 +339,12 @@ def main(argv=None) -> None:
                         probes,
                         flush=True,
                     )
+            except RuntimeError as error:
+                attempt["error"] = str(error)
+                if str(error).startswith("ADAPTER_TRANSPORT:"):
+                    fatal_error = str(error)
             finally:
-                if opened:
+                if open_attempted:
                     try:
                         client.publish(
                             base + "/bridge/request/permit_join",
@@ -343,6 +360,10 @@ def main(argv=None) -> None:
                             wake.clear()
                         close_response = state["permit_responses"].get(close_tx)
                         attempt["close_response"] = close_response
+                        if not close_response or close_response.get("status") != "ok":
+                            fatal_error = fatal_error or (
+                                f"JOIN_CLOSE_UNCONFIRMED:{mode}:{close_response!r}"
+                            )
                         print(
                             "SOURCE_JOIN_WINDOW_CLOSE",
                             mode,
@@ -351,10 +372,13 @@ def main(argv=None) -> None:
                         )
                     except Exception as error:
                         attempt["close_error"] = repr(error)
+                        fatal_error = fatal_error or f"JOIN_CLOSE_EXCEPTION:{mode}:{error!r}"
                         print("CRITICAL_JOIN_CLOSE_FAILED", mode, repr(error), flush=True)
                 attempt["finished_at"] = now()
                 attempts.append(attempt)
 
+            if fatal_error:
+                break
             if result == "fresh_link_restored":
                 if not close_response or close_response.get("status") != "ok":
                     result = "unconfirmed"
@@ -373,6 +397,7 @@ def main(argv=None) -> None:
         "strategy_used": chosen_mode,
         "join_via": profile.get("join_via"),
         "attempts": attempts,
+        "fatal_error": fatal_error,
         "fresh_target": state["target"],
         "target_events": state["events"],
         "note": (
@@ -385,6 +410,8 @@ def main(argv=None) -> None:
         json.dump(evidence, handle, indent=2, default=str)
         handle.write("\n")
     print("SOURCE_REJOIN_EVIDENCE", output, flush=True)
+    if fatal_error:
+        raise SystemExit(3)
     if evidence["result"] != "fresh_link_restored":
         raise SystemExit(2)
 
