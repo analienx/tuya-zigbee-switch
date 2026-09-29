@@ -25,6 +25,11 @@ import paho.mqtt.client as mqtt
 import yaml
 
 DEFAULT_CHECK_TIMEOUT_SECONDS = 90  # Z2M may take 60 seconds to report a device OTA-query failure.
+_LIVE_STATUS_LOCK = threading.Lock()
+_TERMINAL_LIVE_PHASES = frozenset((
+    'ota_transfer_ok_postflash_unverified', 'update_error',
+    'update_timeout_or_unconfirmed', 'preflight_abort',
+))
 
 
 def timestamp():
@@ -69,18 +74,30 @@ def write_live_status(work, **fields):
     lock remain the campaign authorities.
     """
     path = Path(work) / 'LIVE_STATUS.json'
-    current = {}
-    if path.is_file():
-        try:
-            current = json.loads(path.read_text(encoding='utf8'))
-        except (ValueError, OSError):
+    # MQTT callbacks and terminal writes run on separate threads. Serialize the
+    # entire read/modify/replace so observations cannot lose a terminal result.
+    with _LIVE_STATUS_LOCK:
+        current = {}
+        if path.is_file():
+            try:
+                current = json.loads(path.read_text(encoding='utf8'))
+            except (ValueError, OSError):
+                current = {}
+        if not isinstance(current, dict):
             current = {}
-    current.update(fields)
-    current['observed_at'] = timestamp()
-    tmp = path.with_name(path.name + '.tmp')
-    tmp.write_text(json.dumps(current, indent=2, default=str) + '\n', encoding='utf8')
-    tmp.replace(path)
-    return current
+        if 'token' in fields and fields['token'] != current.get('token'):
+            current = {}  # Never attach an earlier transaction's error/result.
+        if (current.get('phase') in _TERMINAL_LIVE_PHASES and
+                fields.get('phase') in ('ota_running', 'device_state')):
+            fields['phase'] = current['phase']
+        current.update(fields)
+        current['observed_at'] = timestamp()
+        # Unique temporary files also avoid collisions with another observer
+        # process; the campaign/network locks still determine OTA ownership.
+        tmp = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
+        tmp.write_text(json.dumps(current, indent=2, default=str) + '\n', encoding='utf8')
+        tmp.replace(path)
+        return current
 
 
 def ota_transport_phase(response):

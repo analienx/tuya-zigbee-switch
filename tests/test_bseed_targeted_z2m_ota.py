@@ -1,5 +1,7 @@
 """Offline regression tests; never connects to MQTT or flashes a device."""
 import hashlib
+import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import struct
 import sys
@@ -9,8 +11,48 @@ from unittest.mock import patch
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'helper_scripts'))
-from bseed_targeted_z2m_ota import verify_image
+from bseed_targeted_z2m_ota import verify_image, write_live_status
 from tests.bseed_image_fixture import image_for
+
+
+def test_live_status_new_transaction_drops_previous_failure(tmp_path):
+    write_live_status(tmp_path, token='old', phase='update_error',
+                      response={'transaction': 'old', 'status': 'error'},
+                      error='old timeout', update={'progress': 50}, ota_was_sent=True)
+    current = write_live_status(tmp_path, token='new', phase='ota_running',
+                                image_sha256='new-image', block_bytes=32)
+    assert current['token'] == 'new'
+    assert current['phase'] == 'ota_running'
+    assert not {'response', 'error', 'update', 'ota_was_sent'} & current.keys()
+    assert json.loads((tmp_path / 'LIVE_STATUS.json').read_text()) == current
+
+
+@pytest.mark.parametrize('phase', [
+    'ota_transfer_ok_postflash_unverified', 'update_error',
+    'update_timeout_or_unconfirmed', 'preflight_abort',
+])
+def test_live_status_late_observation_preserves_terminal_result(tmp_path, phase):
+    response = {'transaction': 'same', 'status': 'ok' if phase.startswith('ota_transfer') else 'error'}
+    write_live_status(tmp_path, token='same', phase=phase, response=response,
+                      image_sha256='image', block_bytes=32)
+    current = write_live_status(tmp_path, token='same', phase='ota_running',
+                                update={'progress': 100})
+    assert current['phase'] == phase
+    assert current['response'] == response
+    assert current['image_sha256'] == 'image' and current['block_bytes'] == 32
+    assert current['update']['progress'] == 100
+
+
+def test_live_status_concurrent_callback_writes_preserve_each_update(tmp_path):
+    def write_sample(sequence):
+        return write_live_status(tmp_path, token='same', phase='ota_running',
+                                 **{f'sample_{sequence}': sequence})
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(write_sample, range(16)))
+    current = json.loads((tmp_path / 'LIVE_STATUS.json').read_text())
+    assert all(current[f'sample_{sequence}'] == sequence for sequence in range(16))
+    assert not list(tmp_path.glob('LIVE_STATUS.json.*.tmp'))
 
 
 def fixture(tmp_path):
