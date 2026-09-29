@@ -53,8 +53,8 @@
  * unified firmware. Four endpoint accumulation slots leave room for generic
  * multi-endpoint devices while the BSEED PM socket uses endpoint 1. */
 #define NV_ITEM_ENERGY_ACCUMULATION(endpoint)              (64 + (endpoint) - 1)
-#define NV_ITEM_ENERGY_CALIBRATION    68
-#define NV_ITEM_OVERLOAD_CONFIG       69
+#define NV_ITEM_ENERGY_CALIBRATION       68
+#define NV_ITEM_OVERLOAD_CONFIG          69
 
 /* PM legacy-migration attempt counter. IDs 52..63 are free (51 is a legacy
  * fork record, 40..50 belong to dimmer state). The counter bounds migration
