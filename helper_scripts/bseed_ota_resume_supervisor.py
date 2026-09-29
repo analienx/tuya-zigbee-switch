@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,7 +29,7 @@ if str(HELPERS) not in sys.path:
 import bseed_ota_campaign as campaign
 
 SUPERVISOR_FILE = "OTA_SUPERVISOR.json"
-RECONCILABLE_PHASES = {"update_error", "update_timeout_or_unconfirmed"}
+RECONCILABLE_PHASES = {"ota_running", "update_error", "update_timeout_or_unconfirmed"}
 READY_PHASE = "source_unchanged_reconciled"
 
 
@@ -185,8 +186,45 @@ def status(profile_path: Path) -> dict[str, Any]:
     }
 
 
+def reconcile_until_ready(profile_path: Path, confirm_ieee: str, work: Path,
+                          orchestration_log: Path, *, wait_seconds: int,
+                          retry_seconds: int) -> str | None:
+    """Use canonical reconciliation until an orphaned/failed source is proven ready.
+
+    Every attempt is read-only with respect to firmware. The canonical helper
+    itself refuses while OTA is still active, while the target is unreachable,
+    or when exact source identity/candidate availability cannot be proven.
+    """
+    deadline = time.monotonic() + max(0, wait_seconds)
+    attempts = 0
+    while True:
+        lock = read_json(work / "ACTIVE_LOCK.json")
+        phase = lock.get("phase") if lock else None
+        if phase in (None, READY_PHASE):
+            return phase
+        if phase not in ("ota_running", *RECONCILABLE_PHASES):
+            raise RuntimeError(f"Campaign phase {phase!r} is not reconcilable")
+        attempts += 1
+        rc = run_logged(
+            campaign_cmd(profile_path, "reconcile-source", confirm_ieee=confirm_ieee),
+            orchestration_log,
+        )
+        lock = read_json(work / "ACTIVE_LOCK.json")
+        phase = lock.get("phase") if lock else None
+        if rc == 0 and phase == READY_PHASE:
+            return phase
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                f"Source reconciliation did not become safe after {attempts} attempt(s); "
+                f"last phase={phase!r}, exit={rc}"
+            )
+        time.sleep(max(1, retry_seconds))
+
+
 def resume_transition(profile_path: Path, confirm_ieee: str, *,
-                      confirm_unloaded: bool, accept_risk: bool) -> dict[str, Any]:
+                      confirm_unloaded: bool, accept_risk: bool,
+                      reconcile_wait_seconds: int = 600,
+                      reconcile_retry_seconds: int = 20) -> dict[str, Any]:
     profile = campaign.load_profile(profile_path)
     if confirm_ieee != profile["ieee"]:
         raise ValueError("Exact IEEE confirmation mismatch")
@@ -209,21 +247,12 @@ def resume_transition(profile_path: Path, confirm_ieee: str, *,
     orchestration_log = work / f"resume_supervisor_{stamp}.log"
     lock = read_json(work / "ACTIVE_LOCK.json")
     phase = lock.get("phase") if lock else None
-
-    if phase == "ota_running":
-        raise RuntimeError(
-            "Campaign still says ota_running. Do not infer death from stale logs; "
-            "verify live transport/device state before terminating or reconciling."
+    if phase not in (None, READY_PHASE):
+        phase = reconcile_until_ready(
+            profile_path, confirm_ieee, work, orchestration_log,
+            wait_seconds=reconcile_wait_seconds,
+            retry_seconds=reconcile_retry_seconds,
         )
-    if phase in RECONCILABLE_PHASES:
-        rc = run_logged(
-            campaign_cmd(profile_path, "reconcile-source", confirm_ieee=confirm_ieee),
-            orchestration_log,
-        )
-        if rc:
-            raise RuntimeError(f"Source-unchanged reconciliation failed with exit {rc}")
-        lock = read_json(work / "ACTIVE_LOCK.json")
-        phase = lock.get("phase") if lock else None
     if phase not in (None, READY_PHASE):
         raise RuntimeError(f"Campaign phase {phase!r} is not safe for an automated resume")
 
@@ -274,6 +303,8 @@ def main(argv: list[str] | None = None) -> None:
     resume.add_argument("--confirm-ieee", required=True)
     resume.add_argument("--confirm-load-unplugged", action="store_true")
     resume.add_argument("--accept-nonrecoverable-ota-risk", action="store_true")
+    resume.add_argument("--reconcile-wait-seconds", type=int, default=600)
+    resume.add_argument("--reconcile-retry-seconds", type=int, default=20)
 
     show = sub.add_parser("status")
     show.add_argument("--profile", required=True)
@@ -288,6 +319,8 @@ def main(argv: list[str] | None = None) -> None:
         args.confirm_ieee,
         confirm_unloaded=args.confirm_load_unplugged,
         accept_risk=args.accept_nonrecoverable_ota_risk,
+        reconcile_wait_seconds=args.reconcile_wait_seconds,
+        reconcile_retry_seconds=args.reconcile_retry_seconds,
     )
     print(json.dumps(result, indent=2, default=str))
 

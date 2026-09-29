@@ -101,7 +101,7 @@ def test_resume_reconciles_then_qualifies_then_launches(tmp_path, monkeypatch):
     assert persisted["pid"] == 5555
 
 
-def test_resume_refuses_ota_running_even_if_observer_could_be_stale(tmp_path, monkeypatch):
+def test_resume_orphaned_ota_running_uses_canonical_reconcile_before_retry(tmp_path, monkeypatch):
     cfg = _profile(tmp_path)
     profile_path = tmp_path / "profile.json"
     profile_path.write_text(json.dumps(cfg))
@@ -109,13 +109,40 @@ def test_resume_refuses_ota_running_even_if_observer_could_be_stale(tmp_path, mo
     work.mkdir()
     (work / "ACTIVE_LOCK.json").write_text(json.dumps({"phase": "ota_running"}))
     monkeypatch.setattr(sup.campaign, "load_profile", lambda _p: dict(cfg))
+    monkeypatch.setattr(sup, "process_alive", lambda _pid: False)
+    calls = []
 
-    with pytest.raises(RuntimeError, match="Do not infer death from stale logs"):
+    def fake_run(cmd, log):
+        mode = cmd[cmd.index("--mode") + 1]
+        calls.append(mode)
+        if mode == "reconcile-source":
+            (work / "ACTIVE_LOCK.json").write_text(json.dumps({"phase": "source_unchanged_reconciled"}))
+        return 0
+
+    monkeypatch.setattr(sup, "run_logged", fake_run)
+    monkeypatch.setattr(sup, "launch_logged", lambda cmd, log: 7777)
+    result = sup.resume_transition(
+        profile_path, cfg["ieee"], confirm_unloaded=True, accept_risk=True,
+        reconcile_wait_seconds=0, reconcile_retry_seconds=1,
+    )
+    assert calls == ["reconcile-source", "qualify"]
+    assert result["pid"] == 7777
+
+
+def test_reconcile_wait_is_bounded_and_never_launches_without_proof(tmp_path, monkeypatch):
+    cfg = _profile(tmp_path)
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text(json.dumps(cfg))
+    work = Path(cfg["workdir"])
+    work.mkdir()
+    (work / "ACTIVE_LOCK.json").write_text(json.dumps({"phase": "ota_running"}))
+    monkeypatch.setattr(sup.campaign, "load_profile", lambda _p: dict(cfg))
+    monkeypatch.setattr(sup, "process_alive", lambda _pid: False)
+    monkeypatch.setattr(sup, "run_logged", lambda cmd, log: 1)
+    with pytest.raises(RuntimeError, match="Source reconciliation did not become safe"):
         sup.resume_transition(
-            profile_path,
-            cfg["ieee"],
-            confirm_unloaded=True,
-            accept_risk=True,
+            profile_path, cfg["ieee"], confirm_unloaded=True, accept_risk=True,
+            reconcile_wait_seconds=0, reconcile_retry_seconds=1,
         )
 
 
