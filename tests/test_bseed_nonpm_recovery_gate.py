@@ -166,3 +166,4 @@ def test_noninvasive_waiver_covers_signed_off_rc2_canary():
         verify_recovery(bad, confirm_unloaded=True)
     pm = dict(profile, require_pm=True)
     with pytest.raises(ValueError, match='refuses PM'):
+        verify_recovery(pm, confirm_unloaded=True)
