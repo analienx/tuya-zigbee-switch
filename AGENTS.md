@@ -16,4 +16,4 @@ A local checkout may be inspected or edited to prepare changes, but local result
 
 ## Required BSEED shared PM firmware gate
 
-Before releasing any BSEED TS011F-BS-PM source change, run `make bseed/pm-matrix` on public GitHub Actions in a clean Linux checkout with the Telink toolchain. This builds and validates the Router and mains Client from the exact same commit, not merely host tests. Read `docs/bseed_pm_variant_matrix.md` and `skills/bseed-zigbee-ota/references/build-and-verify.md`. Keep role-specific OTA identities and live hardware gates separate; a green offline matrix never authorizes flashing.
+Before releasing any BSEED TS011F-BS-PM source change, run `make bseed/pm-matrix` on a GitHub-hosted Actions runner in a clean Linux checkout with the Telink toolchain. This builds and validates the Router and mains Client from the exact same commit, not merely host tests. Read `docs/bseed_pm_variant_matrix.md` and `skills/bseed-zigbee-ota/references/build-and-verify.md`. Keep role-specific OTA identities and live hardware gates separate; a green offline matrix never authorizes flashing.
