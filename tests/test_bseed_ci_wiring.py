@@ -4,6 +4,7 @@ No workflow is executed here; public GitHub Actions at the exact source SHA
 remains the gate of record.
 """
 import re
+import sys
 from pathlib import Path
 
 import yaml
@@ -39,6 +40,19 @@ def test_all_workflows_parse_with_triggers_and_jobs():
         assert document.get("name"), name
         assert document.get(True) is not None, name  # YAML 1.1 `on:` key
         assert document.get("jobs"), name
+
+
+def test_finalizer_prerequisites_run_for_every_pull_request():
+    sys.path.insert(0, str(ROOT / "helper_scripts"))
+    from bseed_ci_finalize import REQUIRED
+
+    documents = {load_workflow(name)["name"]: load_workflow(name)
+                 for name in CANDIDATE_WORKFLOWS}
+    for name in ("BSEED candidate finalization", *REQUIRED):
+        triggers = documents[name][True]
+        assert "pull_request" in triggers, name
+        filters = triggers["pull_request"] or {}
+        assert not filters, (name, filters)
 
 
 def test_no_elevated_or_reusable_trigger_modes():

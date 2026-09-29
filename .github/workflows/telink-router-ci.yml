@@ -2,18 +2,6 @@ name: Telink Router TC32 validation
 
 on:
   pull_request:
-    paths:
-      - 'src/telink/**'
-      - 'src/app.c'
-      - 'src/hal/**'
-      - 'src/zigbee/**'
-      - 'src/base_components/**'
-      - 'src/device_config/**'
-      - 'make_scripts/build_bseed_ts011f_pm_v8.sh'
-      - 'make_scripts/build_bseed_ts011f_nonpm_router.sh'
-      - 'device_db.yaml'
-      - 'NVM_MIGRATIONS_VERSION'
-      - '.github/workflows/telink-router-ci.yml'
   push:
     branches:
       - main
