@@ -9,6 +9,7 @@ jobs:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Install uncrustify
         run: sudo apt-get update && sudo apt-get install -y uncrustify
       - name: Check changed C code formatting
@@ -61,6 +62,7 @@ jobs:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Install YAML parser
         run: sudo apt-get update && sudo apt-get install -y python3-yaml
       - name: Reject new or changed firmware image-type collisions
@@ -77,15 +79,42 @@ jobs:
           fi
           python3 helper_scripts/check_image_types.py device_db.yaml --changed-base "$base"
 
-  test:
+  bseed-identity-gate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Gate checked-in images against the identity registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          make bseed/identity-gate
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Install pytests and converter dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y make python3 python3-pytest python3-yaml python3-jinja2
+          sudo apt-get install -y make python3 python3-pytest python3-yaml python3-jinja2 python3-paho-mqtt python3-paramiko
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install pinned converter runtime
+        run: npm ci --ignore-scripts --prefix tests/zhc_runtime
+      - name: Fetch pinned SDK write-handler source for fault injection
+        run: |
+          mkdir -p build/test-sdk
+          curl --fail --location --retry 3 https://raw.githubusercontent.com/telink-semi/telink_zigbee_sdk/V3.7.2.0/tl_zigbee_sdk/zigbee/zcl/zcl.c -o build/test-sdk/zcl.c
       - name: Run tests
+        timeout-minutes: 15
+        env:
+          NODE_PATH: ${{ github.workspace }}/tests/zhc_runtime/node_modules
         shell: bash
         run: |
           set -o pipefail
@@ -100,11 +129,11 @@ jobs:
           node --check converter-canary/switch_custom.js
           node --check converter-canary/switch_custom_z2m_v1.js
           sha256sum converter-canary/switch_custom.js converter-canary/switch_custom_z2m_v1.js | tee converter-canary/SHA256SUMS
-          diff -u zigbee2mqtt/converters/switch_custom.js converter-canary/switch_custom.js > converter-canary/current-vs-generated.patch || true
+          diff -u zigbee2mqtt/converters/switch_custom.js converter-canary/switch_custom.js > converter-canary/current-vs-generated.patch
       - name: Upload converter canary
         uses: actions/upload-artifact@v4
         with:
-          name: z2m-converter-canary-${{ github.sha }}
+          name: z2m-converter-canary-${{ github.event.pull_request.head.sha || github.sha }}
           path: converter-canary/
           if-no-files-found: error
       - name: Upload test diagnostics

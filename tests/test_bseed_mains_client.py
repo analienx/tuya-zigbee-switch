@@ -1,7 +1,28 @@
+import re
+import subprocess
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.parametrize(('flags', 'valid'), [
+    (['-DEND_DEVICE=1', '-DZB_MAC_RX_ON_WHEN_IDLE=1'], True),
+    (['-DEND_DEVICE=1', '-DZB_MAC_RX_ON_WHEN_IDLE=1', '-DPM_ENABLE=1'], False),
+    (['-DEND_DEVICE=1'], False),
+    (['-DEND_DEVICE=1', '-DZB_MAC_RX_ON_WHEN_IDLE=0'], False),
+    (['-DROUTER=1', '-DZB_MAC_RX_ON_WHEN_IDLE=1'], False),
+])
+def test_effective_stack_config_rejects_sleepy_mains_client(flags, valid):
+    result = subprocess.run(
+        ['cc', '-E', '-x', 'c', '-DBSEED_MAINS_CLIENT=1', *flags,
+         str(ROOT / 'src/telink/configs/stack_cfg.h')],
+        text=True, capture_output=True, timeout=12)
+    assert (result.returncode == 0) == valid, result.stderr
+    if not valid:
+        assert 'BSEED mains Client requires' in result.stderr
 
 
 def test_client_role_is_always_awake_non_router():
@@ -71,7 +92,7 @@ def test_router_to_client_transition_resets_network_not_application_nv_module():
     assert app.index("if (process_device_type_change())") < app.index("parse_config();")
     assert "#else\nvoid process_device_type_change()" in app
     assert "#ifndef BSEED_MAINS_CLIENT\n    process_device_type_change();" in app
-    assert "hal_factory_reset();" in app
+    assert "schedule_network_reset(1);" in app
     assert "hal_nvm_clear_all" not in app
     assert "#ifdef BSEED_MAINS_CLIENT\nbool hal_role_change_reset" in telink
     for module in ["NV_MODULE_ZB_INFO", "NV_MODULE_ADDRESS_TABLE", "NV_MODULE_APS", "NV_MODULE_ZCL", "NV_MODULE_OTA", "NV_MODULE_KEYPAIR"]:
@@ -84,11 +105,13 @@ def test_router_to_client_transition_resets_network_not_application_nv_module():
 def test_client_artifacts_are_separate_and_never_stock_or_auto_indexed():
     script = (ROOT / "make_scripts/build_bseed_mains_client.sh").read_text()
     assert "CLIENT_IMAGE_TYPE=65024" in script
+    assert "CLIENT_IMAGE_TYPE=65026" in script
     assert "CLIENT_IMAGE_TYPE=65025" in script
     assert "ROUTER_IMAGE_TYPE=43556" in script
+    assert "ROUTER_IMAGE_TYPE=43555" in script
     assert "ROUTER_IMAGE_TYPE=45577" in script
-    assert "FILE_VERSION_HEX='0x1205300C'" in script
-    assert "FILE_VERSION_HEX='0x1102300C'" in script
+    assert 'bseed_pm_release.py vars --role client' in script
+    assert "FILE_VERSION_HEX='0x1102300F'" in script
     assert "from-router.ota" in script
     assert "from_tuya" not in script.lower()
     assert "make_z2m_ota_index" not in script
@@ -115,6 +138,20 @@ def test_mains_client_recovers_periodic_ota_query_after_abort():
     assert "OTA_ABORT_QUERY_RETRY_DELAY_MS" in ota
     assert "ota_queryStart(OTA_PERIODIC_QUERY_INTERVAL);" in ota
     assert "#ifdef BSEED_OTA_DEFERRED_REQUERY" in ota
+
+
+def test_pm_join_query_waits_until_ota_client_is_initialized():
+    ota = (ROOT / "src/telink/hal/zigbee_ota.c").read_text()
+    network = (ROOT / "src/telink/hal/zigbee_network.c").read_text()
+    init = ota.index("ota_init(OTA_TYPE_CLIENT")
+    ready = ota.index("ota_client_initialized = true;")
+    schedule = ota.index("telink_zigbee_hal_request_ota_query();", ready)
+    assert init < ready < schedule
+    assert re.search(r"static\s+bool\s+ota_query_requested", ota)
+    assert "OTA_JOIN_QUERY_START_DELAY_MS" in ota
+    assert "hal_zigbee_get_network_status() != HAL_ZIGBEE_NETWORK_JOINED" in ota
+    assert network.count("telink_zigbee_hal_request_ota_query();") == 2
+    assert network.count("ota_queryStart(OTA_QUERY_INTERVAL);") == 2
 
 
 def test_production_router_build_scripts_stay_router_only():

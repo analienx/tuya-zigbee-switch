@@ -52,9 +52,82 @@ const bseedSocketRelayOnOff = () => {
         if (!relay) throw new Error("BSEED socket relay endpoint 2 unavailable for state read");
         return originalGet(relay, key, meta);
     };
+    // MQTT /get {state: ""} has no endpoint name. Z2M publish filters out
+    // endpoint-scoped converters before convertGet, unlike availability.
+    // Supply a read-only fallback; explicit state_relay writes keep their
+    // existing converter and generic state writes gain no new behavior.
+    extension.toZigbee.push({key: ["state"], convertGet: stateConverter.convertGet});
     return extension;
 };
 // BSEED_SOCKET_RECONNECT_READ_END
+
+// BSEED_PM_METER_START
+// Legacy v8u4 Routers use different scales. Fixed scales are safe only for
+// explicit build contracts; unknown builds must use actual scale reads.
+const bseedPmElectricityMeter = () => {
+    const exposes = require('zigbee-herdsman-converters/lib/exposes');
+    const legacy = electricityMeter({
+        power: {max: 60}, current: {max: 300},
+        voltage: {max: 300}, energy: {max: 600, change: 1},
+    });
+    const fixed = electricityMeter({
+        // Explicit change overrides are RAW ZCL units in modernExtend.
+        // Match the provisioner so normal configure needs no repair pass.
+        power: {min: 10, max: 60, change: 5, multiplier: 1, divisor: 1},
+        current: {min: 5, max: 300, change: 50, multiplier: 1, divisor: 1000},
+        voltage: {min: 5, max: 300, change: 5, multiplier: 1, divisor: 100},
+        energy: {min: 10, max: 600, change: 1, multiplier: 1, divisor: 1000},
+    });
+    const knownBuilds = new Set([
+        "1.2.5-bseedcli6", "1.2.5-bseedcli8", "1.2.5-bseedcli9",
+        "1.2.5-bseedcli10", "1.2.5-bseedcli11", "1.2.5-bseedr7", "1.2.5-bseedr8",
+        "1.2.5-bseedcli12", "1.2.5-bseedr9",
+    ]);
+    const hasFixedScaleContract = device => device?.modelID === "TS011F-BS-PM" &&
+        device.manufacturerName === "b28wrpvx" && knownBuilds.has(device.softwareBuildID);
+    const scales = {
+        haElectricalMeasurement: {acVoltageMultiplier: 1, acVoltageDivisor: 100,
+            acCurrentMultiplier: 1, acCurrentDivisor: 1000, acPowerMultiplier: 1, acPowerDivisor: 1},
+        seMetering: {multiplier: 1, divisor: 1000},
+    };
+    // Reports can precede configure after interview/restart. Establish the
+    // known firmware contract before decoding, not after publishing raw units.
+    // Clone converters: mutating a shared ZHC converter would affect the fleet.
+    legacy.fromZigbee = legacy.fromZigbee.map(converter => ({...converter,
+        convert: (model, msg, publish, options, meta) => {
+            const values = scales[msg.cluster];
+            // This persistent per-device option is set and acknowledged BEFORE
+            // OTA submission. Do not decode new payload units using stale Basic
+            // metadata. Only the verified-identity recovery step clears it.
+            if (values && options?.bseed_pm_telemetry_quarantine === true) return {};
+            if (values && hasFixedScaleContract(msg.device) &&
+                Object.entries(values).some(([key, value]) => msg.endpoint.getClusterAttributeValue(msg.cluster, key) !== value)) {
+                msg.endpoint.saveClusterAttributeKeyValue(msg.cluster, values);
+                msg.endpoint.save();
+            }
+            // ZCL UINT48 all-ones means unknown (e.g. an unreadable NVM
+            // baseline). ZHC otherwise scales it into an enormous energy total.
+            // Preserve other attributes and the shared incoming message.
+            if (msg.cluster === 'seMetering' && msg.data.currentSummDelivered === 0xffffffffffff) {
+                const data = {...msg.data};
+                delete data.currentSummDelivered;
+                msg = {...msg, data};
+            }
+            return converter.convert(model, msg, publish, options, meta);
+        },
+    }));
+    const legacyConfigure = legacy.configure || [];
+    legacy.options = [...(legacy.options || []),
+        new exposes.Binary('bseed_pm_telemetry_quarantine', exposes.access.SET, true, false)
+            .withDescription('Pause metering publication during a firmware update until its identity is verified.')];
+    legacy.configure = [async (device, coordinatorEndpoint, definition) => {
+        const verified = hasFixedScaleContract(device);
+        const configure = verified ? fixed.configure : legacyConfigure;
+        for (const step of configure || []) await step(device, coordinatorEndpoint, definition);
+    }];
+    return legacy;
+};
+// BSEED_PM_METER_END
 
 const romasku = {
     switchAction: (name, endpointName) =>
@@ -534,10 +607,7 @@ const definitions = [
             {% if device.power_monitoring %}
 {% if device.bseed_unsuffixed_meter %}
             // BSEED PM fallback: bounded freshness, not a substitute for change reports.
-            electricityMeter({
-                power: {max: 60}, current: {max: 300},
-                voltage: {max: 300}, energy: {max: 600, change: 1},
-            }),
+            bseedPmElectricityMeter(),
 {% else %}
             electricityMeter(),
 {% endif %}

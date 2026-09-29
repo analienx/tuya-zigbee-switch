@@ -7,21 +7,26 @@ set -euo pipefail
 # Usage:
 #   build_bseed_mains_client.sh pm [output-dir]
 #   build_bseed_mains_client.sh nonpm [output-dir]
+#   build_bseed_mains_client.sh nonpm-keepalive [output-dir]
 #   build_bseed_mains_client.sh ts0726 [output-dir]
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 TARGET="${1:-}"
+RELEASE_DATE_OVERRIDE=''
 case "$TARGET" in
 pm)
     BOARD='OUTLET_BSEED_PM_TS011F'
     CANONICAL='b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;'
     ROUTER_IMAGE_TYPE=43556
     CLIENT_IMAGE_TYPE=65024
-    SW_BUILD='1.2.5-bseedcli6'
-    FILE_VERSION_HEX='0x1205300C'
-    FILE_VERSION_DEC=302329868
+    readarray -t release_vars < <(python3 helper_scripts/bseed_pm_release.py vars --role client)
+    [[ ${#release_vars[@]} == 4 ]] || exit 2
+    SW_BUILD="${release_vars[0]}"
+    FILE_VERSION_HEX="${release_vars[1]}"
+    FILE_VERSION_DEC="${release_vars[2]}"
+    RELEASE_DATE_OVERRIDE="${release_vars[3]}"
     DEFAULT_OUT='build/bseed-ts011f-pm-client'
     EXTRA_ARGS=(
         BSEED_PM_B28WRPVX=1
@@ -31,16 +36,23 @@ pm)
         HLW8012_POWER_MULTIPLIER=16989
     )
     ;;
+nonpm-keepalive)
+    echo 'Historical cli5 must use its original source/artifact; use nonpm for the consolidated candidate.' >&2
+    exit 2
+    ;;
 nonpm)
     BOARD='OUTLET_BSEED_TS011F'
     CANONICAL='o1jzcxou;TS011F-BS;LC2;SB4u;RC3;ID2;M;'
     ROUTER_IMAGE_TYPE=43555
     CLIENT_IMAGE_TYPE=65026
-    SW_BUILD='1.1.2-bseedcli4'
-    FILE_VERSION_HEX='0x1102300F'
-    FILE_VERSION_DEC=285356047
+    readarray -t release_vars < <(python3 helper_scripts/bseed_nonpm_release.py vars --role client)
+    [[ ${#release_vars[@]} == 4 ]] || exit 2
+    SW_BUILD="${release_vars[0]}"
+    FILE_VERSION_HEX="${release_vars[1]}"
+    FILE_VERSION_DEC="${release_vars[2]}"
+    RELEASE_DATE_OVERRIDE="${release_vars[3]}"
     DEFAULT_OUT='build/bseed-ts011f-nonpm-client'
-    EXTRA_ARGS=()
+    EXTRA_ARGS=(DEVICE_CONFIG_GUARD=BSEED_TS011F_NONPM)
     ;;
 ts0726)
     BOARD='SWITCH_BSEED_TS0726_3GANG'
@@ -48,9 +60,9 @@ ts0726)
     SWAPPED='iedhxgyi;TS0726-3-BS;LC4;SB1u;RC0;IC2;SB7u;RD7;IC3;SB4u;RD2;IB5;M;'
     ROUTER_IMAGE_TYPE=45577
     CLIENT_IMAGE_TYPE=65025
-    SW_BUILD='1.1.8-bseedcli2'
-    FILE_VERSION_HEX='0x1102300C'
-    FILE_VERSION_DEC=285356044
+    SW_BUILD='1.1.8-bseedcli3'
+    FILE_VERSION_HEX='0x1102300F'
+    FILE_VERSION_DEC=285356047
     DEFAULT_OUT='build/bseed-ts0726-client'
     EXTRA_ARGS=(
         MIGRATION_FROM_CONFIG="$SWAPPED"
@@ -58,7 +70,7 @@ ts0726)
     )
     ;;
 *)
-    echo "usage: $0 {pm|nonpm|ts0726} [output-dir]" >&2
+    echo "usage: $0 {pm|nonpm|nonpm-keepalive|ts0726} [output-dir]" >&2
     exit 2
     ;;
 esac
@@ -79,19 +91,28 @@ client_image = int(client_image)
 with open("device_db.yaml", "r", encoding="utf-8") as f:
     db = yaml.safe_load(f)
 entry = db[board]
-assert entry["config_str"] == canonical, "canonical config drift"
-assert int(entry["firmware_image_type"]) == router_image, "router image type drift"
-assert int(entry["stock_manufacturer_id"]) == 4417, "manufacturer drift"
-assert entry["device_type"] == "router", "validated production target is no longer router"
-assert entry["mcu_family"] == "Telink", "target is no longer Telink"
-assert entry["mcu"] == "TLSR8258", "target MCU drift"
+if not (entry['config_str'] == canonical):
+    raise AssertionError('canonical config drift')
+if not (int(entry['firmware_image_type']) == router_image):
+    raise AssertionError('router image type drift')
+if not (int(entry['stock_manufacturer_id']) == 4417):
+    raise AssertionError('manufacturer drift')
+if not (entry['device_type'] == 'router'):
+    raise AssertionError('validated production target is no longer router')
+if not (entry['mcu_family'] == 'Telink'):
+    raise AssertionError('target is no longer Telink')
+if not (entry['mcu'] == 'TLSR8258'):
+    raise AssertionError('target MCU drift')
 used = {
     int(v["firmware_image_type"])
     for v in db.values()
     if isinstance(v, dict) and v.get("firmware_image_type") is not None
 }
-assert client_image not in used, f"experimental client image type {client_image} collides with device_db"
-assert client_image != router_image
+if not (client_image not in used):
+    raise AssertionError(f'experimental client image type {client_image} collides with device_db')
+if not (client_image != router_image):
+    raise AssertionError()
+
 PY
 
 BIN="$OUT_DIR/forward.bin"
@@ -99,6 +120,7 @@ OTA="$OUT_DIR/forward.ota"
 FROM_ROUTER_OTA="$OUT_DIR/from-router.ota"
 
 COMMON_ARGS=(
+    BSEED_BUILD_DATE="$RELEASE_DATE_OVERRIDE"
     VERSION_STR="$SW_BUILD"
     FILE_VERSION="$FILE_VERSION_HEX"
     NVM_MIGRATIONS_VERSION="$NVM_SCHEMA"
@@ -134,7 +156,7 @@ make -C src/telink -f client.mk ota \
     OTA_IMAGE_TYPE="$ROUTER_IMAGE_TYPE" \
     OTA_VERSION="$FILE_VERSION_HEX"
 
-python3 - "$OUT_DIR" "$TARGET" "$BOARD" "$SW_BUILD" "$FILE_VERSION_DEC" \
+BSEED_MANIFEST_BUILD_DATE="$RELEASE_DATE_OVERRIDE" python3 - "$OUT_DIR" "$TARGET" "$BOARD" "$SW_BUILD" "$FILE_VERSION_DEC" \
     "$MANUFACTURER_CODE" "$ROUTER_IMAGE_TYPE" "$CLIENT_IMAGE_TYPE" \
     "$NVM_SCHEMA" "$CANONICAL" <<'PY'
 from __future__ import annotations
@@ -191,16 +213,23 @@ def header(path: pathlib.Path) -> dict[str, int]:
 
 native = header(out / "forward.ota")
 transition = header(out / "from-router.ota")
-assert native["manufacturerCode"] == manufacturer
-assert native["imageType"] == client_image_type
-assert native["fileVersion"] == file_version
-assert transition["manufacturerCode"] == manufacturer
-assert transition["imageType"] == router_image_type
-assert transition["fileVersion"] == file_version
+if not (native['manufacturerCode'] == manufacturer):
+    raise AssertionError()
+if not (native['imageType'] == client_image_type):
+    raise AssertionError()
+if not (native['fileVersion'] == file_version):
+    raise AssertionError()
+if not (transition['manufacturerCode'] == manufacturer):
+    raise AssertionError()
+if not (transition['imageType'] == router_image_type):
+    raise AssertionError()
+if not (transition['fileVersion'] == file_version):
+    raise AssertionError()
 
 native_bytes = (out / "forward.ota").read_bytes()
 transition_bytes = (out / "from-router.ota").read_bytes()
-assert native_bytes[56:] == transition_bytes[56:]
+if not (native_bytes[56:] == transition_bytes[56:]):
+    raise AssertionError()
 diffs = [i for i, (a, b) in enumerate(zip(native_bytes, transition_bytes)) if a != b]
 expected_diffs = [
     12 + i
@@ -209,10 +238,8 @@ expected_diffs = [
     )
     if a != b
 ]
-assert diffs == expected_diffs, (
-    f"unexpected transition-wrapper header differences: {diffs}; "
-    f"expected {expected_diffs}"
-)
+if not (diffs == expected_diffs):
+    raise AssertionError(f'unexpected transition-wrapper header differences: {diffs}; expected {expected_diffs}')
 
 def git_output(*args: str) -> str:
     env = os.environ.copy()
@@ -239,6 +266,7 @@ manifest = {
     "target": target,
     "board": board,
     "swBuildId": sw_build,
+    "buildDate": os.environ['BSEED_MANIFEST_BUILD_DATE'] or None,
     "fileVersion": file_version,
     "manufacturerCode": manufacturer,
     "routerImageType": router_image_type,
@@ -292,3 +320,12 @@ for path in paths:
 (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 print(json.dumps(manifest, indent=2, sort_keys=True))
 PY
+
+# Identity gate: refuse builds that reuse a released (image_type, file_version)
+# with different bytes or mismatch the claimed version string. Transition
+# wrappers (from-router.ota) stay unregistered by design and are validated
+# structurally above, never served from an index.
+python3 helper_scripts/bseed_ota_identity.py gate --image "$OTA" \
+  --expect-version-str "$SW_BUILD" \
+  --expect-image-type "$CLIENT_IMAGE_TYPE" \
+  --expect-file-version "$FILE_VERSION_HEX"

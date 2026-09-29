@@ -10,6 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'helper_scripts'))
 from bseed_targeted_z2m_ota import verify_image
+from tests.bseed_image_fixture import image_for
 
 
 def fixture(tmp_path):
@@ -38,6 +39,32 @@ def test_verified_wrapper_and_http(tmp_path):
     assert actual == binary and header[5] == 54179
 
 
+def test_nonpm_force_wrapper_validates_embedded_native_version_not_ffffffff(tmp_path):
+    candidate = dict(build='1.1.3-bseedc7', version=0x11023014, type=65026)
+    native = image_for(candidate)
+    wrapper = bytearray(native)
+    struct.pack_into('<H', wrapper, 12, 43555)
+    struct.pack_into('<I', wrapper, 14, 0xffffffff)
+    wrapper = bytes(wrapper)
+    image = tmp_path / 'forced.ota'; image.write_bytes(wrapper)
+    native_path = tmp_path / 'native.ota'; native_path.write_bytes(native)
+    args = SimpleNamespace(
+        image=str(image), native_image=str(native_path), non_pm=True,
+        sha256=hashlib.sha256(wrapper).hexdigest(), manufacturer_code=4417,
+        image_type=43555, file_version=0xffffffff,
+        url='http://example.invalid/forced.ota')
+
+    class FakeResponse:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read(self): return wrapper
+
+    with patch('bseed_targeted_z2m_ota.urllib.request.urlopen', return_value=FakeResponse()):
+        actual, header = verify_image(args)
+    assert actual == wrapper and header[6] == 0xffffffff
+
+
 def test_response_with_matching_transaction_and_no_id_is_ours():
     from bseed_targeted_z2m_ota import matches_response
     token = 'tx-kitchen'
@@ -63,6 +90,26 @@ def test_wrong_identity_and_payload_rejected_before_network(tmp_path):
     Path(a.native_image).write_bytes(original[:-1] + b'x')
     with pytest.raises(AssertionError, match='payload differs'):
         verify_image(a)
+
+
+def test_update_payload_paced_profile_for_sleepy_end_device():
+    from bseed_targeted_z2m_ota import update_payload
+    data = update_payload('0xa4c13824a7005afb', 'http://example.invalid/client.ota', 'transaction-2', 48, 1200)
+    assert data['image_block_response_delay'] == 1200
+    assert data['default_maximum_data_size'] == 48
+    legacy = update_payload('0xa4c13824a7005afb', 'http://example.invalid/client.ota', 'transaction-3', 48)
+    assert 'image_block_response_delay' not in legacy
+    assert legacy['image_block_request_timeout'] == 600000
+    paced = update_payload('0xa4c13824a7005afb', 'http://example.invalid/client.ota', 'transaction-4', 48, 1200, 1800000)
+    assert paced['image_block_request_timeout'] == 1800000
+    with pytest.raises(AssertionError, match='60000..3600000'):
+        update_payload('target', 'url', 'token', 48, None, 59999)
+    with pytest.raises(AssertionError, match='60000..3600000'):
+        update_payload('target', 'url', 'token', 48, None, 3600001)
+    with pytest.raises(AssertionError, match='0..10000'):
+        update_payload('target', 'url', 'token', 48, 10001)
+    with pytest.raises(AssertionError, match='0..10000'):
+        update_payload('target', 'url', 'token', 48, -1)
 
 
 def test_update_payload_uses_explicit_bounded_block_size():
@@ -96,6 +143,17 @@ def test_transport_ok_is_not_postflash_accepted():
     assert not new_campaign_allowed({'phase':'update_error'})
     assert not new_campaign_allowed({'phase':'update_timeout_or_unconfirmed'})
     assert new_campaign_allowed({'phase':'postflash_accepted'})
+    assert new_campaign_allowed({'phase':'installed_image_reconciled'})
+    assert new_campaign_allowed({'phase':'source_unchanged_reconciled'})
     assert new_campaign_allowed({'phase':'preflight_abort'})
     assert ota_transport_phase({'status':'error'})=='update_error'
     assert ota_transport_phase({})=='update_timeout_or_unconfirmed'
+
+
+def test_flash_uses_single_shared_network_authority_before_submit():
+    src = (Path(__file__).resolve().parents[1] / 'helper_scripts/bseed_targeted_z2m_ota.py').read_text()
+    assert 'shared_network_lock_path(source_profile, required=True)' in src
+    assert 'require_profile_authority' not in src
+    assert src.index('shared_network_lock_path(source_profile, required=True)') < src.index('acquire_network_lock(')
+    assert src.index('acquire_network_lock(') < src.index('payload = update_payload(')
+    assert src.index('if active_updates:') < src.index('acquire_network_lock(')

@@ -88,6 +88,19 @@ PYTHON ?= $(shell command -v python >/dev/null 2>&1 && echo python || echo pytho
 bseed/pm-matrix:
 	$(PYTHON) helper_scripts/bseed_pm_variant_matrix.py
 
+# Offline OTA identity gate: every checked-in BSEED image must match the
+# released-identity registry (no relabels, monotonic versions, strings match).
+bseed/identity-gate:
+	$(PYTHON) helper_scripts/bseed_ota_identity.py check-index
+
+# Print the next monotonic OTA file version for every BSEED release line.
+# Release FILEVER/VERSION_STR come from emit-make-vars output, never by hand.
+bseed/suggest-next:
+	$(PYTHON) helper_scripts/bseed_ota_identity.py suggest-next --image-type 43556
+	$(PYTHON) helper_scripts/bseed_ota_identity.py suggest-next --image-type 65024
+	$(PYTHON) helper_scripts/bseed_ota_identity.py suggest-next --image-type 43555
+	$(PYTHON) helper_scripts/bseed_ota_identity.py suggest-next --image-type 65026
+
 # Run pytest tests (requires stub to be built)
 tests: stub/build stub/build_end_device
 	$(PYTHON) -m pytest tests/ -v

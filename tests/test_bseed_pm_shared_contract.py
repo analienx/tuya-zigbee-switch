@@ -10,7 +10,14 @@ ROOT = Path(__file__).resolve().parents[1]
 READS = {'ZCL_ATTR_ELEC_MEAS_RMS_VOLTAGE': ('0x0505','ZCL_DATA_TYPE_UINT16'),
          'ZCL_ATTR_ELEC_MEAS_RMS_CURRENT': ('0x0508','ZCL_DATA_TYPE_UINT16'),
          'ZCL_ATTR_ELEC_MEAS_ACTIVE_POWER': ('0x050B','ZCL_DATA_TYPE_INT16'),
+         'ZCL_ATTR_ELEC_MEAS_AC_VOLTAGE_MULTIPLIER': ('0x0600','ZCL_DATA_TYPE_UINT16'),
+         'ZCL_ATTR_ELEC_MEAS_AC_VOLTAGE_DIVISOR': ('0x0601','ZCL_DATA_TYPE_UINT16'),
+         'ZCL_ATTR_ELEC_MEAS_AC_CURRENT_MULTIPLIER': ('0x0602','ZCL_DATA_TYPE_UINT16'),
+         'ZCL_ATTR_ELEC_MEAS_AC_CURRENT_DIVISOR': ('0x0603','ZCL_DATA_TYPE_UINT16'),
+         'ZCL_ATTR_ELEC_MEAS_AC_POWER_MULTIPLIER': ('0x0604','ZCL_DATA_TYPE_UINT16'),
+         'ZCL_ATTR_ELEC_MEAS_AC_POWER_DIVISOR': ('0x0605','ZCL_DATA_TYPE_UINT16'),
          'ZCL_ATTR_METERING_CURRENT_SUMMATION_DELIVERED': ('0x0000','ZCL_DATA_TYPE_UINT48'),
+         'ZCL_ATTR_METERING_MULTIPLIER': ('0x0301','ZCL_DATA_TYPE_UINT24'),
          'ZCL_ATTR_METERING_DIVISOR': ('0x0302','ZCL_DATA_TYPE_UINT24')}
 
 
@@ -21,7 +28,7 @@ def test_both_roles_use_shared_pm_hal_and_meter(role,makefile,build_script):
     mk=(ROOT/makefile).read_text(encoding='utf8')
     script=(ROOT/build_script).read_text(encoding='utf8')
     hal=(ROOT/'src/telink/hal/zigbee_zcl.c').read_text(encoding='utf8')
-    for callback in ('register_pm_electrical_attrs','register_pm_metering_attrs'):
+    for callback in ('zcl_electricalMeasure_register','zcl_metering_register'):
         assert callback in hal, f'{role}: missing shared attribute registration'
     assert 'BSEED_PM_B28WRPVX=1' in script
     assert 'HLW8012_VOLTAGE_MULTIPLIER=161460' in script or 'VOLTAGE_MULTIPLIER=161460' in script
@@ -54,11 +61,30 @@ def test_both_role_meter_scaling_is_identical_in_shared_source():
     assert 'if (current_energy >= cluster->last_energy_value)' in metering
 
 
+def test_router_recovery_candidate_pins_next_monotonic_version():
+    build = (ROOT / 'make_scripts/build_bseed_ts011f_pm_v8.sh').read_text(encoding='utf8')
+    assert 'BSEED_PM_ROUTER_RECOVERY:-0' in build
+    assert "SW_BUILD='1.2.5-bseedv8u5-rc4'" in build
+    assert "FILE_VERSION_HEX='0x12053011'" in build
+    assert "FILE_VERSION_DEC=302329873" in build
+    assert 'BSEED_PM_ROUTER_RECOVERY_OUTPUT' in build
+    assert 'from-client.ota' not in build
+
+
+def test_router_read_fix_uses_automated_next_identity():
+    build = (ROOT / 'make_scripts/build_bseed_ts011f_pm_v8.sh').read_text(encoding='utf8')
+    assert 'BSEED_PM_ROUTER_READ_FIX:-0' in build
+    assert "SW_BUILD='1.2.5-bseedv8u5-rc5'" in build
+    assert "FILE_VERSION_HEX='0x12053012'" in build
+    assert "FILE_VERSION_DEC=302329874" in build
+    assert 'BSEED_PM_ROUTER_READ_FIX_OUTPUT' in build
+
+
 def test_router_candidate_is_new_image_not_relabelled_published_v8u4():
     build=(ROOT/'make_scripts/build_bseed_ts011f_pm_v8.sh').read_text(encoding='utf8')
     assert "SW_BUILD='1.2.5-bseedv8u4'" in build
     assert "FILE_VERSION_HEX='0x12053007'" in build
     assert 'BSEED_PM_ROUTER_CANDIDATE:-0' in build
-    assert "SW_BUILD='1.2.5-bseedv8u5-rc2'" in build
-    assert "FILE_VERSION_HEX='0x1205300E'" in build
+    assert "SW_BUILD='1.2.5-bseedv8u5-rc3'" in build
+    assert "FILE_VERSION_HEX='0x12053010'" in build
     assert 'BSEED_PM_ROUTER_CANDIDATE_OUTPUT' in build

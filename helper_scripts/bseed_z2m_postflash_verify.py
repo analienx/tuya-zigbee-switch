@@ -96,7 +96,8 @@ def main():
     args = arguments()
     if bool(args.preflash_lock)!=bool(args.expected_image_sha256):
         raise ValueError('Baseline lock and exact OTA image SHA256 are required together')
-    assert 4 <= args.observe_seconds <= 180, 'Observation window must be 4..180 seconds'
+    if not (4 <= args.observe_seconds <= 180):
+        raise AssertionError('Observation window must be 4..180 seconds')
     # PM periodic reporting may legally take up to 60 s; allow a margin beyond that maximum.
     observation_seconds = max(args.observe_seconds, 75) if args.require_pm else args.observe_seconds
     config = yaml.safe_load(Path(args.mqtt_config).read_text(encoding='utf8'))['mqtt']
@@ -132,7 +133,15 @@ def main():
     client.connect(args.broker, 1883, 10)
     client.loop_start()
     try:
-        assert ready.wait(10), 'MQTT connection/subscription failed'
+        if not (ready.wait(10)):
+            raise AssertionError('MQTT connection/subscription failed')
+        # Same-role non-PM sockets can be completely quiet after OTA. The
+        # retention gate must not depend on unsolicited telemetry: request the
+        # pinned read-only relay/policy state after subscriptions are active.
+        if args.preflash_lock and not args.require_pm:
+            client.publish(device_topic + '/get', json.dumps({
+                args.relay_get_key: '', 'relay_physical_mode': ''
+            }), qos=1, retain=False).wait_for_publish(5)
         time.sleep(observation_seconds)
     finally:
         client.loop_stop()
@@ -181,7 +190,8 @@ def main():
                     if snapshot['state'] else None), 'errors': snapshot['errors']}
     outfile = Path(args.output)
     outfile.parent.mkdir(parents=True, exist_ok=True)
-    assert not outfile.exists(), 'Refuse to overwrite previous evidence'
+    if not (not outfile.exists()):
+        raise AssertionError('Refuse to overwrite previous evidence')
     outfile.write_text(json.dumps(evidence, indent=2, default=str), encoding='utf8')
     print(json.dumps(evidence, indent=2, default=str), flush=True)
     print('Physical relay, appliance safety, parent/rejoin, metrology and retained bindings '

@@ -27,14 +27,18 @@ void stub_tasks_poll(void) {
         tasks_executed = 0;
         for (int i = 0; i < MAX_TASKS; i++) {
             if (tasks[i].active && current_time >= tasks[i].scheduled_time) {
-                if (tasks[i].task && tasks[i].task->handler) {
+                hal_task_t *task = tasks[i].task;
+
+                /* Retire this event before invoking its handler. A callback
+                 * may schedule the same task again into this slot. */
+                tasks[i].active = 0;
+                if (task && task->handler) {
                     io_log("TASKS", "Executing task %p from slot %d",
-                           (void *)tasks[i].task, i);
-                    tasks[i].task->handler(tasks[i].task->arg);
+                           (void *)task, i);
+                    task->handler(task->arg);
                     tasks_executed++;
                 }
-                tasks[i].active = 0;
-                io_log("TASKS", "Task completed and removed from slot %d", i);
+                io_log("TASKS", "Task callback completed from slot %d", i);
             }
         }
     } while (tasks_executed > 0);
@@ -59,6 +63,16 @@ void hal_tasks_schedule(hal_task_t *task, uint32_t delay_ms) {
     if (!task->handler) {
         io_log("TASKS", "Error: Task at %p has NULL handler", (void *)task);
         exit(1);
+    }
+
+    /* Match the hardware schedulers: scheduling the same task replaces its
+     * pending event rather than creating a second callback with shared mutable
+     * handler state. */
+    for (int i = 0; i < MAX_TASKS; i++) {
+        if (tasks[i].active && tasks[i].task == task) {
+            tasks[i].active = 0;
+            break;
+        }
     }
 
     // Find free slot

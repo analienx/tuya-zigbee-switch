@@ -166,6 +166,13 @@ $(BUILD_DIR)/sdk/proj/drivers/drv_nv.o: GCC_FLAGS += -Dnv_resetToFactoryNew=nv_r
 $(SDK_OBJS): GCC_FLAGS += -fpack-struct
 
 # Compile SDK C files
+# Keep the downloaded SDK immutable. Fail closed if its two allocation paths
+# no longer match the reviewed SDK, then compile the patched build-local copy.
+$(BUILD_DIR)/sdk/zigbee/zcl/zcl.o: $(SDK_PATH)/zigbee/zcl/zcl.c ../../helper_scripts/patch_telink_zcl.py
+	@mkdir -p $(@D)
+	@python3 ../../helper_scripts/patch_telink_zcl.py --source $< --output $(@D)/zcl.c
+	@$(CC) $(GCC_FLAGS) $(DEVICE_DEFS) $(INCLUDE_PATHS) -c -o $@ $(@D)/zcl.c
+
 $(BUILD_DIR)/sdk/%.o: $(SDK_PATH)/%.c
 	@echo "Compiling SDK $<"
 	@mkdir -p $(dir $@)

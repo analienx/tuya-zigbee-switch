@@ -51,8 +51,8 @@ bool device_config_is_valid(const uint8_t *data, uint16_t size);
 // overflow fixed storage or the endpoint/cluster pools.
 bool device_config_resources_are_safe(const uint8_t *data, uint16_t size);
 
-// If the stored config is structurally/resource unsafe, use the compiled board
-// default for this boot (without overwriting the suspect NVM).
+// Reject unsafe or board-incompatible stored pin mappings at boot; use the
+// compiled default in RAM without overwriting the suspect NVM.
 bool device_config_prepare_for_parse(void);
 
 void handle_version_changes();

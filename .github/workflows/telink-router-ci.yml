@@ -73,6 +73,9 @@ jobs:
 
       - name: Build exact BSEED TS011F Router candidate
         shell: bash
+        env:
+          BSEED_PM_CONSOLIDATED: '1'
+          BSEED_PM_CONSOLIDATED_OUTPUT: build/telink-router-ci-pm
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
@@ -105,13 +108,18 @@ jobs:
           import json, os, sys
           from pathlib import Path
           manifest = json.loads(Path(sys.argv[1]).read_text())
-          assert manifest['sourceCommit'] == os.environ['EXPECTED_HEAD']
-          assert manifest['sourceDirty'] is False
-          assert manifest['board'] == os.environ['EXPECTED_BOARD']
-          assert manifest['manufacturerCode'] == 4417
-          assert manifest['imageType'] == int(os.environ['EXPECTED_IMAGE_TYPE'])
-          assert manifest['stockConversion']['stockImageType'] == int(os.environ['EXPECTED_STOCK_IMAGE_TYPE'])
-          assert manifest['stockConversion']['payloadFromByte56Identical'] is True
+          checks = {
+              'source': manifest['sourceCommit'] == os.environ['EXPECTED_HEAD'],
+              'clean': manifest['sourceDirty'] is False,
+              'board': manifest['board'] == os.environ['EXPECTED_BOARD'],
+              'manufacturer': manifest['manufacturerCode'] == 4417,
+              'image type': manifest['imageType'] == int(os.environ['EXPECTED_IMAGE_TYPE']),
+              'stock type': manifest['stockConversion']['stockImageType'] == int(os.environ['EXPECTED_STOCK_IMAGE_TYPE']),
+              'wrapper payload': manifest['stockConversion']['payloadFromByte56Identical'] is True,
+          }
+          failed = [name for name, passed in checks.items() if not passed]
+          if failed:
+              raise SystemExit('Router manifest rejected: ' + ', '.join(failed))
           print('exact-head manifest/identity guards: PASS')
           PY
 

@@ -10,12 +10,20 @@ on:
 jobs:
   build-clients:
     runs-on: ubuntu-latest
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout exact source
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact candidate head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
 
       - name: Install host dependencies
         run: |
@@ -38,7 +46,6 @@ jobs:
           TC32=./telink_tools/toolchain/tc32/bin/tc32-elf-gcc
           {
             echo "head=$(git rev-parse HEAD)"
-            echo "base=$(git merge-base HEAD origin/main)"
             echo "status_begin"
             git status --porcelain
             echo "status_end"
@@ -48,54 +55,13 @@ jobs:
             sha256sum telink_tools/downloads/tc32_gcc_v2.0.tar.bz2
           } > "$RUNNER_TEMP/client-build-environment.txt"
 
-      - name: Rebuild exact main baseline and prove routers are unchanged
+      - name: Verify stored historical artifacts against sealed identities
         shell: bash
         run: |
-          set -euo pipefail
-          BASE_SHA="$(git merge-base HEAD origin/main)"
-          BASE_DIR="$RUNNER_TEMP/main-baseline"
-          git worktree add --detach "$BASE_DIR" "$BASE_SHA"
-          ln -s "$GITHUB_WORKSPACE/telink_tools" "$BASE_DIR/telink_tools"
-
-          (
-            cd "$BASE_DIR"
-            bash make_scripts/build_bseed_ts011f_pm_v8.sh build/baseline-pm
-            bash make_scripts/build_bseed_ts0726_v8.sh build/baseline-ts0726
-          )
-
-          bash make_scripts/build_bseed_ts011f_pm_v8.sh build/client-control-pm
-          bash make_scripts/build_bseed_ts0726_v8.sh build/client-control-ts0726
-
-          # Normal client-only changes must preserve both Router images exactly.
-          # The reviewed shared ZCL correction intentionally changes both;
-          # allow only the pinned, separately compiled PM/TS0726 binaries.
-          if cmp -s "$BASE_DIR/build/baseline-pm/forward.bin" build/client-control-pm/forward.bin && cmp -s "$BASE_DIR/build/baseline-ts0726/forward.bin" build/client-control-ts0726/forward.bin; then
-            cmp "$BASE_DIR/build/baseline-pm/forward.bin" build/client-control-pm/forward.bin
-            cmp "$BASE_DIR/build/baseline-pm/forward.ota" build/client-control-pm/forward.ota
-            cmp "$BASE_DIR/build/baseline-ts0726/forward.bin" build/client-control-ts0726/forward.bin
-            cmp "$BASE_DIR/build/baseline-ts0726/forward.ota" build/client-control-ts0726/forward.ota
-          else
-            printf '%s  %s\n' 'e4c6fa0bed8d3397478d8b03ed49c5d9efb11679848105af800f67285b21f281' 'build/client-control-pm/forward.bin' 'd0bf912352bf0bfc8c984ab4438ca5d1fd3fc665b1dc3dd1b3e254a5d8e155ae' 'build/client-control-ts0726/forward.bin' | sha256sum -c -
-            echo 'Accepted only the pinned PM and TS0726 shared-ZCL Router control binaries.'
-            # Both target scripts have already checked board identity, OTA
-            # header, normal/stock wrapper payload equality and clean-source SHA.
-          fi
-
-          {
-            echo "baseline_sha=$BASE_SHA"
-            echo "baseline"
-            sha256sum \
-              "$BASE_DIR/build/baseline-pm/forward.bin" \
-              "$BASE_DIR/build/baseline-pm/forward.ota" \
-              "$BASE_DIR/build/baseline-ts0726/forward.bin" \
-              "$BASE_DIR/build/baseline-ts0726/forward.ota"
-            echo "client_branch_router_controls"
-            sha256sum \
-              build/client-control-pm/forward.bin \
-              build/client-control-pm/forward.ota \
-              build/client-control-ts0726/forward.bin \
-              build/client-control-ts0726/forward.ota
-          } > "$RUNNER_TEMP/router-control-sha256.txt"
+          set -o pipefail
+          # Historical bytes are verified directly from pinned stored
+          # artifacts. They are never rebuilt from current shared source.
+          make bseed/identity-gate 2>&1 | tee "$RUNNER_TEMP/historical-identity-gate.log"
 
       - name: Build separate PM and TS0726 mains clients
         shell: bash
@@ -110,30 +76,84 @@ jobs:
           cp build/bseed-ts0726-client/forward.ota "$RUNNER_TEMP/ts0726-client-first.ota"
           cp build/bseed-ts0726-client/from-router.ota "$RUNNER_TEMP/ts0726-client-first-from-router.ota"
 
-      - name: Build sealed client-to-router rollback wrappers
+      - name: Prove exact-source candidate identities
         shell: bash
         run: |
           set -euo pipefail
-          python3 src/telink/make_ota.py create-ota \
-            --manufacturer-id 4417 --image-type 65024 --file-version 0xFFFFFFFF \
-            build/client-control-pm/forward.bin \
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit('candidate identity rejected: ' + message)
+
+          cases = [
+              (Path('build/bseed-ts011f-pm-client/manifest.json'), 'pm',
+               'OUTLET_BSEED_PM_TS011F', '1.2.5-bseedcli12', 0x12053016, 65024),
+              (Path('build/bseed-ts0726-client/manifest.json'), 'ts0726',
+               'SWITCH_BSEED_TS0726_3GANG', '1.1.8-bseedcli3', 0x1102300F, 65025),
+          ]
+          for path, target, board, build, version, image_type in cases:
+              manifest = json.loads(path.read_text())
+              require(manifest['sourceCommit'] == os.environ['EXPECTED_HEAD'],
+                      '%s sourceCommit is not the candidate head' % target)
+              require(manifest['sourceDirty'] is False, '%s built from dirty source' % target)
+              require(manifest['target'] == target, '%s target mismatch' % target)
+              require(manifest['board'] == board, '%s board mismatch' % target)
+              require(manifest['swBuildId'] == build, '%s build ID mismatch' % target)
+              require(manifest['fileVersion'] == version, '%s file version mismatch' % target)
+              require(manifest['manufacturerCode'] == 4417, '%s manufacturer mismatch' % target)
+              require(manifest['clientImageType'] == image_type, '%s image type mismatch' % target)
+          print('exact-source candidate identities: PASS')
+          PY
+
+      - name: Build sealed client-to-router rollback wrappers from pinned history
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Rollback wraps sealed historical Router bytes, never a fresh
+          # rebuild. reseal-ota refuses a wrong pinned source tuple.
+          python3 src/telink/make_ota.py reseal-ota \
+            --manufacturer-id 4417 \
+            --source-image-type 43556 --source-file-version 0x12053007 \
+            --image-type 65024 --file-version 0xFFFFFFFF \
+            zigbee2mqtt/ota/bseed/ts011f-pm-v12053007.ota \
             build/bseed-ts011f-pm-client/rollback-to-router.ota
-          python3 src/telink/make_ota.py create-ota \
-            --manufacturer-id 4417 --image-type 65025 --file-version 0xFFFFFFFF \
-            build/client-control-ts0726/forward.bin \
+          python3 src/telink/make_ota.py reseal-ota \
+            --manufacturer-id 4417 \
+            --source-image-type 45577 --source-file-version 0x1102300A \
+            --image-type 65025 --file-version 0xFFFFFFFF \
+            zigbee2mqtt/ota/bseed/ts0726-v1102300a.ota \
             build/bseed-ts0726-client/rollback-to-router.ota
           python3 - <<'PY'
-          import pathlib, struct
+          import pathlib
+          import struct
+
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit('rollback wrapper rejected: ' + message)
+
           cases = [
-              (pathlib.Path('build/bseed-ts011f-pm-client/rollback-to-router.ota'), 65024),
-              (pathlib.Path('build/bseed-ts0726-client/rollback-to-router.ota'), 65025),
+              (pathlib.Path('zigbee2mqtt/ota/bseed/ts011f-pm-v12053007.ota'),
+               pathlib.Path('build/bseed-ts011f-pm-client/rollback-to-router.ota'), 65024),
+              (pathlib.Path('zigbee2mqtt/ota/bseed/ts0726-v1102300a.ota'),
+               pathlib.Path('build/bseed-ts0726-client/rollback-to-router.ota'), 65025),
           ]
-          for path, image_type in cases:
-              values = struct.unpack('<I5HIH32sI', path.read_bytes()[:56])
-              assert values[0] == 0x0BEEF11E
-              assert values[5] == image_type
-              assert values[6] == 0xFFFFFFFF
-              assert values[-1] == path.stat().st_size
+          for source_path, path, image_type in cases:
+              source = source_path.read_bytes()
+              rollback = path.read_bytes()
+              values = struct.unpack('<I5HIH32sI', rollback[:56])
+              require(values[0] == 0x0BEEF11E, '%s bad OTA magic' % path)
+              require(values[4] == 4417, '%s manufacturer mismatch' % path)
+              require(values[5] == image_type, '%s image type mismatch' % path)
+              require(values[6] == 0xFFFFFFFF, '%s must be max-version' % path)
+              require(values[-1] == path.stat().st_size, '%s size mismatch' % path)
+              require(rollback[56:] == source[56:], '%s payload differs from pinned history' % path)
+              diffs = [i for i, (a, b) in enumerate(zip(source, rollback)) if a != b]
+              require(diffs == [12, 13, 14, 15, 16, 17], '%s unexpected header diffs %r' % (path, diffs))
+          print('sealed rollback wrappers: PASS')
           PY
 
       - name: Rebuild both clients and require byte-identical output
@@ -150,17 +170,21 @@ jobs:
           cmp "$RUNNER_TEMP/ts0726-client-first.ota" build/bseed-ts0726-client/forward.ota
           cmp "$RUNNER_TEMP/ts0726-client-first-from-router.ota" build/bseed-ts0726-client/from-router.ota
 
-      - name: Recreate rollback wrappers after reproducibility rebuild
+      - name: Rebuild rollback wrappers after reproducibility rebuild
         shell: bash
         run: |
           set -euo pipefail
-          python3 src/telink/make_ota.py create-ota \
-            --manufacturer-id 4417 --image-type 65024 --file-version 0xFFFFFFFF \
-            build/client-control-pm/forward.bin \
+          python3 src/telink/make_ota.py reseal-ota \
+            --manufacturer-id 4417 \
+            --source-image-type 43556 --source-file-version 0x12053007 \
+            --image-type 65024 --file-version 0xFFFFFFFF \
+            zigbee2mqtt/ota/bseed/ts011f-pm-v12053007.ota \
             build/bseed-ts011f-pm-client/rollback-to-router.ota
-          python3 src/telink/make_ota.py create-ota \
-            --manufacturer-id 4417 --image-type 65025 --file-version 0xFFFFFFFF \
-            build/client-control-ts0726/forward.bin \
+          python3 src/telink/make_ota.py reseal-ota \
+            --manufacturer-id 4417 \
+            --source-image-type 45577 --source-file-version 0x1102300A \
+            --image-type 65025 --file-version 0xFFFFFFFF \
+            zigbee2mqtt/ota/bseed/ts0726-v1102300a.ota \
             build/bseed-ts0726-client/rollback-to-router.ota
           sha256sum \
             build/bseed-ts011f-pm-client/forward.bin \
@@ -179,32 +203,39 @@ jobs:
           set -euo pipefail
           python3 -m pytest -q tests/test_bseed_mains_client.py
           python3 - <<'PY'
-          import json, pathlib
+          import json
+          import pathlib
+
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit('client contract rejected: ' + message)
+
           for path, expected_pm in [
               (pathlib.Path('build/bseed-ts011f-pm-client/manifest.json'), True),
               (pathlib.Path('build/bseed-ts0726-client/manifest.json'), False),
           ]:
               m = json.loads(path.read_text())
-              assert m['experimental'] is True
-              assert m['role']['logicalType'] == 'end-device'
-              assert m['role']['routing'] is False
-              assert m['role']['sleepy'] is False
-              assert m['role']['rxOnWhenIdle'] is True
-              assert m['role']['powerSource'] == 'mains'
-              assert m['role']['pmEnabled'] is expected_pm
-              assert m['binding']['roleSpecificBindingFork'] is False
-              assert m['distribution']['normalOtaIndex'] is False
-              assert m['distribution']['stockConversion'] is False
+              require(m['experimental'] is True, '%s not experimental' % path)
+              require(m['role']['logicalType'] == 'end-device', '%s role' % path)
+              require(m['role']['routing'] is False, '%s routing' % path)
+              require(m['role']['sleepy'] is False, '%s sleepy' % path)
+              require(m['role']['rxOnWhenIdle'] is True, '%s rx-on' % path)
+              require(m['role']['powerSource'] == 'mains', '%s power' % path)
+              require(m['role']['pmEnabled'] is expected_pm, '%s pmEnabled' % path)
+              require(m['binding']['roleSpecificBindingFork'] is False, '%s binding fork' % path)
+              require(m['distribution']['normalOtaIndex'] is False, '%s index' % path)
+              require(m['distribution']['stockConversion'] is False, '%s stock conversion' % path)
+          print('client role and binding contracts: PASS')
           PY
 
       - name: Upload immutable experimental client artifacts and evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bseed-mains-clients-experimental
+          name: bseed-mains-clients-experimental-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             ${{ runner.temp }}/client-build-environment.txt
-            ${{ runner.temp }}/router-control-sha256.txt
+            ${{ runner.temp }}/historical-identity-gate.log
             ${{ runner.temp }}/client-sha256.txt
             build/bseed-ts011f-pm-client/forward.bin
             build/bseed-ts011f-pm-client/forward.ota

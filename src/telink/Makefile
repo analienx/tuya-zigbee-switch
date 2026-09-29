@@ -101,6 +101,10 @@ endif
 
 DEVICE_DEFS := $(DEVICE_DEFS) $(MIGRATION_DEFINES)
 
+ifneq ($(strip $(BSEED_BUILD_DATE)),)
+DEVICE_DEFS += -DBSEED_BUILD_DATE=$(BSEED_BUILD_DATE)
+endif
+
 ifneq ($(strip $(DEVICE_CONFIG_GUARD)),)
 DEVICE_DEFS := $(DEVICE_DEFS) -DDEVICE_CONFIG_GUARD_$(DEVICE_CONFIG_GUARD)
 endif
@@ -203,7 +207,9 @@ COMMON_SOURCES := \
 	$(SRC_DIR)/zigbee/cover_cluster.c \
 	$(SRC_DIR)/zigbee/battery_cluster.c \
 	$(SRC_DIR)/zigbee/electrical_measurement_cluster.c \
-	$(SRC_DIR)/zigbee/metering_cluster.c
+	$(SRC_DIR)/zigbee/metering_cluster.c \
+	$(SRC_DIR)/zigbee/zcl_write_string_gate.c \
+	$(SRC_DIR)/zigbee/zcl_write_dispatch.c
 
 ALL_TELINK_SOURCES := $(TELINK_SOURCES) $(COMMON_SOURCES)
 

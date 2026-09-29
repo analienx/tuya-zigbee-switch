@@ -99,6 +99,23 @@ CFLAGS += -DDEVICE_MIGRATION_REVERT
 endif
 endif
 
+# Board/role flags for the same persisted-config tests used by release builds.
+DEVICE_CONFIG_GUARD ?=
+STUB_END_DEVICE ?=
+STUB_MAINS_CLIENT ?=
+ifneq ($(strip $(DEVICE_CONFIG_GUARD)),)
+CFLAGS += -DDEVICE_CONFIG_GUARD_$(DEVICE_CONFIG_GUARD)
+endif
+ifeq ($(strip $(DEVICE_CONFIG_GUARD)),BSEED_TS011F_NONPM)
+CFLAGS += -DDEFAULT_CONFIG="o1jzcxou;TS011F-BS;LC2;SB4u;RC3;ID2;M;"
+endif
+ifeq ($(strip $(STUB_END_DEVICE)),1)
+CFLAGS += -DEND_DEVICE
+endif
+ifeq ($(strip $(STUB_MAINS_CLIENT)),1)
+CFLAGS += -DEND_DEVICE -DBSEED_MAINS_CLIENT=1 -DDEBOUNCE_DELAY_MS=20
+endif
+
 # Dedicated unified BSEED PM target flags. Generic stub builds keep these off.
 BSEED_PM_B28WRPVX ?=
 BSEED_PM_B28WRPVX_PROTECTION ?=
@@ -108,6 +125,7 @@ HLW8012_POWER_MULTIPLIER ?=
 
 ifeq ($(strip $(BSEED_PM_B28WRPVX)),1)
 CFLAGS += -DBSEED_PM_B28WRPVX
+CFLAGS += -DDEFAULT_CONFIG="b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;"
 endif
 ifeq ($(strip $(BSEED_PM_B28WRPVX_PROTECTION)),1)
 CFLAGS += -DBSEED_PM_B28WRPVX_PROTECTION

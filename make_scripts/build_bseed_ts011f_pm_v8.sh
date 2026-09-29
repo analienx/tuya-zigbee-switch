@@ -24,12 +24,47 @@ FILE_VERSION_DEC=302329863
 # Opt-in, BUILD-ONLY PM Router repair candidate. Published v8u4 remains immutable.
 # No OTA index or live-device operation is performed by this build script.
 if [[ "${BSEED_PM_ROUTER_CANDIDATE:-0}" == "1" ]]; then
-    SW_BUILD='1.2.5-bseedv8u5-rc2'
-    FILE_VERSION_HEX='0x1205300E'
-    FILE_VERSION_DEC=302329870
-    : "${BSEED_PM_ROUTER_CANDIDATE_OUTPUT:=build/bseed-ts011f-pm-router-v8u5-rc2}"
+    SW_BUILD='1.2.5-bseedv8u5-rc3'
+    FILE_VERSION_HEX='0x12053010'
+    FILE_VERSION_DEC=302329872
+    : "${BSEED_PM_ROUTER_CANDIDATE_OUTPUT:=build/bseed-ts011f-pm-router-v8u5-rc3}"
     set -- "$BSEED_PM_ROUTER_CANDIDATE_OUTPUT"
 fi
+
+# Opt-in, BUILD-ONLY PM Router recovery candidate for the client-to-router
+# return path. v8u5-rc4 carries the bounded PM legacy-migration quarantine;
+# FILEVER is the next monotonic value above the cli8/from-router 0x12053010
+# pair, per bseed_ota_identity suggest-next. Published v8u4 stays immutable.
+if [[ "${BSEED_PM_ROUTER_RECOVERY:-0}" == "1" ]]; then
+    SW_BUILD='1.2.5-bseedv8u5-rc4'
+    FILE_VERSION_HEX='0x12053011'
+    FILE_VERSION_DEC=302329873
+    : "${BSEED_PM_ROUTER_RECOVERY_OUTPUT:=build/bseed-ts011f-pm-router-v8u5-rc4}"
+    set -- "$BSEED_PM_ROUTER_RECOVERY_OUTPUT"
+fi
+
+# Opt-in, BUILD-ONLY PM ZCL-read/OTA-start repair candidate. The identity is
+# emitted by bseed_ota_identity.py and is newer than the sealed rc4/cli9 pair.
+if [[ "${BSEED_PM_ROUTER_READ_FIX:-0}" == "1" ]]; then
+    SW_BUILD='1.2.5-bseedv8u5-rc5'
+    FILE_VERSION_HEX='0x12053012'
+    FILE_VERSION_DEC=302329874
+    : "${BSEED_PM_ROUTER_READ_FIX_OUTPUT:=build/bseed-ts011f-pm-router-v8u5-rc5}"
+    set -- "$BSEED_PM_ROUTER_READ_FIX_OUTPUT"
+fi
+# Consolidated same-source Router companion to PM Client cli11.
+RELEASE_DATE_OVERRIDE=''
+if [[ "${BSEED_PM_CONSOLIDATED:-0}" == "1" ]]; then
+    readarray -t release_vars < <(python3 helper_scripts/bseed_pm_release.py vars --role router)
+    [[ ${#release_vars[@]} == 4 ]] || exit 2
+    SW_BUILD="${release_vars[0]}"
+    FILE_VERSION_HEX="${release_vars[1]}"
+    FILE_VERSION_DEC="${release_vars[2]}"
+    RELEASE_DATE_OVERRIDE="${release_vars[3]}"
+    : "${BSEED_PM_CONSOLIDATED_OUTPUT:=build/bseed-pm-router-r7}"
+    set -- "$BSEED_PM_CONSOLIDATED_OUTPUT"
+fi
+
 VOLTAGE_MULTIPLIER=161460
 CURRENT_MULTIPLIER=144679
 POWER_MULTIPLIER=16989
@@ -108,6 +143,7 @@ OTA="$OUT_DIR/forward.ota"
 FROM_TUYA_OTA="$OUT_DIR/from_tuya.ota"
 
 COMMON_ARGS=(
+    BSEED_BUILD_DATE="$RELEASE_DATE_OVERRIDE"
     VERSION_STR="$SW_BUILD"
     FILE_VERSION="$FILE_VERSION_HEX"
     NVM_MIGRATIONS_VERSION="$NVM_SCHEMA"
@@ -146,13 +182,14 @@ make -C src/telink ota \
     OTA_IMAGE_TYPE="$STOCK_IMAGE_TYPE" \
     OTA_VERSION=0xFFFFFFFF
 
-python3 - "$OUT_DIR" "$BOARD" "$SW_BUILD" "$FILE_VERSION_DEC" \
+BSEED_MANIFEST_BUILD_DATE="$RELEASE_DATE_OVERRIDE" python3 - "$OUT_DIR" "$BOARD" "$SW_BUILD" "$FILE_VERSION_DEC" \
     "$MANUFACTURER_CODE" "$IMAGE_TYPE" "$STOCK_MANUFACTURER_NAME" \
     "$STOCK_IMAGE_TYPE" "$NVM_SCHEMA" "$CANONICAL" \
     "$VOLTAGE_MULTIPLIER" "$CURRENT_MULTIPLIER" "$POWER_MULTIPLIER" <<'PY'
 from __future__ import annotations
 
 import hashlib
+import os
 import json
 import pathlib
 import struct
@@ -268,6 +305,7 @@ manifest = {
     "sourceDirty": source_dirty,
     "board": board,
     "swBuildId": sw_build,
+    "buildDate": os.environ['BSEED_MANIFEST_BUILD_DATE'] or None,
     "fileVersion": file_version,
     "manufacturerCode": manufacturer,
     "imageType": image_type,
@@ -318,3 +356,11 @@ for path in (bin_path, ota_path, from_tuya_path):
 )
 print(json.dumps(manifest, indent=2, sort_keys=True))
 PY
+
+# Identity gate: refuse builds that reuse a released (image_type, file_version)
+# with different bytes or mismatch the claimed version string. Transport
+# wrappers (from_tuya.ota) stay on the shared max-version identity by design.
+python3 helper_scripts/bseed_ota_identity.py gate --image "$OTA" \
+  --expect-version-str "$SW_BUILD" \
+  --expect-image-type "$IMAGE_TYPE" \
+  --expect-file-version "$FILE_VERSION_HEX"

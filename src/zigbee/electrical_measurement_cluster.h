@@ -3,6 +3,11 @@
 
 #include <stdint.h>
 #include "hal/zigbee.h"
+
+/* Application maximum for the writable calibration string. Storage spans
+ * the full ZCL CHAR_STR range so the SDK pre-hook copy cannot overflow;
+ * longer input is rejected and the retained value restored. */
+#define ELEC_MEAS_CALIBRATION_STR_APP_MAX    36
 #include "base_components/energy_meter.h"
 #include "base_components/overload_protection.h"
 
@@ -30,7 +35,7 @@ typedef struct {
     uint16_t              calibrate_power;
     struct {
         uint8_t len;
-        char    str[36];
+        char    str[255];
     }                     calibration_values;
     overload_protection_t overload;
     void *                protected_relay;

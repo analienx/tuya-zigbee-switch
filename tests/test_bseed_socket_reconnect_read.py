@@ -7,6 +7,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 GEN = ROOT / "helper_scripts/make_z2m_custom_converters.py"
 
+from test_bseed_socket_converter_exposes import _definition
+
 
 def generated(*args):
     return subprocess.check_output([sys.executable, str(GEN), *args, "device_db.yaml"], cwd=ROOT, text=True)
@@ -17,13 +19,9 @@ def test_socket_only_reconnect_endpoint_selection_is_generated(args):
     result = generated(*args)
     assert result.count("bseedSocketRelayOnOff(),") == 2
     assert result.count("// BSEED_SOCKET_RECONNECT_READ_START") == 1
-    for model in ('"TS011F-BS-PM"', '"TS011F-BS"'):
-        start = result.index(model)
-        end = result.find("\n    {\n", start + len(model))
-        definition = result[start:end] if end >= 0 else result[start:]
-        assert "bseedSocketRelayOnOff()," in definition
-    dimmer = result[result.index('"TS0726-3-BS"'):]
-    assert "bseedSocketRelayOnOff()," not in dimmer.split("\n    {\n", 1)[0]
+    for model in ("TS011F-BS-PM", "TS011F-BS"):
+        assert "bseedSocketRelayOnOff()," in _definition(result, model)
+    assert "bseedSocketRelayOnOff()," not in _definition(result, "TS0726-3-BS")
 
 
 

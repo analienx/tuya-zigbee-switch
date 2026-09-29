@@ -4,6 +4,16 @@ Scope: **verified TS011F-BS-PM / TS011F_plug_1_2 PM board only**, expected firmw
 
 ## Runbook
 
+2026-09-27 consolidated candidate: see [cli11 release](bseed_pm_consolidated_cli11_20260927.md).
+Use its matched generated converter before the canary. Its normal configure
+callback installs the complete PM binding/reporting/scale contract, including
+raw-unit report thresholds; the existing automatic post-OTA provisioner remains
+an audit/bounded recovery step, not a manual task the owner must remember.
+Fresh-cache and existing-cache CI tests verify normal configuration needs no
+additional reporting writes and converts raw values to standard units correctly.
+That offline contract still requires fresh-commissioning and physical metering
+acceptance on the target. Non-PM firmware must never use this PM procedure.
+
 1. Confirm board/stock OTA tuple, exact IEEE, converter, intended role, existing load and fixture safety. Keep the historical campaign lock and private logs; do not start a new workdir to bypass an incomplete postflash campaign. Preserve one Router cohort and use the existing router-scoped join/metadata repair for a cross-role transition.
 2. Configure `docs/bseed_ota_profile.example.json` privately. For PM devices, supply `pm_ssh_host`, `pm_ssh_key`, `pm_max_writes`, `pm_observe_seconds`, `pm_allow_configure` and `pm_expected_idle`. The SSH identity must be host-key verified and read-only access to the Zigbee2MQTT `database.db` must succeed; the script never writes that database. Use a private evidence directory outside git. Do not commit device IDs, IPs, private profiles, network logs or image binaries.
 3. For existing flashed PM devices: `python helper_scripts/bseed_ota_campaign.py --profile PRIVATE.json --mode provision-pm --confirm-ieee EXACT_IEEE`. `provision-pm` is independently resumable; its dry-run equivalent is `python helper_scripts/bseed_pm_provision.py` with the same identity/SSH/MQTT arguments **without** `--apply`. The direct provisioner defaults to **one reporting write**; the campaign defaults to **four sequential, bounded writes** (override privately with `pm_max_writes: 1` for an unstable canary). A timeout stops all subsequent writes.

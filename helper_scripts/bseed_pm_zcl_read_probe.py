@@ -14,7 +14,8 @@ from bseed_pm_provision import Bridge, ROOT, select_target
 
 READ_ALLOWLIST = {
     'haElectricalMeasurement': frozenset({'activePower','rmsCurrent','rmsVoltage',
-        'acVoltageMultiplier','acVoltageDivisor','acCurrentMultiplier','acCurrentDivisor'}),
+        'acVoltageMultiplier','acVoltageDivisor','acCurrentMultiplier','acCurrentDivisor',
+        'acPowerMultiplier','acPowerDivisor'}),
     'seMetering': frozenset({'currentSummDelivered','multiplier','divisor'}),
 }
 

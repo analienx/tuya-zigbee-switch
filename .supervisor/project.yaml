@@ -17,6 +17,12 @@ canonical_skill:
   ref: main
   path: skills/supervisor-executor/SKILL.md
 
+capability_policy:
+  source: external_github
+  repo: analienx/config
+  ref: main
+  path: skills/supervisor-executor/CAPABILITY_PROFILES.md
+
 registry:
   source: external_github
   repo: analienx/config
@@ -27,10 +33,18 @@ context:
   project_readme: ROMASKU_ORIGINAL_README.md
   firmware_sources: src
   tests: tests
+  firmware_fast_path:
+    repo: analienx/config
+    ref: main
+    path: skills/supervisor-executor/FIRMWARE_FAST_PATH.md
+
+control:
+  primary_issue: 55
 
 executor:
   environment: github_hosted_actions
   runtime: github_actions
+  objective_mode: direct
   interface: github_actions
   management_paths:
     - github_actions

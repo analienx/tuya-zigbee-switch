@@ -50,6 +50,9 @@ zigbee_relay_cluster *relay_cluster_by_endpoint[10];
 
 void relay_cluster_callback_attr_write_trampoline(uint8_t endpoint,
                                                   uint16_t attribute_id) {
+    if (endpoint >= 10 || relay_cluster_by_endpoint[endpoint] == NULL) {
+        return;
+    }
     relay_cluster_on_write_attr(relay_cluster_by_endpoint[endpoint],
                                 attribute_id);
 }
@@ -66,6 +69,11 @@ void relay_cluster_add_to_endpoint(zigbee_relay_cluster *cluster,
                                    hal_zigbee_endpoint *endpoint) {
     relay_cluster_by_endpoint[endpoint->endpoint] = cluster;
     cluster->endpoint = endpoint->endpoint;
+
+    /* The protection-trip latch is boot-volatile: every boot starts unlatched
+     * and applies the persisted startup/mode policy. A persistent overload
+     * re-trips once metering-driven monitoring resumes. */
+    cluster->protection_tripped = 0;
     relay_cluster_load_attrs_from_nv(cluster);
     relay_cluster_load_physical_mode_from_nv(cluster);
     bool binding_intent_loaded =
@@ -213,8 +221,10 @@ hal_zigbee_cmd_result_t relay_cluster_level_callback(zigbee_relay_cluster *clust
     return HAL_ZIGBEE_CMD_PROCESSED;
 }
 
-static uint8_t relay_cluster_effective_physical_state(
-    const zigbee_relay_cluster *cluster) {
+uint8_t relay_cluster_is_physically_on(const zigbee_relay_cluster *cluster) {
+    if (cluster->protection_tripped) {
+        return 0;
+    }
     switch (cluster->physical_relay_mode) {
     case ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON:
         return 1;
@@ -244,7 +254,7 @@ void sync_indicator_led(zigbee_relay_cluster *cluster) {
         break;
     case ZCL_ONOFF_INDICATOR_MODE_PHYSICAL_OUTPUT:
         cluster->indicator_state =
-            relay_cluster_effective_physical_state(cluster);
+            relay_cluster_is_physically_on(cluster);
         break;
     case ZCL_ONOFF_INDICATOR_MODE_BINDING_INTENT:
         cluster->indicator_state = cluster->binding_intent_state ? 1 : 0;
@@ -273,6 +283,10 @@ static void relay_cluster_set_virtual_state(zigbee_relay_cluster *cluster,
 }
 
 void relay_cluster_apply_physical_mode(zigbee_relay_cluster *cluster) {
+    if (cluster->protection_tripped) {
+        relay_drive_physical(cluster->relay, 0);
+        return;
+    }
     switch (cluster->physical_relay_mode) {
     case ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED:
         relay_drive_physical(cluster->relay, cluster->relay->on);
@@ -291,6 +305,12 @@ void relay_cluster_apply_physical_mode(zigbee_relay_cluster *cluster) {
 }
 
 void relay_cluster_on(zigbee_relay_cluster *cluster) {
+    if (cluster->protection_tripped) {
+        /* Protection owns re-arm.  A user/binding command must never bypass a
+         * timed retry or lockout by clearing the physical safety latch. */
+        sync_indicator_led(cluster);
+        return;
+    }
     if (cluster->physical_relay_mode == ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED) {
         relay_on(cluster->relay);
     } else {
@@ -309,10 +329,30 @@ void relay_cluster_off(zigbee_relay_cluster *cluster) {
 }
 
 void relay_cluster_toggle(zigbee_relay_cluster *cluster) {
-    if (cluster->physical_relay_mode == ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED) {
-        relay_toggle(cluster->relay);
+    if (cluster->relay->on) {
+        relay_cluster_off(cluster);
     } else {
-        relay_cluster_set_virtual_state(cluster, !cluster->relay->on);
+        relay_cluster_on(cluster);
+    }
+}
+
+void relay_cluster_protection_trip(zigbee_relay_cluster *cluster) {
+    cluster->protection_tripped = 1;
+    relay_cluster_set_virtual_state(cluster, 0);
+    relay_drive_physical(cluster->relay, 0);
+    sync_indicator_led(cluster);
+}
+
+void relay_cluster_protection_rearm(zigbee_relay_cluster *cluster) {
+    if (!cluster || !cluster->protection_tripped)
+        return;
+
+    cluster->protection_tripped = 0;
+    if (cluster->physical_relay_mode == ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED) {
+        relay_on(cluster->relay);
+    } else {
+        relay_cluster_set_virtual_state(cluster, 1);
+        relay_cluster_apply_physical_mode(cluster);
     }
     sync_indicator_led(cluster);
 }
@@ -417,9 +457,19 @@ void relay_cluster_load_attrs_from_nv(zigbee_relay_cluster *cluster) {
     if (st != HAL_NVM_SUCCESS)
         return;
 
-    cluster->startup_mode       = nv_config_buffer.startup_mode;
+    cluster->startup_mode = nv_config_buffer.startup_mode;
+    /* PREVIOUS is 0xFF; comparison against it accepts every uint8_t. */
+    if (cluster->startup_mode != ZCL_START_UP_ONOFF_SET_ONOFF_TO_OFF &&
+        cluster->startup_mode != ZCL_START_UP_ONOFF_SET_ONOFF_TO_ON &&
+        cluster->startup_mode != ZCL_START_UP_ONOFF_SET_ONOFF_TOGGLE &&
+        cluster->startup_mode != ZCL_START_UP_ONOFF_SET_ONOFF_TO_PREVIOUS) {
+        cluster->startup_mode = ZCL_START_UP_ONOFF_SET_ONOFF_TO_OFF;
+    }
     cluster->indicator_led_mode = nv_config_buffer.indicator_led_mode;
-    cluster->indicator_state    = nv_config_buffer.indicator_led_on;
+    if (cluster->indicator_led_mode > ZCL_ONOFF_INDICATOR_MODE_MAX) {
+        cluster->indicator_led_mode = ZCL_ONOFF_INDICATOR_MODE_MANUAL;
+    }
+    cluster->indicator_state = nv_config_buffer.indicator_led_on ? 1 : 0;
 }
 
 void relay_cluster_store_physical_mode_to_nv(

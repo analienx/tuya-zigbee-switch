@@ -10,7 +10,7 @@ def test_nonpm_target_has_distinct_router_and_client_identities():
     assert "CANONICAL='o1jzcxou;TS011F-BS;LC2;SB4u;RC3;ID2;M;'" in script
     assert "ROUTER_IMAGE_TYPE=43555" in script
     assert "CLIENT_IMAGE_TYPE=65026" in script
-    assert "FILE_VERSION_HEX='0x1102300F'" in script
+    assert 'bseed_nonpm_release.py vars --role client' in script
     assert "DEFAULT_OUT='build/bseed-ts011f-nonpm-client'" in script
 
 
@@ -22,8 +22,7 @@ def test_nonpm_stock_conversion_is_staged_through_router_not_direct_to_client():
     assert "STOCK_IMAGE_TYPE=54179" in router
     assert "IMAGE_TYPE=43555" in router
     assert "OTA_VERSION=0xFFFFFFFF" in router
-    assert "SW_BUILD='1.1.3-bseedv8'" in router
-    assert "FILE_VERSION_HEX='0x11023001'" in router
+    assert 'bseed_nonpm_release.py vars --role router' in router
     assert 'BUILD ONLY: never publishes, flashes, or mutates a live device.' in router
 
     # The Client artifact intentionally accepts only the already-custom Router
@@ -34,27 +33,26 @@ def test_nonpm_stock_conversion_is_staged_through_router_not_direct_to_client():
     assert "from_tuya" not in client.lower()
 
 
-def test_nonpm_canary_workflow_proves_router_regression_and_client_rollback():
+def test_nonpm_canary_workflow_builds_matrix_and_verifies_history_separately():
     workflow = (ROOT / ".github/workflows/bseed-nonpm-client-canary.yml").read_text()
-    assert "git merge-base HEAD origin/main" in workflow
-    # Ordinary changes retain exact baseline byte equality; the reviewed shared
-    # ZCL delta permits only the separately verified non-PM Router SHA-256.
-    assert "if cmp -s" in workflow
-    assert "sha256sum -c -" in workflow
-    assert "9e5a22ec58513ae1cd2c8a4fe7df602d0fc413df4d36c5dbc34ee9bb3550130f" in workflow
-    assert 'cd "$BASE_DIR"' in workflow
-    assert "cmp \"$BASE_DIR/build/baseline-nonpm/forward.bin\" build/client-control-nonpm/forward.bin" in workflow
-    assert "build_bseed_ts011f_nonpm_router.sh build/baseline-nonpm" in workflow
-    assert "build_bseed_ts011f_nonpm_router.sh build/client-control-nonpm" in workflow
-    assert "build_bseed_mains_client.sh nonpm" in workflow
-    assert "reseal-ota" in workflow
-    assert "--source-image-type 43555 --source-file-version 0x11023001" in workflow
-    assert "--image-type 65026 --file-version 0xFFFFFFFF" in workflow
-    assert "zigbee2mqtt/ota/bseed/ts011f-nonpm-v11023001.ota" in workflow
-    assert "rollback[56:] == source[56:]" in workflow
-    assert "rollback-to-router.ota" in workflow
-    assert "Rebuild Client and require byte-identical output" in workflow
-    assert "normalOtaIndex" in workflow
+    # Stored historical bytes are verified directly; they are never rebuilt
+    # from current shared source to compare hashes.
+    assert "make bseed/identity-gate" in workflow
+    assert "git worktree add" not in workflow
+    assert "merge-base" not in workflow
+    assert "baseline-nonpm" not in workflow
+    assert "client-control-nonpm" not in workflow
+    assert "9e5a22ec58513ae1cd2c8a4fe7df602d0fc413df4d36c5dbc34ee9bb3550130f" not in workflow
+    # The candidate path builds both fresh roles with clean rebuilds.
+    assert "helper_scripts/bseed_nonpm_variant_matrix.py" in workflow
+    assert "set -o pipefail" in workflow
+    assert "build/bseed-nonpm-role-matrix-*/ROLE_MATRIX.json" in workflow
+    assert "build/bseed-nonpm-role-matrix-*/router/*" in workflow
+    assert "build/bseed-nonpm-role-matrix-*/client/*" in workflow
+    assert "bseed-nonpm-role-matrix-${{ github.event.pull_request.head.sha || github.sha }}" in workflow
+    # Exact candidate head, never a synthetic merge checkout.
+    assert "ref: ${{ github.event.pull_request.head.sha || github.sha }}" in workflow
+    assert 'test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"' in workflow
 
 
 def test_nonpm_canary_identity_guard_is_exact():

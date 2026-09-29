@@ -8,6 +8,7 @@
 
 #include "telink_size_t_hack.h"
 
+#include "hal/tasks.h"
 #include "hal/zigbee.h"
 #include "telink_zigbee_hal.h"
 #include "version_cfg.h"
@@ -21,16 +22,61 @@ void zdo_leave_indication_callback(nlme_leave_ind_t *pLeaveInd);
 void zdo_leave_confirmation_callback(nlme_leave_cnf_t *pLeaveCnf);
 
 #ifdef BSEED_MAINS_CLIENT
+
 /* Rx-on-when-idle clients still need parent MAC-poll keepalives. One per
  * minute is 60x lighter than the standard 1s sleepy-end-device poll. */
-#define MAINS_CLIENT_KEEPALIVE_POLL_MS 60000u
+#define MAINS_CLIENT_KEEPALIVE_POLL_MS    60000u
+#define KEEPALIVE_VERIFY_TICK_MS          60000u
+#define KEEPALIVE_RETRY_MS                5000u
+#define OTA_POLL_VERIFY_MS                1000u
+static hal_task_t keepalive_verify_task;
+static bool       ota_fast_poll_active = false;
+
+static uint32_t desired_mains_client_poll_ms(void) {
+    return ota_fast_poll_active ? RESPONSE_POLL_RATE : MAINS_CLIENT_KEEPALIVE_POLL_MS;
+}
+
+static void keepalive_verify_handler(void *arg) {
+    uint32_t next_ms = ota_fast_poll_active ? OTA_POLL_VERIFY_MS : KEEPALIVE_VERIFY_TICK_MS;
+
+    (void)arg;
+    if (hal_zigbee_get_poll_rate_ms() != desired_mains_client_poll_ms()) {
+        if (zb_setPollRate(desired_mains_client_poll_ms()) != RET_OK) {
+            next_ms = ota_fast_poll_active ? OTA_POLL_VERIFY_MS : KEEPALIVE_RETRY_MS;
+        }
+    }
+    hal_tasks_schedule(&keepalive_verify_task, next_ms);
+}
+
 static void configure_mains_client_keepalive(void) {
-    u8 status = zb_setPollRate(MAINS_CLIENT_KEEPALIVE_POLL_MS);
+    u8 status = zb_setPollRate(desired_mains_client_poll_ms());
+
     if (status != RET_OK) {
         printf("Mains client keepalive setup failed: %u\r\n", status);
     }
+    keepalive_verify_task.handler = keepalive_verify_handler;
+    keepalive_verify_task.arg     = NULL;
+    hal_tasks_schedule(&keepalive_verify_task,
+                       ota_fast_poll_active ? OTA_POLL_VERIFY_MS :
+                       (status == RET_OK ? KEEPALIVE_VERIFY_TICK_MS : KEEPALIVE_RETRY_MS));
 }
+
+void hal_zigbee_set_ota_poll_active(bool fast) {
+    ota_fast_poll_active = fast;
+    // Also retry failed fast-poll setup; a join callback during OTA must not
+    // restore the slow keepalive rate while blocks are still being exchanged.
+    configure_mains_client_keepalive();
+}
+
 #endif
+
+#if defined(ZB_ED_ROLE) && !defined(BSEED_MAINS_CLIENT)
+void hal_zigbee_set_ota_poll_active(bool fast) {
+    hal_zigbee_set_poll_rate_ms(fast ? RESPONSE_POLL_RATE : POLL_RATE);
+}
+
+#endif
+
 
 typedef enum {
     TELINK_NETWORK_RECOVERY_IDLE = 0,
@@ -120,12 +166,16 @@ void bdb_init_callback(u8 status, u8 joinedNetwork) {
     if (status == BDB_INIT_STATUS_SUCCESS) {
         network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
         if (joinedNetwork) {
-            ota_queryStart(OTA_QUERY_INTERVAL);
 #ifdef BSEED_MAINS_CLIENT
             configure_mains_client_keepalive();
 #endif
 #if defined(ZB_ED_ROLE) && !defined(BSEED_MAINS_CLIENT)
             zb_setPollRate(POLL_RATE);
+#endif
+#ifdef BSEED_PM_B28WRPVX
+            telink_zigbee_hal_request_ota_query();
+#else
+            ota_queryStart(OTA_QUERY_INTERVAL);
 #endif
         }
     } else {
@@ -142,7 +192,6 @@ void bdb_commissioning_callback(u8 status, void *arg) {
     switch (status) {
     case BDB_COMMISSION_STA_SUCCESS:
         network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
-        ota_queryStart(OTA_QUERY_INTERVAL);
 #ifdef BSEED_MAINS_CLIENT
         configure_mains_client_keepalive();
 #endif
@@ -152,6 +201,11 @@ void bdb_commissioning_callback(u8 status, void *arg) {
         // after fast re-connect.
         zb_setPollRate(POLL_RATE);
         printf("Set poll rate to %d\r\n", POLL_RATE);
+#endif
+#ifdef BSEED_PM_B28WRPVX
+        telink_zigbee_hal_request_ota_query();
+#else
+        ota_queryStart(OTA_QUERY_INTERVAL);
 #endif
         break;
     case BDB_COMMISSION_STA_IN_PROGRESS:

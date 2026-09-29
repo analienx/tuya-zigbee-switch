@@ -3,10 +3,17 @@
 First run --mode preflight, then --mode check (with a one-entry index),
 then --mode flash. Never run two OTA campaigns at once.
 """
+# Live checks use explicit exceptions. Retain the conservative optimized-mode
+# refusal as defense in depth before imports, I/O or MQTT.
+if not __debug__:
+    raise RuntimeError('OTA runner requires Python without -O or PYTHONOPTIMIZE')
+
 import argparse
+import binascii
 import datetime as dt
 import hashlib
 import json
+import math
 from pathlib import Path
 import struct
 import threading
@@ -35,13 +42,45 @@ def matches_response(message, token, device, ieee):
 
 
 def wait_for_check_result(event, seconds):
-    assert seconds >= 70, 'Check monitor must outlast Zigbee2MQTT 60-second response timeout'
+    if not (seconds >= 70):
+        raise AssertionError('Check monitor must outlast Zigbee2MQTT 60-second response timeout')
     return event.wait(seconds)
 
 
 def new_campaign_allowed(previous):
     # Legacy update_ok is only a transfer result; it must not permit another flash.
-    return not previous or previous.get('phase') in ('postflash_accepted', 'preflight_abort')
+    return not previous or previous.get('phase') in (
+        'postflash_accepted', 'installed_image_reconciled',
+        'source_unchanged_reconciled', 'preflight_abort')
+
+
+def archive_prior_check(work):
+    prior = work / 'LAST_CHECK.json'
+    if not prior.exists(): return None
+    archive = work / ('CHECK_ARCHIVE_' + uuid.uuid4().hex + '.json')
+    prior.replace(archive)
+    return archive
+
+
+def write_live_status(work, **fields):
+    """Atomically persist the latest OTA state for detached/status-only views.
+
+    This file is observational only. ACTIVE_LOCK.json and the shared network
+    lock remain the campaign authorities.
+    """
+    path = Path(work) / 'LIVE_STATUS.json'
+    current = {}
+    if path.is_file():
+        try:
+            current = json.loads(path.read_text(encoding='utf8'))
+        except (ValueError, OSError):
+            current = {}
+    current.update(fields)
+    current['observed_at'] = timestamp()
+    tmp = path.with_name(path.name + '.tmp')
+    tmp.write_text(json.dumps(current, indent=2, default=str) + '\n', encoding='utf8')
+    tmp.replace(path)
+    return current
 
 
 def ota_transport_phase(response):
@@ -50,23 +89,90 @@ def ota_transport_phase(response):
     return 'update_timeout_or_unconfirmed'
 
 
+
+def validate_nonpm_native_ota_image(image, expected_version):
+    """Fail closed on corrupt 512K-layout BSEED non-PM Client images."""
+    if not (62 + 32 <= len(image) <= 208 * 1024):
+        raise AssertionError('Non-PM OTA image length outside conservative 512K slot limit')
+    sub_type, sub_len = struct.unpack_from('<HI', image, 56)
+    if not (sub_type == 0 and sub_len == len(image) - 62):
+        raise AssertionError('Non-PM OTA sub-element length/type mismatch')
+    native = image[62:]
+    if not (native[6:8] == b']\x02'):
+        raise AssertionError('Non-PM Telink OTA magic missing')
+    if not (struct.unpack_from('<I', native, 8)[0] == 1414286923):
+        raise AssertionError('Non-PM Telink startup flag missing')
+    if not (struct.unpack_from('<I', native, 2)[0] == expected_version):
+        raise AssertionError('Non-PM embedded version differs from OTA header')
+    if not (struct.unpack_from('<I', native, 24)[0] == len(native)):
+        raise AssertionError('Non-PM embedded firmware length mismatch')
+    if not (struct.unpack_from('<I', native, len(native) - 4)[0] == binascii.crc32(native[:-4]) ^ 4294967295):
+        raise AssertionError('Non-PM embedded CRC mismatch')
+    return True
+
+
 def verify_image(args):
     image = Path(args.image).read_bytes()
-    assert len(image) > 64 and digest(image) == args.sha256, 'Image SHA/size mismatch'
+    if not (len(image) > 64 and digest(image) == args.sha256):
+        raise AssertionError('Image SHA/size mismatch')
     header = struct.unpack_from('<I5HIH32sI', image)
-    assert header[0] == 0x0BEEF11E and header[2] == 56 and header[9] == len(image), 'Invalid OTA header'
-    assert (header[4], header[5], header[6]) == (args.manufacturer_code, args.image_type, args.file_version), 'Wrong OTA identity'
+    if not (header[0] == 200208670 and header[2] == 56 and (header[9] == len(image))):
+        raise AssertionError('Invalid OTA header')
+    if not ((header[4], header[5], header[6]) == (args.manufacturer_code, args.image_type, args.file_version)):
+        raise AssertionError('Wrong OTA identity')
+    native = image
+    native_header = header
     if args.native_image:
         native = Path(args.native_image).read_bytes()
-        assert image[56:] == native[56:], 'Stock wrapper payload differs from native firmware'
+        native_header = struct.unpack_from('<I5HIH32sI', native)
+        if not (len(native) > 64 and native_header[0] == 200208670 and native_header[2] == 56 and native_header[9] == len(native)):
+            raise AssertionError('Invalid native OTA image')
+        if not (image[56:] == native[56:]):
+            raise AssertionError('Transport wrapper payload differs from native firmware')
+    if getattr(args, 'non_pm', False):
+        validate_nonpm_native_ota_image(native, native_header[6])
     with urllib.request.urlopen(args.url, timeout=12) as reply:
-        assert reply.status == 200 and digest(reply.read()) == args.sha256, 'HTTP image mismatch'
+        if not (reply.status == 200 and digest(reply.read()) == args.sha256):
+            raise AssertionError('HTTP image mismatch')
     return image, header
 
 
-def update_payload(ieee, url, token, max_block_bytes):
-    assert 10 <= max_block_bytes <= 100, 'OTA maximum data size must be 10..100 bytes'
-    return {'id': ieee, 'url': url, 'transaction': token, 'image_block_request_timeout': 600000, 'default_maximum_data_size': max_block_bytes}
+def update_payload(ieee, url, token, max_block_bytes, response_delay_ms=None, request_timeout_ms=600000):
+    if not (10 <= max_block_bytes <= 100):
+        raise AssertionError('OTA maximum data size must be 10..100 bytes')
+    if not (response_delay_ms is None or 0 <= response_delay_ms <= 10000):
+        raise AssertionError('OTA response delay must be 0..10000 ms')
+    if not (60000 <= request_timeout_ms <= 3600000):
+        raise AssertionError('OTA request timeout must be 60000..3600000 ms')
+    payload = {'id': ieee, 'url': url, 'transaction': token, 'image_block_request_timeout': request_timeout_ms, 'default_maximum_data_size': max_block_bytes}
+    if response_delay_ms:
+        payload['image_block_response_delay'] = response_delay_ms
+    return payload
+
+
+def validate_metering_preflight(relay, *, non_pm, model, manufacturer, role, max_reported_watts,
+                               nonpm_router_transition=False, ts0726=False):
+    """Explicit non-PM/TS0726 exceptions; PM devices must supply a bounded fresh power reading."""
+    if non_pm and ts0726:
+        raise AssertionError('Conflicting metering exceptions')
+    if ts0726:
+        if not ((model, manufacturer, role) in (('TS0726-3-BS', 'iedhxgyi', 'Router'),
+                                                ('TS0726', '_TZ3002_iedhxgyi', 'Router'))):
+            raise AssertionError('TS0726 exception only for BSEED TS0726-3-BS Router')
+        if not ('power' not in relay):
+            raise AssertionError('TS0726 preflight unexpectedly exposes PM data; inspect identity')
+        return None
+    if non_pm:
+        if not (model == 'TS011F-BS' and manufacturer == 'o1jzcxou' and
+                (role == 'EndDevice' or (role == 'Router' and nonpm_router_transition))):
+            raise AssertionError('Non-PM exception only for BSEED TS011F-BS Client')
+        if not ('power' not in relay):
+            raise AssertionError('Non-PM preflight unexpectedly exposes PM data; inspect identity')
+        return None
+    power = relay.get('power')
+    if not (type(power) in (int, float) and math.isfinite(power) and (0 <= power <= max_reported_watts)):
+        raise AssertionError('Power missing or above limit')
+    return power
 
 
 def arguments():
@@ -78,31 +184,118 @@ def arguments():
     p.add_argument('--image-type', type=lambda x: int(x, 0), required=True)
     p.add_argument('--file-version', type=lambda x: int(x, 0), required=True)
     p.add_argument('--native-image')
+    p.add_argument('--campaign-profile', help='Canonical private profile required for check/flash')
     p.add_argument('--index-url', help='Single-entry OTA JSON index URL; required for read-only --mode check')
     p.add_argument('--expect-relay', choices=['ON', 'OFF'], required=True)
     p.add_argument('--relay-get-key', choices=['state','state_relay'], default='state')
     p.add_argument('--max-reported-watts', type=float, default=1.0)
+    p.add_argument('--non-pm', action='store_true', help='Strict non-PM TS011F-BS Client exception; never use for PM devices')
+    p.add_argument('--ts0726', action='store_true', help='Strict TS0726-3-BS Router exception (no metering hardware); never use for PM devices')
+    p.add_argument('--hardware-evidence', help='Private exact-board recovery readback attestation, non-PM flash only')
+    p.add_argument('--accept-nonrecoverable-ota-risk', action='store_true', help='One exact-canary non-PM OTA; failure may require replacement')
+    p.add_argument('--confirm-load-unplugged', action='store_true', help='Non-PM flash only; operator has just verified no appliance attached')
+    p.add_argument('--preflash-build')
+    p.add_argument('--preflash-relay-physical-mode')
     p.add_argument('--timeout-seconds', type=int, default=2400)
     p.add_argument('--check-timeout-seconds', type=int, default=DEFAULT_CHECK_TIMEOUT_SECONDS)
     p.add_argument('--max-block-bytes', type=int, default=50, help='OTA per-request maximum; conservative 50-byte default for fragile meshes')
+    p.add_argument('--response-delay-ms', type=int, default=None, help='Paced OTA profile for sleepy EndDevice clients: minimum ms between server block responses (Z2M image_block_response_delay); omit for server default')
+    p.add_argument('--request-timeout-ms', type=int, default=600000, help='Per-block server wait for the next client request (Z2M image_block_request_timeout); raise for paced transfers so retry storms are not funeraled early')
     return p.parse_args()
 
 
 def main():
     args = arguments()
-    assert 10 <= args.max_block_bytes <= 100, 'OTA maximum data size must be 10..100 bytes'
-    assert args.check_timeout_seconds >= 70, 'OTA check wait must outlast Zigbee2MQTT 60-second device timeout'
+    campaign = None
+    if args.mode in ('check', 'flash'):
+        if not args.campaign_profile:
+            raise ValueError('Use the canonical campaign with a private profile for check/flash')
+        from bseed_ota_campaign import load_profile
+        from bseed_socket_version_policy import require_increasing, number
+        campaign = load_profile(args.campaign_profile)
+        for key, value in (('device', args.device), ('ieee', args.ieee), ('manufacturer', args.manufacturer),
+                           ('model', args.model), ('preflash_role', args.role), ('sha256', args.sha256),
+                           ('expect_relay', args.expect_relay), ('url', args.url), ('index_url', args.index_url)):
+            if campaign.get(key) != value:
+                raise ValueError('Runner differs from canonical profile: ' + key)
+        for key, value in (('image', args.image), ('workdir', args.workdir)):
+            if Path(campaign[key]).resolve() != Path(value).resolve():
+                raise ValueError('Runner path differs from canonical profile: ' + key)
+        native_arg = getattr(args, 'native_image', None)
+        if campaign.get('native_image'):
+            if not native_arg or Path(campaign['native_image']).resolve() != Path(native_arg).resolve():
+                raise ValueError('Runner path differs from canonical profile: native_image')
+        elif native_arg:
+            raise ValueError('Runner supplied native_image absent from canonical profile')
+        for key, value in (('manufacturer_code', args.manufacturer_code), ('image_type', args.image_type),
+                           ('file_version', args.file_version)):
+            if number(campaign[key]) != value:
+                raise ValueError('Runner tuple differs from canonical profile: ' + key)
+        if args.non_pm != (campaign.get('non_pm') is True):
+            raise ValueError('Runner board mode differs from canonical profile')
+        from bseed_socket_version_policy import split_manufacturer as _split_board
+        if getattr(args, 'ts0726', False) != (_split_board(campaign.get('manufacturer', ''))[0] == 'iedhxgyi'):
+            raise ValueError('Runner TS0726 mode differs from canonical profile')
+        if args.non_pm and getattr(args, 'ts0726', False):
+            raise ValueError('Runner metering exceptions are mutually exclusive')
+        require_increasing(campaign)
+    cross_role = campaign is not None and campaign['preflash_role'] != campaign['postflash_role']
+    source_profile = campaign
+    if not (10 <= args.max_block_bytes <= 100):
+        raise AssertionError('OTA maximum data size must be 10..100 bytes')
+    response_delay_ms = getattr(args, 'response_delay_ms', None)
+    request_timeout_ms = getattr(args, 'request_timeout_ms', 600000)
+    if not (response_delay_ms is None or 0 <= response_delay_ms <= 10000):
+        raise AssertionError('OTA response delay must be 0..10000 ms')
+    if not (60000 <= request_timeout_ms <= 3600000):
+        raise AssertionError('OTA request timeout must be 60000..3600000 ms')
+    if not (args.check_timeout_seconds >= 70):
+        raise AssertionError('OTA check wait must outlast Zigbee2MQTT 60-second device timeout')
+    if args.non_pm and args.mode == 'flash':
+        from bseed_nonpm_recovery_gate import verify_recovery, verify_transition_recovery
+        recovery_gate = verify_transition_recovery if cross_role else verify_recovery
+        if (args.max_block_bytes != campaign.get('block_bytes') or
+                args.hardware_evidence != str(campaign.get('recovery_evidence', '')) or
+                args.preflash_build != campaign.get('preflash_build') or
+                args.preflash_relay_physical_mode != campaign.get('preflash_relay_physical_mode')):
+            raise ValueError('Runner recovery inputs differ from canonical profile')
+        recovery_gate(campaign,
+            confirm_unloaded=args.confirm_load_unplugged,
+            accept_nonrecoverable_ota=args.accept_nonrecoverable_ota_risk)
+    elif args.hardware_evidence or args.confirm_load_unplugged:
+        raise ValueError('Non-PM hardware recovery flags are valid only for non-PM flash')
     verify_image(args)
     work = Path(args.workdir); work.mkdir(parents=True, exist_ok=True)
+    if args.mode == 'check':
+        archive_prior_check(work)
+    if args.non_pm and args.mode in ('check', 'flash'):
+        from bseed_nonpm_link_gate import verify_record
+        if not (args.preflash_build and args.preflash_relay_physical_mode):
+            raise AssertionError('Missing pinned Client build/policy')
+        evidence = work / 'LATEST_LINK_GATE.json'
+        if not (evidence.is_file()):
+            raise AssertionError('Missing mandatory non-PM link gate; run campaign --mode link-gate')
+        gate_profile = dict(device=args.device, ieee=args.ieee, sha256=args.sha256, preflash_build=args.preflash_build)
+        after = None
+        if args.mode == 'flash':
+            checked = work / 'LAST_CHECK.json'
+            if not (checked.is_file()):
+                raise AssertionError('OTA availability check missing')
+            after = json.loads(checked.read_text(encoding='utf8'))['timestamp']
+        verify_record(json.loads(evidence.read_text(encoding='utf8')), gate_profile, after=after)
     lock = work / 'ACTIVE_LOCK.json'
     old = json.loads(lock.read_text()) if lock.exists() else {}
-    assert new_campaign_allowed(old), 'Previous OTA incomplete, failed, or not postflash-accepted; inspect device and reconcile lock manually before another campaign'
+    if not (new_campaign_allowed(old)):
+        raise AssertionError('Previous OTA incomplete, failed, or not postflash-accepted; inspect device and reconcile lock manually before another campaign')
     if args.mode == 'check':
-        assert args.index_url, 'check requires one-entry index URL'
+        if not (args.index_url):
+            raise AssertionError('check requires one-entry index URL')
     config = yaml.safe_load(Path(args.mqtt_config).read_text(encoding='utf-8'))['mqtt']
     base = config.get('base_topic', 'zigbee2mqtt')
     token = 'bseed-ota-' + uuid.uuid4().hex
-    state = {'inventory': None, 'info': None, 'bridge': None, 'relay': None, 'check': None, 'result': None, 'sent': False}
+    state = {'inventory': None, 'info': None, 'bridge': None, 'relay': None,
+             'check': None, 'result': None, 'sent': False,
+             'network_updates': {}}
     ready = threading.Event(); changed = threading.Event(); answered = threading.Event(); fresh_relay = threading.Event()
     log_path = work / ('ota_' + token + '.jsonl')
     def log(event, value):
@@ -116,13 +309,26 @@ def main():
     resp = base + '/bridge/response/device/ota_update/' + ('check' if args.mode == 'check' else 'update')
     def on_connect(c, u, flags, reason, props):
         if reason.is_failure: return
-        topics = [(base + '/' + suffix, 1) for suffix in ('bridge/devices', 'bridge/info', 'bridge/state', args.device, 'bridge/logging')]
+        topics = [(base + '/' + suffix, 1) for suffix in (
+            'bridge/devices', 'bridge/info', 'bridge/state',
+            args.device, 'bridge/logging')]
+        # Retained top-level device states are a secondary network-wide OTA
+        # observation. The atomic shared network lock remains the authority.
+        topics.append((base + '/+', 1))
         topics.append((resp, 1))
         c.subscribe(topics); ready.set()
     def on_message(c, u, message):
         try: data = json.loads(message.payload)
         except (ValueError, UnicodeDecodeError): return
         topic = message.topic
+        tail = topic.removeprefix(base + '/')
+        if isinstance(data, dict) and '/' not in tail:
+            update = data.get('update')
+            if isinstance(update, dict) and update.get('state') == 'updating':
+                state['network_updates'][tail] = True
+            else:
+                state['network_updates'].pop(tail, None)
+            changed.set()
         if topic == base + '/bridge/devices':
             state['inventory'] = data; changed.set()
         elif topic == base + '/bridge/info':
@@ -133,6 +339,14 @@ def main():
             if isinstance(data, dict):
                 if not message.retain:
                     state['relay'] = data; fresh_relay.set()
+                update_state = data.get('update')
+                if isinstance(update_state, dict):
+                    write_live_status(
+                        work, device=args.device, ieee=args.ieee,
+                        token=token if state['sent'] else None,
+                        phase='ota_running' if update_state.get('state') == 'updating' else 'device_state',
+                        update=update_state,
+                    )
                 if state['sent'] and not message.retain:
                     log('device_state', {k: data.get(k) for k in ('state', 'state_relay', 'power', 'current', 'voltage', 'update')})
                 changed.set()
@@ -145,21 +359,33 @@ def main():
             if 'MQTT publish:' not in text and (args.device in text or 'ota' in text.lower()):
                 log('z2m_log', {'level': data.get('level'), 'message': text[:400]})
     client.on_connect = on_connect; client.on_message = on_message
+    network_lock_path = None
+    network_lock_owned = False
     client.connect(args.broker, 1883, 10); client.loop_start()
     try:
-        assert ready.wait(10), 'MQTT subscription failed'
+        if not (ready.wait(10)):
+            raise AssertionError('MQTT subscription failed')
         deadline = time.monotonic() + 12
         while time.monotonic() < deadline and not all(state[k] is not None for k in ('inventory', 'info', 'bridge')):
             changed.wait(1); changed.clear()
-        assert state['bridge'] == 'online', 'Bridge not online'
-        assert isinstance(state['inventory'], list) and isinstance(state['info'], dict), 'Missing bridge inventory/info'
+        if not (state['bridge'] == 'online'):
+            raise AssertionError('Bridge not online')
+        if not (isinstance(state['inventory'], list) and isinstance(state['info'], dict)):
+            raise AssertionError('Missing bridge inventory/info')
         matches = [d for d in state['inventory'] if d.get('ieee_address') == args.ieee]
-        assert len(matches) == 1, 'IEEE missing or duplicated'
+        if not (len(matches) == 1):
+            raise AssertionError('IEEE missing or duplicated')
         d = matches[0]
-        assert d.get('friendly_name') == args.device, 'Friendly name does not match IEEE'
-        assert (d.get('manufacturer'), d.get('model_id'), d.get('type')) == (args.manufacturer, args.model, args.role), 'Identity/role mismatch'
-        assert d.get('interview_state') == 'SUCCESSFUL', 'Device interview incomplete'
-        assert state['info'].get('permit_join') is False, 'Permit join unexpectedly open'
+        if not (d.get('friendly_name') == args.device):
+            raise AssertionError('Friendly name does not match IEEE')
+        if not ((d.get('manufacturer'), d.get('model_id'), d.get('type')) == (args.manufacturer, args.model, args.role)):
+            raise AssertionError('Identity/role mismatch')
+        if not (d.get('interview_state') == 'SUCCESSFUL'):
+            raise AssertionError('Device interview incomplete')
+        if campaign and campaign.get('preflash_build') and d.get('software_build_id') != campaign['preflash_build']:
+            raise ValueError('Live source build differs from version-policy baseline')
+        if not (state['info'].get('permit_join') is False):
+            raise AssertionError('Permit join unexpectedly open')
         log('inventory_ok', {k: d.get(k) for k in ('friendly_name', 'ieee_address', 'manufacturer', 'model_id', 'type', 'software_build_id')})
         state['relay'] = None
         client.publish(base + '/' + args.device + '/get', json.dumps({args.relay_get_key: ''}), qos=1).wait_for_publish(5)
@@ -167,30 +393,86 @@ def main():
         while time.monotonic() < until and not fresh_relay.is_set():
             changed.wait(0.5); changed.clear()
         relay = state['relay'] or {}
-        assert relay.get(args.relay_get_key) == args.expect_relay, 'Relay state not verified by read-only GET'
-        power = relay.get('power')
-        assert isinstance(power, (int, float)) and 0 <= power <= args.max_reported_watts, 'Power missing or above limit'
-        assert not (relay.get('update') or {}).get('state') == 'updating', 'Device OTA already running'
+        if not (relay.get(args.relay_get_key) == args.expect_relay):
+            raise AssertionError('Relay state not verified by read-only GET')
+        if args.non_pm:
+            if not (relay.get('relay_physical_mode') == args.preflash_relay_physical_mode):
+                raise AssertionError('Non-PM relay policy changed')
+        if not ((relay.get('device') or {}).get('ieeeAddr') == args.ieee):
+            raise AssertionError('Fresh MQTT response IEEE mismatch')
+        power = validate_metering_preflight(relay, non_pm=args.non_pm, model=args.model,
+            manufacturer=args.manufacturer, role=args.role, max_reported_watts=args.max_reported_watts,
+            nonpm_router_transition=cross_role and args.role == 'Router', ts0726=getattr(args, 'ts0726', False))
+        if not (not (relay.get('update') or {}).get('state') == 'updating'):
+            raise AssertionError('Device OTA already running')
         log('preflight_ok', {'relay': relay.get(args.relay_get_key), 'relay_get_key': args.relay_get_key, 'reported_power_w': power, 'voltage_v': relay.get('voltage'), 'image_sha256': args.sha256, 'mode': args.mode})
         if args.mode == 'preflight': return
         if args.mode == 'check':
             payload = {'id': args.ieee, 'url': args.index_url, 'transaction': token}
             state['sent'] = True
             client.publish(req, json.dumps(payload), qos=1).wait_for_publish(5)
-            assert wait_for_check_result(answered, args.check_timeout_seconds), 'Read-only OTA index check timed out before a Zigbee2MQTT result'
+            if not (wait_for_check_result(answered, args.check_timeout_seconds)):
+                raise AssertionError('Read-only OTA index check timed out before a Zigbee2MQTT result')
             result = state['result'] or {}
-            assert result.get('status') == 'ok' and result.get('data', {}).get('update_available') is True, 'OTA check did not offer an update'
-            assert result['data'].get('source') == args.url, 'OTA index offered a different image URL'
+            if not (result.get('status') == 'ok' and result.get('data', {}).get('update_available') is True):
+                raise AssertionError('OTA check did not offer an update')
+            if not (result['data'].get('source') == args.url):
+                raise AssertionError('OTA index offered a different image URL')
             record = {'device': args.device, 'ieee': args.ieee, 'sha256': args.sha256, 'timestamp': time.time(), 'response': result}
             (work / 'LAST_CHECK.json').write_text(json.dumps(record, indent=2), encoding='utf-8')
             log('check_passed_no_flash', {'status': result['status'], 'data': result.get('data')})
             return
         record = json.loads((work / 'LAST_CHECK.json').read_text(encoding='utf-8'))
-        assert record['device'] == args.device and record['ieee'] == args.ieee and record['sha256'] == args.sha256, 'Wrong OTA check record'
-        assert time.time() - record['timestamp'] < 1800, 'OTA check is older than 30 minutes'
-        assert record['response'].get('status') == 'ok', 'Previous OTA check did not succeed'
-        assert args.mode == 'flash'
+        if not (record['device'] == args.device and record['ieee'] == args.ieee and (record['sha256'] == args.sha256)):
+            raise AssertionError('Wrong OTA check record')
+        if not (time.time() - record['timestamp'] < 1800):
+            raise AssertionError('OTA check is older than 30 minutes')
+        if not (record['response'].get('status') == 'ok'):
+            raise AssertionError('Previous OTA check did not succeed')
+        if not (args.mode == 'flash'):
+            raise AssertionError()
+
+        # Give retained top-level device states a short bounded window to arrive,
+        # then fail closed if any device on the network is already updating.
+        changed.wait(1.5); changed.clear()
+        inventory_updating = [
+            item.get('friendly_name') or item.get('ieee_address')
+            for item in state['inventory']
+            if isinstance(item, dict)
+            and isinstance(item.get('update'), dict)
+            and item['update'].get('state') == 'updating'
+        ]
+        active_updates = sorted(set(
+            list(state['network_updates']) + inventory_updating))
+        if active_updates:
+            raise RuntimeError(
+                'Another Zigbee OTA is active on this network: ' +
+                ', '.join(active_updates))
+
+        from bseed_network_campaign_lock import (
+            acquire as acquire_network_lock,
+            update as update_network_lock,
+        )
+        from bseed_ota_campaign import network_lock_path as shared_network_lock_path
+        network_lock_path = shared_network_lock_path(source_profile, required=True)
+        coordinator = (state['info'].get('coordinator') or {}).get('ieee_address')
+        if not coordinator or source_profile['network_id'] != coordinator:
+            raise ValueError('Network lock identity must match the live coordinator IEEE')
+        acquire_network_lock(
+            network_lock_path,
+            network_id=source_profile['network_id'],
+            token=token,
+            device=args.device,
+            ieee=args.ieee,
+            image_sha256=args.sha256,
+        )
+        network_lock_owned = True
+
+        if source_profile.get('require_pm') is True:
+            from bseed_pm_telemetry_guard import begin
+            begin(source_profile, token)  # Acknowledged before any OTA request; failures leave telemetry suppressed.
         campaign = {'device': args.device, 'ieee': args.ieee, 'sha256': args.sha256, 'phase': 'preflight', 'token': token, 'started': timestamp(),
+                    'network_lock': str(network_lock_path),
                     'preflash_state': {k:relay.get(k) for k in ('state','state_relay','energy','relay_physical_mode')},
                     'relay_get_key':args.relay_get_key}
         if old:
@@ -198,13 +480,22 @@ def main():
         with lock.open('x' if not lock.exists() else 'w', encoding='utf-8') as handle:
             json.dump(campaign, handle, indent=2)
         campaign['phase'] = 'ota_running'; lock.write_text(json.dumps(campaign, indent=2), encoding='utf-8')
-        payload = update_payload(args.ieee, args.url, token, args.max_block_bytes)
+        update_network_lock(network_lock_path, token, 'ota_running')
+        payload = update_payload(args.ieee, args.url, token, args.max_block_bytes, response_delay_ms, request_timeout_ms)
         state['sent'] = True
         pub = client.publish(req, json.dumps(payload), qos=1)
-        assert pub.rc == mqtt.MQTT_ERR_SUCCESS, 'OTA publish failed'
+        if not (pub.rc == mqtt.MQTT_ERR_SUCCESS):
+            raise AssertionError('OTA publish failed')
         pub.wait_for_publish(5)
-        assert pub.is_published(), 'OTA publish not confirmed'
-        log('ota_request_sent', {'ieee': args.ieee, 'image_sha256': args.sha256, 'transaction': token, 'default_maximum_data_size': args.max_block_bytes})
+        if not (pub.is_published()):
+            raise AssertionError('OTA publish not confirmed')
+        log('ota_request_sent', {'ieee': args.ieee, 'image_sha256': args.sha256, 'transaction': token, 'default_maximum_data_size': args.max_block_bytes, 'image_block_response_delay': response_delay_ms, 'image_block_request_timeout': request_timeout_ms})
+        write_live_status(
+            work, device=args.device, ieee=args.ieee, token=token,
+            phase='ota_running', image_sha256=args.sha256,
+            request_timeout_ms=request_timeout_ms,
+            block_bytes=args.max_block_bytes,
+        )
         deadline = time.monotonic() + args.timeout_seconds
         while not answered.wait(15) and time.monotonic() < deadline:
             log('ota_pending', {'elapsed_seconds': int(args.timeout_seconds - max(0, deadline - time.monotonic()))})
@@ -212,7 +503,14 @@ def main():
         campaign['phase'] = ota_transport_phase(result)
         campaign['response'] = result; campaign['completed'] = timestamp()
         lock.write_text(json.dumps(campaign, indent=2), encoding='utf-8')
+        update_network_lock(
+            network_lock_path, token, campaign['phase'],
+            completed=campaign['completed'])
         log('ota_final', {'phase': campaign['phase'], 'response': result})
+        write_live_status(
+            work, device=args.device, ieee=args.ieee, token=token,
+            phase=campaign['phase'], response=result,
+        )
         if campaign['phase'] != 'ota_transfer_ok_postflash_unverified':
             raise RuntimeError('OTA not confirmed; inspect log/lock before any retry')
         log('postflash_pending', 'OTA service returned OK; verify firmware build, interview, role, relay and meter separately')
@@ -222,6 +520,30 @@ def main():
             campaign['exception'] = repr(error)
             campaign['completed'] = timestamp()
             lock.write_text(json.dumps(campaign, indent=2), encoding='utf-8')
+        if network_lock_owned:
+            from bseed_network_campaign_lock import (
+                release_preflight_abort,
+                update as update_network_lock_on_error,
+            )
+            if not state['sent']:
+                update_network_lock_on_error(
+                    network_lock_path, token, 'preflight_abort',
+                    exception=repr(error))
+                release_preflight_abort(network_lock_path, token)
+                network_lock_owned = False
+            else:
+                phase = ('campaign' in locals() and
+                         isinstance(campaign, dict) and
+                         campaign.get('phase')) or 'update_timeout_or_unconfirmed'
+                update_network_lock_on_error(
+                    network_lock_path, token, phase,
+                    exception=repr(error))
+        write_live_status(
+            work, device=args.device, ieee=args.ieee, token=token,
+            phase=(campaign.get('phase') if isinstance(locals().get('campaign'), dict)
+                   else 'preflight_abort'),
+            error=repr(error), ota_was_sent=state['sent'],
+        )
         log('campaign_error', {'error': repr(error), 'ota_was_sent': state['sent']})
         raise
     finally:

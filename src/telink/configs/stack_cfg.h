@@ -63,4 +63,11 @@
 #endif
 #endif
 
+#ifdef BSEED_MAINS_CLIENT
+/* Never silently turn a mains Client into a sleepy child through build flags. */
+#if !ZB_ED_ROLE || ZB_ROUTER_ROLE || PM_ENABLE || (ZB_MAC_RX_ON_WHEN_IDLE != 1)
+#error "BSEED mains Client requires EndDevice, receiver on, and power management disabled"
+#endif
+#endif
+
 #endif /* _STACK_CFG_H_ */

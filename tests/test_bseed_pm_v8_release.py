@@ -73,6 +73,39 @@ def test_pm_validator_proves_same_sha_pm_and_ts0726_builds():
     assert "device flash" in text
 
 
+def test_pm_router_recovery_candidate_pins_next_monotonic_version():
+    text = BUILD.read_text(encoding="utf-8")
+    assert "BSEED_PM_ROUTER_RECOVERY" in text
+    assert "SW_BUILD='1.2.5-bseedv8u5-rc4'" in text
+    assert "FILE_VERSION_HEX='0x12053011'" in text
+    assert "FILE_VERSION_DEC=302329873" in text
+    assert "build/bseed-ts011f-pm-router-v8u5-rc4" in text
+    # Default release stays pinned; recovery is opt-in only.
+    assert "SW_BUILD='1.2.5-bseedv8u4'" in text
+    assert "FILE_VERSION_HEX='0x12053007'" in text
+
+
+def test_pm_router_read_fix_has_new_immutable_identity():
+    text = BUILD.read_text(encoding="utf-8")
+    assert "BSEED_PM_ROUTER_READ_FIX" in text
+    assert "SW_BUILD='1.2.5-bseedv8u5-rc5'" in text
+    assert "FILE_VERSION_HEX='0x12053012'" in text
+    assert "FILE_VERSION_DEC=302329874" in text
+    assert "build/bseed-ts011f-pm-router-v8u5-rc5" in text
+
+
+def test_pm_router_build_has_no_legacy_client_return_wrapper():
+    text = BUILD.read_text(encoding="utf-8")
+    assert "CLIENT_IMAGE_TYPE=65024" not in text
+    assert "from-client.ota" not in text
+    assert '"fromClientOtaHeader"' not in text
+    assert '"clientReturn"' not in text
+    assert "from_tuya" in text.lower()
+    force = (ROOT / "helper_scripts/bseed_force_test_wrapper.py").read_text(encoding="utf-8")
+    assert "FORCE_TEST_VERSION" in force
+    assert "force-test wrapper" in force
+
+
 def test_release_handoff_scripts_parse_before_executor_use():
     subprocess.run(["bash", "-n", str(BUILD)], cwd=ROOT, check=True)
     compile(
@@ -80,3 +113,12 @@ def test_release_handoff_scripts_parse_before_executor_use():
         str(VALIDATOR),
         "exec",
     )
+
+
+def test_pm_matrix_publishes_same_role_canaries_without_cross_role_recovery_job():
+    workflow = (ROOT / ".github/workflows/bseed-pm-matrix.yml").read_text()
+    assert "build/bseed-pm-role-matrix-*/router/forward.ota" in workflow
+    assert "build/bseed-pm-role-matrix-*/client/forward.ota" in workflow
+    assert "BSEED_PM_ROUTER_RECOVERY=1" not in workflow
+    same_role_upload = workflow.split('name: Upload matrix evidence', 1)[1].split('name: Upload matrix log', 1)[0]
+    assert "from-client.ota" not in same_role_upload

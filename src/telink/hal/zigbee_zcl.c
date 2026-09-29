@@ -13,6 +13,8 @@
 #include "telink_zigbee_hal.h"
 #include "zigbee/battery_cluster.h"
 #include "zigbee/consts.h"
+#include "zigbee/zcl_write_string_gate.h"
+#include "zigbee/zcl_write_dispatch.h"
 
 // Storage for Telink endpoint configuration
 static af_simple_descriptor_t endpoint_descriptors[MAX_ENDPOINTS];
@@ -27,8 +29,10 @@ static uint8_t hal_endpoints_cnt          = 0;
 static hal_attribute_change_callback_t attribute_change_callback = NULL;
 static hal_zcl_activity_callback_t     zcl_activity_callback     = NULL;
 
-/* Register standard PM attribute tables without linking optional Telink
- * Electrical Measurement or Metering command implementations. */
+#ifndef BSEED_PM_B28WRPVX
+
+/* Generic builds keep lightweight attribute-only registration. The BSEED PM
+ * target enables and uses the SDK's complete standard cluster handlers. */
 static status_t register_pm_electrical_attrs(u8 ep, u16 mfr, u8 n,
                                              const zclAttrInfo_t attrs[], cluster_forAppCb_t cb) {
     return zcl_registerCluster(ep, ZCL_CLUSTER_MS_ELECTRICAL_MEASUREMENT,
@@ -40,6 +44,8 @@ static status_t register_pm_metering_attrs(u8 ep, u16 mfr, u8 n,
     return zcl_registerCluster(ep, ZCL_CLUSTER_SE_METERING,
                                mfr, n, attrs, NULL, cb);
 }
+
+#endif
 
 static cluster_registerFunc_t get_register_func_by_cluster_id(u16 cluster_id) {
     if (cluster_id == ZCL_CLUSTER_GEN_BASIC) {
@@ -77,10 +83,18 @@ static cluster_registerFunc_t get_register_func_by_cluster_id(u16 cluster_id) {
         return zcl_pollCtrl_register;
     }
     if (cluster_id == ZCL_CLUSTER_MS_ELECTRICAL_MEASUREMENT) {
+#ifdef BSEED_PM_B28WRPVX
+        return zcl_electricalMeasure_register;
+#else
         return register_pm_electrical_attrs;
+#endif
     }
     if (cluster_id == ZCL_CLUSTER_SE_METERING) {
+#ifdef BSEED_PM_B28WRPVX
+        return zcl_metering_register;
+#else
         return register_pm_metering_attrs;
+#endif
     }
     return NULL;
 }
@@ -174,13 +188,34 @@ static cluster_forAppCb_t get_cmd_callback_by_cluster_id(u16 cluster_id) {
 }
 
 static void zcl_incoming_message_callback(zclIncoming_t *pInHdlrMsg) {
-    if (pInHdlrMsg->hdr.cmd == ZCL_CMD_WRITE ||
-        pInHdlrMsg->hdr.cmd == ZCL_CMD_WRITE_NO_RSP) {
+    uint8_t write_cmd = pInHdlrMsg->hdr.cmd;
+
+    if (write_cmd == ZCL_CMD_WRITE || write_cmd == ZCL_CMD_WRITE_UNDIVIDED ||
+        write_cmd == ZCL_CMD_WRITE_NO_RSP) {
         if (attribute_change_callback == NULL) {
             return;
         }
-        zclWriteCmd_t *writeCmd = (zclWriteCmd_t *)pInHdlrMsg->attrCmd;
+        zclWriteCmd_t *writeCmd   = (zclWriteCmd_t *)pInHdlrMsg->attrCmd;
+        uint8_t        endpoint   = pInHdlrMsg->msg->indInfo.dst_ep;
+        uint16_t       cluster_id = pInHdlrMsg->msg->indInfo.cluster_id;
+        if (write_cmd == ZCL_CMD_WRITE_UNDIVIDED) {
+            for (u8 i = 0; i < writeCmd->numAttr; i++) {
+                if (!zcl_write_record_applied(endpoint, cluster_id,
+                                              writeCmd->attrList[i].attrID,
+                                              writeCmd->attrList[i].dataType,
+                                              hal_endpoints,
+                                              hal_endpoints_cnt)) {
+                    return;
+                }
+            }
+        }
         for (u8 i = 0; i < writeCmd->numAttr; i++) {
+            if (!zcl_write_record_applied(endpoint, cluster_id,
+                                          writeCmd->attrList[i].attrID,
+                                          writeCmd->attrList[i].dataType,
+                                          hal_endpoints, hal_endpoints_cnt)) {
+                continue;
+            }
             attribute_change_callback(pInHdlrMsg->msg->indInfo.dst_ep,
                                       pInHdlrMsg->msg->indInfo.cluster_id,
                                       writeCmd->attrList[i].attrID);
@@ -191,6 +226,15 @@ static void zcl_incoming_message_callback(zclIncoming_t *pInHdlrMsg) {
 static void af_rx_callback(void *arg) {
     if (zcl_activity_callback != NULL) {
         zcl_activity_callback();
+    }
+    apsdeDataInd_t *ind = (apsdeDataInd_t *)arg;
+    if (!zcl_write_string_gate_allows(ind->asdu, ind->asduLen,
+                                      ind->indInfo.dst_ep,
+                                      ind->indInfo.cluster_id, hal_endpoints,
+                                      hal_endpoints_cnt)) {
+        printf("Dropping oversized/truncated foundation write\r\n");
+        ev_buf_free(arg);
+        return;
     }
     zcl_rx_handler(arg);
 }

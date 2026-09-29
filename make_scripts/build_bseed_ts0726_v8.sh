@@ -21,9 +21,9 @@ FILE_VERSION_DEC=285356042
 # Explicit single-device canary identity. Keep the published V8 baseline as
 # the default; do not change legacy builds or the production OTA index.
 if [[ "${BSEED_TS0726_RELEASE_CHANNEL:-}" == 'currentlevel-canary' ]]; then
-    SW_BUILD='1.1.9-bseedlevel1'
-    FILE_VERSION_HEX='0x1102300D'
-    FILE_VERSION_DEC=285356045
+    SW_BUILD='1.1.9-bseedlv3'
+    FILE_VERSION_HEX='0x1102300F'
+    FILE_VERSION_DEC=285356047
 elif [[ -n "${BSEED_TS0726_RELEASE_CHANNEL:-}" ]]; then
     echo 'ERROR: unknown BSEED TS0726 release channel' >&2
     exit 2

@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "target_ieee": "0xREPLACE_WITH_EXACT_NONPM_SOCKET_IEEE",
+  "board": "OUTLET_BSEED_TS011F",
+  "chip": "TLSR8258",
+  "programming_method": "TLSR8258-SWire",
+  "candidate_sha256": "REPLACE_WITH_SIGNED_OFF_CLI5_OTA_SHA256",
+  "board_inspected": false,
+  "mains_isolation_verified": false,
+  "low_voltage_programming_verified": false,
+  "programmer_readback_tested": false,
+  "backup_restore_procedure_reviewed": false,
+  "flash_capacity_bytes": 524288,
+  "readback_files": [
+    "C:\\PRIVATE_PATH\\INDEPENDENT_CAPTURE_1.bin",
+    "C:\\PRIVATE_PATH\\INDEPENDENT_CAPTURE_2.bin"
+  ],
+  "backup_sha256": "REPLACE_WITH_IDENTICAL_FULL_READBACK_SHA256"
+}

@@ -120,13 +120,13 @@ static bool init_hlw8012_energy_meter(hal_gpio_pin_t cf_pin,
 }
 
 void on_reset_clicked(void *_) {
-    hal_factory_reset();
+    schedule_network_reset(1);
 }
 
 void on_multi_press_reset(void *_, uint8_t press_count) {
     if (g_multi_press_reset_count != 0 &&
         press_count >= g_multi_press_reset_count) {
-        hal_factory_reset();
+        schedule_network_reset(1);
     }
 }
 

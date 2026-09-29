@@ -12,9 +12,28 @@ from pathlib import Path
 import subprocess
 import sys
 import uuid
+from bseed_pm_release import CLIENT, ROUTER, RELEASE_DATE, verify_native_image
+from bseed_ota_identity import IdentityError
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMON_TESTS = ('tests/test_unified_pm_v8.py', 'tests/test_pm_cluster_layout_guard.py',
+                'tests/test_bseed_socket_antibrick.py',
+                'tests/test_bseed_controlled_reboot.py',
+                'tests/test_bseed_emergency_config.py',
+                'tests/test_bseed_gate_optimization.py',
+                'tests/test_bseed_basic_swbuild_limit.py',
+                'tests/test_bseed_release_date.py',
+                'tests/test_bseed_release_inputs.py',
+                'tests/test_bseed_nonpm_variant_matrix.py',
+                'tests/test_bseed_socket_version_policy.py',
+                'tests/test_bseed_nonpm_transition.py',
+                'tests/test_bseed_pm_telemetry_guard.py',
+                'tests/test_bseed_client_ota_poll.py',
+                'tests/test_bseed_poll_runtime.py',
+                'tests/test_bseed_pm_native_image.py',
+                'tests/test_bseed_pm_seal.py',
+                'tests/test_pm_legacy_migration_quarantine.py',
+                'tests/test_bseed_force_test_wrapper.py',
                 'tests/test_telink_pm_attribute_registration.py',
                 'tests/test_bseed_pm_shared_contract.py',
                 'tests/test_bseed_pm_variant_matrix.py',
@@ -27,10 +46,6 @@ ROLE_TESTS = {'Router': ('tests/test_bseed_pm_v8_release.py',
                          'tests/test_bseed_golden_role_distribution.py'),
               'EndDevice': ('tests/test_bseed_mains_client.py',
                             'tests/test_bseed_mains_client_keepalive.py')}
-ROUTER = {'role': 'Router', 'build': '1.2.5-bseedv8u5-rc2',
-          'version': 0x1205300E, 'type': 43556, 'artifact': 'forward.ota'}
-CLIENT = {'role': 'EndDevice', 'build': '1.2.5-bseedcli6',
-          'version': 0x1205300C, 'type': 65024, 'artifact': 'forward.ota'}
 
 def run(command, *, env=None):
     result = subprocess.run(command, cwd=ROOT, env=env, text=True,
@@ -43,27 +58,33 @@ def run(command, *, env=None):
 
 
 def verify_artifact(path, expected, source_commit):
+    def require(condition, reason):
+        if not condition:
+            raise IdentityError(reason)
+
     manifest = json.loads((path / 'manifest.json').read_text(encoding='utf8'))
-    assert manifest['sourceCommit'] == source_commit, 'build source mismatch'
-    assert manifest['sourceDirty'] is False, 'dirty firmware build'
-    assert manifest['board'] == 'OUTLET_BSEED_PM_TS011F'
-    assert manifest['canonicalConfig'] == 'b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;'
-    assert manifest['swBuildId'] == expected['build']
-    assert manifest['fileVersion'] == expected['version']
-    assert manifest['manufacturerCode'] == 4417
+    require(manifest['sourceCommit'] == source_commit, 'build source mismatch')
+    require(manifest['sourceDirty'] is False, 'dirty firmware build')
+    require(manifest['board'] == expected.get('board', 'OUTLET_BSEED_PM_TS011F'), 'wrong board')
+    require(manifest['canonicalConfig'] == expected.get('config', 'b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;'), 'wrong pin map')
+    require(manifest['swBuildId'] == expected['build'], 'wrong Basic build ID')
+    require(manifest['buildDate'] == expected.get('date', RELEASE_DATE), 'wrong pinned release date')
+    require(manifest['fileVersion'] == expected['version'], 'wrong file version')
+    require(manifest['manufacturerCode'] == 4417, 'wrong manufacturer')
     image_type = manifest.get('imageType', manifest.get('clientImageType'))
-    assert image_type == expected['type'], 'variant OTA identity mismatch'
-    assert manifest['nvmMigrationsVersion'] >= 1
+    require(image_type == expected['type'], 'variant OTA identity mismatch')
+    require(manifest['nvmMigrationsVersion'] >= 1, 'missing NVM schema')
     artifact = path / expected['artifact']
     data = artifact.read_bytes()
-    assert len(data) > 10000 and len(data) < 0x80000, 'invalid PM image size'
-    assert manifest['artifacts'][artifact.name]['sha256'] == hashlib.sha256(data).hexdigest()
-    assert manifest['otaHeader']['imageType'] == expected['type']
-    assert manifest['otaHeader']['fileVersion'] == expected['version']
-    assert manifest['otaHeader']['totalImageSize'] == len(data)
+    require(10000 < len(data) < 0x80000, 'invalid PM image size')
+    require(manifest['artifacts'][artifact.name]['sha256'] == hashlib.sha256(data).hexdigest(), 'manifest hash mismatch')
+    require(manifest['otaHeader']['imageType'] == expected['type'], 'manifest header type mismatch')
+    require(manifest['otaHeader']['fileVersion'] == expected['version'], 'manifest header version mismatch')
+    require(manifest['otaHeader']['totalImageSize'] == len(data), 'manifest header size mismatch')
+    integrity = verify_native_image(data, expected)
     return {'role': expected['role'], 'build': expected['build'],
             'imageType': image_type, 'sha256': hashlib.sha256(data).hexdigest(),
-            'artifact': str(artifact)}
+            'artifact': str(artifact), **integrity}
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
@@ -94,14 +115,27 @@ def main(argv=None):
         print(json.dumps(result, indent=2)); return 0
     if run(['git', 'status', '--porcelain']).strip():
         raise RuntimeError('Build matrix requires clean tracked and untracked sources')
-    router_env = dict(os.environ, BSEED_PM_ROUTER_CANDIDATE='1',
-                      BSEED_PM_ROUTER_CANDIDATE_OUTPUT=str(output / 'router'))
+    router_env = dict(os.environ, BSEED_PM_CONSOLIDATED='1',
+                      BSEED_PM_CONSOLIDATED_OUTPUT=str(output / 'router'))
     run(['bash', 'make_scripts/build_bseed_ts011f_pm_v8.sh'], env=router_env)
     result['artifacts'].append(verify_artifact(output / 'router', ROUTER, head))
     run(['bash', 'make_scripts/build_bseed_mains_client.sh', 'pm',
          str(output / 'client')])
     result['artifacts'].append(verify_artifact(output / 'client', CLIENT, head))
-    assert result['artifacts'][0]['sha256'] != result['artifacts'][1]['sha256']
+    if not (result['artifacts'][0]['sha256'] != result['artifacts'][1]['sha256']):
+        raise AssertionError()
+    # Two independent clean builds per role: manifests alone cannot establish
+    # reproducibility, nor catch stale compiler outputs or role contamination.
+    repeat_env = dict(os.environ, BSEED_PM_CONSOLIDATED='1',
+                     BSEED_PM_CONSOLIDATED_OUTPUT=str(output / 'repeat-router'))
+    run(['bash', 'make_scripts/build_bseed_ts011f_pm_v8.sh'], env=repeat_env)
+    run(['bash', 'make_scripts/build_bseed_mains_client.sh', 'pm',
+         str(output / 'repeat-client')])
+    for name, candidate, original in zip(('router', 'client'), (ROUTER, CLIENT), result['artifacts']):
+        repeated = verify_artifact(output / ('repeat-' + name), candidate, head)
+        if repeated['sha256'] != original['sha256']:
+            raise RuntimeError('non-reproducible clean build: ' + name)
+    result['reproducedBothRoles'] = True
     result['compiledBothRoles'] = True
     (output / 'ROLE_MATRIX.json').write_text(json.dumps(result, indent=2)+'\n',
                                               encoding='utf8')

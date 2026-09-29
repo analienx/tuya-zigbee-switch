@@ -8,16 +8,20 @@ import pytest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'helper_scripts'))
 from bseed_pm_variant_matrix import (verify_artifact, ROUTER, CLIENT, COMMON_TESTS,
                                       ROLE_TESTS)
+from tests.bseed_image_fixture import image_for
+from bseed_pm_release import RELEASE_DATE
+from bseed_ota_identity import IdentityError
 
 
 def sample_artifact(tmp_path, role):
     directory=tmp_path/role['role']; directory.mkdir()
-    data=b'P' * 14000
+    data=image_for(role)
     (directory/'forward.ota').write_bytes(data)
     manifest={'sourceCommit':'abcdef', 'sourceDirty':False,
-              'board':'OUTLET_BSEED_PM_TS011F',
-              'canonicalConfig':'b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;',
+              'board':role.get('board', 'OUTLET_BSEED_PM_TS011F'),
+              'canonicalConfig':role.get('config', 'b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;'),
               'swBuildId':role['build'], 'fileVersion':role['version'],
+              'buildDate': role.get('date', RELEASE_DATE),
               'manufacturerCode':4417,'imageType':role['type'],
               'clientImageType':role['type'],'nvmMigrationsVersion':1,
               'artifacts':{'forward.ota':{'sha256':hashlib.sha256(data).hexdigest()}},
@@ -39,4 +43,4 @@ def test_router_candidate_fails_closed_on_wrong_manifest(tmp_path,field,value):
     directory,manifest=sample_artifact(tmp_path,ROUTER)
     manifest[field]=value
     (directory/'manifest.json').write_text(json.dumps(manifest),encoding='utf8')
-    with pytest.raises(AssertionError): verify_artifact(directory,ROUTER,'abcdef')
+    with pytest.raises(IdentityError): verify_artifact(directory,ROUTER,'abcdef')

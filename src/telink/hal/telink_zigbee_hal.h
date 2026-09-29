@@ -19,6 +19,22 @@
 void telink_zigbee_hal_network_init(void);
 void telink_zigbee_hal_bdb_init(af_simple_descriptor_t *endpoint_descriptor);
 
+/* Safe before or after ota_init(): a pre-init join is remembered and starts
+ * periodic querying as soon as the OTA client owns its SDK state. */
+void telink_zigbee_hal_request_ota_query(void);
+
+// OTA poll management (implemented in zigbee_network.c, end-device builds
+// only). Routers keep byte-identical binaries: the call compiles to nothing.
+#if defined(ZB_ED_ROLE)
+void hal_zigbee_set_ota_poll_active(bool fast);
+
+#else
+static inline void hal_zigbee_set_ota_poll_active(bool fast) {
+    (void)fast;
+}
+
+#endif
+
 // ZCL module functions (implemented in zigbee_zcl.c)
 void telink_zigbee_hal_zcl_init(hal_zigbee_endpoint *endpoints,
                                 uint8_t endpoints_cnt);

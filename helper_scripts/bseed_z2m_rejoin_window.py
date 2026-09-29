@@ -48,7 +48,8 @@ def main():
     lock=json.loads(Path(a.campaign_lock).read_text(encoding='utf8'))
     config=yaml.safe_load(Path(a.mqtt_config).read_text(encoding='utf8'))['mqtt']
     base=config.get('base_topic','zigbee2mqtt');token='bseed-rejoin-'+uuid.uuid4().hex
-    state={'info':None,'inventory':None,'response':{},'events':[],'target_state':None,'candidate':False}
+    state={'info':None,'inventory':None,'response':{},'events':[],'target_state':None,'candidate':False,
+           'window_open':False,'fresh_inventory':False}
     ready=threading.Event();wake=threading.Event()
     c=mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,client_id=token)
     c.username_pw_set(config.get('user',''),config.get('password',''))
@@ -64,7 +65,10 @@ def main():
         elif m.topic==base+'/bridge/devices' and isinstance(data,list):
             state['inventory']=data
             target=next((x for x in data if x.get('ieee_address')==a.ieee),None)
-            if target and target.get('interview_completed') is True and target.get('software_build_id')==a.expect_build:
+            if state['window_open'] and not m.retain:state['fresh_inventory']=True
+            if state['window_open'] and not m.retain and target and target.get('friendly_name')==a.target:
+                # This only permits a subsequent targeted interview. Cached
+                # Basic metadata may still describe the pre-OTA firmware.
                 state['candidate']=True;wake.set()
         elif m.topic==base+'/bridge/response/permit_join' and isinstance(data,dict):
             state['response'][data.get('transaction')]=data;wake.set()
@@ -100,11 +104,12 @@ def main():
         open_response=state['response'].get(open_token)
         if not open_response or open_response.get('status')!='ok':
             raise RuntimeError('Scoped permit-join not confirmed: '+repr(open_response))
+        state['window_open']=True
         print('JOIN_WINDOW_OPEN',a.seconds,a.permit_via,flush=True)
         stop=time.monotonic()+a.seconds
         while time.monotonic()<stop and not state['candidate']:
             wake.wait(min(2,max(0.05,stop-time.monotonic())));wake.clear()
-        outcome='postflash_candidate' if state['candidate'] else 'unconfirmed'
+        outcome='rejoin_candidate' if state['candidate'] else 'unconfirmed'
     finally:
         if opened:
             close_token=token+'-close';topic=base+'/bridge/request/permit_join'
@@ -122,12 +127,13 @@ def main():
     if target_now.get('network_address') is not None:
         try:live_node=read_node_descriptor(a.mqtt_config,a.broker,a.ieee,target_now['network_address'])
         except (ValueError,TimeoutError,OSError) as error:zdo_error=repr(error)
-    outcome='postflash_candidate' if (state['candidate'] and live_node and
+    outcome='rejoin_candidate' if (state['candidate'] and live_node and
             live_node.get('role')==a.expect_role) else 'unconfirmed'
     result={'observed_at':dt.datetime.now().astimezone().isoformat(),
             'target':a.target,'ieee':a.ieee,'join_via':a.permit_via,'window_seconds':a.seconds,
             'open_response':open_response,'close_response':close_response,
-            'live_node_descriptor':live_node,'zdo_error':zdo_error,
+            'identity_verified':False,'expected_build':a.expect_build,
+            'live_node_descriptor':live_node,'zdo_error':zdo_error,'fresh_inventory_during_window':state['fresh_inventory'],
             'result':outcome if close_response and close_response.get('status')=='ok' else 'unconfirmed',
             'inventory':{k:target_now.get(k) for k in ('friendly_name','ieee_address','type',
                 'manufacturer','model_id','software_build_id','interview_completed')},
@@ -136,7 +142,7 @@ def main():
     output.write_text(json.dumps(result,indent=2,default=str),encoding='utf8')
     print('PRIVATE_JOIN_EVIDENCE',output,flush=True)
     print('RESULT',result['result'],json.dumps(result['inventory']),flush=True)
-    if result['result']!='postflash_candidate':raise SystemExit(2)
+    if result['result']!='rejoin_candidate':raise SystemExit(2)
     print('Role/build/physical relay/PM/parent/bindings require independent acceptance.',flush=True)
 
 

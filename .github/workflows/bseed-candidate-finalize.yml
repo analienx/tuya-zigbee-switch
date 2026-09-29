@@ -1,0 +1,32 @@
+name: BSEED candidate finalization
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify-and-propose-seal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Install manifest parser
+        run: sudo apt-get update && sudo apt-get install -y python3-yaml
+      - name: Verify public CI and seal a registry proposal
+        run: python3 helper_scripts/bseed_ci_finalize.py
+      - name: Upload verified candidate registry proposal
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseed-candidate-finalization-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            build/ci-finalization/CI_SEAL_REPORT.json
+            build/ci-finalization/bseed_identity.json
+          if-no-files-found: error
