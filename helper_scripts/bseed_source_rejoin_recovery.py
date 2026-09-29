@@ -1,13 +1,17 @@
-"""Scoped source-link recovery for an exact BSEED OTA campaign.
+"""Recover reachability of one exact OTA campaign target via permit-join.
 
-This helper does not flash, reset, remove, re-interview, bind, or restart Zigbee.
-It opens permit-join only through the campaign profile's declared join_via router,
-polls the exact target with a read-only GET until a fresh response proves the link
-is back, then closes permit-join unconditionally.
+This helper is generic across BSEED devices and supports four deterministic
+rejoin strategies:
 
-It is intentionally weaker than source reconciliation: success here only proves
-that the exact IEEE is reachable again. bseed_ota_source_reconcile.py must still
-prove exact source role/build, a quiet OTA window, and exact candidate availability.
+- none: refuse to open permit-join;
+- scoped: open permit-join only through profile.join_via;
+- all: open a bounded network-wide permit-join window;
+- auto: prefer a verified join_via router and optionally fall back to Join All.
+
+It never flashes, resets, removes, re-interviews, binds, or restarts Zigbee.
+Success means only that a fresh read from the exact target IEEE was observed.
+Canonical source reconciliation must still prove role/build, OTA quietness and
+candidate identity before any firmware retry is allowed.
 """
 from __future__ import annotations
 
@@ -31,32 +35,118 @@ ELIGIBLE_PHASES = {
     "update_timeout_or_unconfirmed",
     "source_unchanged_reconciled",
 }
+JOIN_STRATEGIES = ("none", "scoped", "all", "auto")
 
 
 def now() -> str:
     return dt.datetime.now().astimezone().isoformat()
 
 
-def main(argv=None) -> None:
+def target_identity_ok(device: dict, profile: dict) -> bool:
+    return (
+        device.get("friendly_name"),
+        device.get("ieee_address"),
+        device.get("manufacturer"),
+        device.get("model_id"),
+    ) == (
+        profile["device"],
+        profile["ieee"],
+        profile["manufacturer"],
+        profile["model"],
+    )
+
+
+def verified_router(devices: list[dict], router_name: str | None, target_ieee: str) -> dict | None:
+    if not router_name:
+        return None
+    matches = [d for d in devices if d.get("friendly_name") == router_name]
+    if len(matches) != 1:
+        return None
+    router = matches[0]
+    interview_ok = (
+        router.get("interview_completed") is True
+        or router.get("interview_state") == "SUCCESSFUL"
+    )
+    if (
+        router.get("type") != "Router"
+        or not interview_ok
+        or router.get("ieee_address") == target_ieee
+    ):
+        return None
+    return router
+
+
+def resolve_join_plan(
+    strategy: str,
+    *,
+    router_available: bool,
+    allow_join_all_fallback: bool,
+) -> list[str]:
+    if strategy not in JOIN_STRATEGIES:
+        raise ValueError(f"Unknown join strategy {strategy!r}")
+    if strategy == "none":
+        return []
+    if strategy == "scoped":
+        if not router_available:
+            raise ValueError("Scoped join requested but no verified join_via router is available")
+        return ["scoped"]
+    if strategy == "all":
+        return ["all"]
+
+    # auto: use the narrowest working mechanism first.
+    if router_available:
+        plan = ["scoped"]
+        if allow_join_all_fallback:
+            plan.append("all")
+        return plan
+    if allow_join_all_fallback:
+        return ["all"]
+    raise ValueError(
+        "Auto join recovery has no verified join_via router and Join All fallback is not allowed"
+    )
+
+
+def permit_payload(mode: str, *, seconds: int, transaction: str, router_name: str | None) -> dict:
+    payload = {"time": seconds, "transaction": transaction}
+    if mode == "scoped":
+        if not router_name:
+            raise ValueError("Scoped permit-join requires router_name")
+        payload["device"] = router_name
+    elif mode != "all":
+        raise ValueError(f"Unsupported permit-join mode {mode!r}")
+    return payload
+
+
+def arguments(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--profile", required=True)
     p.add_argument("--confirm-ieee", required=True)
     p.add_argument("--output", required=True)
     p.add_argument("--seconds", type=int)
     p.add_argument("--probe-every-seconds", type=int, default=5)
-    a = p.parse_args(argv)
+    p.add_argument("--join-strategy", choices=JOIN_STRATEGIES)
+    p.add_argument("--allow-join-all-fallback", action="store_true")
+    return p.parse_args(argv)
 
+
+def main(argv=None) -> None:
+    a = arguments(argv)
     profile = load_profile(Path(a.profile).expanduser().resolve())
     if a.confirm_ieee != profile["ieee"]:
         raise ValueError("Exact target IEEE confirmation required")
-    router_name = profile.get("join_via")
-    if not router_name:
-        raise ValueError("Profile has no join_via router")
+
     seconds = int(a.seconds if a.seconds is not None else profile.get("join_seconds", 120))
     if not 30 <= seconds <= 180:
-        raise ValueError("Scoped join window must be 30..180 seconds")
+        raise ValueError("Join window must be 30..180 seconds")
     if not 2 <= a.probe_every_seconds <= 30:
         raise ValueError("Probe cadence must be 2..30 seconds")
+
+    requested_strategy = a.join_strategy or profile.get("source_rejoin_strategy", "auto")
+    if requested_strategy not in JOIN_STRATEGIES:
+        raise ValueError("source_rejoin_strategy must be one of none/scoped/all/auto")
+    allow_global = bool(
+        a.allow_join_all_fallback or profile.get("allow_join_all_fallback", False)
+    )
 
     work = Path(profile["workdir"])
     lock_path = work / "ACTIVE_LOCK.json"
@@ -66,7 +156,7 @@ def main(argv=None) -> None:
     ):
         raise ValueError("Campaign lock identity/hash mismatch")
     if lock.get("phase") not in ELIGIBLE_PHASES:
-        raise ValueError("Campaign phase is not eligible for scoped source-link recovery")
+        raise ValueError("Campaign phase is not eligible for source-link recovery")
 
     output = Path(a.output).expanduser().resolve()
     if output.exists():
@@ -84,7 +174,6 @@ def main(argv=None) -> None:
         "permit_responses": {},
         "target": None,
         "events": [],
-        "opened": False,
     }
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=token)
@@ -124,7 +213,7 @@ def main(argv=None) -> None:
         elif topic == base + "/bridge/logging" and isinstance(data, dict):
             text = str(data.get("message", ""))
             if profile["ieee"] in text or profile["device"] in text:
-                if len(state["events"]) < 100:
+                if len(state["events"]) < 160:
                     state["events"].append({"at": now(), "message": text[:400]})
         wake.set()
 
@@ -133,10 +222,9 @@ def main(argv=None) -> None:
     client.connect(profile["broker"], 1883, 10)
     client.loop_start()
 
-    open_response = None
-    close_response = None
+    attempts: list[dict] = []
     result = "unconfirmed"
-    probes = 0
+    chosen_mode = None
     try:
         if not ready.wait(10):
             raise TimeoutError("MQTT subscription not ready")
@@ -154,91 +242,143 @@ def main(argv=None) -> None:
         if info.get("permit_join") is not False:
             raise ValueError("Joining already open; do not override another campaign")
 
-        target = [d for d in devices if d.get("ieee_address") == profile["ieee"]]
-        router = [d for d in devices if d.get("friendly_name") == router_name]
-        if len(target) != 1 or len(router) != 1:
-            raise ValueError("Exact target or join_via router missing/ambiguous")
-        t = target[0]
-        r = router[0]
-        if (
-            t.get("friendly_name"),
-            t.get("manufacturer"),
-            t.get("model_id"),
-        ) != (
-            profile["device"],
-            profile["manufacturer"],
-            profile["model"],
-        ):
-            raise ValueError("Cached target identity mismatch")
-        if r.get("type") != "Router" or not (
-            r.get("interview_completed") is True or r.get("interview_state") == "SUCCESSFUL"
-        ):
-            raise ValueError("join_via is not a verified Router")
-        if r.get("ieee_address") == profile["ieee"]:
-            raise ValueError("join_via must be distinct from target")
+        targets = [d for d in devices if d.get("ieee_address") == profile["ieee"]]
+        if len(targets) != 1 or not target_identity_ok(targets[0], profile):
+            raise ValueError("Cached target identity is absent, ambiguous or mismatched")
 
-        open_tx = token + "-open"
-        client.publish(
-            base + "/bridge/request/permit_join",
-            json.dumps({"time": seconds, "device": router_name, "transaction": open_tx}),
-            qos=1,
-        ).wait_for_publish(5)
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline and open_tx not in state["permit_responses"]:
-            wake.wait(0.3)
-            wake.clear()
-        open_response = state["permit_responses"].get(open_tx)
-        if not open_response or open_response.get("status") != "ok":
-            raise RuntimeError("Scoped permit-join not confirmed: " + repr(open_response))
-        state["opened"] = True
-        print("SOURCE_JOIN_WINDOW_OPEN", seconds, router_name, flush=True)
+        router_name = profile.get("join_via")
+        router = verified_router(devices, router_name, profile["ieee"])
+        plan = resolve_join_plan(
+            requested_strategy,
+            router_available=router is not None,
+            allow_join_all_fallback=allow_global,
+        )
+        if not plan:
+            raise RuntimeError("Source-link recovery disabled by join strategy 'none'")
 
-        stop = time.monotonic() + seconds
-        cadence = float(a.probe_every_seconds)
-        while time.monotonic() < stop and not fresh.is_set():
-            probes += 1
-            client.publish(
-                base + "/" + profile["device"] + "/get",
-                json.dumps({profile.get("relay_get_key", "state"): ""}),
-                qos=1,
-            ).wait_for_publish(5)
-            fresh.wait(min(cadence, max(0.1, stop - time.monotonic())))
-        if fresh.is_set():
-            result = "fresh_link_restored"
-            print("SOURCE_LINK_RESTORED", profile["ieee"], "probes", probes, flush=True)
-    finally:
-        if state["opened"]:
-            close_tx = token + "-close"
+        for mode in plan:
+            fresh.clear()
+            state["target"] = None
+            open_tx = f"{token}-{mode}-open"
+            close_tx = f"{token}-{mode}-close"
+            open_response = None
+            close_response = None
+            probes = 0
+            opened = False
+            attempt = {
+                "mode": mode,
+                "router": router_name if mode == "scoped" else None,
+                "window_seconds": seconds,
+                "started_at": now(),
+            }
             try:
+                payload = permit_payload(
+                    mode,
+                    seconds=seconds,
+                    transaction=open_tx,
+                    router_name=router_name,
+                )
                 client.publish(
                     base + "/bridge/request/permit_join",
-                    json.dumps({"time": 0, "transaction": close_tx}),
+                    json.dumps(payload),
                     qos=1,
                 ).wait_for_publish(5)
-                deadline = time.monotonic() + 12
-                while time.monotonic() < deadline and close_tx not in state["permit_responses"]:
+                deadline = time.monotonic() + 15
+                while time.monotonic() < deadline and open_tx not in state["permit_responses"]:
                     wake.wait(0.3)
                     wake.clear()
-                close_response = state["permit_responses"].get(close_tx)
-                print("SOURCE_JOIN_WINDOW_CLOSE", close_response, flush=True)
-            except Exception as error:
-                print("CRITICAL_JOIN_CLOSE_FAILED", repr(error), flush=True)
+                open_response = state["permit_responses"].get(open_tx)
+                attempt["open_response"] = open_response
+                if not open_response or open_response.get("status") != "ok":
+                    raise RuntimeError(
+                        f"{mode} permit-join not confirmed: {open_response!r}"
+                    )
+                opened = True
+                print(
+                    "SOURCE_JOIN_WINDOW_OPEN",
+                    mode,
+                    seconds,
+                    router_name if mode == "scoped" else "ALL",
+                    flush=True,
+                )
+
+                stop = time.monotonic() + seconds
+                cadence = float(a.probe_every_seconds)
+                while time.monotonic() < stop and not fresh.is_set():
+                    probes += 1
+                    client.publish(
+                        base + "/" + profile["device"] + "/get",
+                        json.dumps({profile.get("relay_get_key", "state"): ""}),
+                        qos=1,
+                    ).wait_for_publish(5)
+                    fresh.wait(min(cadence, max(0.1, stop - time.monotonic())))
+                attempt["probes"] = probes
+                attempt["fresh_exact_target"] = fresh.is_set()
+                if fresh.is_set():
+                    result = "fresh_link_restored"
+                    chosen_mode = mode
+                    print(
+                        "SOURCE_LINK_RESTORED",
+                        profile["ieee"],
+                        "mode",
+                        mode,
+                        "probes",
+                        probes,
+                        flush=True,
+                    )
+            finally:
+                if opened:
+                    try:
+                        client.publish(
+                            base + "/bridge/request/permit_join",
+                            json.dumps({"time": 0, "transaction": close_tx}),
+                            qos=1,
+                        ).wait_for_publish(5)
+                        deadline = time.monotonic() + 12
+                        while (
+                            time.monotonic() < deadline
+                            and close_tx not in state["permit_responses"]
+                        ):
+                            wake.wait(0.3)
+                            wake.clear()
+                        close_response = state["permit_responses"].get(close_tx)
+                        attempt["close_response"] = close_response
+                        print(
+                            "SOURCE_JOIN_WINDOW_CLOSE",
+                            mode,
+                            close_response,
+                            flush=True,
+                        )
+                    except Exception as error:
+                        attempt["close_error"] = repr(error)
+                        print("CRITICAL_JOIN_CLOSE_FAILED", mode, repr(error), flush=True)
+                attempt["finished_at"] = now()
+                attempts.append(attempt)
+
+            if result == "fresh_link_restored":
+                if not close_response or close_response.get("status") != "ok":
+                    result = "unconfirmed"
+                break
+    finally:
         client.loop_stop()
         client.disconnect()
 
     evidence = {
         "observed_at": now(),
-        "result": result if close_response and close_response.get("status") == "ok" else "unconfirmed",
+        "result": result,
         "device": profile["device"],
         "ieee": profile["ieee"],
-        "join_via": router_name,
-        "window_seconds": seconds,
-        "probes": probes,
-        "open_response": open_response,
-        "close_response": close_response,
+        "requested_strategy": requested_strategy,
+        "allow_join_all_fallback": allow_global,
+        "strategy_used": chosen_mode,
+        "join_via": profile.get("join_via"),
+        "attempts": attempts,
         "fresh_target": state["target"],
         "target_events": state["events"],
-        "note": "Reachability only; source reconciliation must still prove role/build/quiet OTA/candidate.",
+        "note": (
+            "Reachability only; source reconciliation must still prove "
+            "role/build/quiet OTA/candidate."
+        ),
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("x", encoding="utf8") as handle:

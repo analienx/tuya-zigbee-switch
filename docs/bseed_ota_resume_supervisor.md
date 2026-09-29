@@ -27,10 +27,14 @@ The supervisor performs this sequence:
    or an orphaned `ota_running` state whose previous supervised process is no
    longer alive, attempt canonical `reconcile-source`.
 4. If and only if that latest reconciliation failure is exactly `Fresh target
-   GET response missing`, run `bseed_source_rejoin_recovery.py`: open permit-join
-   only through the profile's declared `join_via` router, poll the exact target
-   with a read-only GET, verify the returned nested IEEE, and close permit-join
-   unconditionally. Identity/hash/lock/candidate failures never open join.
+   GET response missing`, run `bseed_source_rejoin_recovery.py` with the resolved
+   recovery policy: `none`, `scoped`, `all`, or `auto`. `scoped` uses the
+   profile's verified `join_via` router; `all` opens a bounded network-wide
+   permit-join window; `auto` prefers scoped and may fall back to Join All when
+   `allow_join_all_fallback` is explicitly enabled. Every opened window is
+   closed in `finally`. Recovery succeeds only when a fresh read from the exact
+   target IEEE is observed; unrelated joins never count. Identity/hash/lock/
+   candidate failures never open any join window.
 5. After link recovery, rerun canonical `reconcile-source`; it remains the
    authority for exact source role/build, quiet OTA state, candidate source and
    network-lock release. Timeout or failed proof is a hard stop and never
@@ -48,6 +52,24 @@ For the exact Bedroom non-PM canary, profile loading separately enforces the
 known-good transfer envelope: 32-byte blocks, >=1200 ms response delay,
 >=1,800,000 ms per-request timeout and >=14,400 s overall monitor.
 
+## Rejoin policy
+
+Profiles may declare `source_rejoin_strategy` as `none`, `scoped`, `all`, or
+`auto`. `auto` is the default. `allow_join_all_fallback` defaults to false.
+CLI flags override the profile for one run. `all` is intentionally supported as
+a reusable recovery mechanism; its broader join window does not weaken target
+acceptance because success still requires a fresh response carrying the exact
+campaign IEEE, followed by canonical source reconciliation.
+
+Recommended defaults:
+
+- stable local router known: `auto`, fallback false;
+- topology uncertain but bounded Join All is acceptable: `auto`, fallback true;
+- explicitly force network-wide join for recovery: `all`;
+- recovery must never open permit-join: `none`.
+
+The resolved policy is persisted in `OTA_SUPERVISOR.json`.
+
 ## Commands
 
 Resume/retry:
@@ -57,7 +79,9 @@ py -3 helper_scripts\bseed_ota_resume_supervisor.py resume-transition ^
   --profile C:\path\to\PRIVATE_profile.json ^
   --confirm-ieee 0xa4c13824a7005afb ^
   --confirm-load-unplugged ^
-  --accept-nonrecoverable-ota-risk
+  --accept-nonrecoverable-ota-risk ^
+  --join-strategy auto ^
+  --allow-join-all-fallback
 ```
 
 Read-only status:

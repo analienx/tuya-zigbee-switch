@@ -31,6 +31,7 @@ import bseed_ota_campaign as campaign
 SUPERVISOR_FILE = "OTA_SUPERVISOR.json"
 RECONCILABLE_PHASES = {"ota_running", "update_error", "update_timeout_or_unconfirmed"}
 READY_PHASE = "source_unchanged_reconciled"
+JOIN_STRATEGIES = ("none", "scoped", "all", "auto")
 
 
 def now() -> str:
@@ -201,18 +202,24 @@ def _last_logged_run(log_path: Path) -> str:
     return text[previous if previous >= 0 else 0:]
 
 
-def source_rejoin_cmd(profile_path: Path, confirm_ieee: str, output: Path) -> list[str]:
-    return [
+def source_rejoin_cmd(profile_path: Path, confirm_ieee: str, output: Path, *,
+                      join_strategy: str, allow_join_all_fallback: bool) -> list[str]:
+    cmd = [
         sys.executable, "-u", str(HELPERS / "bseed_source_rejoin_recovery.py"),
         "--profile", str(profile_path),
         "--confirm-ieee", confirm_ieee,
         "--output", str(output),
+        "--join-strategy", join_strategy,
     ]
+    if allow_join_all_fallback:
+        cmd.append("--allow-join-all-fallback")
+    return cmd
 
 
 def reconcile_until_ready(profile_path: Path, confirm_ieee: str, work: Path,
                           orchestration_log: Path, *, wait_seconds: int,
-                          retry_seconds: int, allow_scoped_source_rejoin: bool = True) -> str | None:
+                          retry_seconds: int, join_strategy: str = "auto",
+                          allow_join_all_fallback: bool = False) -> str | None:
     """Use canonical reconciliation until an orphaned/failed source is proven ready.
 
     Every attempt is read-only with respect to firmware. The canonical helper
@@ -238,18 +245,24 @@ def reconcile_until_ready(profile_path: Path, confirm_ieee: str, work: Path,
         phase = lock.get("phase") if lock else None
         if rc == 0 and phase == READY_PHASE:
             return phase
-        if (rc != 0 and allow_scoped_source_rejoin and not source_rejoin_attempted and
+        if (rc != 0 and join_strategy != "none" and not source_rejoin_attempted and
                 "Fresh target GET response missing" in _last_logged_run(orchestration_log)):
             source_rejoin_attempted = True
             stamp = dt.datetime.now().strftime("%Y%m%dT%H%M%S%f")
             evidence = work / f"source_rejoin_{stamp}.json"
             rejoin_rc = run_logged(
-                source_rejoin_cmd(profile_path, confirm_ieee, evidence),
+                source_rejoin_cmd(
+                    profile_path,
+                    confirm_ieee,
+                    evidence,
+                    join_strategy=join_strategy,
+                    allow_join_all_fallback=allow_join_all_fallback,
+                ),
                 orchestration_log,
             )
             if rejoin_rc != 0:
                 raise RuntimeError(
-                    f"Scoped source rejoin failed with exit {rejoin_rc}; "
+                    f"Source rejoin recovery failed with exit {rejoin_rc}; "
                     "permit-join was closed and OTA resume remains blocked"
                 )
             continue
@@ -264,8 +277,17 @@ def reconcile_until_ready(profile_path: Path, confirm_ieee: str, work: Path,
 def resume_transition(profile_path: Path, confirm_ieee: str, *,
                       confirm_unloaded: bool, accept_risk: bool,
                       reconcile_wait_seconds: int = 600,
-                      reconcile_retry_seconds: int = 20) -> dict[str, Any]:
+                      reconcile_retry_seconds: int = 20,
+                      join_strategy: str | None = None,
+                      allow_join_all_fallback: bool | None = None) -> dict[str, Any]:
     profile = campaign.load_profile(profile_path)
+    resolved_join_strategy = join_strategy or profile.get("source_rejoin_strategy", "auto")
+    if resolved_join_strategy not in JOIN_STRATEGIES:
+        raise ValueError("join strategy must be one of none/scoped/all/auto")
+    resolved_global_fallback = (
+        bool(profile.get("allow_join_all_fallback", False))
+        if allow_join_all_fallback is None else bool(allow_join_all_fallback)
+    )
     if confirm_ieee != profile["ieee"]:
         raise ValueError("Exact IEEE confirmation mismatch")
     if profile["preflash_role"] == profile["postflash_role"]:
@@ -292,6 +314,8 @@ def resume_transition(profile_path: Path, confirm_ieee: str, *,
             profile_path, confirm_ieee, work, orchestration_log,
             wait_seconds=reconcile_wait_seconds,
             retry_seconds=reconcile_retry_seconds,
+            join_strategy=resolved_join_strategy,
+            allow_join_all_fallback=resolved_global_fallback,
         )
     if phase not in (None, READY_PHASE):
         raise RuntimeError(f"Campaign phase {phase!r} is not safe for an automated resume")
@@ -317,6 +341,12 @@ def resume_transition(profile_path: Path, confirm_ieee: str, *,
         "profile": str(profile_path),
         "profile_sha256": hashlib.sha256(profile_path.read_bytes()).hexdigest(),
         "image_sha256": profile["sha256"],
+        "recovery_policy": {
+            "join_strategy": resolved_join_strategy,
+            "allow_join_all_fallback": resolved_global_fallback,
+            "join_via": profile.get("join_via"),
+            "join_seconds": profile.get("join_seconds", 120),
+        },
         "orchestration_log": str(orchestration_log),
         "transition_log": str(transition_log),
         "launch_contract": {
@@ -345,6 +375,8 @@ def main(argv: list[str] | None = None) -> None:
     resume.add_argument("--accept-nonrecoverable-ota-risk", action="store_true")
     resume.add_argument("--reconcile-wait-seconds", type=int, default=600)
     resume.add_argument("--reconcile-retry-seconds", type=int, default=20)
+    resume.add_argument("--join-strategy", choices=JOIN_STRATEGIES)
+    resume.add_argument("--allow-join-all-fallback", action="store_true", default=None)
 
     show = sub.add_parser("status")
     show.add_argument("--profile", required=True)
@@ -361,6 +393,8 @@ def main(argv: list[str] | None = None) -> None:
         accept_risk=args.accept_nonrecoverable_ota_risk,
         reconcile_wait_seconds=args.reconcile_wait_seconds,
         reconcile_retry_seconds=args.reconcile_retry_seconds,
+        join_strategy=args.join_strategy,
+        allow_join_all_fallback=args.allow_join_all_fallback,
     )
     print(json.dumps(result, indent=2, default=str))
 

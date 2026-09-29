@@ -27,6 +27,8 @@
   "postflash_build": "REPLACE_WITH_EXPECTED_CUSTOM_BUILD",
   "join_via": "VERIFIED_NEIGHBOR_ROUTER_FRIENDLY_NAME",
   "join_seconds": 120,
+  "source_rejoin_strategy": "auto",
+  "allow_join_all_fallback": false,
   "block_bytes": 32,
   "postota_settle_seconds": 10,
   "check_timeout_seconds": 90,

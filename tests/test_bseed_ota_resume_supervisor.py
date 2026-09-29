@@ -8,6 +8,7 @@ import pytest
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "helper_scripts"))
 import bseed_ota_resume_supervisor as sup
+import bseed_source_rejoin_recovery as rejoin
 
 
 def _profile(tmp_path):
@@ -247,3 +248,92 @@ def test_non_link_reconcile_failure_does_not_open_source_rejoin(tmp_path, monkey
             wait_seconds=0, retry_seconds=1,
         )
     assert calls == ["bseed_ota_campaign.py"]
+
+
+def test_join_strategy_plan_is_generic_and_fail_closed():
+    assert rejoin.resolve_join_plan(
+        "none", router_available=False, allow_join_all_fallback=False
+    ) == []
+    assert rejoin.resolve_join_plan(
+        "all", router_available=False, allow_join_all_fallback=False
+    ) == ["all"]
+    assert rejoin.resolve_join_plan(
+        "scoped", router_available=True, allow_join_all_fallback=False
+    ) == ["scoped"]
+    assert rejoin.resolve_join_plan(
+        "auto", router_available=True, allow_join_all_fallback=False
+    ) == ["scoped"]
+    assert rejoin.resolve_join_plan(
+        "auto", router_available=True, allow_join_all_fallback=True
+    ) == ["scoped", "all"]
+    assert rejoin.resolve_join_plan(
+        "auto", router_available=False, allow_join_all_fallback=True
+    ) == ["all"]
+    with pytest.raises(ValueError, match="no verified join_via"):
+        rejoin.resolve_join_plan(
+            "auto", router_available=False, allow_join_all_fallback=False
+        )
+    with pytest.raises(ValueError, match="no verified join_via"):
+        rejoin.resolve_join_plan(
+            "scoped", router_available=False, allow_join_all_fallback=True
+        )
+
+
+def test_join_all_payload_omits_router_and_scoped_payload_names_it():
+    all_payload = rejoin.permit_payload(
+        "all", seconds=120, transaction="tx-all", router_name=None
+    )
+    assert all_payload == {"time": 120, "transaction": "tx-all"}
+
+    scoped_payload = rejoin.permit_payload(
+        "scoped",
+        seconds=120,
+        transaction="tx-scoped",
+        router_name="AnyVerifiedRouter",
+    )
+    assert scoped_payload == {
+        "time": 120,
+        "transaction": "tx-scoped",
+        "device": "AnyVerifiedRouter",
+    }
+
+
+def test_supervisor_source_rejoin_command_carries_policy(tmp_path):
+    cmd = sup.source_rejoin_cmd(
+        tmp_path / "profile.json",
+        "0x0011223344556677",
+        tmp_path / "evidence.json",
+        join_strategy="auto",
+        allow_join_all_fallback=True,
+    )
+    assert cmd[cmd.index("--join-strategy") + 1] == "auto"
+    assert "--allow-join-all-fallback" in cmd
+
+
+def test_resume_records_explicit_join_all_policy(tmp_path, monkeypatch):
+    cfg = _profile(tmp_path)
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text(json.dumps(cfg))
+    work = Path(cfg["workdir"])
+    work.mkdir()
+    (work / "ACTIVE_LOCK.json").write_text(
+        json.dumps({"phase": "source_unchanged_reconciled"})
+    )
+    monkeypatch.setattr(sup.campaign, "load_profile", lambda _p: dict(cfg))
+    monkeypatch.setattr(sup, "process_alive", lambda _pid: False)
+    monkeypatch.setattr(sup, "run_logged", lambda cmd, log: 0)
+    monkeypatch.setattr(sup, "launch_logged", lambda cmd, log: 9191)
+
+    result = sup.resume_transition(
+        profile_path,
+        cfg["ieee"],
+        confirm_unloaded=True,
+        accept_risk=True,
+        join_strategy="all",
+        allow_join_all_fallback=False,
+    )
+
+    assert result["recovery_policy"]["join_strategy"] == "all"
+    assert result["recovery_policy"]["allow_join_all_fallback"] is False
+    persisted = json.loads((work / sup.SUPERVISOR_FILE).read_text())
+    assert persisted["recovery_policy"]["join_strategy"] == "all"
