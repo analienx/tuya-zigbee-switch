@@ -26,21 +26,19 @@ def _private_file(value, label):
     return path
 
 
-def verify_recovery(profile, *, confirm_unloaded=False, accept_nonrecoverable_ota=False):
-    return _verify_recovery(profile, confirm_unloaded=confirm_unloaded,
-                            accept_nonrecoverable_ota=accept_nonrecoverable_ota)
+def verify_recovery(profile, *, confirm_unloaded=False):
+    return _verify_recovery(profile, confirm_unloaded=confirm_unloaded)
 
 
-def verify_transition_recovery(profile, *, confirm_unloaded=False, accept_nonrecoverable_ota=False):
+def verify_transition_recovery(profile, *, confirm_unloaded=False):
     roles = (profile.get('preflash_role'), profile.get('postflash_role'))
     if roles not in (('Router', 'EndDevice'), ('EndDevice', 'Router')):
         raise ValueError('Non-PM transition requires distinct supported source and target roles')
     return _verify_recovery(profile, confirm_unloaded=confirm_unloaded,
-                            accept_nonrecoverable_ota=accept_nonrecoverable_ota,
                             roles=roles, transition=True)
 
 
-def _verify_recovery(profile, *, confirm_unloaded=False, accept_nonrecoverable_ota=False,
+def _verify_recovery(profile, *, confirm_unloaded=False,
                      roles=('EndDevice', 'EndDevice'), transition=False):
     """Reject absent, foreign, untested or unverified board-specific recovery."""
     if profile.get('non_pm') is not True:
@@ -53,13 +51,12 @@ def _verify_recovery(profile, *, confirm_unloaded=False, accept_nonrecoverable_o
         raise ValueError('Unproven non-PM transfer size: pin 32 bytes')
     if confirm_unloaded is not True:
         raise ValueError('Physical load not explicitly confirmed disconnected for THIS flash')
-    if accept_nonrecoverable_ota:
-        # Exact-device opt-in only. Legacy rc1/rc2 remain pinned to their exact
+    if (profile.get('device'), profile.get('ieee')) == (BEDROOM_DEVICE, BEDROOM_IEEE):
+        # Exact-device candidates only. Legacy rc1/rc2 remain pinned to their exact
         # hashes. The consolidated c7/r10 pair is allowed only on the same
         # Bedroom canary and only when the exact sealed native destination is
         # proven; FORCE wrapper payload equality is verified separately by the
         # canonical OTA runner before any bytes are submitted.
-        identity_ok = (profile.get('device'), profile.get('ieee')) == (BEDROOM_DEVICE, BEDROOM_IEEE)
         legacy = (profile.get('preflash_build'), profile.get('postflash_build'), profile.get('sha256')) in (
             ('1.1.2-bseedcli4', '1.1.2-bseedcli5-rc1',
              '92894009f687976a60a535170581d8ff8daf06b7cc07bb175775ae7b751330dd'),
@@ -74,8 +71,8 @@ def _verify_recovery(profile, *, confirm_unloaded=False, accept_nonrecoverable_o
              profile.get('postflash_build') == R10_BUILD and profile.get('native_sha256') == R10_SHA256) or
             (roles == ('Router', 'EndDevice') and profile.get('preflash_build') == R10_BUILD and
              profile.get('postflash_build') == C7_BUILD and profile.get('native_sha256') == C7_SHA256)))
-        if not (identity_ok and (legacy or consolidated_same or consolidated_transition)):
-            raise ValueError('Non-invasive risk waiver applies only to the exact signed-off Bedroom non-PM candidates')
+        if not (legacy or consolidated_same or consolidated_transition):
+            raise ValueError('Non-invasive path applies only to the exact signed-off Bedroom non-PM candidates')
         if profile.get('require_pm') is not False or profile.get('relay_get_key') != 'state_relay':
             raise ValueError('Non-invasive path refuses PM or unverified relay endpoints')
         if profile.get('preflash_relay_physical_mode') != 'follow_state':
@@ -85,7 +82,7 @@ def _verify_recovery(profile, *, confirm_unloaded=False, accept_nonrecoverable_o
         if not legacy and profile.get('expect_relay') not in ('ON', 'OFF'):
             raise ValueError('Consolidated non-PM canary requires an explicit relay baseline')
         return {'ieee': profile['ieee'], 'method': ('non-invasive single OTA canary' if legacy else 'non-invasive exact Bedroom canary'),
-                'recovery_available': False, 'warning': 'No guaranteed OTA or physical recovery if boot fails'}
+                'recovery_available': False}
     evidence = _private_file(profile.get('recovery_evidence'), 'Recovery evidence')
     record = json.loads(evidence.read_text(encoding='utf8'))
     if record.get('schema') != 1 or record.get('target_ieee') != profile['ieee']:

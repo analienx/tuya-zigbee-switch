@@ -209,7 +209,6 @@ def arguments():
     p.add_argument('--non-pm', action='store_true', help='Strict non-PM TS011F-BS Client exception; never use for PM devices')
     p.add_argument('--ts0726', action='store_true', help='Strict TS0726-3-BS Router exception (no metering hardware); never use for PM devices')
     p.add_argument('--hardware-evidence', help='Private exact-board recovery readback attestation, non-PM flash only')
-    p.add_argument('--accept-nonrecoverable-ota-risk', action='store_true', help='One exact-canary non-PM OTA; failure may require replacement')
     p.add_argument('--confirm-load-unplugged', action='store_true', help='Non-PM flash only; operator has just verified no appliance attached')
     p.add_argument('--preflash-build')
     p.add_argument('--preflash-relay-physical-mode')
@@ -276,9 +275,7 @@ def main():
                 args.preflash_build != campaign.get('preflash_build') or
                 args.preflash_relay_physical_mode != campaign.get('preflash_relay_physical_mode')):
             raise ValueError('Runner recovery inputs differ from canonical profile')
-        recovery_gate(campaign,
-            confirm_unloaded=args.confirm_load_unplugged,
-            accept_nonrecoverable_ota=args.accept_nonrecoverable_ota_risk)
+        recovery_gate(campaign, confirm_unloaded=args.confirm_load_unplugged)
     elif args.hardware_evidence or args.confirm_load_unplugged:
         raise ValueError('Non-PM hardware recovery flags are valid only for non-PM flash')
     verify_image(args)

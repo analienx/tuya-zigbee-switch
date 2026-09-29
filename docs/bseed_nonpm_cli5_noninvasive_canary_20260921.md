@@ -8,11 +8,11 @@ This document supersedes the **mandatory disassembly/readback** disposition in `
 - Telink TLSR8258 multi-address Zigbee OTA alternates 0x00000 and 0x40000 slots; it validates the complete new image before selecting it. A successful transfer does not establish automatic rollback after an app crash, watchdog reset, lost parent or a physical power fault. Do not implement untested flash boot-flag changes as part of this `cli5` canary.
 - `BOOT_LOADER_MODE=0` and `MODULE_WATCHDOG_ENABLE=1` are already present in source; the latter flag alone does not prove coverage of every hang or a working fallback to the previous firmware.
 
-## Exact opt-in, no disassembly required
+## Exact candidate, no disassembly required
 
-Both `bseed_ota_campaign.py` and direct `bseed_targeted_z2m_ota.py` enforce the same gate. The non-invasive option is **only** `BedroomSocketCabinetRight`, IEEE `0xa4c13824a7005afb`, non-PM `o1jzcxou`/`TS011F-BS`, EndDevice→EndDevice, `cli4`→`cli5-rc1` SHA-256 `92894009f687976a60a535170581d8ff8daf06b7cc07bb175775ae7b751330dd`; relay `OFF`/`follow_state`, `state_relay` endpoint, 32-byte blocks. No PM or different build may use this risk waiver.
+Both `bseed_ota_campaign.py` and direct `bseed_targeted_z2m_ota.py` enforce the same gate. The non-invasive route is **only** for `BedroomSocketCabinetRight`, IEEE `0xa4c13824a7005afb`, non-PM `o1jzcxou`/`TS011F-BS`, and the pinned `cli4`→`cli5-rc1` image SHA-256 `92894009f687976a60a535170581d8ff8daf06b7cc07bb175775ae7b751330dd`; relay `OFF`/`follow_state`, `state_relay` endpoint, 32-byte blocks. Later pinned c7/r10 candidates have their own exact-build and image checks. No PM or unpinned build uses this route.
 
-The operator must **physically check that the outlet's appliance is unplugged just before flashing**, then use `--confirm-load-unplugged` plus `--accept-nonrecoverable-ota-risk` on the separately authorized exact-IEEE flash command. Risk acceptance means accepting possible permanent loss of this socket if boot or hardware fails; it is never inferred from passing tests or a saved profile. Never fabricate either confirmation or send these flags in read-only `qualify`.
+The operator must **physically check that the outlet's appliance is unplugged just before flashing**, then use `--confirm-load-unplugged` on the separately authorized exact-IEEE flash command. Never infer this physical confirmation from passing tests or a saved profile, and do not send it in read-only `qualify`.
 
 Before sending any image: inspect current fleet OTA activity and previous campaign locks, preserve private Z2M/coordinator settings, verify the unchanged signed-off image/header/CRC and one-device private index, then run a **fresh** read-only `qualify` (three separated replies → OTA eligibility → three further replies). A retained `online` flag is insufficient. The second gate and successful check must remain unexpired when the one-target `flash` command executes.
 

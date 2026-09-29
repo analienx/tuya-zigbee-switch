@@ -126,7 +126,7 @@ def test_runner_cannot_bypass_wrapper_flash_gate(tmp_path):
         expect_relay='OFF', manufacturer_code=4417, image_type=65026,
         file_version=0x11023013, campaign_profile=str(src),
         preflash_build='1.1.2-bseedcli4', hardware_evidence='',
-        confirm_load_unplugged=True, accept_nonrecoverable_ota_risk=False,
+        confirm_load_unplugged=True,
         relay_get_key='state', preflash_relay_physical_mode='follow_state')
     with patch.object(runner, 'arguments', return_value=args), \
             patch.object(runner, 'verify_image') as image_fn, \
@@ -158,15 +158,11 @@ def test_noninvasive_waiver_covers_signed_off_rc2_canary():
         preflash_build='1.1.2-bseedcli4', postflash_build='1.1.2-bseedcli5-rc2',
         require_pm=False, relay_get_key='state_relay', expect_relay='OFF',
         preflash_relay_physical_mode='follow_state')
-    out = verify_recovery(profile, confirm_unloaded=True,
-                          accept_nonrecoverable_ota=True)
+    out = verify_recovery(profile, confirm_unloaded=True)
     assert out['method'] == 'non-invasive single OTA canary'
     assert out['recovery_available'] is False
     bad = dict(profile, sha256='0'*64)
     with pytest.raises(ValueError, match='signed-off'):
-        verify_recovery(bad, confirm_unloaded=True,
-                        accept_nonrecoverable_ota=True)
+        verify_recovery(bad, confirm_unloaded=True)
     pm = dict(profile, require_pm=True)
     with pytest.raises(ValueError, match='refuses PM'):
-        verify_recovery(pm, confirm_unloaded=True,
-                        accept_nonrecoverable_ota=True)

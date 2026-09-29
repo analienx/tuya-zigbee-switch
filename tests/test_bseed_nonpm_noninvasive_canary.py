@@ -1,4 +1,4 @@
-"""Offline regression of the opt-in, exact-target non-invasive OTA route."""
+"""Offline regression of the exact-target non-invasive OTA route."""
 from pathlib import Path
 import sys
 import pytest
@@ -16,14 +16,13 @@ def canary():
         sha256=SHA,block_bytes=32,relay_get_key='state_relay',expect_relay='OFF',
         preflash_relay_physical_mode='follow_state')
 
-def test_only_pinned_unloaded_canary_may_opt_in_without_physical_readback():
+def test_only_pinned_unloaded_canary_may_run_without_physical_readback():
     p=canary()
-    with pytest.raises(ValueError,match='Physical load'):verify_recovery(p,accept_nonrecoverable_ota=True)
-    with pytest.raises(ValueError,match='Recovery evidence'):verify_recovery(p,confirm_unloaded=True)
-    d=verify_recovery(p,confirm_unloaded=True,accept_nonrecoverable_ota=True)
+    with pytest.raises(ValueError,match='Physical load'):verify_recovery(p)
+    d=verify_recovery(p,confirm_unloaded=True)
     assert d['recovery_available'] is False
 
-def test_canary_opt_in_rejects_wrong_imei_role_image_and_relay():
+def test_canary_rejects_wrong_ieee_role_image_and_relay():
     checks={'ieee':'0x0011223344556677','device':'OtherSocket','sha256':'b'*64,
         'preflash_build':'old','postflash_build':'new','block_bytes':50,
         'model':'TS011F-BS-PM','require_pm':True,'preflash_role':'Router',
@@ -32,28 +31,27 @@ def test_canary_opt_in_rejects_wrong_imei_role_image_and_relay():
     for key,value in checks.items():
         p=canary();p[key]=value
         with pytest.raises(ValueError):
-            verify_recovery(p,confirm_unloaded=True,accept_nonrecoverable_ota=True)
+            verify_recovery(p,confirm_unloaded=True)
 
-def test_wrapper_passes_optin_to_lower_level_only_on_explicit_flash():
+def test_wrapper_passes_load_confirmation_only_on_explicit_flash():
     p=canary();p.update({k:'test' for k in (
         'image','url','mqtt_config','broker','workdir','index_url')})
     p.update(manufacturer_code=4417,image_type=65026,file_version='285356048')
-    cmd=runner_args(p,'flash',confirm_unloaded=True,accept_risk=True)
-    assert cmd.count('--accept-nonrecoverable-ota-risk')==1
+    cmd=runner_args(p,'flash',confirm_unloaded=True)
     assert cmd.count('--confirm-load-unplugged')==1
-    assert '--accept-nonrecoverable-ota-risk' not in runner_args(p,'check')
+    assert '--confirm-load-unplugged' not in runner_args(p,'check')
 
 
-def test_consolidated_c7_canary_uses_same_exact_device_opt_in():
+def test_consolidated_c7_canary_uses_same_exact_device_gate():
     p=canary()
     p.update(postflash_build='1.1.3-bseedc7',
              sha256='f0a499ea9e351265cb47fa26717f00246450cecaf727adad3298552bb1d8a94f',
              expect_relay='ON')
-    out=verify_recovery(p,confirm_unloaded=True,accept_nonrecoverable_ota=True)
+    out=verify_recovery(p,confirm_unloaded=True)
     assert out['method']=='non-invasive exact Bedroom canary'
     bad=dict(p,sha256='0'*64)
     with pytest.raises(ValueError,match='exact signed-off'):
-        verify_recovery(bad,confirm_unloaded=True,accept_nonrecoverable_ota=True)
+        verify_recovery(bad,confirm_unloaded=True)
 
 
 def test_consolidated_force_pair_requires_exact_native_destination():
@@ -63,17 +61,14 @@ def test_consolidated_force_pair_requires_exact_native_destination():
              force_test_transition=True,
              native_sha256='c2bb21dee350fd375586029eefb03f85791b0941bd386882a0b8653bb15bdb96',
              sha256='a'*64)
-    out=verify_transition_recovery(p,confirm_unloaded=True,accept_nonrecoverable_ota=True)
+    out=verify_transition_recovery(p,confirm_unloaded=True)
     assert out['recovery_available'] is False
     with pytest.raises(ValueError,match='exact signed-off'):
-        verify_transition_recovery(dict(p,native_sha256='0'*64),
-            confirm_unloaded=True,accept_nonrecoverable_ota=True)
+        verify_transition_recovery(dict(p,native_sha256='0'*64), confirm_unloaded=True)
     with pytest.raises(ValueError,match='exact signed-off'):
-        verify_transition_recovery(dict(p,force_test_transition=False),
-            confirm_unloaded=True,accept_nonrecoverable_ota=True)
+        verify_transition_recovery(dict(p,force_test_transition=False), confirm_unloaded=True)
 
     back=dict(p,preflash_build='1.1.3-bseedr10',postflash_build='1.1.3-bseedc7',
               preflash_role='Router',postflash_role='EndDevice',
               native_sha256='f0a499ea9e351265cb47fa26717f00246450cecaf727adad3298552bb1d8a94f')
-    assert verify_transition_recovery(back,confirm_unloaded=True,
-        accept_nonrecoverable_ota=True)['recovery_available'] is False
+    assert verify_transition_recovery(back,confirm_unloaded=True)['recovery_available'] is False
