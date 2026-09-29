@@ -23,10 +23,15 @@ The supervisor performs this sequence:
 
 1. Load and validate the private campaign profile.
 2. Refuse a duplicate supervised child if the previous supervisor PID is alive.
-3. If the prior campaign phase is `update_error` or
-   `update_timeout_or_unconfirmed`, run canonical `reconcile-source`.
-4. Require the campaign to be either new or
-   `source_unchanged_reconciled`.
+3. If the prior campaign is `update_error`, `update_timeout_or_unconfirmed`,
+   or an orphaned `ota_running` state whose previous supervised process is no
+   longer alive, repeatedly attempt canonical `reconcile-source` for a bounded
+   recovery window. The canonical helper itself refuses while the device is
+   unreachable, still updating, or the exact source identity/candidate cannot
+   be freshly proven.
+4. Require the campaign to become either new or
+   `source_unchanged_reconciled`; timeout without proof is a hard stop and never
+   triggers an OTA launch.
 5. Run canonical `qualify` synchronously, logging directly to disk.
 6. Immediately launch canonical `transition` so link-gate evidence cannot age
    between qualification and OTA launch.
