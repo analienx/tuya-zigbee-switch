@@ -86,7 +86,6 @@ py -3 helper_scripts\bseed_ota_resume_supervisor.py resume-transition ^
   --profile C:\path\to\PRIVATE_profile.json ^
   --confirm-ieee 0xa4c13824a7005afb ^
   --confirm-load-unplugged ^
-  --accept-nonrecoverable-ota-risk ^
   --join-strategy auto ^
   --allow-join-all-fallback
 ```
@@ -108,7 +107,7 @@ failure.
 - It will not auto-kill an `ota_running` campaign.
 - It will not infer OTA failure from a stale stdout/log/JSONL timestamp.
 - It will not bypass the recovery gate, exact IEEE confirmation, load-unplugged
-  confirmation, risk acknowledgement, image SHA checks, role policy, or link
+  confirmation, image SHA checks, role policy, or link
   qualification.
 - It will not automatically retry a firmware transfer that actually returned a
   failed OTA result without first reconciling the exact source as unchanged.

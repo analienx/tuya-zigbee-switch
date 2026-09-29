@@ -83,15 +83,13 @@ def file_age_seconds(path: Path) -> float | None:
 
 
 def campaign_cmd(profile_path: Path, mode: str, *, confirm_ieee: str | None = None,
-                 confirm_unloaded: bool = False, accept_risk: bool = False) -> list[str]:
+                 confirm_unloaded: bool = False) -> list[str]:
     cmd = [sys.executable, "-u", str(HELPERS / "bseed_ota_campaign.py"),
            "--profile", str(profile_path), "--mode", mode]
     if confirm_ieee:
         cmd += ["--confirm-ieee", confirm_ieee]
     if confirm_unloaded:
         cmd.append("--confirm-load-unplugged")
-    if accept_risk:
-        cmd.append("--accept-nonrecoverable-ota-risk")
     return cmd
 
 
@@ -276,7 +274,7 @@ def reconcile_until_ready(profile_path: Path, confirm_ieee: str, work: Path,
 
 
 def resume_transition(profile_path: Path, confirm_ieee: str, *,
-                      confirm_unloaded: bool, accept_risk: bool,
+                      confirm_unloaded: bool,
                       reconcile_wait_seconds: int = 600,
                       reconcile_retry_seconds: int = 20,
                       join_strategy: str | None = None,
@@ -293,8 +291,8 @@ def resume_transition(profile_path: Path, confirm_ieee: str, *,
         raise ValueError("Exact IEEE confirmation mismatch")
     if profile["preflash_role"] == profile["postflash_role"]:
         raise ValueError("Resume supervisor is for cross-role transition campaigns")
-    if profile.get("non_pm") is True and not (confirm_unloaded and accept_risk):
-        raise ValueError("Non-PM transition requires load-unplugged and nonrecoverable-risk confirmations")
+    if profile.get("non_pm") is True and not confirm_unloaded:
+        raise ValueError("Non-PM transition requires load-unplugged confirmation")
 
     work = Path(profile["workdir"])
     work.mkdir(parents=True, exist_ok=True)
@@ -330,7 +328,6 @@ def resume_transition(profile_path: Path, confirm_ieee: str, *,
         "transition",
         confirm_ieee=confirm_ieee,
         confirm_unloaded=confirm_unloaded,
-        accept_risk=accept_risk,
     )
     transition_log = work / f"transition_{stamp}.log"
     record = {
@@ -373,7 +370,6 @@ def main(argv: list[str] | None = None) -> None:
     resume.add_argument("--profile", required=True)
     resume.add_argument("--confirm-ieee", required=True)
     resume.add_argument("--confirm-load-unplugged", action="store_true")
-    resume.add_argument("--accept-nonrecoverable-ota-risk", action="store_true")
     resume.add_argument("--reconcile-wait-seconds", type=int, default=600)
     resume.add_argument("--reconcile-retry-seconds", type=int, default=20)
     resume.add_argument("--join-strategy", choices=JOIN_STRATEGIES)
@@ -391,7 +387,6 @@ def main(argv: list[str] | None = None) -> None:
         profile_path,
         args.confirm_ieee,
         confirm_unloaded=args.confirm_load_unplugged,
-        accept_risk=args.accept_nonrecoverable_ota_risk,
         reconcile_wait_seconds=args.reconcile_wait_seconds,
         reconcile_retry_seconds=args.reconcile_retry_seconds,
         join_strategy=args.join_strategy,

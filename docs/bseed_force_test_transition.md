@@ -125,7 +125,7 @@ The non-PM recovery gate remains exact-target and fail-closed, but the reviewed
 BedroomSocketCabinetRight canary now has the same narrow no-disassembly test
 path as the PM role canary. It is pinned to IEEE `0xa4c13824a7005afb`, 32-byte
 blocks, non-PM `o1jzcxou / TS011F-BS`, `state_relay`, `follow_state`, explicit
-load-unplugged plus nonrecoverable-risk acknowledgement, and only the sealed
+load-unplugged confirmation, and only the sealed
 `1.1.3-bseedc7` / `1.1.3-bseedr10` pair. Same-role `cli4 -> c7` requires the
 exact c7 SHA. FORCE `c7 <-> r10` additionally requires the exact sealed native
 destination SHA; the canonical runner independently proves the private wrapper

@@ -21,8 +21,6 @@ def test_cross_role_contract_keeps_same_role_gate_strict(tmp_path):
     assert verify_transition_recovery(p, confirm_unloaded=True)
     with pytest.raises(ValueError, match='not explicitly confirmed'):
         verify_transition_recovery(p)
-    with pytest.raises(ValueError, match='waiver'):
-        verify_transition_recovery(p, confirm_unloaded=True, accept_nonrecoverable_ota=True)
 
 
 def test_router_no_meter_exception_requires_verified_transition_context():

@@ -87,7 +87,6 @@ def test_resume_reconciles_then_qualifies_then_launches(tmp_path, monkeypatch):
         profile_path,
         cfg["ieee"],
         confirm_unloaded=True,
-        accept_risk=True,
     )
 
     assert calls == [
@@ -123,7 +122,7 @@ def test_resume_orphaned_ota_running_uses_canonical_reconcile_before_retry(tmp_p
     monkeypatch.setattr(sup, "run_logged", fake_run)
     monkeypatch.setattr(sup, "launch_logged", lambda cmd, log: 7777)
     result = sup.resume_transition(
-        profile_path, cfg["ieee"], confirm_unloaded=True, accept_risk=True,
+        profile_path, cfg["ieee"], confirm_unloaded=True,
         reconcile_wait_seconds=0, reconcile_retry_seconds=1,
     )
     assert calls == ["reconcile-source", "qualify"]
@@ -142,12 +141,12 @@ def test_reconcile_wait_is_bounded_and_never_launches_without_proof(tmp_path, mo
     monkeypatch.setattr(sup, "run_logged", lambda cmd, log: 1)
     with pytest.raises(RuntimeError, match="Source reconciliation did not become safe"):
         sup.resume_transition(
-            profile_path, cfg["ieee"], confirm_unloaded=True, accept_risk=True,
+            profile_path, cfg["ieee"], confirm_unloaded=True,
             reconcile_wait_seconds=0, reconcile_retry_seconds=1,
         )
 
 
-def test_resume_requires_nonpm_risk_and_unloaded_confirmation(tmp_path, monkeypatch):
+def test_resume_requires_nonpm_unloaded_confirmation(tmp_path, monkeypatch):
     cfg = _profile(tmp_path)
     profile_path = tmp_path / "profile.json"
     profile_path.write_text(json.dumps(cfg))
@@ -155,10 +154,7 @@ def test_resume_requires_nonpm_risk_and_unloaded_confirmation(tmp_path, monkeypa
 
     with pytest.raises(ValueError, match="load-unplugged"):
         sup.resume_transition(profile_path, cfg["ieee"],
-                              confirm_unloaded=False, accept_risk=True)
-    with pytest.raises(ValueError, match="nonrecoverable-risk"):
-        sup.resume_transition(profile_path, cfg["ieee"],
-                              confirm_unloaded=True, accept_risk=False)
+                              confirm_unloaded=False)
 
 
 def test_status_warns_stale_observer_is_not_transport_failure(tmp_path, monkeypatch):
@@ -217,7 +213,7 @@ def test_fresh_get_timeout_runs_scoped_source_rejoin_once_then_reconciles(tmp_pa
     monkeypatch.setattr(sup, "launch_logged", lambda cmd, log: 8888)
 
     result = sup.resume_transition(
-        profile_path, cfg["ieee"], confirm_unloaded=True, accept_risk=True,
+        profile_path, cfg["ieee"], confirm_unloaded=True,
         reconcile_wait_seconds=30, reconcile_retry_seconds=1,
     )
 
@@ -283,7 +279,7 @@ def test_failed_rejoin_keeps_lock_and_never_qualifies_or_launches(tmp_path, monk
     monkeypatch.setattr(sup, "launch_logged", lambda *args: pytest.fail("unsafe OTA launch"))
     with pytest.raises(RuntimeError, match="permit-join closure is unconfirmed") as error:
         sup.resume_transition(
-            profile_path, cfg["ieee"], confirm_unloaded=True, accept_risk=True,
+            profile_path, cfg["ieee"], confirm_unloaded=True,
             reconcile_wait_seconds=0, join_strategy="all",
         )
 
@@ -388,7 +384,6 @@ def test_resume_records_explicit_join_all_policy(tmp_path, monkeypatch):
         profile_path,
         cfg["ieee"],
         confirm_unloaded=True,
-        accept_risk=True,
         join_strategy="all",
         allow_join_all_fallback=False,
     )
