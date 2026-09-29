@@ -25,21 +25,24 @@ The supervisor performs this sequence:
 2. Refuse a duplicate supervised child if the previous supervisor PID is alive.
 3. If the prior campaign is `update_error`, `update_timeout_or_unconfirmed`,
    or an orphaned `ota_running` state whose previous supervised process is no
-   longer alive, repeatedly attempt canonical `reconcile-source` for a bounded
-   recovery window. The canonical helper itself refuses while the device is
-   unreachable, still updating, or the exact source identity/candidate cannot
-   be freshly proven.
-4. Require the campaign to become either new or
-   `source_unchanged_reconciled`; timeout without proof is a hard stop and never
+   longer alive, attempt canonical `reconcile-source`.
+4. If and only if that latest reconciliation failure is exactly `Fresh target
+   GET response missing`, run `bseed_source_rejoin_recovery.py`: open permit-join
+   only through the profile's declared `join_via` router, poll the exact target
+   with a read-only GET, verify the returned nested IEEE, and close permit-join
+   unconditionally. Identity/hash/lock/candidate failures never open join.
+5. After link recovery, rerun canonical `reconcile-source`; it remains the
+   authority for exact source role/build, quiet OTA state, candidate source and
+   network-lock release. Timeout or failed proof is a hard stop and never
    triggers an OTA launch.
-5. Run canonical `qualify` synchronously, logging directly to disk.
-6. Immediately launch canonical `transition` so link-gate evidence cannot age
+6. Run canonical `qualify` synchronously, logging directly to disk.
+7. Immediately launch canonical `transition` so link-gate evidence cannot age
    between qualification and OTA launch.
-7. Redirect child stdout and stderr to a durable transition log; stdin is
+8. Redirect child stdout and stderr to a durable transition log; stdin is
    `DEVNULL`; no stdout/stderr PIPE is created.
-8. Persist `OTA_SUPERVISOR.json` with PID, exact profile SHA, image SHA, log
+9. Persist `OTA_SUPERVISOR.json` with PID, exact profile SHA, image SHA, log
    paths, launch contract and timestamps.
-9. Return immediately. Later checks use `status`.
+10. Return immediately. Later checks use `status`.
 
 For the exact Bedroom non-PM canary, profile loading separately enforces the
 known-good transfer envelope: 32-byte blocks, >=1200 ms response delay,

@@ -175,3 +175,75 @@ def test_status_warns_stale_observer_is_not_transport_failure(tmp_path, monkeypa
     assert result["campaign_lock"]["phase"] == "ota_running"
     assert result["live_status"]["update"]["progress"] == 50.38
     assert "NOT proof" in result["warning"]
+
+
+def test_fresh_get_timeout_runs_scoped_source_rejoin_once_then_reconciles(tmp_path, monkeypatch):
+    cfg = _profile(tmp_path)
+    cfg["join_via"] = "BedroomSocketCabinetL"
+    cfg["join_seconds"] = 120
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text(json.dumps(cfg))
+    work = Path(cfg["workdir"])
+    work.mkdir()
+    (work / "ACTIVE_LOCK.json").write_text(json.dumps({"phase": "ota_running"}))
+    monkeypatch.setattr(sup.campaign, "load_profile", lambda _p: dict(cfg))
+    monkeypatch.setattr(sup, "process_alive", lambda _pid: False)
+    calls = []
+    reconcile_count = 0
+
+    def fake_run(cmd, log):
+        nonlocal reconcile_count
+        name = Path(cmd[2]).name
+        if name == "bseed_source_rejoin_recovery.py":
+            calls.append("source-rejoin")
+            return 0
+        mode = cmd[cmd.index("--mode") + 1]
+        calls.append(mode)
+        if mode == "reconcile-source":
+            reconcile_count += 1
+            if reconcile_count == 1:
+                log.write_text(
+                    "=== RUN ===\nTimeoutError: Fresh target GET response missing\n=== EXIT 1 ===\n"
+                )
+                return 1
+            (work / "ACTIVE_LOCK.json").write_text(
+                json.dumps({"phase": "source_unchanged_reconciled"})
+            )
+            return 0
+        return 0
+
+    monkeypatch.setattr(sup, "run_logged", fake_run)
+    monkeypatch.setattr(sup, "launch_logged", lambda cmd, log: 8888)
+
+    result = sup.resume_transition(
+        profile_path, cfg["ieee"], confirm_unloaded=True, accept_risk=True,
+        reconcile_wait_seconds=30, reconcile_retry_seconds=1,
+    )
+
+    assert calls == ["reconcile-source", "source-rejoin", "reconcile-source", "qualify"]
+    assert result["pid"] == 8888
+
+
+def test_non_link_reconcile_failure_does_not_open_source_rejoin(tmp_path, monkeypatch):
+    cfg = _profile(tmp_path)
+    cfg["join_via"] = "BedroomSocketCabinetL"
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text(json.dumps(cfg))
+    work = Path(cfg["workdir"])
+    work.mkdir()
+    (work / "ACTIVE_LOCK.json").write_text(json.dumps({"phase": "ota_running"}))
+    monkeypatch.setattr(sup.campaign, "load_profile", lambda _p: dict(cfg))
+    calls = []
+
+    def fake_run(cmd, log):
+        calls.append(Path(cmd[2]).name)
+        log.write_text("=== RUN ===\nValueError: Campaign lock identity/hash mismatch\n=== EXIT 1 ===\n")
+        return 1
+
+    monkeypatch.setattr(sup, "run_logged", fake_run)
+    with pytest.raises(RuntimeError, match="Source reconciliation did not become safe"):
+        sup.reconcile_until_ready(
+            profile_path, cfg["ieee"], work, work / "orchestration.log",
+            wait_seconds=0, retry_seconds=1,
+        )
+    assert calls == ["bseed_ota_campaign.py"]

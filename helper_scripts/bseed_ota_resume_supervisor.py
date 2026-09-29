@@ -186,9 +186,33 @@ def status(profile_path: Path) -> dict[str, Any]:
     }
 
 
+def _last_logged_run(log_path: Path) -> str:
+    try:
+        text = log_path.read_text(encoding="utf8", errors="replace")
+    except OSError:
+        return ""
+    # run_logged writes one RUN marker, body, then one EXIT marker. Slice from
+    # the marker immediately preceding the final marker so error matching only
+    # considers the most recent orchestration step and is format-tolerant.
+    final = text.rfind("=== ")
+    if final < 0:
+        return text
+    previous = text.rfind("=== ", 0, final)
+    return text[previous if previous >= 0 else 0:]
+
+
+def source_rejoin_cmd(profile_path: Path, confirm_ieee: str, output: Path) -> list[str]:
+    return [
+        sys.executable, "-u", str(HELPERS / "bseed_source_rejoin_recovery.py"),
+        "--profile", str(profile_path),
+        "--confirm-ieee", confirm_ieee,
+        "--output", str(output),
+    ]
+
+
 def reconcile_until_ready(profile_path: Path, confirm_ieee: str, work: Path,
                           orchestration_log: Path, *, wait_seconds: int,
-                          retry_seconds: int) -> str | None:
+                          retry_seconds: int, allow_scoped_source_rejoin: bool = True) -> str | None:
     """Use canonical reconciliation until an orphaned/failed source is proven ready.
 
     Every attempt is read-only with respect to firmware. The canonical helper
@@ -197,6 +221,7 @@ def reconcile_until_ready(profile_path: Path, confirm_ieee: str, work: Path,
     """
     deadline = time.monotonic() + max(0, wait_seconds)
     attempts = 0
+    source_rejoin_attempted = False
     while True:
         lock = read_json(work / "ACTIVE_LOCK.json")
         phase = lock.get("phase") if lock else None
@@ -213,6 +238,21 @@ def reconcile_until_ready(profile_path: Path, confirm_ieee: str, work: Path,
         phase = lock.get("phase") if lock else None
         if rc == 0 and phase == READY_PHASE:
             return phase
+        if (rc != 0 and allow_scoped_source_rejoin and not source_rejoin_attempted and
+                "Fresh target GET response missing" in _last_logged_run(orchestration_log)):
+            source_rejoin_attempted = True
+            stamp = dt.datetime.now().strftime("%Y%m%dT%H%M%S%f")
+            evidence = work / f"source_rejoin_{stamp}.json"
+            rejoin_rc = run_logged(
+                source_rejoin_cmd(profile_path, confirm_ieee, evidence),
+                orchestration_log,
+            )
+            if rejoin_rc != 0:
+                raise RuntimeError(
+                    f"Scoped source rejoin failed with exit {rejoin_rc}; "
+                    "permit-join was closed and OTA resume remains blocked"
+                )
+            continue
         if time.monotonic() >= deadline:
             raise RuntimeError(
                 f"Source reconciliation did not become safe after {attempts} attempt(s); "
