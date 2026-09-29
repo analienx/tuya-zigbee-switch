@@ -31,7 +31,7 @@ are evidenced:
 1. Restore the coordinator/service and positively verify joining is closed.
 2. Reconcile the original non-PM campaign with fresh exact source build/role,
    target IEEE, OTA quietness and candidate identity; preserve unresolved locks.
-3. With applicable physical-load/risk authorization, freshly qualify and resume
+3. With current physical-load confirmation, freshly qualify and resume
    through the deterministic supervisor, retaining durable transaction evidence.
 4. Verify the exact non-PM Router build and live role, relay/settings retention,
    absence of PM reporting and actual child-parenting/routing behavior.
