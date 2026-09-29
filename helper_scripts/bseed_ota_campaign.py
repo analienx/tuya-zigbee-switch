@@ -83,6 +83,17 @@ def load_profile(path):
     if data.get('network_lock_dir') and Path(data['network_lock_dir']).is_relative_to(ROOT):
         raise ValueError('Network lock authority must not be inside repository')
     validate_pm_mode(data)
+    if (data.get('force_test_transition') is True and data.get('non_pm') is True and
+            data.get('device') == 'BedroomSocketCabinetRight' and
+            data.get('ieee') == '0xa4c13824a7005afb'):
+        if int(data.get('block_bytes', 0)) != 32:
+            raise ValueError('Bedroom non-PM FORCE canary requires 32-byte OTA blocks')
+        if int(data.get('response_delay_ms', 0)) < 1200:
+            raise ValueError('Bedroom non-PM FORCE canary requires at least 1200 ms response pacing')
+        if int(data.get('request_timeout_ms', 0)) < 1800000:
+            raise ValueError('Bedroom non-PM FORCE canary requires at least 1800000 ms per-request timeout')
+        if int(data.get('monitor_seconds', 0)) < 14400:
+            raise ValueError('Bedroom non-PM FORCE canary requires at least 14400 s overall monitor')
     data['_profile_path'] = str(source)
     return data
 

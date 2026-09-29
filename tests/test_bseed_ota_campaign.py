@@ -78,6 +78,34 @@ def test_force_profile_requires_boolean_flag_native_image_and_hash(tmp_path):
     assert loaded['native_image'] == str(native.resolve())
 
 
+def test_exact_bedroom_force_profile_rejects_short_transfer_timeouts(tmp_path):
+    cfg = profile(tmp_path)
+    native = tmp_path / 'native.ota'; native.write_bytes(b'native fixture')
+    cfg.update(device='BedroomSocketCabinetRight', ieee='0xa4c13824a7005afb',
+               manufacturer='o1jzcxou', model='TS011F-BS',
+               preflash_role='EndDevice', postflash_role='Router',
+               preflash_build='1.1.3-bseedc7', postflash_build='1.1.3-bseedr10',
+               preflash_relay_physical_mode='follow_state', non_pm=True, require_pm=False,
+               force_test_transition=True, native_image=str(native),
+               native_sha256=hashlib.sha256(native.read_bytes()).hexdigest(),
+               block_bytes=32, response_delay_ms=1200, request_timeout_ms=1800000,
+               monitor_seconds=14400)
+    source = tmp_path / 'bedroom-force.json'
+    source.write_text(json.dumps(cfg))
+    loaded = campaign.load_profile(source)
+    assert loaded['request_timeout_ms'] == 1800000
+    assert loaded['monitor_seconds'] == 14400
+    for key, value, match in (
+            ('request_timeout_ms', 180000, 'per-request timeout'),
+            ('monitor_seconds', 7200, 'overall monitor'),
+            ('response_delay_ms', 1000, 'response pacing'),
+            ('block_bytes', 48, '32-byte OTA blocks')):
+        bad = dict(cfg); bad[key] = value
+        source.write_text(json.dumps(bad))
+        with pytest.raises(ValueError, match=match):
+            campaign.load_profile(source)
+
+
 def test_image_index_requires_exact_tuple_and_hash(tmp_path):
     cfg=profile(tmp_path);cfg['sha256']='0'*64
     with pytest.raises(ValueError,match='SHA256'): campaign.make_index(cfg)

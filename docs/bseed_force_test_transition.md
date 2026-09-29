@@ -131,3 +131,10 @@ exact c7 SHA. FORCE `c7 <-> r10` additionally requires the exact sealed native
 destination SHA; the canonical runner independently proves the private wrapper
 payload is byte-identical to that native image. Other devices/builds remain
 blocked without SWire/readback recovery evidence.
+
+For this exact Bedroom FORCE role canary, the paced transfer timing is also
+fail-closed: 32-byte blocks, at least 1200 ms response pacing, at least
+1,800,000 ms per-request timeout and at least 14,400 s overall monitor. A
+2026-09-29 c7 -> r10 attempt with only 180,000 ms per-request timeout reached
+49.74% before a quiet client interval caused Zigbee2MQTT to terminate the
+session; the source c7 image remained healthy and was reconciled unchanged.
