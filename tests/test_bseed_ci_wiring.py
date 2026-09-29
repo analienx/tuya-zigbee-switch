@@ -51,8 +51,11 @@ def test_finalizer_prerequisites_run_for_every_pull_request():
     for name in ("BSEED candidate finalization", *REQUIRED):
         triggers = documents[name][True]
         assert "pull_request" in triggers, name
-        filters = triggers["pull_request"] or {}
-        assert not filters, (name, filters)
+        if isinstance(triggers, dict):
+            filters = triggers["pull_request"] or {}
+            assert not filters, (name, filters)
+        else:
+            assert isinstance(triggers, list), (name, triggers)
 
 
 def test_no_elevated_or_reusable_trigger_modes():
