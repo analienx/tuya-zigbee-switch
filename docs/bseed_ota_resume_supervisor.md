@@ -32,8 +32,11 @@ The supervisor performs this sequence:
    `scoped` uses the profile's verified `join_via` router; `coordinator` opens
    only the coordinator; `all` opens a bounded network-wide permit-join window;
    `auto` prefers scoped, then coordinator, and may fall back to Join All when
-   `allow_join_all_fallback` is explicitly enabled. Every opened window is
-   closed in `finally`. Recovery succeeds only when a fresh read from the exact
+   `allow_join_all_fallback` is explicitly enabled. Closure is attempted in
+   `finally`, including after a failed open request. A close timeout or error
+   leaves closure unconfirmed and blocks OTA. Check the saved close response
+   and live bridge permit-join state before another attempt. Recovery succeeds
+   only when a fresh read from the exact
    target IEEE is observed; unrelated joins never count. Identity/hash/lock/
    candidate failures never open any join window.
 5. After link recovery, rerun canonical `reconcile-source`; it remains the

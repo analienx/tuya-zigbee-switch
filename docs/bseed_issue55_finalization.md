@@ -5,6 +5,12 @@ two patch drafts. The candidate is published in PR #56. CI results are specific
 to each candidate SHA; consult that PR's current checks and the candidate
 finalization artifact. No local execution counts as verification.
 
+Current completion boundaries are in `docs/bseed_issue55_resume_20260929.md`.
+The four current native socket candidates and exact-source sealed hashes are
+recorded in `docs/pr56_second_review_remediation.md`; the six-tuple report below
+describes the historical first finalization. The Kitchen PM role-pair canary
+passed A/B/A checks; non-PM and broader release acceptance remain open.
+
 ## Source disposition
 
 All twelve original findings and the seven wider-review findings have source

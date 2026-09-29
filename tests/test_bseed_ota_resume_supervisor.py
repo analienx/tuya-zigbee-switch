@@ -250,6 +250,50 @@ def test_non_link_reconcile_failure_does_not_open_source_rejoin(tmp_path, monkey
     assert calls == ["bseed_ota_campaign.py"]
 
 
+def test_failed_rejoin_keeps_lock_and_never_qualifies_or_launches(tmp_path, monkeypatch):
+    cfg = _profile(tmp_path)
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text(json.dumps(cfg))
+    work = Path(cfg["workdir"])
+    work.mkdir()
+    lock_path = work / "ACTIVE_LOCK.json"
+    lock_path.write_text(json.dumps({"phase": "ota_running"}))
+    original_lock = lock_path.read_bytes()
+    monkeypatch.setattr(sup.campaign, "load_profile", lambda _p: dict(cfg))
+    monkeypatch.setattr(sup, "process_alive", lambda _pid: False)
+    calls = []
+
+    def fake_run(cmd, log):
+        name = Path(cmd[2]).name
+        calls.append(name)
+        if name == "bseed_ota_campaign.py":
+            log.write_text(
+                "=== RUN ===\nTimeoutError: Fresh target GET response missing\n=== EXIT 1 ===\n"
+            )
+        else:
+            output = Path(cmd[cmd.index("--output") + 1])
+            output.write_text(json.dumps({
+                "result": "unconfirmed",
+                "fatal_error": "JOIN_CLOSE_UNCONFIRMED:all",
+                "attempts": [{"close_response": {"status": "error"}}],
+            }))
+        return 1
+
+    monkeypatch.setattr(sup, "run_logged", fake_run)
+    monkeypatch.setattr(sup, "launch_logged", lambda *args: pytest.fail("unsafe OTA launch"))
+    with pytest.raises(RuntimeError, match="permit-join closure is unconfirmed") as error:
+        sup.resume_transition(
+            profile_path, cfg["ieee"], confirm_unloaded=True, accept_risk=True,
+            reconcile_wait_seconds=0, join_strategy="all",
+        )
+
+    assert calls == ["bseed_ota_campaign.py", "bseed_source_rejoin_recovery.py"]
+    assert lock_path.read_bytes() == original_lock
+    evidence = next(work.glob("source_rejoin_*.json"))
+    assert str(evidence) in str(error.value)
+    assert not (work / sup.SUPERVISOR_FILE).exists()
+
+
 def test_join_strategy_plan_is_generic_and_fail_closed():
     assert rejoin.resolve_join_plan(
         "none", router_available=False, allow_join_all_fallback=False

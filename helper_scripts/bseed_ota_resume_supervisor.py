@@ -263,7 +263,8 @@ def reconcile_until_ready(profile_path: Path, confirm_ieee: str, work: Path,
             if rejoin_rc != 0:
                 raise RuntimeError(
                     f"Source rejoin recovery failed with exit {rejoin_rc}; "
-                    "permit-join was closed and OTA resume remains blocked"
+                    f"permit-join closure is unconfirmed until evidence in {evidence} "
+                    "and live bridge state are checked; OTA resume remains blocked"
                 )
             continue
         if time.monotonic() >= deadline:
