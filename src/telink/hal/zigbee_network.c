@@ -115,7 +115,9 @@ static hal_network_status_change_callback_t network_status_change_callback =
 // Telink ZDO callbacks
 static void zdo_sync_confirmation_callback(nlme_sync_cnf_t *confirmation) {
     firmware_health.last_poll_status = confirmation->status;
-    firmware_health_increment(confirmation->status == RET_OK ?
+    /* An acknowledged poll with no queued data is a healthy parent response. */
+    firmware_health_increment((confirmation->status == MAC_SUCCESS ||
+                               confirmation->status == MAC_STA_NO_DATA) ?
                               &firmware_health.poll_success :
                               &firmware_health.poll_failure);
 }

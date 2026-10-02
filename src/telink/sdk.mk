@@ -172,6 +172,7 @@ $(BUILD_DIR)/sdk/proj/os/ev_timer.o: $(SDK_PATH)/proj/os/ev_timer.c ../../helper
 	@$(CC) $(GCC_FLAGS) $(DEVICE_DEFS) $(INCLUDE_PATHS) -I$(SDK_PATH)/proj/os -c -o $@ $(@D)/ev_timer.c
 
 $(BUILD_DIR)/telink/hal/tasks.o: GCC_FLAGS += -fno-strict-aliasing
+$(BUILD_DIR)/sdk/proj/os/ev_timer.o: GCC_FLAGS += -fno-strict-aliasing
 
 # Compile SDK C files
 # Keep the downloaded SDK immutable. Fail closed if its two allocation paths

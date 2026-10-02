@@ -158,3 +158,29 @@ int main(void) {
 '''
     run_c(tmp_path, harness + defines + "\n" + state + rejoin +
           callback + status + ensure + checks, flags)
+
+
+def test_poll_diagnostics_count_empty_ack_as_success_and_saturate(tmp_path):
+    source = (ROOT / "src/telink/hal/zigbee_network.c").read_text()
+    callback = "static void zdo_sync_confirmation_callback" + source.split(
+        "static void zdo_sync_confirmation_callback", 1)[1].split(
+        "zdo_appIndCb_t zdo_callbacks", 1)[0]
+    run_c(tmp_path, r'''
+#include <assert.h>
+#include "hal/firmware_health.h"
+#define MAC_SUCCESS 0
+#define MAC_STA_NO_DATA 0xEB
+typedef struct {uint8_t status;} nlme_sync_cnf_t;
+firmware_health_t firmware_health;
+''' + callback + r'''
+int main(void) {
+    nlme_sync_cnf_t cnf={MAC_SUCCESS}; zdo_sync_confirmation_callback(&cnf);
+    cnf.status=MAC_STA_NO_DATA; zdo_sync_confirmation_callback(&cnf);
+    assert(firmware_health.poll_success==2 && !firmware_health.poll_failure);
+    cnf.status=0xE9; zdo_sync_confirmation_callback(&cnf);
+    assert(firmware_health.poll_failure==1 && firmware_health.last_poll_status==0xE9);
+    firmware_health.poll_failure=UINT32_MAX; zdo_sync_confirmation_callback(&cnf);
+    assert(firmware_health.poll_failure==UINT32_MAX);
+    return 0;
+}
+''')

@@ -36,8 +36,12 @@ typedef int32_t s32;
 #define TIMER_CANCEL_NOT_ALLOWED 2
 #define ZB_EXCEPTION_POST(code) ((void)0)
 static u32 ticks;
+static void (*irq_hook)(void);
 static u32 clock_time(void) {return ticks;}
-static u32 drv_disable_irq(void) {return 0;}
+static u32 drv_disable_irq(void) {
+    if(irq_hook) {void (*hook)(void)=irq_hook; irq_hook=0; hook();}
+    return 0;
+}
 static void drv_restore_irq(u32 r) {(void)r;}
 static void ev_rtc_update(u32 ms) {(void)ms;}
 #pragma pack(push, 1)
@@ -56,6 +60,12 @@ static void ev_rtc_update(u32 ms) {(void)ms;}
 #include "telink/hal/tasks.c"
 static hal_task_t task, other;
 static int fired, other_fired;
+static int race_fired;
+static void rearm_from_irq(void) {hal_tasks_schedule(&other,7);}
+static void race_handler(void *arg) {
+    (void)arg; race_fired++;
+    if(race_fired==1) irq_hook=rearm_from_irq;
+}
 static int pooled(void *arg) {(void)arg; return 0;}
 static void other_handler(void *arg) {(void)arg; other_fired++;}
 static void handler(void *arg) {
@@ -83,6 +93,10 @@ int main(void) {
     step(5); assert(other_fired==1);
     hal_tasks_schedule(&other,1); hal_tasks_unschedule(&other);
     step(2); assert(other_fired==1);
+    other.handler=race_handler;
+    hal_tasks_schedule(&other,1);
+    step(1); assert(race_fired==1);
+    step(7); assert(race_fired==2); /* ISR rearm survives callback cleanup */
     u32 before=hal_millis();
     for(int i=0;i<600;i++) {ticks+=8000; ev_timer_process();}
     assert(hal_millis()==before+300); /* fractional milliseconds retained */

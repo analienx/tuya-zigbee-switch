@@ -76,11 +76,12 @@ void metering_cluster_add_to_endpoint(metering_cluster_t *cluster,
 }
 
 static void metering_cluster_save_if_due(metering_cluster_t *cluster) {
-    uint32_t now = hal_millis();
+    uint32_t now      = hal_millis();
     uint32_t interval = cluster->persistence_retry_pending ?
                         NVM_RETRY_INTERVAL_MS : NVM_SAVE_INTERVAL_MS;
     uint32_t last = cluster->persistence_retry_pending ?
                     cluster->last_nvm_attempt_time : cluster->last_nvm_save_time;
+
     if ((cluster->persistence_retry_pending ||
          cluster->current_summation_delivered != cluster->last_persisted_energy) &&
         now - last >= interval)
@@ -111,7 +112,7 @@ void metering_cluster_update(metering_cluster_t *cluster) {
     energy_meter_get_data(cluster->meter, &data);
     if (!data.valid) {
         /* A stalled sampler does not prevent saving an already trusted total
-         * or retrying an explicit reset. Never integrate stale meter data. */
+        * or retrying an explicit reset. Never integrate stale meter data. */
         metering_cluster_save_if_due(cluster);
         return;
     }
