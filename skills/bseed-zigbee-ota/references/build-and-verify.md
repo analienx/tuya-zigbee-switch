@@ -6,10 +6,10 @@ for the superseding implementation and GitHub-hosted-only validation path.
 Pending-source/approval statements below are historical. Run no repository
 build, test, lint, verification or sealing on a local machine.
 
-Current status: independent review HOLD. Read the remediation table in
-`docs/bseed_independent_review_triage_20260927.md`; the non-PM workflow replacement
-and PM telemetry-recovery follow-up are not yet applied. The procedure below is
-the required completion path, not evidence that CI or hardware already passed.
+The source remediation and workflow replacements are implemented in PR #56.
+The original triage's pending-source statements are historical. Read
+`docs/pr56_second_review_remediation.md` for the sealed native candidate set and
+`docs/bseed_issue55_resume_20260929.md` for the outstanding live gates.
 
 Run from repository root. This is the offline build path; live campaign gates
 remain in the main skill. Do not flash, reset or modify a production converter
@@ -54,9 +54,9 @@ as a side effect of building.
    release proof. If lint fails, use the CI `lint-diagnostics` artifact,
    inspect the patch, then commit and rerun. A corrected source SHA needs its
    own green runs.
-6. Download the PM/non-PM role-matrix and generated converter artifacts into
-   ignored `build/ci-SHA/`. Check successful GitHub conclusions and their
-   `headSha`; a downloaded report is not authentication of CI success. Run:
+6. The GitHub-hosted candidate-finalization workflow downloads the exact-SHA
+   PM/non-PM matrix artifacts and authenticates prerequisite run conclusions.
+   The following command runs only on that runner, never a personal checkout:
 
    ```text
    python helper_scripts/bseed_pm_seal.py --matrix-dir MATRIX_DIR --nonpm-dir NONPM_MATRIX_DIR --source-commit FULL_SHA
@@ -66,8 +66,10 @@ as a side effect of building.
    startup marker, CRC, exact embedded length-prefixed Basic ID, role hashes and
    reproducibility reports for the four native socket candidates. It does not
    claim the firmware booted or the downlink works.
-7. Once exact-SHA CI is green, repeat with `--write`. Review and commit the
-   registry diff; no old sealed hash may change. The tool seals the four native
+7. Once exact-SHA CI is green, the runner repeats with `--write` on a registry
+   copy and uploads its sealed proposal/report. Download that proposal for
+   inspection and commit the reviewed registry diff; no old sealed hash may
+   change. The tool seals the four native
    PM/non-PM role tuples atomically and is idempotent for identical artifacts.
    FORCE wrappers remain private and unregistered. The retired PM `.17`
    return-experiment tuples stay tombstoned only to prevent future byte-identity

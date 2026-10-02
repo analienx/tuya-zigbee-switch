@@ -22,7 +22,9 @@ Published Router `1.2.5-bseedv8u4` (`0x12053007`) must remain byte-stable.
 Current candidates are defined in `helper_scripts/bseed_pm_release.py`:
 `BSEED_PM_CONSOLIDATED=1` builds `1.2.5-bseedr9` (`0x12053016`, type 43556),
 and the PM Client build produces `1.2.5-bseedcli12` (same version, type 65024).
-Neither is hardware-accepted or a golden release. Historical candidate modes
+The KitchenSocketLeft PM A/B/A canary passed the role-pair checks in
+`docs/bseed_force_hardware_acceptance_20260928.md`; broader release/soak gates
+remain open. This does not grant fleet release acceptance. Historical candidate modes
 remain immutable evidence and are not a current-source rebuild path.
 See [FORCE role-transition testing](bseed_force_test_transition.md) and the
 [build/sealing procedure](../skills/bseed-zigbee-ota/references/build-and-verify.md).
