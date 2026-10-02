@@ -82,6 +82,8 @@ def test_resume_reconciles_then_qualifies_then_launches(tmp_path, monkeypatch):
     monkeypatch.setattr(sup, "run_logged", fake_run)
     monkeypatch.setattr(sup, "launch_logged",
                         lambda cmd, log: calls.append(("launch", cmd[cmd.index("--mode") + 1])) or 5555)
+    monkeypatch.setattr(sup, "confirm_transition_started",
+                        lambda work, pid, previous_token: {"phase": "ota_running", "token": "new-5555", "started": "now"})
 
     result = sup.resume_transition(
         profile_path,
@@ -122,6 +124,8 @@ def test_resume_orphaned_ota_running_uses_canonical_reconcile_before_retry(tmp_p
 
     monkeypatch.setattr(sup, "run_logged", fake_run)
     monkeypatch.setattr(sup, "launch_logged", lambda cmd, log: 7777)
+    monkeypatch.setattr(sup, "confirm_transition_started",
+                        lambda work, pid, previous_token: {"phase": "ota_running", "token": "new-7777", "started": "now"})
     result = sup.resume_transition(
         profile_path, cfg["ieee"], confirm_unloaded=True, accept_risk=True,
         reconcile_wait_seconds=0, reconcile_retry_seconds=1,
@@ -215,6 +219,8 @@ def test_fresh_get_timeout_runs_scoped_source_rejoin_once_then_reconciles(tmp_pa
 
     monkeypatch.setattr(sup, "run_logged", fake_run)
     monkeypatch.setattr(sup, "launch_logged", lambda cmd, log: 8888)
+    monkeypatch.setattr(sup, "confirm_transition_started",
+                        lambda work, pid, previous_token: {"phase": "ota_running", "token": "new-8888", "started": "now"})
 
     result = sup.resume_transition(
         profile_path, cfg["ieee"], confirm_unloaded=True, accept_risk=True,
@@ -383,6 +389,8 @@ def test_resume_records_explicit_join_all_policy(tmp_path, monkeypatch):
     monkeypatch.setattr(sup, "process_alive", lambda _pid: False)
     monkeypatch.setattr(sup, "run_logged", lambda cmd, log: 0)
     monkeypatch.setattr(sup, "launch_logged", lambda cmd, log: 9191)
+    monkeypatch.setattr(sup, "confirm_transition_started",
+                        lambda work, pid, previous_token: {"phase": "ota_running", "token": "new-9191", "started": "now"})
 
     result = sup.resume_transition(
         profile_path,
@@ -397,3 +405,64 @@ def test_resume_records_explicit_join_all_policy(tmp_path, monkeypatch):
     assert result["recovery_policy"]["allow_join_all_fallback"] is False
     persisted = json.loads((work / sup.SUPERVISOR_FILE).read_text())
     assert persisted["recovery_policy"]["join_strategy"] == "all"
+
+
+def test_confirm_transition_started_requires_fresh_ota_lock(tmp_path, monkeypatch):
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "ACTIVE_LOCK.json").write_text(json.dumps({
+        "phase": "ota_running",
+        "token": "new-token",
+        "started": "now",
+    }))
+    monkeypatch.setattr(sup, "process_alive", lambda pid: True)
+    lock = sup.confirm_transition_started(work, 1234, "old-token", timeout_seconds=0.1)
+    assert lock["token"] == "new-token"
+
+
+def test_confirm_transition_started_rejects_dead_child_without_new_lock(tmp_path, monkeypatch):
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "ACTIVE_LOCK.json").write_text(json.dumps({
+        "phase": "source_unchanged_reconciled",
+        "token": "old-token",
+    }))
+    monkeypatch.setattr(sup, "process_alive", lambda pid: False)
+    with pytest.raises(RuntimeError, match="exited before acquiring"):
+        sup.confirm_transition_started(work, 4321, "old-token", timeout_seconds=0.1)
+
+
+def test_resume_persists_launch_failed_when_child_never_acquires_lock(tmp_path, monkeypatch):
+    cfg = _profile(tmp_path)
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text(json.dumps(cfg))
+    work = Path(cfg["workdir"])
+    work.mkdir()
+    (work / "ACTIVE_LOCK.json").write_text(json.dumps({
+        "phase": "source_unchanged_reconciled",
+        "token": "old-token",
+    }))
+    monkeypatch.setattr(sup.campaign, "load_profile", lambda _p: dict(cfg))
+    monkeypatch.setattr(sup, "process_alive", lambda _pid: False)
+    monkeypatch.setattr(sup, "run_logged", lambda cmd, log: 0)
+    monkeypatch.setattr(sup, "launch_logged", lambda cmd, log: 4242)
+    monkeypatch.setattr(
+        sup,
+        "confirm_transition_started",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("child exited before lock")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="child exited before lock"):
+        sup.resume_transition(
+            profile_path,
+            cfg["ieee"],
+            confirm_unloaded=True,
+            accept_risk=True,
+        )
+
+    record = json.loads((work / sup.SUPERVISOR_FILE).read_text())
+    assert record["state"] == "launch_failed"
+    assert record["pid"] == 4242
+    assert "child exited before lock" in record["launch_error"]

@@ -138,6 +138,31 @@ def launch_logged(cmd: list[str], log_path: Path) -> int:
     return int(proc.pid)
 
 
+def confirm_transition_started(work: Path, pid: int, previous_token: str | None, *,
+                               timeout_seconds: float = 10.0) -> dict[str, Any]:
+    """Require concrete campaign ownership after spawning the transition child.
+
+    Popen returning a PID is not evidence that the OTA runner actually started.
+    Success requires a fresh ota_running lock/token while the child remains alive.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    last_lock = None
+    while time.monotonic() < deadline:
+        last_lock = read_json(work / "ACTIVE_LOCK.json")
+        if (last_lock and last_lock.get("phase") == "ota_running" and
+                last_lock.get("token") and last_lock.get("token") != previous_token):
+            return last_lock
+        if not process_alive(pid):
+            raise RuntimeError(
+                f"Transition child PID {pid} exited before acquiring a fresh ota_running lock"
+            )
+        time.sleep(0.2)
+    raise RuntimeError(
+        "Transition child did not acquire a fresh ota_running lock within "
+        f"{timeout_seconds:.1f}s; last_lock={last_lock!r}"
+    )
+
+
 def latest_ota_jsonl(work: Path) -> Path | None:
     files = sorted(work.glob("ota_bseed-ota-*.jsonl"),
                    key=lambda p: p.stat().st_mtime if p.exists() else 0,
@@ -359,8 +384,22 @@ def resume_transition(profile_path: Path, confirm_ieee: str, *,
         },
     }
     write_json_atomic(supervisor_path, record)
+    previous_token = lock.get("token") if lock else None
     pid = launch_logged(transition_cmd, transition_log)
-    record.update(state="running", launched_at=now(), pid=pid)
+    record.update(state="starting", launched_at=now(), pid=pid)
+    write_json_atomic(supervisor_path, record)
+    try:
+        fresh_lock = confirm_transition_started(work, pid, previous_token)
+    except Exception as error:
+        record.update(state="launch_failed", launch_failed_at=now(), launch_error=repr(error))
+        write_json_atomic(supervisor_path, record)
+        raise
+    record.update(
+        state="running",
+        confirmed_at=now(),
+        campaign_token=fresh_lock.get("token"),
+        campaign_started=fresh_lock.get("started"),
+    )
     write_json_atomic(supervisor_path, record)
     return record
 
