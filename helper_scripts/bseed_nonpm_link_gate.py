@@ -20,6 +20,11 @@ import yaml
 SAMPLES = 3
 MIN_SPACING_S = 25
 MAX_LATENCY_S = 12
+# gate_requested_at is stamped on the operator host while requested_at/response_at
+# are stamped on the Zigbee2MQTT host. Do not require impossible sub-second wall
+# clock ordering across hosts; request_id correlation and the backend's own
+# issued_at freshness check prevent stale/replayed evidence.
+MAX_CROSS_HOST_CLOCK_SKEW_S = 2.0
 MAX_EVIDENCE_AGE_S = 600
 PROBE_SCHEMA = 1
 DEFAULT_PROBE_ENDPOINT = 2
@@ -75,7 +80,7 @@ def verify_probe_evidence(evidence, profile, request_id, gate_requested_at):
     responded = evidence.get('response_at')
     if not (type(requested) in (int, float) and
             type(responded) in (int, float) and
-            gate_requested_at <= requested <= responded and
+            gate_requested_at - MAX_CROSS_HOST_CLOCK_SKEW_S <= requested <= responded and
             responded - requested <= MAX_LATENCY_S):
         raise AssertionError('Backend read probe timing is invalid')
     if evidence.get('errors'):

@@ -48,6 +48,12 @@ def test_backend_probe_must_correlate_exact_read_response():
         requested_at=100.1,response_at=101.0,errors=[],value='OFF')
     p['expect_relay']='OFF'
     assert verify_probe_evidence(evidence,p,'req-1',100.0) is evidence
+    # Cross-host wall clocks need not be sub-second synchronized. A small skew
+    # is acceptable, while a materially old backend timestamp remains rejected.
+    skewed=dict(evidence,requested_at=99.75,response_at=100.65)
+    assert verify_probe_evidence(skewed,p,'req-1',100.0) is skewed
+    with pytest.raises(AssertionError,match='timing'):
+        verify_probe_evidence(dict(evidence,requested_at=97.5,response_at=98.0),p,'req-1',100.0)
     for field,value in (
         ('request_id','foreign'),('ieee','0xBAD'),('endpoint',1),
         ('cluster','haElectricalMeasurement'),('attribute','activePower'),
