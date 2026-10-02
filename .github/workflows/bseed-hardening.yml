@@ -1,0 +1,19 @@
+name: BSEED shared hardening
+
+on:
+  push:
+    branches: ['codex/bseed-shared-hardening']
+  pull_request:
+
+jobs:
+  allocation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - run: |
+          python3 helper_scripts/bseed_ota_identity.py emit-make-vars --image-type 65024 --version-str 1.2.5-bseedcli13
+          python3 helper_scripts/bseed_ota_identity.py emit-make-vars --image-type 43556 --version-str 1.2.5-bseedr11
+          python3 helper_scripts/bseed_ota_identity.py emit-make-vars --image-type 65026 --version-str 1.1.3-bseedc8
+          python3 helper_scripts/bseed_ota_identity.py emit-make-vars --image-type 43555 --version-str 1.1.3-bseedr11
