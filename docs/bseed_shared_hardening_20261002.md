@@ -67,8 +67,33 @@ multiple hardware wraps, sleep elapsed time, self-cancel/rearm and interrupt
 rearm. Shared fault injection covers stale/idle sampling, persistence failures,
 reset retry, millisecond wrap and SDK-owned network recovery in both roles.
 
-Source SHA, final run links and sealed identities will be recorded after the
-final head passes. Green CI proves offline integrity/reproducibility only.
+Sealing source: `a0c457b0cc829403f33bc01c915dd8813cada1e3`.
+All prerequisites passed at this exact SHA:
+
+- [Full tests (1005 passed), converter runtime, lint and identity gates](https://github.com/analienx/tuya-zigbee-switch/actions/runs/37056042902)
+- [Shared PM Router/Client matrix and independent rebuilds](https://github.com/analienx/tuya-zigbee-switch/actions/runs/37056043098)
+- [Non-PM Router/Client matrix and independent rebuilds](https://github.com/analienx/tuya-zigbee-switch/actions/runs/37056043099)
+- [Router TC32 validation](https://github.com/analienx/tuya-zigbee-switch/actions/runs/37056043061)
+- [Experimental Client native builds and reproducibility](https://github.com/analienx/tuya-zigbee-switch/actions/runs/37056043128)
+- [Authenticated exact-SHA finalization and sealed registry proposal](https://github.com/analienx/tuya-zigbee-switch/actions/runs/37056043046)
+
+The runner-produced proposal is committed to the identity registry. Its
+[original sealing report](bseed_shared_hardening_ci_seal_20261002.json)
+records the pre-commit proposal stage (`registryCommitted: false`), public run
+URLs, native checks and SHA-256 hashes. SHA-512 byte identities are recorded
+in [the registry](../zigbee2mqtt/ota/bseed_identity.json). The artifact filename
+is `forward.ota` within each matrix's separate `router/` or `client/` directory.
+The subsequent registry/documentation commit must pass all exact-head checks
+again and reproduce these same sealed bytes before merge.
+
+| Candidate | OTA SHA-256 | OTA SHA-512 |
+| --- | --- | --- |
+| PM Router r11 | `1480e9efb6cca6ad3d0f77f3bb5640f1fb943b3cb303cab04d7f48f7ccdfd97e` | `40f0e0a02019b2794d0bb47c7bacd33f56011450be5a4cf9557a9422d135018bdcefd3749138231927a9d04c16c23e8bb33734bd2275ee3a804010507fc75ea4` |
+| PM Client cli13 | `6c932792d24371f76c777318d776c6dbe903f4d00c8ff7a4b6327a4e01a2fdb5` | `cd80a24d6c2cce5fe40cde49f4b955f790dd3b6ffadaf2f2183d6b851ab14bc371774761773cbc39db87c258c7c3f1987b8d3c7524912c4686f8a6c2fd0c86a2` |
+| Non-PM Router r11 | `9d3cdd7bdc9f3186e38023da8c242dba5ed3616a9df77d644f27576bb3905358` | `950c53575db2ea037902aea8f7119506fe43cea76fd5a20036321249e78c54ecaad8c03ec15fe0e3703affdf63156ab307a3008169bf095ec2a8e08019c7f5b9` |
+| Non-PM Client c8 | `d1e410d73d33fb4d254433f062b117cae8efc5edb96a284b249a0aa0dbe4a45c` | `5b41a96cf06e6ff4f18aa2ce88268d82020919b426d847e717745d715f3fb5f2cf99bfb83d076e9c03aab0bd438b90c20686b198490d36a9fe2a5a260ca924c9` |
+
+Green CI proves offline integrity/reproducibility only.
 Separate authorized hardware work must still establish actual installed boot
 identity, working downlink, retained energy, no-load/known-load metering,
 protection timing, parent loss/rejoin, Router sleepy-child parenting, OTA
