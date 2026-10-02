@@ -16,7 +16,7 @@ remain in the main skill. Do not flash, reset or modify a production converter
 as a side effect of building.
 
 1. Read current branch status, the latest device investigation, the identity
-   registry and `docs/bseed_pm_consolidated_cli11_20260927.md`. Compare actual
+   registry and `docs/bseed_shared_hardening_20261002.md`. Compare actual
    commit ancestry/diffs: a larger cli number does not imply every earlier
    branch's fixes were merged. Preserve another agent's uncommitted work.
 2. Allocate before editing: use `bseed_ota_identity.py suggest-next --image-type

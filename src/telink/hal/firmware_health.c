@@ -11,7 +11,6 @@ firmware_health_t firmware_health;
 /* ZCL octet string: one length byte followed by schema-1 diagnostic bytes. */
 uint8_t             firmware_health_snapshot[49] = { 48, 1 };
 extern volatile u16 T_evtExcept[4];
-extern tl_zb_mac_pib_t g_zbMacPib;
 
 static void put32(uint8_t *p, uint32_t value) {
     for (uint8_t i = 0; i < 4; i++)
