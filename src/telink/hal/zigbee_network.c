@@ -9,6 +9,8 @@
 #include "telink_size_t_hack.h"
 
 #include "hal/tasks.h"
+#include "hal/timer.h"
+#include "hal/firmware_health.h"
 #include "hal/zigbee.h"
 #include "telink_zigbee_hal.h"
 #include "version_cfg.h"
@@ -40,7 +42,9 @@ static void keepalive_verify_handler(void *arg) {
     uint32_t next_ms = ota_fast_poll_active ? OTA_POLL_VERIFY_MS : KEEPALIVE_VERIFY_TICK_MS;
 
     (void)arg;
-    if (hal_zigbee_get_poll_rate_ms() != desired_mains_client_poll_ms()) {
+    /* While disconnected the SDK owns recovery polling. */
+    if (zb_isDeviceJoinedNwk() &&
+        hal_zigbee_get_poll_rate_ms() != desired_mains_client_poll_ms()) {
         if (zb_setPollRate(desired_mains_client_poll_ms()) != RET_OK) {
             next_ms = ota_fast_poll_active ? OTA_POLL_VERIFY_MS : KEEPALIVE_RETRY_MS;
         }
@@ -49,7 +53,8 @@ static void keepalive_verify_handler(void *arg) {
 }
 
 static void configure_mains_client_keepalive(void) {
-    u8 status = zb_setPollRate(desired_mains_client_poll_ms());
+    u8 status = zb_isDeviceJoinedNwk() ?
+                zb_setPollRate(desired_mains_client_poll_ms()) : RET_OK;
 
     if (status != RET_OK) {
         printf("Mains client keepalive setup failed: %u\r\n", status);
@@ -90,10 +95,31 @@ typedef enum {
 static telink_network_recovery_state_t network_recovery_state =
     TELINK_NETWORK_RECOVERY_IDLE;
 
+#define NETWORK_START_RETRY_MS    5000u
+static bool network_start_retry_pending;
+static uint32_t network_last_start_attempt;
+
+static bool network_start_ready(void) {
+    return !network_start_retry_pending ||
+           hal_millis() - network_last_start_attempt >= NETWORK_START_RETRY_MS;
+}
+
+static void network_start_attempt(void) {
+    network_last_start_attempt = hal_millis();
+    network_start_retry_pending = true;
+}
+
 static hal_network_status_change_callback_t network_status_change_callback =
     NULL;
 
 // Telink ZDO callbacks
+static void zdo_sync_confirmation_callback(nlme_sync_cnf_t *confirmation) {
+    firmware_health.last_poll_status = confirmation->status;
+    firmware_health_increment(confirmation->status == RET_OK ?
+                              &firmware_health.poll_success :
+                              &firmware_health.poll_failure);
+}
+
 zdo_appIndCb_t zdo_callbacks = {
     bdb_zdoStartDevCnf,              // start device cnf cb
     NULL,                            // reset cnf cb
@@ -102,7 +128,7 @@ zdo_appIndCb_t zdo_callbacks = {
     zdo_leave_confirmation_callback, // leave cnf cb
     NULL,                            // nwk update ind cb
     NULL,                            // permit join ind cb
-    NULL,                            // nlme sync cnf cb
+    zdo_sync_confirmation_callback, // nlme sync cnf cb
     NULL,                            // tc join ind cb
     NULL,                            // tc detects that the frame counter is near limit
 };
@@ -132,13 +158,17 @@ static bdb_appCb_t device_bdb_cb = {
 
 static bool start_rejoin_with_backoff(void) {
     if (zb_isDeviceJoinedNwk() || zb_isDeviceFactoryNew() ||
-        network_recovery_state != TELINK_NETWORK_RECOVERY_IDLE) {
+        network_recovery_state != TELINK_NETWORK_RECOVERY_IDLE ||
+        !network_start_ready()) {
         return false;
     }
 
+    network_start_attempt();
+    firmware_health_increment(&firmware_health.rejoin_start);
     u8 res =
         zb_rejoinReqWithBackOff(zb_apsChannelMaskGet(), g_bdbAttrs.scanDuration);
     if (res != RET_OK) {
+        firmware_health_increment(&firmware_health.rejoin_failure);
         printf("Failed to start network rejoin/backoff, status: %d\r\n", res);
         return false;
     }
@@ -165,6 +195,7 @@ void zdo_leave_confirmation_callback(nlme_leave_cnf_t *pLeaveCnf) {
 void bdb_init_callback(u8 status, u8 joinedNetwork) {
     if (status == BDB_INIT_STATUS_SUCCESS) {
         network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
+        network_start_retry_pending = false;
         if (joinedNetwork) {
 #ifdef BSEED_MAINS_CLIENT
             configure_mains_client_keepalive();
@@ -191,7 +222,10 @@ void bdb_commissioning_callback(u8 status, void *arg) {
     printf("BDB commissioning callback, status: %d\r\n", status);
     switch (status) {
     case BDB_COMMISSION_STA_SUCCESS:
+        if (network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN)
+            firmware_health_increment(&firmware_health.rejoin_success);
         network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
+        network_start_retry_pending = false;
 #ifdef BSEED_MAINS_CLIENT
         configure_mains_client_keepalive();
 #endif
@@ -227,6 +261,7 @@ void bdb_commissioning_callback(u8 status, void *arg) {
         network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
         break;
     case BDB_COMMISSION_STA_PARENT_LOST:
+        firmware_health_increment(&firmware_health.parent_loss);
         // If the SDK's self-sustaining rejoin/backoff is already active, keep
         // ownership with that operation. Do not clear the state and create a
         // second backoff instance from a callback generated by the first one.
@@ -236,6 +271,7 @@ void bdb_commissioning_callback(u8 status, void *arg) {
         }
         break;
     case BDB_COMMISSION_STA_REJOIN_FAILURE:
+        firmware_health_increment(&firmware_health.rejoin_failure);
         // zb_rejoinReqWithBackOff() is documented to continue its backoff
         // sequence until rejoin success. Intermediate failures therefore do
         // not terminate our REJOIN state or start another recovery sequence.
@@ -261,7 +297,10 @@ hal_zigbee_network_status_t hal_zigbee_get_network_status(void) {
         // Rejoin success is asynchronous. Synchronize our application-side
         // state from the authoritative stack state so future losses can start
         // a fresh recovery operation.
+        if (network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN)
+            firmware_health_increment(&firmware_health.rejoin_success);
         network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
+        network_start_retry_pending = false;
         return HAL_ZIGBEE_NETWORK_JOINED;
     }
     if (network_recovery_state != TELINK_NETWORK_RECOVERY_IDLE) {
@@ -283,6 +322,7 @@ void hal_zigbee_leave_network(void) {
     leaveReq.removeChildren = 1;
     leaveReq.rejoin         = 0;
     network_recovery_state  = TELINK_NETWORK_RECOVERY_IDLE;
+    network_start_retry_pending = false;
     zb_nlmeLeaveReq(&leaveReq);
     notify_about_network_status_change();
 }
@@ -297,7 +337,8 @@ void hal_zigbee_start_network_steering(void) {
     // "ensure connectivity": factory-new devices perform BDB steering, while
     // devices that already own network state use the SDK's rejoin/backoff
     // recovery. Never let the two operations overlap.
-    if (network_recovery_state != TELINK_NETWORK_RECOVERY_IDLE) {
+    if (network_recovery_state != TELINK_NETWORK_RECOVERY_IDLE ||
+        !network_start_ready()) {
         return;
     }
 
@@ -307,6 +348,7 @@ void hal_zigbee_start_network_steering(void) {
     }
 
     printf("Starting network steering\r\n");
+    network_start_attempt();
     u8 res = bdb_networkSteerStart();
     if (res == 0) {
         network_recovery_state = TELINK_NETWORK_RECOVERY_STEERING;

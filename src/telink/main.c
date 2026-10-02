@@ -13,6 +13,7 @@
 
 #include "app.h"
 #include "hal/gpio.h"
+#include "hal/firmware_health.h"
 #include "hal/telink_zigbee_hal.h"
 #include "hal/zigbee.h"
 
@@ -81,6 +82,7 @@ int real_main(startup_state_e state) {
         tl_zbTaskProcedure();
         drv_wd_clear();
         app_task();
+        hal_firmware_health_update();
         drv_wd_clear();
         report_handler();
         drv_wd_clear();

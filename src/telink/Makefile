@@ -163,6 +163,7 @@ TELINK_SOURCES := \
 	hal/system.c \
 	hal/timer.c \
 	hal/tasks.c \
+	hal/firmware_health.c \
 	hal/gpio.c \
 	hal/gpio_counter.c \
 	hal/gpio_interrupts.c \

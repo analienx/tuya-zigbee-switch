@@ -111,6 +111,8 @@ jobs:
         run: |
           mkdir -p build/test-sdk
           curl --fail --location --retry 3 https://raw.githubusercontent.com/telink-semi/telink_zigbee_sdk/V3.7.2.0/tl_zigbee_sdk/zigbee/zcl/zcl.c -o build/test-sdk/zcl.c
+          curl --fail --location --retry 3 https://raw.githubusercontent.com/telink-semi/telink_zigbee_sdk/V3.7.2.0/tl_zigbee_sdk/proj/os/ev_timer.c -o build/test-sdk/ev_timer.c
+          curl --fail --location --retry 3 https://raw.githubusercontent.com/telink-semi/telink_zigbee_sdk/V3.7.2.0/tl_zigbee_sdk/proj/os/ev_timer.h -o build/test-sdk/ev_timer.h
       - name: Run tests
         timeout-minutes: 15
         env:

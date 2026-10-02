@@ -79,6 +79,7 @@ const bseedPmElectricityMeter = () => {
         "1.2.5-bseedcli6", "1.2.5-bseedcli8", "1.2.5-bseedcli9",
         "1.2.5-bseedcli10", "1.2.5-bseedcli11", "1.2.5-bseedr7", "1.2.5-bseedr8",
         "1.2.5-bseedcli12", "1.2.5-bseedr9",
+        "1.2.5-bseedcli13", "1.2.5-bseedr11",
     ]);
     const hasFixedScaleContract = device => device?.modelID === "TS011F-BS-PM" &&
         device.manufacturerName === "b28wrpvx" && knownBuilds.has(device.softwareBuildID);
