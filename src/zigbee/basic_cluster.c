@@ -241,7 +241,7 @@ void basic_cluster_add_to_endpoint(zigbee_basic_cluster *cluster,
     endpoint->clusters[endpoint->cluster_count].cluster_id      = ZCL_CLUSTER_BASIC;
     endpoint->clusters[endpoint->cluster_count].attribute_count =
         network_indicator.has_dedicated_led ? 14 : 13;
-    endpoint->clusters[endpoint->cluster_count].attributes   = cluster->attr_infos;
+    endpoint->clusters[endpoint->cluster_count].attributes = cluster->attr_infos;
 #ifdef HAL_TELINK
     uint8_t health_index = network_indicator.has_dedicated_led ? 14 : 13;
     SETUP_ATTR(health_index, 0xFF10, ZCL_DATA_TYPE_OCTET_STR, ATTR_READONLY,

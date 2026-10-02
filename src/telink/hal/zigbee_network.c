@@ -96,7 +96,7 @@ static telink_network_recovery_state_t network_recovery_state =
     TELINK_NETWORK_RECOVERY_IDLE;
 
 #define NETWORK_START_RETRY_MS    5000u
-static bool network_start_retry_pending;
+static bool     network_start_retry_pending;
 static uint32_t network_last_start_attempt;
 
 static bool network_start_ready(void) {
@@ -105,7 +105,7 @@ static bool network_start_ready(void) {
 }
 
 static void network_start_attempt(void) {
-    network_last_start_attempt = hal_millis();
+    network_last_start_attempt  = hal_millis();
     network_start_retry_pending = true;
 }
 
@@ -128,7 +128,7 @@ zdo_appIndCb_t zdo_callbacks = {
     zdo_leave_confirmation_callback, // leave cnf cb
     NULL,                            // nwk update ind cb
     NULL,                            // permit join ind cb
-    zdo_sync_confirmation_callback, // nlme sync cnf cb
+    zdo_sync_confirmation_callback,  // nlme sync cnf cb
     NULL,                            // tc join ind cb
     NULL,                            // tc detects that the frame counter is near limit
 };
@@ -194,7 +194,7 @@ void zdo_leave_confirmation_callback(nlme_leave_cnf_t *pLeaveCnf) {
 
 void bdb_init_callback(u8 status, u8 joinedNetwork) {
     if (status == BDB_INIT_STATUS_SUCCESS) {
-        network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
+        network_recovery_state      = TELINK_NETWORK_RECOVERY_IDLE;
         network_start_retry_pending = false;
         if (joinedNetwork) {
 #ifdef BSEED_MAINS_CLIENT
@@ -224,7 +224,7 @@ void bdb_commissioning_callback(u8 status, void *arg) {
     case BDB_COMMISSION_STA_SUCCESS:
         if (network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN)
             firmware_health_increment(&firmware_health.rejoin_success);
-        network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
+        network_recovery_state      = TELINK_NETWORK_RECOVERY_IDLE;
         network_start_retry_pending = false;
 #ifdef BSEED_MAINS_CLIENT
         configure_mains_client_keepalive();
@@ -299,7 +299,7 @@ hal_zigbee_network_status_t hal_zigbee_get_network_status(void) {
         // a fresh recovery operation.
         if (network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN)
             firmware_health_increment(&firmware_health.rejoin_success);
-        network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
+        network_recovery_state      = TELINK_NETWORK_RECOVERY_IDLE;
         network_start_retry_pending = false;
         return HAL_ZIGBEE_NETWORK_JOINED;
     }
@@ -319,9 +319,9 @@ void hal_zigbee_leave_network(void) {
     nlme_leave_req_t leaveReq;
 
     TL_SETSTRUCTCONTENT(leaveReq, 0);
-    leaveReq.removeChildren = 1;
-    leaveReq.rejoin         = 0;
-    network_recovery_state  = TELINK_NETWORK_RECOVERY_IDLE;
+    leaveReq.removeChildren     = 1;
+    leaveReq.rejoin             = 0;
+    network_recovery_state      = TELINK_NETWORK_RECOVERY_IDLE;
     network_start_retry_pending = false;
     zb_nlmeLeaveReq(&leaveReq);
     notify_about_network_status_change();

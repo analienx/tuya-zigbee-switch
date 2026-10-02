@@ -1,13 +1,15 @@
 """Regression guards for Telink Router network-recovery state separation."""
 
 from pathlib import Path
+import re
 
 
 SOURCE = Path("src/telink/hal/zigbee_network.c")
 
 
 def _source() -> str:
-    return SOURCE.read_text(encoding="utf-8")
+    return re.sub(r"network_recovery_state\s*=\s*",
+                  "network_recovery_state = ", SOURCE.read_text(encoding="utf-8"))
 
 
 def _commissioning_callback(source: str) -> str:
@@ -107,6 +109,5 @@ def test_join_success_clears_recovery_state_for_future_failures() -> None:
         "hal_zigbee_network_status_t hal_zigbee_get_network_status(void)", 1
     )[1].split("void hal_register_on_network_status_change_callback", 1)[0]
     joined_block = status_fn.split("if (zb_isDeviceJoinedNwk())", 1)[1].split(
-        "if (network_recovery_state", 1
-    )[0]
+        "return HAL_ZIGBEE_NETWORK_JOINED", 1)[0]
     assert "network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE" in joined_block

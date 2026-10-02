@@ -22,20 +22,20 @@ struct ev_timer_event_t;
 typedef struct {
     struct ev_timer_event_t *next;
     int (*cb)(void *);
-    void *data;
-    uint32_t timeout;
-    uint32_t period;
-    uint32_t curSysTick;
-    uint8_t resv;
-    uint8_t isBusy;
-    uint8_t isRunning;
-    uint8_t used;
+    void *                   data;
+    uint32_t                 timeout;
+    uint32_t                 period;
+    uint32_t                 curSysTick;
+    uint8_t                  resv;
+    uint8_t                  isBusy;
+    uint8_t                  isRunning;
+    uint8_t                  used;
 } hal_telink_event_t;
 #pragma pack(pop)
 typedef struct {
     hal_telink_event_t event;
-    uint8_t dispatching;
-    uint8_t scheduled;
+    uint8_t            dispatching;
+    uint8_t            scheduled;
 } hal_platfrom_struct_t;
 
 #endif

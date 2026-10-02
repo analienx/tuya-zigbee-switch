@@ -2,13 +2,14 @@
 #include "tl_common.h"
 #include "zb_api.h"
 #pragma pack(pop)
+#include "telink_size_t_hack.h"
 #include "hal/firmware_health.h"
 #include "hal/timer.h"
 #include "hal/zigbee.h"
 
 firmware_health_t firmware_health;
 /* ZCL octet string: one length byte followed by schema-1 diagnostic bytes. */
-uint8_t firmware_health_snapshot[49] = {48, 1};
+uint8_t             firmware_health_snapshot[49] = { 48, 1 };
 extern volatile u16 T_evtExcept[4];
 
 static void put32(uint8_t *p, uint32_t value) {
@@ -18,15 +19,17 @@ static void put32(uint8_t *p, uint32_t value) {
 
 void hal_firmware_health_update(void) {
     static uint32_t last_update;
-    uint32_t now = hal_millis();
+    uint32_t        now = hal_millis();
+
     if (now - last_update < 1000u)
         return;
+
     last_update = now;
     uint8_t *p = firmware_health_snapshot + 1;
     p[1] = (uint8_t)hal_zigbee_get_network_status();
     p[2] = firmware_health.meter_enabled |
            (firmware_health.meter_stale << 1) |
-           (g_macPib.rxOnWhenIdle ? 4 : 0);
+           (MAC_IB().rxOnWhenIdle ? 4 : 0);
     p[3] = firmware_health.last_poll_status;
     put32(p + 4, now);
     put32(p + 8, firmware_health.poll_success);

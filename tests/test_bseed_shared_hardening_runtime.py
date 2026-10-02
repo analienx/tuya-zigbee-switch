@@ -41,7 +41,7 @@ int main(void) {
     assert(nvm_writes==2); /* unchanged total causes no flash wear */
     fail_write=1; metering_cluster_reset_energy(&cluster);
     assert(cluster.persistence_retry_pending && nvm_stored_wh==110);
-    fake_now+=30000; fail_write=0; metering_cluster_update(&cluster);
+    fake_now+=30000; fail_write=0; meter_valid=0; metering_cluster_update(&cluster);
     assert(nvm_stored_wh==0 && !cluster.persistence_retry_pending);
     return 0;
 }

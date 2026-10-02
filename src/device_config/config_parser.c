@@ -579,10 +579,10 @@ void energy_monitoring_tick(void) {
     electrical_measurement_cluster_update(&elec_meas_cluster);
     metering_cluster_update(&metering_cluster_inst);
 #ifdef HAL_TELINK
-    firmware_health.meter_enabled = 1;
-    firmware_health.meter_stale = hlw8012_device.sample_stale;
-    firmware_health.sample_stalls = hlw8012_device.sample_stalls;
-    firmware_health.sample_time = hlw8012_device.data.last_sample_time;
+    firmware_health.meter_enabled        = 1;
+    firmware_health.meter_stale          = hlw8012_device.sample_stale;
+    firmware_health.sample_stalls        = hlw8012_device.sample_stalls;
+    firmware_health.sample_time          = hlw8012_device.data.last_sample_time;
     firmware_health.persistence_failures = metering_cluster_inst.persistence_failures;
 #endif
 }

@@ -179,17 +179,18 @@ static void update_measurement_handler(void *arg) {
     if (!dev || !dev->initialized)
         return;
 
-    uint32_t now        = hal_millis();
+    uint32_t now = hal_millis();
     if (now - dev->data.last_sample_time >= HLW8012_PULSE_TIMEOUT_MS) {
         hlw8012_tick(dev);
+
         /* A stalled window has unknown duration/SEL settling. Discard its
          * pulses rather than report them as a normal five-second measurement.
          * Preserve the accumulated total; resume after a full fresh window. */
         hal_gpio_counter_read_and_reset(dev->cf_counter);
         hal_gpio_counter_read_and_reset(dev->cf1_counter);
         dev->data.last_sample_time = now;
-        dev->data.valid = 0;
-        dev->cycle_count = 0;
+        dev->data.valid            = 0;
+        dev->cycle_count           = 0;
         hal_tasks_schedule(&dev->update_task, HLW8012_SAMPLE_INTERVAL_MS);
         return;
     }
@@ -299,6 +300,7 @@ static void hlw8012_meter_get_data(void *ctx, energy_meter_data_t *data) {
 
     if (!dev || !data)
         return;
+
     hlw8012_tick(dev);
 
     data->voltage   = dev->data.voltage;
@@ -329,9 +331,11 @@ energy_meter_t *hlw8012_as_energy_meter(hlw8012_t *dev) {
 void hlw8012_tick(hlw8012_t *dev) {
     if (!dev || !dev->initialized)
         return;
+
     uint32_t now = hal_millis();
     if (now - dev->data.last_sample_time < HLW8012_PULSE_TIMEOUT_MS)
         return;
+
     dev->data.valid = 0;
     if (!dev->sample_stale) {
         dev->sample_stale = 1;

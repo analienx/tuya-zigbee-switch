@@ -100,10 +100,11 @@ int main(void) {
 }
 ''')
     binary = tmp_path / "timer-test"
-    subprocess.run(["cc", "-std=c99", "-fno-strict-aliasing", "-fno-pie",
+    result = subprocess.run(["cc", "-std=c99", "-fno-strict-aliasing", "-fno-pie",
                     "-no-pie", "-DHAL_TELINK", "-I", str(proj), "-I",
                     str(ROOT / "src"), str(harness), "-o", str(binary)],
-                   check=True, capture_output=True, text=True)
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
     subprocess.run([str(binary)], check=True, timeout=10)
 
 
