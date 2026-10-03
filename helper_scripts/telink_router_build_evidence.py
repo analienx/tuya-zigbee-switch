@@ -16,6 +16,7 @@ def main():
     parser.add_argument('--elf', type=Path, required=True)
     parser.add_argument('--macros', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--objdump', required=True)
     args = parser.parse_args()
     macros = dict(re.findall(r'^#define (\w+) (.+)$', args.macros.read_text(), re.M))
     if macros.get('ZB_ROUTER_ROLE') != '1':
@@ -57,6 +58,24 @@ def main():
                     'note': 'Static linker margin; runtime stack peak and burst admission need hardware.'},
             'flashHookSection': hook_section,
         }
+    listing = subprocess.check_output([args.objdump, '-d', str(args.elf)], text=True)
+    blocks = re.split(r'(?=^[0-9a-f]+ <[^>]+>:\s*$)', listing, flags=re.M)
+    audited = {}
+    for name in ('hal_telink_flash_complete', 'flash_mspi_write_ram',
+                 'nv_nwkFrameCountSaveToFlash', 'nv_nwkFrameCountFromFlash'):
+        matches = [b for b in blocks if re.match(r'^[0-9a-f]+ <' + name + r'>:', b)]
+        if len(matches) != 1:
+            raise ValueError('missing native audit function: ' + name)
+        audited[name] = matches[0]
+    if re.search(r'\btjl\b', audited['hal_telink_flash_complete']):
+        raise ValueError('RAM flash hook contains an out-of-line call')
+    if '<hal_telink_flash_complete>' not in audited['flash_mspi_write_ram']:
+        raise ValueError('native flash driver does not call RAM hook')
+    for name in ('nv_nwkFrameCountSaveToFlash', 'nv_nwkFrameCountFromFlash'):
+        if '<hal_telink_counter_fault>' not in audited[name]:
+            raise ValueError('native counter fault barrier missing: ' + name)
+    args.output.with_suffix('.native.txt').write_text('\n'.join(audited.values()))
+    report['nativeHookAudit'] = 'RAM-only flash hook and linked counter fault barriers verified'
     args.output.write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report, indent=2))
 

@@ -84,6 +84,9 @@ jobs:
           import json
           import os
           from pathlib import Path
+          import sys
+          sys.path.insert(0, 'helper_scripts')
+          from bseed_pm_release import CANDIDATES
 
           def require(condition, message):
               if not condition:
@@ -91,7 +94,8 @@ jobs:
 
           cases = [
               (Path('build/bseed-ts011f-pm-client/manifest.json'), 'pm',
-               'OUTLET_BSEED_PM_TS011F', '1.2.5-bseedcli13', 0x12053018, 65024),
+               'OUTLET_BSEED_PM_TS011F', CANDIDATES['client']['build'],
+               CANDIDATES['client']['version'], 65024),
               (Path('build/bseed-ts0726-client/manifest.json'), 'ts0726',
                'SWITCH_BSEED_TS0726_3GANG', '1.1.8-bseedcli3', 0x1102300F, 65025),
           ]

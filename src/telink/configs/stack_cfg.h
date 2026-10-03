@@ -78,6 +78,9 @@
 #if defined(ZB_MAC_RX_ON_WHEN_IDLE) && (ZB_MAC_RX_ON_WHEN_IDLE != 1)
 #error "Zigbee Router requires receiver on when idle"
 #endif
+#ifndef ZB_MAC_RX_ON_WHEN_IDLE
+#define ZB_MAC_RX_ON_WHEN_IDLE    1
+#endif
 #endif
 
 #endif /* _STACK_CFG_H_ */

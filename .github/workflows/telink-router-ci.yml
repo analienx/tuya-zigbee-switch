@@ -83,6 +83,7 @@ jobs:
           OUT="build/telink-router-ci-$TARGET_ID"
           python3 helper_scripts/telink_router_build_evidence.py \
             --elf build/telink/tlc_switch.elf --macros build/telink/profile-macros.txt \
+            --objdump telink_tools/toolchain/tc32/bin/tc32-elf-objdump \
             --output "$OUT/router-profile.json"
           cp build/telink/profile-macros.txt "$OUT/router-profile-macros.txt"
           {
@@ -129,4 +130,5 @@ jobs:
             build/telink-router-ci-${{ matrix.id }}/manifest.json
             build/telink-router-ci-${{ matrix.id }}/router-profile.json
             build/telink-router-ci-${{ matrix.id }}/router-profile-macros.txt
+            build/telink-router-ci-${{ matrix.id }}/router-profile.native.txt
           if-no-files-found: warn
