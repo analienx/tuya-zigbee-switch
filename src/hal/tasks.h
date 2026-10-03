@@ -17,9 +17,25 @@ typedef sli_zigbee_event_t hal_platfrom_struct_t;
 #ifdef HAL_TELINK
 
 struct ev_timer_event_t;
+/* tasks.c checks every field against the SDK without importing its typedefs. */
+#pragma pack(push, 1)
 typedef struct {
-    struct ev_timer_event_t
-    *ev_timer_handle;   // Can't use telink header due to size_t conflict
+    struct ev_timer_event_t *next;
+    int (*cb)(void *);
+    void *                   data;
+    uint32_t                 timeout;
+    uint32_t                 period;
+    uint32_t                 curSysTick;
+    uint8_t                  resv;
+    uint8_t                  isBusy;
+    uint8_t                  isRunning;
+    uint8_t                  used;
+} hal_telink_event_t;
+#pragma pack(pop)
+typedef struct {
+    hal_telink_event_t event;
+    uint8_t            dispatching;
+    uint8_t            scheduled;
 } hal_platfrom_struct_t;
 
 #endif

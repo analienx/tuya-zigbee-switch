@@ -16,6 +16,8 @@ typedef struct {void (*handler)(void *); void *arg;} hal_task_t;
 #define RESPONSE_POLL_RATE 250u
 #define RET_OK 0
 static uint32_t rate, delay, calls, failures;
+static bool joined = true;
+static bool zb_isDeviceJoinedNwk(void) {return joined;}
 static u8 zb_setPollRate(uint32_t r) {
     calls++;
     if (failures) {failures--; return 1;}
@@ -48,6 +50,15 @@ int main(void) {
     assert(rate == 250); /* repair SDK drift while OTA active */
     hal_zigbee_set_ota_poll_active(false);
     assert(rate == 60000 && delay == 60000);
+    joined = false;
+    rate = 100;
+    before = calls;
+    keepalive_verify_handler(0);
+    hal_zigbee_set_ota_poll_active(true);
+    assert(calls == before && rate == 100);
+    joined = true;
+    keepalive_verify_handler(0);
+    assert(rate == 250);
     return 0;
 }
 '''

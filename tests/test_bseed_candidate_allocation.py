@@ -21,7 +21,6 @@ def test_candidates_follow_canonical_board_allocator():
     # later PM .17 return experiment is now a retired tombstone, not a release,
     # but remains reserved in the real registry so future allocations skip it.
     pairs = {(c['type'], c['version']) for group in groups for c in group}
-    pairs.update({(43556, 0x12053017), (65024, 0x12053017)})
     for image_type, line in registry.items():
         line['versions'] = [v for v in line['versions'] if (image_type, v['file_version']) not in pairs]
     for group in groups:
@@ -47,5 +46,8 @@ def test_retired_pm_return_tuple_stays_reserved_without_being_a_candidate():
     ]
     assert len(retired) == 2 and all(entry.get('status') == 'retired' for entry in retired)
     registry = {int(line['image_type']): copy.deepcopy(line) for line in document['lines']}
-    next_router = emit_make_vars(registry, ROUTER['type'], '1.2.5-bseedr11')
-    assert int(next_router['FILE_VERSION'], 0) == 0x12053018
+    for line in registry.values():
+        line['versions'] = [v for v in line['versions'] if
+                            v['file_version'] != ROUTER['version']]
+    next_router = emit_make_vars(registry, ROUTER['type'], ROUTER['build'])
+    assert int(next_router['FILE_VERSION'], 0) == ROUTER['version']

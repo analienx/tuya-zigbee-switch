@@ -8,6 +8,7 @@
 #include <string.h>
 
 #define NVM_SAVE_INTERVAL_MS                   300000
+#define NVM_RETRY_INTERVAL_MS                  30000
 #define METERING_BASELINE_RETRY_INTERVAL_MS    300000
 #define METERING_SUMMATION_UNTRUSTED           0xFFFFFFFFFFFFULL
 #define METERING_DEVICE_TYPE_ELECTRIC          0x00
@@ -74,6 +75,19 @@ void metering_cluster_add_to_endpoint(metering_cluster_t *cluster,
            (unsigned long long)cluster->current_summation_delivered);
 }
 
+static void metering_cluster_save_if_due(metering_cluster_t *cluster) {
+    uint32_t now      = hal_millis();
+    uint32_t interval = cluster->persistence_retry_pending ?
+                        NVM_RETRY_INTERVAL_MS : NVM_SAVE_INTERVAL_MS;
+    uint32_t last = cluster->persistence_retry_pending ?
+                    cluster->last_nvm_attempt_time : cluster->last_nvm_save_time;
+
+    if ((cluster->persistence_retry_pending ||
+         cluster->current_summation_delivered != cluster->last_persisted_energy) &&
+        now - last >= interval)
+        metering_cluster_save_energy(cluster);
+}
+
 void metering_cluster_update(metering_cluster_t *cluster) {
     if (!cluster || !cluster->meter)
         return;
@@ -96,8 +110,12 @@ void metering_cluster_update(metering_cluster_t *cluster) {
     energy_meter_data_t data;
     memset(&data, 0, sizeof(data));
     energy_meter_get_data(cluster->meter, &data);
-    if (!data.valid)
+    if (!data.valid) {
+        /* A stalled sampler does not prevent saving an already trusted total
+        * or retrying an explicit reset. Never integrate stale meter data. */
+        metering_cluster_save_if_due(cluster);
         return;
+    }
 
     uint32_t current_energy = data.energy;
     if (!cluster->last_energy_value_seeded) {
@@ -113,11 +131,7 @@ void metering_cluster_update(metering_cluster_t *cluster) {
     }
     cluster->last_energy_value = current_energy;
 
-    uint32_t now = hal_millis();
-    if (now - cluster->last_nvm_save_time >= NVM_SAVE_INTERVAL_MS) {
-        metering_cluster_save_energy(cluster);
-        cluster->last_nvm_save_time = now;
-    }
+    metering_cluster_save_if_due(cluster);
 }
 
 void metering_cluster_report(metering_cluster_t *cluster) {
@@ -156,6 +170,8 @@ void metering_cluster_load_energy(metering_cluster_t *cluster) {
         printf("Metering: NVM read failed; reporting untrusted, NVM record preserved\r\n");
     }
     if (cluster->energy_baseline_valid && cluster->meter) {
+        cluster->last_persisted_energy     = cluster->current_summation_delivered;
+        cluster->persistence_retry_pending = 0;
         energy_meter_data_t data;
         memset(&data, 0, sizeof(data));
         energy_meter_get_data(cluster->meter, &data);
@@ -168,15 +184,25 @@ void metering_cluster_load_energy(metering_cluster_t *cluster) {
     }
 }
 
-void metering_cluster_save_energy(metering_cluster_t *cluster) {
+bool metering_cluster_save_energy(metering_cluster_t *cluster) {
     if (!cluster || !cluster->energy_baseline_valid)
-        return;
+        return false;
 
     metering_nv_data_t nv_data = {
         .accumulated_energy_wh = cluster->current_summation_delivered,
     };
-    hal_nvm_write(NV_ITEM_ENERGY_ACCUMULATION(cluster->endpoint),
-                  sizeof(nv_data), (uint8_t *)&nv_data);
+    cluster->last_nvm_attempt_time = hal_millis();
+    if (hal_nvm_write(NV_ITEM_ENERGY_ACCUMULATION(cluster->endpoint),
+                      sizeof(nv_data), (uint8_t *)&nv_data) != HAL_NVM_SUCCESS) {
+        cluster->persistence_retry_pending = 1;
+        if (cluster->persistence_failures != UINT32_MAX)
+            cluster->persistence_failures++;
+        return false;
+    }
+    cluster->last_persisted_energy     = cluster->current_summation_delivered;
+    cluster->last_nvm_save_time        = cluster->last_nvm_attempt_time;
+    cluster->persistence_retry_pending = 0;
+    return true;
 }
 
 void metering_cluster_reset_energy(metering_cluster_t *cluster) {
@@ -218,13 +244,19 @@ bool metering_cluster_checkpoint(void) {
     metering_nv_data_t saved;
     uint8_t            item = NV_ITEM_ENERGY_ACCUMULATION(g_metering_cluster->endpoint);
 
+    g_metering_cluster->last_nvm_attempt_time = hal_millis();
     if (hal_nvm_write(item, sizeof(desired), (uint8_t *)&desired) != HAL_NVM_SUCCESS ||
         hal_nvm_read(item, sizeof(saved), (uint8_t *)&saved) != HAL_NVM_SUCCESS ||
         saved.accumulated_energy_wh != desired.accumulated_energy_wh) {
+        g_metering_cluster->persistence_retry_pending = 1;
+        if (g_metering_cluster->persistence_failures != UINT32_MAX)
+            g_metering_cluster->persistence_failures++;
         printf("Metering checkpoint failed; controlled reboot deferred\r\n");
         return false;
     }
-    g_metering_cluster->last_nvm_save_time = hal_millis();
+    g_metering_cluster->last_nvm_save_time        = hal_millis();
+    g_metering_cluster->last_persisted_energy     = desired.accumulated_energy_wh;
+    g_metering_cluster->persistence_retry_pending = 0;
     return true;
 }
 

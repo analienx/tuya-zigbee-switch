@@ -165,6 +165,15 @@ $(BUILD_DIR)/sdk/proj/drivers/drv_nv.o: GCC_FLAGS += -Dnv_resetToFactoryNew=nv_r
 
 $(SDK_OBJS): GCC_FLAGS += -fpack-struct
 
+# Compile a build-local copy; include the original directory for ../tl_common.h.
+$(BUILD_DIR)/sdk/proj/os/ev_timer.o: $(SDK_PATH)/proj/os/ev_timer.c ../../helper_scripts/patch_telink_timing.py
+	@mkdir -p $(@D)
+	@python3 ../../helper_scripts/patch_telink_timing.py --source $< --output $(@D)/ev_timer.c
+	@$(CC) $(GCC_FLAGS) $(DEVICE_DEFS) $(INCLUDE_PATHS) -I$(SDK_PATH)/proj/os -c -o $@ $(@D)/ev_timer.c
+
+$(BUILD_DIR)/telink/hal/tasks.o: GCC_FLAGS += -fno-strict-aliasing
+$(BUILD_DIR)/sdk/proj/os/ev_timer.o: GCC_FLAGS += -fno-strict-aliasing
+
 # Compile SDK C files
 # Keep the downloaded SDK immutable. Fail closed if its two allocation paths
 # no longer match the reviewed SDK, then compile the patched build-local copy.

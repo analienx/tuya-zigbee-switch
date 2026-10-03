@@ -1,0 +1,23 @@
+name: BSEED shared hardening
+
+on:
+  push:
+    branches: ['codex/bseed-shared-hardening']
+  pull_request:
+
+jobs:
+  allocation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Replay allocation while preserving sealed and retired identities
+        run: |
+          python3 - <<'PY'
+          import runpy
+          suite = runpy.run_path('tests/test_bseed_candidate_allocation.py')
+          suite['test_candidates_follow_canonical_board_allocator']()
+          suite['test_retired_pm_return_tuple_stays_reserved_without_being_a_candidate']()
+          print('Canonical socket allocation and retired-tuple reservations verified')
+          PY

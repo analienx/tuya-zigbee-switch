@@ -69,6 +69,9 @@ typedef struct {
     uint8_t               cycle_count;
     uint8_t               initialized;
     uint8_t               sel_inverted;
+    uint8_t               sample_stale;
+    uint32_t              sample_stalls;
+    uint32_t              last_recovery_time;
     energy_meter_t        meter;
 } hlw8012_t;
 

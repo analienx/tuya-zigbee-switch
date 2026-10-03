@@ -1,11 +1,14 @@
 #include "hal/timer.h"
-#pragma pack(push, 1)
-#include "tl_common.h"
-#pragma pack(pop)
 #include <stdint.h>
 
+/* SDK elapsed milliseconds preserve fractional ticks, hardware wrap and sleep.
+ * This hook runs with IRQs disabled in ev_timer_update. */
+static volatile uint32_t elapsed_milliseconds;
+
+void hal_telink_time_update(uint32_t elapsed_ms) {
+    elapsed_milliseconds += elapsed_ms;
+}
+
 uint32_t hal_millis() {
-    // Convert system ticks directly to milliseconds
-    // clock_time() returns ticks at 16MHz, so divide by 16000 for milliseconds
-    return clock_time() / CLOCK_16M_SYS_TIMER_CLK_1MS;
+    return elapsed_milliseconds;
 }

@@ -179,7 +179,21 @@ static void update_measurement_handler(void *arg) {
     if (!dev || !dev->initialized)
         return;
 
-    uint32_t now        = hal_millis();
+    uint32_t now = hal_millis();
+    if (now - dev->data.last_sample_time >= HLW8012_PULSE_TIMEOUT_MS) {
+        hlw8012_tick(dev);
+
+        /* A stalled window has unknown duration/SEL settling. Discard its
+         * pulses rather than report them as a normal five-second measurement.
+         * Preserve the accumulated total; resume after a full fresh window. */
+        hal_gpio_counter_read_and_reset(dev->cf_counter);
+        hal_gpio_counter_read_and_reset(dev->cf1_counter);
+        dev->data.last_sample_time = now;
+        dev->data.valid            = 0;
+        dev->cycle_count           = 0;
+        hal_tasks_schedule(&dev->update_task, HLW8012_SAMPLE_INTERVAL_MS);
+        return;
+    }
     uint32_t cf_pulses  = hal_gpio_counter_read_and_reset(dev->cf_counter);
     uint32_t cf1_pulses = hal_gpio_counter_read_and_reset(dev->cf1_counter);
 
@@ -225,6 +239,7 @@ static void update_measurement_handler(void *arg) {
     }
 
     dev->data.valid            = 1;
+    dev->sample_stale          = 0;
     dev->data.last_sample_time = now;
     dev->cycle_count++;
     cycle_sel_pin(dev);
@@ -245,6 +260,7 @@ static void cycle_sel_pin(hlw8012_t *dev) {
 }
 
 hlw8012_data_t *hlw8012_get_data(hlw8012_t *dev) {
+    hlw8012_tick(dev);
     return dev ? &dev->data : NULL;
 }
 
@@ -285,6 +301,8 @@ static void hlw8012_meter_get_data(void *ctx, energy_meter_data_t *data) {
     if (!dev || !data)
         return;
 
+    hlw8012_tick(dev);
+
     data->voltage   = dev->data.voltage;
     data->current   = dev->data.current;
     data->power     = dev->data.power;
@@ -311,5 +329,22 @@ energy_meter_t *hlw8012_as_energy_meter(hlw8012_t *dev) {
 }
 
 void hlw8012_tick(hlw8012_t *dev) {
-    (void)dev;
+    if (!dev || !dev->initialized)
+        return;
+
+    uint32_t now = hal_millis();
+    if (now - dev->data.last_sample_time < HLW8012_PULSE_TIMEOUT_MS)
+        return;
+
+    dev->data.valid = 0;
+    if (!dev->sample_stale) {
+        dev->sample_stale = 1;
+        if (dev->sample_stalls != UINT32_MAX)
+            dev->sample_stalls++;
+        dev->last_recovery_time = now;
+        hal_tasks_schedule(&dev->update_task, 0);
+    } else if (now - dev->last_recovery_time >= HLW8012_SAMPLE_INTERVAL_MS) {
+        dev->last_recovery_time = now;
+        hal_tasks_schedule(&dev->update_task, 0);
+    }
 }

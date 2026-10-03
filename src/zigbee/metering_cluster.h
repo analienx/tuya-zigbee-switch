@@ -33,6 +33,10 @@ typedef struct {
     uint8_t              last_energy_value_seeded;
     /* Stamped on every baseline load; throttles retries while invalid. */
     uint32_t             last_baseline_retry_time;
+    uint64_t             last_persisted_energy;
+    uint32_t             last_nvm_attempt_time;
+    uint32_t             persistence_failures;
+    uint8_t              persistence_retry_pending;
 } metering_cluster_t;
 
 void metering_cluster_init(metering_cluster_t *cluster, energy_meter_t *meter);
@@ -41,7 +45,7 @@ void metering_cluster_add_to_endpoint(metering_cluster_t *cluster,
 void metering_cluster_update(metering_cluster_t *cluster);
 void metering_cluster_report(metering_cluster_t *cluster);
 void metering_cluster_load_energy(metering_cluster_t *cluster);
-void metering_cluster_save_energy(metering_cluster_t *cluster);
+bool metering_cluster_save_energy(metering_cluster_t *cluster);
 
 /* Save and verify the active meter before controlled reboot; no meter is OK. */
 bool metering_cluster_checkpoint(void);

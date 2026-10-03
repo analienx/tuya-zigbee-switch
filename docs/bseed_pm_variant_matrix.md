@@ -20,9 +20,11 @@ radio-report proof, fixture calibration or Router child-parenting verification.
 
 Published Router `1.2.5-bseedv8u4` (`0x12053007`) must remain byte-stable.
 Current candidates are defined in `helper_scripts/bseed_pm_release.py`:
-`BSEED_PM_CONSOLIDATED=1` builds `1.2.5-bseedr9` (`0x12053016`, type 43556),
-and the PM Client build produces `1.2.5-bseedcli12` (same version, type 65024).
-The KitchenSocketLeft PM A/B/A canary passed the role-pair checks in
+`BSEED_PM_CONSOLIDATED=1` builds `1.2.5-bseedr11` (`0x12053018`, type 43556),
+and the PM Client build produces `1.2.5-bseedcli13` (same version, type 65024).
+See [the shared hardening pass](bseed_shared_hardening_20261002.md) for changes
+and the current candidate's separate offline and hardware gates.
+The earlier r9/cli12 KitchenSocketLeft PM A/B/A canary passed the role-pair checks in
 `docs/bseed_force_hardware_acceptance_20260928.md`; broader release/soak gates
 remain open. This does not grant fleet release acceptance. Historical candidate modes
 remain immutable evidence and are not a current-source rebuild path.
