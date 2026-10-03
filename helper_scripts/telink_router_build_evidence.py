@@ -8,7 +8,7 @@ from elftools.elf.elffile import ELFFile
 
 CAPACITIES = ('TL_ZB_NEIGHBOR_TABLE_SIZE', 'TL_ZB_CHILD_TABLE_SIZE',
               'ROUTING_TABLE_SIZE', 'ZB_BUF_POOL_SIZE', 'MAC_TX_QUEUE_SIZE',
-              'APS_TX_CACHE_TABLE_SIZE', 'NWK_ROUTE_RECORD_TABLE_SIZE')
+              'APS_TX_CACHE_TABLE_SIZE')
 
 
 def main():
@@ -51,6 +51,8 @@ def main():
             'sourceCommit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
             'power': {'ZB_ROUTER_ROLE': 1, 'PM_ENABLE': 0, 'ZB_MAC_RX_ON_WHEN_IDLE': 1},
             'nativeInitializedCapacities': capacities,
+            'unlinkedCapacitySymbols': [name for name in ('NWK_ROUTE_RECORD_TABLE_SIZE',)
+                                        if name not in symbols],
             'ram': {'dataBytes': data_section['sh_size'], 'bssBytes': bss['sh_size'],
                     **bounds,
                     'headroomBeyondLinkerReservedStackBytes': bounds['_stack_end_'] - bounds['_ram_end_'],
