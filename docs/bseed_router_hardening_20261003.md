@@ -126,7 +126,7 @@ stack-service maximum also includes other main-loop work and scheduler delays.
 The 32-bit hardware tick subtraction handles one wrap; gaps spanning multiple
 tick wraps are outside this metric.
 
-## Candidates and acceptance
+## Candidates and validation
 
 Fresh board-wide identities allocated on GitHub Actions before firmware edits:
 - PM Router r12 / Client cli14: 0x12053019, image types 43556 / 65024.
@@ -140,14 +140,12 @@ sealing. Router lanes also extract actual initialized capacities and linker
 RAM margin from their ELF and verify the flash hook resides in RAM. Static
 margin beyond the linker-reserved minimum stack is not runtime stack proof.
 
-After merge, separate live authorization and the repository OTA gates are
-required for any canary. Hardware work must test actual child parenting,
-bursty forwarding, route/neighbor turnover, coordinator restart, sleepy-child
-retention, flash service gaps, counter continuity through controlled power cuts,
-and successful recovery from storage faults with a safe relay fixture.
-Measure delivery, retries, latency and table pressure before changing table
-sizes, RF power or retry policy. These measurements are necessary before
-calling a Router best in class.
+After flashing, the new diagnostics can compare delivery, retries, latency,
+route/neighbor usage and flash service gaps during ordinary forwarding and
+child parenting. Those measurements can guide later RF, retry or capacity
+tuning. This pass adds no new preflash soak, disassembly, storage-fault injection
+or power-cut experiment requirement. Use the existing targeted hardware tooling
+when the device/board and desired role are selected.
 
 ## Sealed offline evidence
 
