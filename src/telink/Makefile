@@ -164,6 +164,7 @@ TELINK_SOURCES := \
 	hal/timer.c \
 	hal/tasks.c \
 	hal/firmware_health.c \
+	hal/router_health.c \
 	hal/gpio.c \
 	hal/gpio_counter.c \
 	hal/gpio_interrupts.c \
@@ -240,6 +241,7 @@ all: $(BIN_FILE) $(LST_FILE)
 $(ELF_FILE): $(ALL_APP_OBJS) sdk-build
 	@echo "Linking $(ELF_FILE)"
 	@$(LD) $(LNK_FLAGS) -T$(LINKER_SCRIPT) $(LIBRARY_PATHS) -o $@ $(ALL_APP_OBJS) $(SDK_OBJS) $(LIBS)
+	@printf '#include "tl_common.h"\n#include "zb_api.h"\n' | $(CC) $(DEVICE_DEFS) $(INCLUDE_PATHS) -dM -E -x c - > $(BUILD_DIR)/profile-macros.txt
 
 $(LST_FILE): $(ELF_FILE)
 	@echo 'Invoking: TC32 Create Extended Listing'

@@ -164,7 +164,7 @@ def test_poll_diagnostics_count_empty_ack_as_success_and_saturate(tmp_path):
     source = (ROOT / "src/telink/hal/zigbee_network.c").read_text()
     callback = "static void zdo_sync_confirmation_callback" + source.split(
         "static void zdo_sync_confirmation_callback", 1)[1].split(
-        "zdo_appIndCb_t zdo_callbacks", 1)[0]
+        "static void zdo_network_status_callback", 1)[0]
     run_c(tmp_path, r'''
 #include <assert.h>
 #include "hal/firmware_health.h"

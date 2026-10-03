@@ -3,13 +3,13 @@ import argparse
 
 from bseed_ota_identity import IdentityError
 
-RELEASE_DATE = '20261002'
+RELEASE_DATE = '20261003'
 BOARD = 'OUTLET_BSEED_TS011F'
 CONFIG = 'o1jzcxou;TS011F-BS;LC2;SB4u;RC3;ID2;M;'
 # Fresh shared version allocated by the canonical allocator on GitHub Actions.
-ROUTER = dict(role='Router', build='1.1.3-bseedr11', version=0x11023015, type=43555,
+ROUTER = dict(role='Router', build='1.1.3-bseedr12', version=0x11023016, type=43555,
               artifact='forward.ota', board=BOARD, config=CONFIG, date=RELEASE_DATE)
-CLIENT = dict(role='EndDevice', build='1.1.3-bseedc8', version=0x11023015, type=65026,
+CLIENT = dict(role='EndDevice', build='1.1.3-bseedc9', version=0x11023016, type=65026,
               artifact='forward.ota', board=BOARD, config=CONFIG, date=RELEASE_DATE)
 CANDIDATES = {'router': ROUTER, 'client': CLIENT}
 

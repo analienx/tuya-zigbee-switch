@@ -289,8 +289,10 @@ void telink_zigbee_hal_zcl_init(hal_zigbee_endpoint *endpoints,
                  attr < cluster->attributes + cluster->attribute_count; attr++) {
                 attr_table_ptr->id     = attr->attribute_id;
                 attr_table_ptr->type   = attr->data_type_id;
-                attr_table_ptr->access =
-                    ACCESS_CONTROL_READ | ACCESS_CONTROL_REPORTABLE;
+                attr_table_ptr->access = ACCESS_CONTROL_READ;
+                if (attr->flag != ATTR_DIAGNOSTIC) {
+                    attr_table_ptr->access |= ACCESS_CONTROL_REPORTABLE;
+                }
                 if (attr->flag == ATTR_WRITABLE) {
                     attr_table_ptr->access |= ACCESS_CONTROL_WRITE;
                 }

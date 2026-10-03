@@ -1,0 +1,58 @@
+{
+  "sourceCommit": "fb5c2af778ae6b11e3a445699c7b9b9d12cf3173",
+  "artifacts": [
+    {
+      "role": "Router",
+      "build": "1.2.5-bseedr12",
+      "imageType": 43556,
+      "sha256": "df66583cc27d71b4953d74e1471e21f39902e0407f6bd24ef2b295d627bc584e",
+      "artifact": "build/ci-finalization/pm/bseed-pm-role-matrix-20261003T053128Z-4ec7dc09/router/forward.ota",
+      "nativeIntegrityVerified": true,
+      "basicBuildIdVerified": true,
+      "hardwareAcceptance": false
+    },
+    {
+      "role": "EndDevice",
+      "build": "1.2.5-bseedcli14",
+      "imageType": 65024,
+      "sha256": "a72a5b3daa7f546391777793013c9a11214851213768b9dc9ff1cf0730085c7a",
+      "artifact": "build/ci-finalization/pm/bseed-pm-role-matrix-20261003T053128Z-4ec7dc09/client/forward.ota",
+      "nativeIntegrityVerified": true,
+      "basicBuildIdVerified": true,
+      "hardwareAcceptance": false
+    }
+  ],
+  "hardwareAcceptance": false,
+  "nonpmArtifacts": [
+    {
+      "role": "Router",
+      "build": "1.1.3-bseedr12",
+      "imageType": 43555,
+      "sha256": "6ccbb1d0dabf1f78a6e9af3bcf028e3e021e75af6ee6d17813f5d570137d20e2",
+      "artifact": "build/ci-finalization/nonpm/bseed-nonpm-role-matrix-20261003T053125Z-5050e06d/router/forward.ota",
+      "nativeIntegrityVerified": true,
+      "basicBuildIdVerified": true,
+      "hardwareAcceptance": false
+    },
+    {
+      "role": "EndDevice",
+      "build": "1.1.3-bseedc9",
+      "imageType": 65026,
+      "sha256": "e52701b83ea7528ed0e9b26cb9e4da0679d125c259c8141e62207c6460738fff",
+      "artifact": "build/ci-finalization/nonpm/bseed-nonpm-role-matrix-20261003T053125Z-5050e06d/client/forward.ota",
+      "nativeIntegrityVerified": true,
+      "basicBuildIdVerified": true,
+      "hardwareAcceptance": false
+    }
+  ],
+  "registryWritten": true,
+  "publicActions": {
+    "test": "https://github.com/analienx/tuya-zigbee-switch/actions/runs/37100067231",
+    "BSEED PM role matrix": "https://github.com/analienx/tuya-zigbee-switch/actions/runs/37100067237",
+    "BSEED non-PM role matrix": "https://github.com/analienx/tuya-zigbee-switch/actions/runs/37100067240",
+    "Telink Router TC32 validation": "https://github.com/analienx/tuya-zigbee-switch/actions/runs/37100067223",
+    "BSEED experimental mains clients": "https://github.com/analienx/tuya-zigbee-switch/actions/runs/37100067230"
+  },
+  "registryProposalSha256": "31bd8a8cfaba5d754eb916d1a6fa733b4ebf3fe511977a1c47fe97e467c1408c",
+  "registryCommitted": false
+}

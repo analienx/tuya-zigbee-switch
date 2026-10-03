@@ -107,16 +107,101 @@ _CODE_ZDO_ static void zdp_txCnfCb(void *arg) {
     //apsdeDataConf_t *pApsDataCnf = (apsdeDataConf_t *)arg;
 }
 
+/* Validate wire lengths before entering opaque native handlers. Counts are
+ * bounded by the pinned SDK's fixed cluster-list storage, never sizeof a
+ * pointer-bearing request structure. The transaction byte is included. */
+static bool zdp_clusterListsValid(const u8 *p, u16 length, u16 count_offset) {
+    if (length <= count_offset || p[count_offset] > MAX_REQUESTED_CLUSTER_NUMBER)
+        return false;
+
+    u16 out_offset = count_offset + 1u + 2u * p[count_offset];
+    if (length <= out_offset || p[out_offset] > MAX_REQUESTED_CLUSTER_NUMBER)
+        return false;
+
+    return length >= out_offset + 1u + 2u * p[out_offset];
+}
+
+static bool zdp_requestLengthValid(const aps_data_ind_t *p) {
+    const u8 *a = p->asdu;
+    u16       n = p->asduLength;
+
+    if (a == NULL || n < 1u)
+        return false;
+
+    switch (p->cluster_id) {
+    case NWK_ADDR_REQ_CLID: return n >= 11u;
+
+    case IEEE_ADDR_REQ_CLID: return n >= 5u;
+
+    case NODE_DESC_REQ_CLID:
+    case POWER_DESC_REQ_CLID:
+    case ACTIVE_EP_REQ_CLID:
+    case SYSTEM_SERVER_DISCOVERY_REQ_CLID: return n >= 3u;
+
+    case SIMPLE_DESC_REQ_CLID: return n >= 4u;
+
+    case MATCH_DESC_REQ_CLID: return zdp_clusterListsValid(a, n, 5u);
+
+    case END_DEVICE_BIND_REQ_CLID: return zdp_clusterListsValid(a, n, 14u);
+
+    case BIND_REQ_CLID:
+    case UNBIND_REQ_CLID:
+        if (n < 13u) return false;
+
+        return (a[12] == SHORT_GROUPADDR_NODSTENDPOINT && n >= 15u) ||
+               (a[12] == LONG_EXADDR_DSTENDPOINT && n >= 22u);
+
+#ifdef ZB_ROUTER_ROLE
+    case DEVICE_ANNCE_CLID: return n >= 12u;
+
+    case PARENT_ANNCE_CLID: return n >= 2u && n >= 2u + 8u * a[1];
+
+    case MGMT_RTG_REQ_CLID: return n >= 2u;
+
+    case MGMT_PERMIT_JOINING_REQ_CLID: return n >= 3u;
+#endif
+    case MGMT_LQI_REQ_CLID:
+    case MGMT_BIND_REQ_CLID: return n >= 2u;
+
+    case MGMT_LEAVE_REQ_CLID: return n >= 10u;
+
+    case MGMT_NWK_UPDATE_REQ_CLID:
+        if (n < 7u) return false;
+
+        if (a[5] <= 5u || a[5] == 0xfeu) return true;
+
+        return a[5] == 0xffu && n >= 9u;
+
+    default: return true; /* unsupported requests still receive native status */
+    }
+}
+
 _CODE_ZDO_ void zdp_serverCmdHandler(void *ind) {
     aps_data_ind_t *p = (aps_data_ind_t *)ind;
 
+    /* Every response starts with transaction sequence and status. Check before
+     * passing the payload to native handlers or consuming either byte. */
+    if (p->asdu == NULL || p->asduLength < 2u) {
+        zb_buf_free((zb_buf_t *)ind);
+        return;
+    }
+
 #ifdef ZB_ROUTER_ROLE
     if (p->cluster_id == PARENT_ANNCE_RSP_CLID) {
-        zdo_parentAnnounceNotify(ind);
+        if (p->asdu[1] == ZDO_SUCCESS && p->asduLength >= 3u &&
+            p->asduLength >= 3u + 8u * p->asdu[2]) {
+            zdo_parentAnnounceNotify(ind);
+        }
         zb_buf_free((zb_buf_t *)ind);
         return;
     } else if (p->cluster_id == NWK_ADDR_RSP_CLID || p->cluster_id == IEEE_ADDR_RSP_CLID) {
-        zdo_remoteAddrNotify(ind);
+        if (p->asdu[1] == ZDO_SUCCESS) {
+            if (p->asduLength < 12u) {
+                zb_buf_free((zb_buf_t *)ind);
+                return;
+            }
+            zdo_remoteAddrNotify(ind);
+        }
     }
 #endif
 
@@ -140,6 +225,11 @@ _CODE_ZDO_ void zdp_serverCmdHandler(void *ind) {
 _CODE_ZDO_ static void zdp_clientCmdHandler(void *ind) {
     aps_data_ind_t *p   = (aps_data_ind_t *)ind;
     zdo_status_t    sta = ZDO_NOT_SUPPORTED;
+
+    if (!zdp_requestLengthValid(p)) {
+        zb_buf_free((zb_buf_t *)ind);
+        return;
+    }
 
     for (u32 i = 0; i < sizeof(g_zdpClientFunc) / sizeof(zdp_funcList_t); i++) {
         if ((g_zdpClientFunc[i].clusterId == p->cluster_id) && g_zdpClientFunc[i].func) {
@@ -166,16 +256,19 @@ _CODE_ZDO_ static void zdp_clientCmdHandler(void *ind) {
     zdo_zdp_req_t zzr;
     TL_SETSTRUCTCONTENT(zzr, 0);
 
+    const u8  seq_num     = p->asdu[0];
+    const u16 cluster_id  = p->cluster_id;
+    const u16 destination = p->src_short_addr;
     TL_BUF_INITIAL_ALLOC((zb_buf_t *)ind, 2, zzr.zdu, u8 *);
     u8 *ptr = zzr.zdu;
-    *ptr++ = p->asdu[0];//seqNum
+    *ptr++ = seq_num;
     *ptr++ = (u8)sta;
 
-    zzr.cluster_id          = (p->cluster_id | 0x8000);
+    zzr.cluster_id          = (cluster_id | 0x8000);
     zzr.zduLen              = ptr - zzr.zdu;
     zzr.buff_addr           = ind;
     zzr.dst_addr_mode       = SHORT_ADDR_MODE;
-    zzr.dst_nwk_addr        = p->src_short_addr;
+    zzr.dst_nwk_addr        = destination;
     zzr.zdoRspReceivedIndCb = NULL;
 
     zdo_send_req(&zzr);
