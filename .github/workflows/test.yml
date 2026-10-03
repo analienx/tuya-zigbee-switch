@@ -113,6 +113,11 @@ jobs:
           curl --fail --location --retry 3 https://raw.githubusercontent.com/telink-semi/telink_zigbee_sdk/V3.7.2.0/tl_zigbee_sdk/zigbee/zcl/zcl.c -o build/test-sdk/zcl.c
           curl --fail --location --retry 3 https://raw.githubusercontent.com/telink-semi/telink_zigbee_sdk/V3.7.2.0/tl_zigbee_sdk/proj/os/ev_timer.c -o build/test-sdk/ev_timer.c
           curl --fail --location --retry 3 https://raw.githubusercontent.com/telink-semi/telink_zigbee_sdk/V3.7.2.0/tl_zigbee_sdk/proj/os/ev_timer.h -o build/test-sdk/ev_timer.h
+          curl --fail --location --retry 3 https://raw.githubusercontent.com/telink-semi/telink_zigbee_sdk/V3.7.2.0/tl_zigbee_sdk/proj/drivers/drv_nv.c -o build/test-sdk/drv_nv.c
+          curl --fail --location --retry 3 https://raw.githubusercontent.com/telink-semi/telink_zigbee_sdk/V3.7.2.0/tl_zigbee_sdk/proj/drivers/drv_nv.h -o build/test-sdk/drv_nv.h
+          curl --fail --location --retry 3 https://raw.githubusercontent.com/telink-semi/telink_zigbee_sdk/V3.7.2.0/tl_zigbee_sdk/platform/chip_8258/flash.c -o build/test-sdk/flash.c
+          curl --fail --location --retry 3 https://raw.githubusercontent.com/telink-semi/telink_zigbee_sdk/V3.7.2.0/tl_zigbee_sdk/zigbee/common/includes/zb_common.h -o build/test-sdk/zb_common.h
+          curl --fail --location --retry 3 https://raw.githubusercontent.com/telink-semi/telink_zigbee_sdk/V3.7.2.0/tl_zigbee_sdk/zigbee/zdo/zdp.h -o build/test-sdk/zdp.h
       - name: Run tests
         timeout-minutes: 15
         env:

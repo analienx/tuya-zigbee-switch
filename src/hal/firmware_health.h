@@ -12,6 +12,13 @@ typedef struct {
 
 extern firmware_health_t firmware_health;
 extern uint8_t           firmware_health_snapshot[49];
+extern uint8_t           firmware_runtime_snapshot[49];
+#ifdef ROUTER
+extern uint8_t           firmware_router_snapshot[49];
+#endif
+void hal_telink_stack_service_sample(void);
+void hal_telink_routing_health_update(void);
+void hal_telink_nwk_status(uint16_t address, uint8_t status);
 void hal_firmware_health_update(void);
 
 static inline void firmware_health_increment(uint32_t *counter) {

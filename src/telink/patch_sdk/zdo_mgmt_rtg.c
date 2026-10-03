@@ -9,11 +9,12 @@ static bool route_entry_is_valid(const nwk_routingTabEntry_t *entry) {
              entry->status == NWK_ROUTE_STATE_DISCOVERY_INACTIVE);
 }
 
-static uint8_t route_entry_count(void) {
+uint8_t telink_route_entry_count(bool active_only) {
     uint8_t count = 0;
 
     for (uint16_t i = 0; i < ROUTING_TABLE_SIZE && count < 0xffu; ++i) {
-        if (route_entry_is_valid(&g_routingTab[i])) {
+        if (route_entry_is_valid(&g_routingTab[i]) &&
+            (!active_only || g_routingTab[i].status == NWK_ROUTE_STATE_ACTIVE)) {
             ++count;
         }
     }
@@ -24,14 +25,15 @@ void zdo_mgmtRtgIndicate(void *buf) {
     zb_buf_t *      zbuff = (zb_buf_t *)buf;
     aps_data_ind_t *ad    = (aps_data_ind_t *)buf;
 
-    if (ad->asduLength < 2u) {
+    if (ad->asdu == NULL || ad->asduLength < 2u) {
         zb_buf_free(zbuff);
         return;
     }
 
     const uint8_t seq_num       = ad->asdu[0];
     const uint8_t start_index   = ad->asdu[1];
-    const uint8_t total_entries = route_entry_count();
+    const uint16_t destination  = ad->src_short_addr;
+    const uint8_t total_entries = telink_route_entry_count(false);
     const uint8_t list_count    = mgmt_rtg_page_count(total_entries, start_index);
     const uint8_t response_len  =
         (uint8_t)(MGMT_RTG_RESPONSE_HEADER_SIZE +
@@ -71,7 +73,7 @@ void zdo_mgmtRtgIndicate(void *buf) {
     req.zduLen              = (uint8_t)(ptr - req.zdu);
     req.buff_addr           = buf;
     req.dst_addr_mode       = SHORT_ADDR_MODE;
-    req.dst_nwk_addr        = ad->src_short_addr;
+    req.dst_nwk_addr        = destination;
     req.zdoRspReceivedIndCb = NULL;
 
     zdo_send_req(&req);

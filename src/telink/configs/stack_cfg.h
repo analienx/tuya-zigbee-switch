@@ -70,4 +70,14 @@
 #endif
 #endif
 
+#if ZB_ROUTER_ROLE
+/* A Router remains available for its neighbors and children at every idle. */
+#if PM_ENABLE
+#error "Zigbee Router requires power management disabled"
+#endif
+#if defined(ZB_MAC_RX_ON_WHEN_IDLE) && (ZB_MAC_RX_ON_WHEN_IDLE != 1)
+#error "Zigbee Router requires receiver on when idle"
+#endif
+#endif
+
 #endif /* _STACK_CFG_H_ */

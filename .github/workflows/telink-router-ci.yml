@@ -48,7 +48,7 @@ jobs:
       - name: Install host dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y make python3 python3-yaml curl wget unzip bzip2
+          sudo apt-get install -y make python3 python3-yaml python3-pyelftools curl wget unzip bzip2
 
       - name: Cache Telink SDK and TC32 toolchain
         uses: actions/cache@v4
@@ -81,6 +81,10 @@ jobs:
         run: |
           set -euo pipefail
           OUT="build/telink-router-ci-$TARGET_ID"
+          python3 helper_scripts/telink_router_build_evidence.py \
+            --elf build/telink/tlc_switch.elf --macros build/telink/profile-macros.txt \
+            --output "$OUT/router-profile.json"
+          cp build/telink/profile-macros.txt "$OUT/router-profile-macros.txt"
           {
             echo "expected_head=$EXPECTED_HEAD"
             echo "head=$(git rev-parse HEAD)"
@@ -123,4 +127,6 @@ jobs:
             build/telink-router-ci-${{ matrix.id }}/forward.ota
             build/telink-router-ci-${{ matrix.id }}/from_tuya.ota
             build/telink-router-ci-${{ matrix.id }}/manifest.json
+            build/telink-router-ci-${{ matrix.id }}/router-profile.json
+            build/telink-router-ci-${{ matrix.id }}/router-profile-macros.txt
           if-no-files-found: warn

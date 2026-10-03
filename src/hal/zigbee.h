@@ -9,6 +9,7 @@
 typedef enum {
     ATTR_READONLY,
     ATTR_WRITABLE,
+    ATTR_DIAGNOSTIC, /* Read-only RAM data; never configure automatic reporting. */
 } hal_attr_flags_t;
 
 /** Command handler result (processed or delegate to default handler) */

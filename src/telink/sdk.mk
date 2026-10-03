@@ -215,3 +215,16 @@ sdk-help:
 	@echo "  Total SDK sources:  $(words $(ALL_SDK_SOURCES)) files"
 
 .PHONY: sdk-build sdk-clean sdk-directories sdk-help
+
+# Verify network counter persistence before any native caller can continue.
+$(BUILD_DIR)/sdk/proj/drivers/drv_nv.o: $(SDK_PATH)/proj/drivers/drv_nv.c ../../helper_scripts/patch_telink_router_runtime.py
+	@mkdir -p $(@D)
+	@python3 ../../helper_scripts/patch_telink_router_runtime.py --kind nv --source $< --output $(@D)/drv_nv.c
+	@$(CC) $(GCC_FLAGS) $(DEVICE_DEFS) $(INCLUDE_PATHS) -I$(SDK_PATH)/proj/drivers -c -o $@ $(@D)/drv_nv.c
+
+# Record write/erase IRQ blackout duration from RAM, with no SDK mutation.
+$(BUILD_DIR)/sdk/platform/chip_8258/flash.o: $(SDK_PATH)/platform/chip_8258/flash.c ../../helper_scripts/patch_telink_router_runtime.py
+	@mkdir -p $(@D)
+	@python3 ../../helper_scripts/patch_telink_router_runtime.py --kind flash --source $< --output $(@D)/flash.c
+	@$(CC) $(GCC_FLAGS) $(DEVICE_DEFS) $(INCLUDE_PATHS) -I$(SDK_PATH)/platform/chip_8258 -c -o $@ $(@D)/flash.c
+

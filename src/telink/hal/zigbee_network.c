@@ -122,6 +122,10 @@ static void zdo_sync_confirmation_callback(nlme_sync_cnf_t *confirmation) {
                               &firmware_health.poll_failure);
 }
 
+static void zdo_network_status_callback(zdo_nwk_status_ind_t *indication) {
+    hal_telink_nwk_status(indication->shortAddr, indication->status);
+}
+
 zdo_appIndCb_t zdo_callbacks = {
     bdb_zdoStartDevCnf,              // start device cnf cb
     NULL,                            // reset cnf cb
@@ -133,6 +137,7 @@ zdo_appIndCb_t zdo_callbacks = {
     zdo_sync_confirmation_callback,  // nlme sync cnf cb
     NULL,                            // tc join ind cb
     NULL,                            // tc detects that the frame counter is near limit
+    zdo_network_status_callback,     // raw NWK status/address; never initiate recovery here
 };
 
 // Telink BDB storage
@@ -390,7 +395,7 @@ void telink_zigbee_hal_network_init(void) {
 #endif
 
     zb_zdoCbRegister(&zdo_callbacks);
-#ifdef BSEED_MAINS_CLIENT
+#if ZB_ROUTER_ROLE || defined(BSEED_MAINS_CLIENT)
     // A mains client is a Zigbee End Device only in the topology sense. Keep
     // the radio on continuously, advertise mains power, and do not enable the
     // sleepy-end-device polling model. ZB_MAC_RX_ON_WHEN_IDLE=1 also seeds the

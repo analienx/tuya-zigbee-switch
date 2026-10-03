@@ -18,6 +18,10 @@ from bseed_ota_identity import IdentityError
 ROOT = Path(__file__).resolve().parents[1]
 COMMON_TESTS = ('tests/test_unified_pm_v8.py', 'tests/test_pm_cluster_layout_guard.py',
                 'tests/test_telink_timer_runtime.py',
+                'tests/test_telink_counter_persistence.py',
+                'tests/test_telink_router_health.py',
+                'tests/test_telink_zdp_lengths.py',
+                'tests/test_telink_mgmt_rtg.py',
                 'tests/test_bseed_shared_hardening_runtime.py',
                 'tests/test_bseed_socket_antibrick.py',
                 'tests/test_bseed_controlled_reboot.py',

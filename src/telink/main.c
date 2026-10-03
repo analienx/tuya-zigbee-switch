@@ -79,10 +79,12 @@ int real_main(startup_state_e state) {
         drv_wd_clear();
         ev_main();
         drv_wd_clear();
+        hal_telink_stack_service_sample();
         tl_zbTaskProcedure();
         drv_wd_clear();
         app_task();
         hal_firmware_health_update();
+        hal_telink_routing_health_update();
         drv_wd_clear();
         report_handler();
         drv_wd_clear();

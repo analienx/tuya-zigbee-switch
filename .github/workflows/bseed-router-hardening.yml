@@ -46,7 +46,7 @@ jobs:
           selected = []
           for block in blocks:
               name = block.splitlines()[0] if block else ''
-              if re.search(r'frame|Frame|routerStart|rejoin', name):
+              if re.search(r'frame|routerStart|rejoin', name, re.I) or 'nv_nwkFrameCount' in block:
                   selected.append(block)
           if not selected:
               raise SystemExit('native counter functions missing')
