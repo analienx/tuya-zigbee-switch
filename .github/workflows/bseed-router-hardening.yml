@@ -1,0 +1,62 @@
+name: BSEED Router hardening evidence
+
+on:
+  push:
+    branches: ['codex/bseed-router-hardening']
+  pull_request:
+
+jobs:
+  sdk-evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Allocate fresh socket identities before firmware edits
+        run: |
+          set -euo pipefail
+          python3 helper_scripts/bseed_ota_identity.py suggest-next --image-type 65024
+          python3 helper_scripts/bseed_ota_identity.py emit-make-vars --image-type 65024 --version-str 1.2.5-bseedcli14
+          python3 helper_scripts/bseed_ota_identity.py emit-make-vars --image-type 43556 --version-str 1.2.5-bseedr12
+          python3 helper_scripts/bseed_ota_identity.py suggest-next --image-type 65026
+          python3 helper_scripts/bseed_ota_identity.py emit-make-vars --image-type 65026 --version-str 1.1.3-bseedc9
+          python3 helper_scripts/bseed_ota_identity.py emit-make-vars --image-type 43555 --version-str 1.1.3-bseedr12
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y make python3 curl wget unzip bzip2
+      - uses: actions/cache@v4
+        with:
+          path: telink_tools
+          key: telink-tools-v3.7.2.0
+      - name: Install pinned SDK and TC32 tools
+        run: make -C src/telink -f tools.mk sdk toolchain
+      - name: Inspect native security-counter and recovery call paths
+        run: |
+          set -euo pipefail
+          TC=telink_tools/toolchain/tc32/bin/tc32-elf
+          LIB=telink_tools/sdk/zigbee/lib/tc32/libzb_router.a
+          sha256sum "$LIB"
+          "$TC-nm" -A "$LIB" | grep -Ei 'frame|routerStart|rejoin' > "$RUNNER_TEMP/router-sdk-symbols.txt"
+          "$TC-objdump" -dr "$LIB" > "$RUNNER_TEMP/router-sdk-native.txt"
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          path = Path(os.environ['RUNNER_TEMP'])
+          text = (path / 'router-sdk-native.txt').read_text()
+          blocks = re.split(r'(?=^[0-9a-f]+ <[^>]+>:\s*$)', text, flags=re.M)
+          selected = []
+          for block in blocks:
+              name = block.splitlines()[0] if block else ''
+              if re.search(r'frame|Frame|routerStart|rejoin', name):
+                  selected.append(block)
+          if not selected:
+              raise SystemExit('native counter functions missing')
+          (path / 'router-sdk-counter-paths.txt').write_text('\n'.join(selected))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: router-sdk-evidence-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/router-sdk-symbols.txt
+            ${{ runner.temp }}/router-sdk-counter-paths.txt
+          if-no-files-found: error
+
