@@ -31,7 +31,7 @@ def test_runtime_snapshot_sdk_widths_irq_timing_and_fault_stop(tmp_path, router)
 #include <string.h>
 typedef uint8_t u8; typedef uint16_t u16; typedef uint32_t u32; typedef int8_t s8;
 #define _attribute_ram_code_sec_
-#define CLOCK_SYS_CLOCK_1US 16
+#define S_TIMER_CLOCK_1US 16
 #define MAC_CAP_RX_ON_WHEN_IDLE 8
 #define POWER_MODE_RECEIVER_SYNCHRONIZED_WHEN_ON_IDLE 0
 ''' + diag + r'''
@@ -52,7 +52,7 @@ static u32 clock_time(void) {return ticks;}
 static u32 drv_disable_irq(void) {irq_depth++;return 1;}
 static void drv_restore_irq(u32 r) {(void)r;assert(irq_depth>0);irq_depth--;}
 static void rf_set_tx_rx_off(void) {assert(irq_depth);radio_off++;}
-static void drv_wd_stop(void) {watchdog_stopped++;longjmp(fault,1);}
+static void wd_stop(void) {watchdog_stopped++;longjmp(fault,1);}
 static u8 tl_zbNeighborTableNumGet(void) {assert(!irq_depth);return neighbors;}
 static u8 tl_zbNeighborTableChildEDNumGet(void) {return children;}
 static void af_nodeDescriptorCopy(node_descriptor_t *p) {p->mac_capability_flag=8;}
@@ -61,6 +61,7 @@ static void af_powerDescriptorCopy(power_descriptor_t *p) {p->current_power_mode
 '''
     (tmp_path/'tl_common.h').write_text(shim)
     (tmp_path/'zb_api.h').write_text('#include "tl_common.h"\n')
+    (tmp_path/'watchdog.h').write_text('#include "tl_common.h"\n')
     (tmp_path/'telink_size_t_hack.h').write_text('')
     code = '#include "' + (ROOT/'src/telink/hal/router_health.c').as_posix() + '"\n' + r'''
 uint32_t hal_millis(void) {return now;}

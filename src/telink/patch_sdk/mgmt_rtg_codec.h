@@ -19,6 +19,7 @@ void mgmt_rtg_encode_descriptor(uint8_t out[MGMT_RTG_DESCRIPTOR_SIZE],
                                 uint16_t next_hop);
 
 uint8_t mgmt_rtg_page_count(uint8_t total_entries, uint8_t start_index);
+
 /* SDK-backed entry selection shared by Mgmt_Rtg and Router diagnostics. */
 uint8_t telink_route_entry_count(bool active_only);
 

@@ -14,7 +14,7 @@ extern firmware_health_t firmware_health;
 extern uint8_t           firmware_health_snapshot[49];
 extern uint8_t           firmware_runtime_snapshot[49];
 #ifdef ROUTER
-extern uint8_t           firmware_router_snapshot[49];
+extern uint8_t firmware_router_snapshot[49];
 #endif
 void hal_telink_stack_service_sample(void);
 void hal_telink_routing_health_update(void);

@@ -113,45 +113,65 @@ _CODE_ZDO_ static void zdp_txCnfCb(void *arg) {
 static bool zdp_clusterListsValid(const u8 *p, u16 length, u16 count_offset) {
     if (length <= count_offset || p[count_offset] > MAX_REQUESTED_CLUSTER_NUMBER)
         return false;
+
     u16 out_offset = count_offset + 1u + 2u * p[count_offset];
     if (length <= out_offset || p[out_offset] > MAX_REQUESTED_CLUSTER_NUMBER)
         return false;
+
     return length >= out_offset + 1u + 2u * p[out_offset];
 }
 
 static bool zdp_requestLengthValid(const aps_data_ind_t *p) {
     const u8 *a = p->asdu;
-    u16 n = p->asduLength;
+    u16       n = p->asduLength;
+
     if (a == NULL || n < 1u)
         return false;
+
     switch (p->cluster_id) {
     case NWK_ADDR_REQ_CLID: return n >= 11u;
+
     case IEEE_ADDR_REQ_CLID: return n >= 5u;
+
     case NODE_DESC_REQ_CLID:
     case POWER_DESC_REQ_CLID:
     case ACTIVE_EP_REQ_CLID:
     case SYSTEM_SERVER_DISCOVERY_REQ_CLID: return n >= 3u;
+
     case SIMPLE_DESC_REQ_CLID: return n >= 4u;
+
     case MATCH_DESC_REQ_CLID: return zdp_clusterListsValid(a, n, 5u);
+
     case END_DEVICE_BIND_REQ_CLID: return zdp_clusterListsValid(a, n, 14u);
+
     case BIND_REQ_CLID:
     case UNBIND_REQ_CLID:
         if (n < 13u) return false;
+
         return (a[12] == SHORT_GROUPADDR_NODSTENDPOINT && n >= 15u) ||
                (a[12] == LONG_EXADDR_DSTENDPOINT && n >= 22u);
+
 #ifdef ZB_ROUTER_ROLE
     case DEVICE_ANNCE_CLID: return n >= 12u;
+
     case PARENT_ANNCE_CLID: return n >= 2u && n >= 2u + 8u * a[1];
+
     case MGMT_RTG_REQ_CLID: return n >= 2u;
+
     case MGMT_PERMIT_JOINING_REQ_CLID: return n >= 3u;
 #endif
     case MGMT_LQI_REQ_CLID:
     case MGMT_BIND_REQ_CLID: return n >= 2u;
+
     case MGMT_LEAVE_REQ_CLID: return n >= 10u;
+
     case MGMT_NWK_UPDATE_REQ_CLID:
         if (n < 7u) return false;
+
         if (a[5] <= 5u || a[5] == 0xfeu) return true;
+
         return a[5] == 0xffu && n >= 9u;
+
     default: return true; /* unsupported requests still receive native status */
     }
 }
@@ -236,8 +256,8 @@ _CODE_ZDO_ static void zdp_clientCmdHandler(void *ind) {
     zdo_zdp_req_t zzr;
     TL_SETSTRUCTCONTENT(zzr, 0);
 
-    const u8 seq_num = p->asdu[0];
-    const u16 cluster_id = p->cluster_id;
+    const u8  seq_num     = p->asdu[0];
+    const u16 cluster_id  = p->cluster_id;
     const u16 destination = p->src_short_addr;
     TL_BUF_INITIAL_ALLOC((zb_buf_t *)ind, 2, zzr.zdu, u8 *);
     u8 *ptr = zzr.zdu;

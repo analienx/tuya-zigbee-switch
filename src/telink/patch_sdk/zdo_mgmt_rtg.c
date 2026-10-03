@@ -30,12 +30,12 @@ void zdo_mgmtRtgIndicate(void *buf) {
         return;
     }
 
-    const uint8_t seq_num       = ad->asdu[0];
-    const uint8_t start_index   = ad->asdu[1];
-    const uint16_t destination  = ad->src_short_addr;
-    const uint8_t total_entries = telink_route_entry_count(false);
-    const uint8_t list_count    = mgmt_rtg_page_count(total_entries, start_index);
-    const uint8_t response_len  =
+    const uint8_t  seq_num       = ad->asdu[0];
+    const uint8_t  start_index   = ad->asdu[1];
+    const uint16_t destination   = ad->src_short_addr;
+    const uint8_t  total_entries = telink_route_entry_count(false);
+    const uint8_t  list_count    = mgmt_rtg_page_count(total_entries, start_index);
+    const uint8_t  response_len  =
         (uint8_t)(MGMT_RTG_RESPONSE_HEADER_SIZE +
                   list_count * MGMT_RTG_DESCRIPTOR_SIZE);
 
