@@ -25,7 +25,7 @@ If persistence cannot be verified, the firmware synchronously disables IRQs,
 turns radio TX/RX off, stops the watchdog and halts. Relay/GPIO outputs are
 preserved. **Buttons, metering, protection processing and other application work
 also stop**; this is an exceptional fail-stop, not a degraded operating mode.
-The device needs physical recovery after its storage is repaired. It does not
+Restarting retries the persistence path. The firmware does not
 factory-reset itself or repeatedly reboot. The fault is RAM-only and cannot be
 queried over Zigbee after radio shutdown.
 
@@ -148,3 +148,28 @@ and successful recovery from storage faults with a safe relay fixture.
 Measure delivery, retries, latency and table pressure before changing table
 sizes, RF power or retry policy. These measurements are necessary before
 calling a Router best in class.
+
+## Sealed offline evidence
+
+Candidate source `fb5c2af778ae6b11e3a445699c7b9b9d12cf3173` passed all public
+Actions prerequisites, including 1,015 tests, native Router/Client compilation,
+both reproduced role matrices, and the native Router hook/profile audit.
+[CI seal report](bseed_router_hardening_ci_seal_20261003.json) records the four
+verified OTA hashes and exact-SHA run links. The registry adds the four fresh
+identities; historical sealed hashes remain unchanged. The registry/packaging
+commit must pass the same gates again before finalization.
+
+Both Router ELFs retain 26 neighbors, a configured child quota of 16, 48 routes,
+36 packet buffers, a MAC TX queue of 32 and an APS TX cache of 16. Data/BSS are
+952/32,878 bytes on PM and 952/32,794 bytes on non-PM. Static margin beyond the
+linker's reserved minimum stack is 20,480/20,736 bytes respectively; it is not
+a runtime stack or child-admission measurement. NWK_ROUTE_RECORD_TABLE_SIZE is
+not linked in these Router images; the report does not invent its capacity.
+
+Actions finalization also emits `bseed-flash-candidates-SHA`: each exact board/role
+folder contains the verified normal OTA, its identical native BIN payload,
+the build manifest, and a shared JSON with native/OTA hashes and provenance.
+These are offline canary candidates, not fleet-approved firmware. The package
+contains no FORCE/stock-conversion wrappers, credentials or device profiles.
+Local flashing must consume the downloaded bytes through separately authorized
+hardware tooling; `make flash` is unsuitable because it rebuilds locally.

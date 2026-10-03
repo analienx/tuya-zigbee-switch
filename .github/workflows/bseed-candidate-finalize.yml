@@ -29,4 +29,10 @@ jobs:
           path: |
             build/ci-finalization/CI_SEAL_REPORT.json
             build/ci-finalization/bseed_identity.json
+      - name: Upload local-flashing candidate files and runner-produced hashes
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseed-flash-candidates-${{ github.event.pull_request.head.sha || github.sha }}
+          path: build/ci-finalization/flash-candidates/
+          if-no-files-found: error
           if-no-files-found: error
