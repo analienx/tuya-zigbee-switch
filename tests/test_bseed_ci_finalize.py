@@ -26,18 +26,19 @@ def test_artifact_redirect_does_not_forward_api_authorization(monkeypatch):
 def test_candidate_package_preserves_verified_native_payloads(tmp_path, monkeypatch):
     import hashlib
     import json
-    import struct
+    import runpy
     from bseed_ci_finalize import package_candidates
     monkeypatch.setenv('GITHUB_ACTIONS', 'true')
     monkeypatch.setenv('RUNNER_ENVIRONMENT', 'github-hosted')
     rows = []
+    make_ota_image = runpy.run_path(str(Path(__file__).resolve().parents[1] /
+                                      'src/telink/make_ota.py'))['make_ota_image']
     for image_type in (43556, 65024, 43555, 65026):
         folder = tmp_path / str(image_type)
         folder.mkdir()
-        raw = b'native-payload-' + str(image_type).encode()
-        ota = bytearray(62)
-        struct.pack_into('<I', ota, 14, 0x12053019)
-        ota = bytes(ota) + raw
+        raw = b'native-payload-' + str(image_type).encode() + bytes(37)
+        ota = make_ota_image(raw, 4417, image_type, 0x12053019, 'Telink OTA Image')
+        assert ota[62:] != raw  # header/length/padding/CRC conversion is expected
         source = folder / 'forward.ota'
         source.write_bytes(ota)
         source.with_suffix('.bin').write_bytes(raw)

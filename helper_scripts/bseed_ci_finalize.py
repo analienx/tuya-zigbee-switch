@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import os
+import runpy
 from pathlib import Path
 import shutil
 import subprocess
@@ -41,6 +42,8 @@ def package_candidates(report, root):
     package = root / 'flash-candidates'
     package.mkdir(exist_ok=False)
     entries = []
+    make_ota_image = runpy.run_path(str(Path(__file__).resolve().parents[1] /
+                                      'src/telink/make_ota.py'))['make_ota_image']
     for row in rows:
         if not row['nativeIntegrityVerified'] or not row['basicBuildIdVerified']:
             raise ValueError('Candidate lacks native integrity evidence')
@@ -52,8 +55,12 @@ def package_candidates(report, root):
         # native length/version/startup marker/CRC and length-prefixed build ID.
         raw = ota[62:]
         original_bin = source.with_suffix('.bin')
-        if original_bin.exists() and original_bin.read_bytes() != raw:
-            raise ValueError('Native BIN and verified OTA payload differ')
+        if original_bin.exists():
+            prepared = make_ota_image(original_bin.read_bytes(), 4417,
+                                      row['imageType'], int.from_bytes(ota[14:18], 'little'),
+                                      'Telink OTA Image')
+            if prepared != ota:
+                raise ValueError('Prepared compiler BIN and verified OTA differ')
         folder = package / labels[row['imageType']]
         folder.mkdir()
         (folder / 'firmware.ota').write_bytes(ota)
@@ -76,7 +83,8 @@ def package_candidates(report, root):
         '# Analienx BSEED firmware (based on Romasku) — CI-verified socket firmware\n\n'
         'Four independently identified socket variants are included. Select the exact '
         'PM/non-PM board and Router/Client role. firmware.bin is the verified native '
-        'application image, not a complete flash/NVM backup. firmware.ota is the normal '
+        'application payload with Telink length/padding/CRC preparation, not a complete '
+        'flash/NVM backup. firmware.ota is the normal '
         'role-specific OTA image; no stock/FORCE/role-transition wrapper is included.\n\n'
         'The accompanying JSON records runner-produced hashes and exact-SHA CI provenance. '
         'These bytes passed native integrity, identity and reproducibility checks on '
