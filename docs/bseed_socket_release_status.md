@@ -1,5 +1,26 @@
 # BSEED socket firmware: golden images and role rollout
 
+
+## Current status — 2026-10-04
+
+The September table below is retained as historical rollout context. The current sealed four-variant hardening set is newer:
+
+| Socket board | Router candidate | Client candidate | Current hardware evidence |
+|---|---|---|---|
+| TS011F-BS-PM (`b28wrpvx`) | `1.2.5-bseedr12` / `0x12053019` / type `43556` | `1.2.5-bseedcli14` / `0x12053019` / type `65024` | Sealed/reproducible; broad per-device acceptance still required |
+| TS011F-BS non-PM (`o1jzcxou`) | `1.1.3-bseedr12` / `0x11023016` / type `43555` | `1.1.3-bseedc9` / `0x11023016` / type `65026` | c9 live install/rejoin proven on `BedroomSocketCabinetRight`; full acceptance bookkeeping still pending |
+
+The c8/c9 generation includes shared Telink clock, scheduler, network-recovery and diagnostics hardening. Client keepalive enforcement now stops overriding SDK disconnected recovery polling; rejoin/backoff is kept distinct from fresh steering; rejected starts are paced. Read-only Basic diagnostics `0xFF10` and `0xFF12` expose parent/rejoin, polling, stack latency, flash-service, frame-counter and radio evidence.
+
+The c9 canary also showed that interrupted OTA state is retained across retries: transfers resumed from approximately 16% and 46% before the final successful apply. This does **not** mean c9 added a new direct OTA-abort algorithm: relevant deferred re-query logic predates c9. Treat the improvement as evidence for the broader timing/scheduler/network-recovery hardening, not as proof that every OTA abort root cause is eliminated.
+
+After the successful c9 transfer, the socket reported `1.1.3-bseedc9`, live `EndDevice` ZDO role, fresh MQTT state and healthy connectivity without a power cycle. The earlier power-cycle requirement occurred while recovering the old c7 firmware from interrupted/stuck OTA/network state.
+
+### Fleet rollout policy from this point
+
+Custom BSEED sockets may be advanced serially to the latest sealed firmware for their **existing board and role**, one OTA at a time. Each device must preserve exact IEEE/board/role/image identity, pass fresh link and relay/load preflight, own the network OTA lock exclusively, and complete post-flash build/role/connectivity checks before the next socket starts. Stock TS011F devices are not part of this same-role custom-firmware rollout. Cross-role Router↔Client conversion remains a separate operation with rejoin/binding implications.
+
+
 Status updated on 2026-09-25. **Router goldens are released; Mains Client remains a canary and must not be advertised as a normal OTA update.** The word *golden* here means an exact, retained, hardware-accepted image for a specific board and role—not a guarantee of perfect reliability.
 
 | Socket board | Released Router | Router OTA image type | Client candidate | Client OTA image type | Client hardware status |
