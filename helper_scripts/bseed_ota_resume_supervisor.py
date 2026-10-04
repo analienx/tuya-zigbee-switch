@@ -516,6 +516,7 @@ def resume_same_role(
                     retry_seconds=reconcile_retry_seconds,
                     join_strategy="auto",
                     allow_join_all_fallback=False,
+                    fast=True,
                 )
             except RuntimeError as error:
                 return persist(
