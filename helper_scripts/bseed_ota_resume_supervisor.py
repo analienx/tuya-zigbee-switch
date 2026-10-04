@@ -278,12 +278,13 @@ def source_rejoin_cmd(profile_path: Path, confirm_ieee: str, output: Path, *,
 def reconcile_until_ready(profile_path: Path, confirm_ieee: str, work: Path,
                           orchestration_log: Path, *, wait_seconds: int,
                           retry_seconds: int, join_strategy: str = "auto",
-                          allow_join_all_fallback: bool = False) -> str | None:
-    """Use canonical reconciliation until an orphaned/failed source is proven ready.
+                          allow_join_all_fallback: bool = False,
+                          fast: bool = False) -> str | None:
+    """Use source reconciliation until an orphaned/failed source is proven ready.
 
-    Every attempt is read-only with respect to firmware. The canonical helper
-    itself refuses while OTA is still active, while the target is unreachable,
-    or when exact source identity/candidate availability cannot be proven.
+    Strict mode also proves candidate availability. Fast same-role mode proves
+    exact source identity, fresh reachability and a 15-second no-OTA quiet
+    window, then defers candidate verification to the fresh pre-flash check.
     """
     deadline = time.monotonic() + max(0, wait_seconds)
     attempts = 0
@@ -297,7 +298,7 @@ def reconcile_until_ready(profile_path: Path, confirm_ieee: str, work: Path,
             raise RuntimeError(f"Campaign phase {phase!r} is not reconcilable")
         attempts += 1
         rc = run_logged(
-            campaign_cmd(profile_path, "reconcile-source", confirm_ieee=confirm_ieee),
+            source_reconcile_cmd(profile_path, confirm_ieee, fast=fast),
             orchestration_log,
         )
         lock = read_json(work / "ACTIVE_LOCK.json")
