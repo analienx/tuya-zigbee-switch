@@ -560,10 +560,13 @@ def test_same_role_autoresume_stops_when_progress_no_longer_increases(tmp_path, 
 
     def fake_run(cmd, log):
         nonlocal flash_count
-        mode = cmd[cmd.index("--mode") + 1]
-        if mode == "reconcile-source":
+        name = Path(cmd[2]).name
+        if name == "bseed_ota_source_reconcile.py":
+            assert "--defer-candidate-check" in cmd
+            assert cmd[cmd.index("--observe-seconds") + 1] == "15"
             (work / "ACTIVE_LOCK.json").write_text(json.dumps({"phase": sup.READY_PHASE}))
             return 0
+        mode = cmd[cmd.index("--mode") + 1]
         if mode in ("preflight", "check"):
             return 0
         if mode == "flash":
