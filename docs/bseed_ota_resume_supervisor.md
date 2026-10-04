@@ -1,8 +1,9 @@
 # BSEED OTA Resume Supervisor
 
 Use `helper_scripts/bseed_ota_resume_supervisor.py` for a retry/resume of a
-cross-role OTA after a failed or source-unchanged attempt. Do not hand-launch a
-long-running OTA child with `stdout=PIPE`.
+cross-role OTA and for **progress-gated same-role OTA resume** after a failed,
+source-unchanged attempt. Do not hand-launch a long-running OTA child with
+`stdout=PIPE`.
 
 ## Why this exists
 
@@ -17,7 +18,7 @@ JSONL/log or blocked observer therefore is **not proof** that the actual OTA
 transport stopped. Never kill/reconcile an `ota_running` campaign solely
 because observer output stopped.
 
-## Safe resume flow
+## Cross-role safe resume flow
 
 The supervisor performs this sequence:
 
@@ -56,6 +57,37 @@ For the exact Bedroom non-PM canary, profile loading separately enforces the
 known-good transfer envelope: 32-byte blocks, >=1200 ms response delay,
 >=1,800,000 ms per-request timeout and >=14,400 s overall monitor.
 
+## Same-role progress-gated auto-resume
+
+`resume-same-role` exists for an exact same-role Router→Router or
+Client→Client campaign. The primitive `bseed_ota_campaign.py --mode flash`
+still performs exactly one firmware submission and never retries itself.
+
+For every real flash attempt the supervisor reads only a transaction JSONL that
+contains `ota_request_sent`, then records the maximum numeric
+`device_state.update.progress`. OTA availability checks therefore cannot be
+mistaken for transfer attempts. Automatic retry uses a strict monotonic gate:
+
+- first failed flash: compare its maximum progress with a 0% baseline;
+- later failed flash: require `current_max_progress > previous_max_progress`;
+- equal, lower, missing or zero progress blocks another automatic flash;
+- successful transport followed by interview/postflash failure also blocks
+  reflashing, because transport success is already known.
+
+Before every permitted retry, canonical `reconcile-source` must prove the
+source build/role is still installed and no OTA remains active. If the exact
+target GET is missing, same-role mode uses `auto` recovery with **Join All
+disabled**: verified scoped `join_via` first, coordinator-only second. Both
+paths close their permit-join windows in `finally`. If reachability cannot be
+restored, the result is `physical_intervention_required`, not another OTA.
+After reconciliation, fresh `preflight` and exact `check` must pass before
+the next flash. `OTA_SUPERVISOR.json` records the progress history and current
+retry decision.
+
+This allows retained-image protocol resume to continue when each iteration
+makes objective forward progress, while preventing an unattended loop at the
+same failing offset.
+
 ## Rejoin policy
 
 Profiles may declare `source_rejoin_strategy` as `none`, `scoped`,
@@ -79,7 +111,7 @@ The resolved policy is persisted in `OTA_SUPERVISOR.json`.
 
 ## Commands
 
-Resume/retry:
+Cross-role resume/retry:
 
 ```powershell
 py -3 helper_scripts\bseed_ota_resume_supervisor.py resume-transition ^
@@ -89,6 +121,18 @@ py -3 helper_scripts\bseed_ota_resume_supervisor.py resume-transition ^
   --join-strategy auto ^
   --allow-join-all-fallback
 ```
+
+Same-role progress-gated resume/retry:
+
+```powershell
+py -3 helper_scripts\bseed_ota_resume_supervisor.py resume-same-role ^
+  --profile C:\path\to\PRIVATE_profile.json ^
+  --confirm-ieee 0xEXACT_TARGET_IEEE ^
+  --max-attempts 12
+```
+
+For non-PM same-role firmware also supply `--confirm-load-unplugged`.
+Same-role mode never enables Join All.
 
 Read-only status:
 
@@ -111,6 +155,9 @@ failure.
   qualification.
 - It will not automatically retry a firmware transfer that actually returned a
   failed OTA result without first reconciling the exact source as unchanged.
+  For same-role OTA it additionally requires strict forward progress versus the
+  previous real flash attempt; equal/lower/missing progress is terminal for
+  automatic retry.
 - It will not release hardware acceptance or network ownership merely because
   a transport completed.
 

@@ -479,7 +479,7 @@ def main():
                 verify_transition_recovery(profile, confirm_unloaded=args.confirm_load_unplugged)
             print('ONE_DEVICE_ROLE_TRANSITION', profile['ieee'], flush=True)
             flashed = subprocess.call(runner_args(profile, 'flash', confirm_unloaded=args.confirm_load_unplugged))
-            if flashed: raise SystemExit(flashed)  # no automatic retry after failure
+            if flashed: raise SystemExit(flashed)  # Primitive never retries; supervised resume must reconcile first.
         join_evidence = work / ('rejoin_' + uuid.uuid4().hex + '.json')
         joined = subprocess.call(rejoin_cmd(profile, args.confirm_ieee, join_evidence))
         if joined: raise SystemExit(joined)
@@ -519,7 +519,7 @@ def main():
             provision_cmd(profile, args.confirm_ieee, work / 'pm_prevalidated.json')
         print('EXPLICIT_FLASH_TARGET', profile['ieee'], profile['device'], flush=True)
         flashed = subprocess.call(runner_args(profile, 'flash', confirm_unloaded=args.confirm_load_unplugged))
-        if flashed: raise SystemExit(flashed)  # Never interview or retry after OTA failure.
+        if flashed: raise SystemExit(flashed)  # Primitive never retries; progress-gated supervisor may resume after reconciliation.
         import uuid
         interview = work / ('postota_interview_' + uuid.uuid4().hex + '.json')
         interviewed = subprocess.call(reinterview_cmd(profile, args.confirm_ieee, interview))

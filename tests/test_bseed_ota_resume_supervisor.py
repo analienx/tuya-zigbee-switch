@@ -490,3 +490,129 @@ def test_preflight_recovery_rejects_stale_cached_source_build():
             campaign_lock_exists=False,
             network_lock_exists=False,
         )
+
+
+def _same_role_profile(tmp_path):
+    image = tmp_path / "same-role.ota"
+    image.write_bytes(b"fixture")
+    work = tmp_path / "same-role-work"
+    return {
+        "device": "LivingRoomSocketHifiLeft",
+        "ieee": "0xa4c138da1333dc70",
+        "manufacturer": "b28wrpvx",
+        "model": "TS011F-BS-PM",
+        "preflash_role": "EndDevice",
+        "preflash_build": "1.2.5-bseedcli6",
+        "postflash_role": "EndDevice",
+        "postflash_build": "1.2.5-bseedcli14",
+        "image": str(image),
+        "sha256": hashlib.sha256(image.read_bytes()).hexdigest(),
+        "workdir": str(work),
+        "require_pm": True,
+        "non_pm": False,
+    }
+
+
+def _ota_progress_log(path, progress):
+    rows = [
+        {"event": "ota_request_sent", "value": {"transaction": path.stem}},
+        {"event": "device_state", "value": {"update": {"state": "updating", "progress": progress}}},
+        {"event": "ota_final", "value": {"phase": "update_error"}},
+    ]
+    path.write_text("\n".join(json.dumps(x) for x in rows) + "\n")
+
+
+def test_progress_gate_requires_strict_increase(tmp_path):
+    check = tmp_path / "ota_bseed-ota-check.jsonl"
+    check.write_text(json.dumps({"event": "check_passed_no_flash", "value": {}}) + "\n")
+    assert sup.ota_attempt_progress(check) is None
+
+    one = [{"max_progress": 0.59}]
+    assert sup.progress_retry_gate(one) == {
+        "allow_retry": True,
+        "previous_progress": 0.0,
+        "current_progress": 0.59,
+        "strictly_improved": True,
+    }
+    assert sup.progress_retry_gate(one + [{"max_progress": 1.2}])["allow_retry"] is True
+    stalled = sup.progress_retry_gate(one + [{"max_progress": 0.59}])
+    assert stalled["allow_retry"] is False
+    assert stalled["strictly_improved"] is False
+
+
+def test_same_role_autoresume_stops_when_progress_no_longer_increases(tmp_path, monkeypatch):
+    cfg = _same_role_profile(tmp_path)
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text(json.dumps(cfg))
+    work = Path(cfg["workdir"])
+    work.mkdir()
+    (work / "ACTIVE_LOCK.json").write_text(json.dumps({
+        "phase": "update_error",
+        "device": cfg["device"],
+        "ieee": cfg["ieee"],
+        "sha256": cfg["sha256"],
+    }))
+    _ota_progress_log(work / "ota_bseed-ota-attempt1.jsonl", 0.59)
+
+    monkeypatch.setattr(sup.campaign, "load_profile", lambda _p: dict(cfg))
+    monkeypatch.setattr(sup, "process_alive", lambda _pid: False)
+    flash_count = 0
+
+    def fake_run(cmd, log):
+        nonlocal flash_count
+        mode = cmd[cmd.index("--mode") + 1]
+        if mode == "reconcile-source":
+            (work / "ACTIVE_LOCK.json").write_text(json.dumps({"phase": sup.READY_PHASE}))
+            return 0
+        if mode in ("preflight", "check"):
+            return 0
+        if mode == "flash":
+            flash_count += 1
+            progress = 1.2
+            _ota_progress_log(work / f"ota_bseed-ota-attempt{flash_count + 1}.jsonl", progress)
+            (work / "ACTIVE_LOCK.json").write_text(json.dumps({"phase": "update_error"}))
+            return 1
+        raise AssertionError(mode)
+
+    monkeypatch.setattr(sup, "run_logged", fake_run)
+    result = sup.resume_same_role(
+        profile_path,
+        cfg["ieee"],
+        confirm_unloaded=False,
+        max_attempts=8,
+        reconcile_wait_seconds=0,
+        reconcile_retry_seconds=1,
+    )
+
+    assert flash_count == 2
+    assert result["state"] == "progress_not_improved"
+    assert result["retry_progress_gate"]["previous_progress"] == 1.2
+    assert result["retry_progress_gate"]["current_progress"] == 1.2
+    assert result["retry_progress_gate"]["allow_retry"] is False
+
+
+def test_same_role_autoresume_does_not_retry_zero_progress_failure(tmp_path, monkeypatch):
+    cfg = _same_role_profile(tmp_path)
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text(json.dumps(cfg))
+    work = Path(cfg["workdir"])
+    work.mkdir()
+    (work / "ACTIVE_LOCK.json").write_text(json.dumps({"phase": "update_error"}))
+    _ota_progress_log(work / "ota_bseed-ota-attempt1.jsonl", 0.0)
+
+    monkeypatch.setattr(sup.campaign, "load_profile", lambda _p: dict(cfg))
+    monkeypatch.setattr(sup, "process_alive", lambda _pid: False)
+    monkeypatch.setattr(
+        sup,
+        "run_logged",
+        lambda *args, **kwargs: pytest.fail("zero-progress failure must not auto-retry"),
+    )
+
+    result = sup.resume_same_role(
+        profile_path,
+        cfg["ieee"],
+        confirm_unloaded=False,
+        max_attempts=8,
+    )
+    assert result["state"] == "progress_not_improved"
+    assert result["retry_progress_gate"]["current_progress"] == 0.0
