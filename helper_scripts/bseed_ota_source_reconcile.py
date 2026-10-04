@@ -221,7 +221,7 @@ def reconcile(profile_path, confirmation, observe_seconds=45, verify_candidate=T
             reconciliation_evidence=str(evidence_path),
         )
 
-        if profile.get('require_pm') is True:
+        if profile.get('require_pm') is True and verify_candidate:
             from bseed_pm_telemetry_guard import release_source_unchanged as release_pm
             release_pm(profile, evidence_path)
 
