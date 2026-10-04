@@ -13,6 +13,8 @@ BEDROOM_DEVICE = 'BedroomSocketCabinetRight'
 BEDROOM_IEEE = '0xa4c13824a7005afb'
 C7_BUILD = '1.1.3-bseedc7'
 C7_SHA256 = 'f0a499ea9e351265cb47fa26717f00246450cecaf727adad3298552bb1d8a94f'
+C9_BUILD = '1.1.3-bseedc9'
+C9_SHA256 = 'e52701b83ea7528ed0e9b26cb9e4da0679d125c259c8141e62207c6460738fff'
 R10_BUILD = '1.1.3-bseedr10'
 R10_SHA256 = 'c2bb21dee350fd375586029eefb03f85791b0941bd386882a0b8653bb15bdb96'
 
@@ -63,9 +65,10 @@ def _verify_recovery(profile, *, confirm_unloaded=False,
             ('1.1.2-bseedcli4', '1.1.2-bseedcli5-rc2',
              'e6fb2cca2a244a42ab5e8da166ed35ec438434220a46c89a37bc98086c326d1b'))
         consolidated_same = (not transition and roles == ('EndDevice', 'EndDevice') and
-            profile.get('preflash_build') == '1.1.2-bseedcli4' and
-            profile.get('postflash_build') == C7_BUILD and
-            profile.get('sha256') == C7_SHA256)
+            (profile.get('preflash_build'), profile.get('postflash_build'),
+             profile.get('sha256')) in (
+                ('1.1.2-bseedcli4', C7_BUILD, C7_SHA256),
+                (C7_BUILD, C9_BUILD, C9_SHA256)))
         consolidated_transition = (transition and profile.get('force_test_transition') is True and (
             (roles == ('EndDevice', 'Router') and profile.get('preflash_build') == C7_BUILD and
              profile.get('postflash_build') == R10_BUILD and profile.get('native_sha256') == R10_SHA256) or

@@ -165,6 +165,28 @@ For non-PM Client flashing, read `docs/bseed_nonpm_cli5_hardening_20260921.md` a
 
 The earlier **mandatory disassembly/full-flash-readback** gate has a deliberately narrow exact-device alternative for `BedroomSocketCabinetRight` (IEEE `0xa4c13824a7005afb`). Historical `cli4`→`cli5-rc1/rc2` exceptions remain pinned to their original hashes. For the consolidated PR #56 canary, the no-disassembly path also covers exact `cli4`→`1.1.3-bseedc7` and FORCE `1.1.3-bseedc7`↔`1.1.3-bseedr10`, but only with the sealed native destination SHA, 32-byte OTA payloads, non-PM `o1jzcxou / TS011F-BS`, `state_relay`, `follow_state`, fresh `qualify`, separate exact-IEEE confirmation and explicit physical appliance-unplugged confirmation. The FORCE runner must independently prove the private wrapper payload is byte-identical to the sealed native image. Stronger SWire/readback evidence remains an alternative. Never apply this exception to another IEEE, board, build pair, PM socket, or fleet release. For this exact Bedroom FORCE role canary, profile loading also enforces 32-byte blocks, at least 1200 ms response pacing, at least 1,800,000 ms per-request timeout and at least 14,400 s overall monitoring. This was tightened after the 2026-09-29 c7→r10 run reached 49.74% and then hit the former 180,000 ms quiet-request timeout while c7 remained healthy. TLSR8258 alternating OTA slots are not proof of automatic rollback after a crash or parent loss.
 
+### Bedroom same-role Client continuation (2026-10-04)
+
+The owner explicitly authorized exact `BedroomSocketCabinetRight`
+(`0xa4c13824a7005afb`) `1.1.3-bseedc7` → `1.1.3-bseedc9` without disassembly,
+with recovery if boot fails not guaranteed. The native destination SHA-256 is
+`e52701b83ea7528ed0e9b26cb9e4da0679d125c259c8141e62207c6460738fff`.
+This same-role pair is now included in the exact-device recovery gate; preserve
+32-byte blocks, physical-load confirmation, sealed identity, monotonic version,
+fresh qualification and campaign/network ownership checks.
+
+The owner also gave standing authorization to continue qualified newer sealed
+Client updates on this same socket and explicitly requested no repeated risk/
+permission question merely because the Client version changes. Preserve that
+authorization across sessions; maintain exact candidate pins through reviewed
+tooling when another version is selected. Do not re-ask an already supplied
+physical-load confirmation while it still applies. This does not generalize to
+other sockets, PM boards, role changes, failed-campaign retries or fleet rollout,
+and does not authorize inventing load, recovery or acceptance evidence.
+
+See `docs/bseed_bedroom_c9_canary_20261004.md` for the timing correction and
+deployment boundaries. No firmware bytes or sealed identities change here.
+
 ## Paced server profile for sleepy EndDevice clients (2026-09-24 live evidence)
 
 BedroomSocketCabinetRight (`_TZ3000_o1jzcxou`, sleepy EndDevice, NWK 24188) stalled twice on unpaced transfers: 32-byte blocks died at offset 24112 (~15%) and 48-byte blocks died at offset 47088 (~30%). Block size was not the variable. Log forensics showed perfect uplink (LQI 120-141, every request arriving) with a lost downlink `imageBlockResponse`: the Telink client waits ~5 s, retries once, then aborts quietly with no `upgradeEnd`, staying alive and publishing telemetry. Only a fresh notify cycle restarts it. Contributing server-side cause: full-speed responses (~6-10/s) colliding with Tuya `defaultRsp` traffic drove coordinator `MAC_BAD_STATE` (0x19) transmit refusals inside both stall windows.
