@@ -588,6 +588,10 @@ def resume_same_role(
             return persist("preflight_failed")
         if run_logged(campaign_cmd(profile_path, "check"), orchestration_log):
             return persist("check_failed")
+        try:
+            release_pm_after_deferred_reconcile(profile, work)
+        except (RuntimeError, ValueError) as error:
+            return persist("pm_deferred_release_failed", reason=str(error))
 
         launched += 1
         persist("flashing", attempt=launched)
