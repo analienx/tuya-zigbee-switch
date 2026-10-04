@@ -216,6 +216,63 @@ def progress_retry_gate(history: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def release_pm_after_deferred_reconcile(profile: dict[str, Any], work: Path) -> Path | None:
+    """Release PM quarantine only after the deferred fresh candidate check succeeds."""
+    if profile.get("require_pm") is not True:
+        return None
+    guard = work / "PM_TELEMETRY_GUARD.json"
+    if not guard.exists():
+        return None
+
+    lock = read_json(work / "ACTIVE_LOCK.json") or {}
+    if lock.get("phase") != READY_PHASE:
+        raise RuntimeError("PM deferred release requires source_unchanged_reconciled")
+    raw_evidence = lock.get("reconciliation_evidence")
+    if not raw_evidence:
+        raise RuntimeError("PM deferred release is missing reconciliation evidence")
+    source_path = Path(raw_evidence)
+    source = read_json(source_path) or {}
+    if source.get("candidate_verification_deferred") is not True:
+        raise RuntimeError("PM guard is active without deferred candidate evidence")
+
+    check_path = work / "LAST_CHECK.json"
+    check = read_json(check_path) or {}
+    if (check.get("device"), check.get("ieee"), check.get("sha256")) != (
+        profile["device"], profile["ieee"], profile["sha256"]
+    ):
+        raise RuntimeError("Fresh OTA check identity/hash does not match deferred reconciliation")
+    response = check.get("response") or {}
+    data = response.get("data") or {}
+    if response.get("status") != "ok" or data.get("update_available") is not True:
+        raise RuntimeError("Fresh OTA check did not confirm the deferred candidate")
+    if data.get("source") != profile["url"]:
+        raise RuntimeError("Fresh OTA check confirmed a different candidate source")
+
+    combined = dict(source)
+    combined.update(
+        candidate_check_performed=True,
+        candidate_verification_deferred=False,
+        update_available=True,
+        candidate_source=data.get("source"),
+        candidate_confirmed_at=now(),
+        candidate_check_record=str(check_path),
+    )
+    combined_path = work / (
+        "source_unchanged_candidate_confirmed_"
+        + dt.datetime.now().strftime("%Y%m%dT%H%M%S%f")
+        + ".json"
+    )
+    with combined_path.open("x", encoding="utf8") as handle:
+        json.dump(combined, handle, indent=2)
+        handle.write("\n")
+
+    from bseed_pm_telemetry_guard import release_source_unchanged
+    release_source_unchanged(profile, combined_path)
+    lock["candidate_reconciliation_evidence"] = str(combined_path)
+    write_json_atomic(work / "ACTIVE_LOCK.json", lock)
+    return combined_path
+
+
 def status(profile_path: Path) -> dict[str, Any]:
     profile = campaign.load_profile(profile_path)
     work = Path(profile["workdir"])
