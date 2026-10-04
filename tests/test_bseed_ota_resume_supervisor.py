@@ -619,3 +619,83 @@ def test_same_role_autoresume_does_not_retry_zero_progress_failure(tmp_path, mon
     )
     assert result["state"] == "progress_not_improved"
     assert result["retry_progress_gate"]["current_progress"] == 0.0
+
+def test_fast_source_reconcile_command_defers_candidate_check():
+    profile_path = Path("PRIVATE_profile.json")
+    fast = sup.source_reconcile_cmd(
+        profile_path,
+        "0xa4c138da1333dc70",
+        fast=True,
+    )
+    assert Path(fast[2]).name == "bseed_ota_source_reconcile.py"
+    assert "--defer-candidate-check" in fast
+    assert fast[fast.index("--observe-seconds") + 1] == "15"
+
+    strict = sup.source_reconcile_cmd(
+        profile_path,
+        "0xa4c138da1333dc70",
+        fast=False,
+    )
+    assert Path(strict[2]).name == "bseed_ota_campaign.py"
+    assert strict[strict.index("--mode") + 1] == "reconcile-source"
+
+
+def test_pm_deferred_release_requires_exact_fresh_check(tmp_path, monkeypatch):
+    import bseed_pm_telemetry_guard as pm_guard
+
+    work = tmp_path / "work"
+    work.mkdir()
+    profile = {
+        "device": "LivingRoomSocketHifiLeft",
+        "ieee": "0xa4c138da1333dc70",
+        "sha256": "a" * 64,
+        "url": "http://example.test/pm-client/firmware.ota",
+        "require_pm": True,
+    }
+    (work / "PM_TELEMETRY_GUARD.json").write_text("{}")
+    source_path = work / "source_unchanged.json"
+    source_path.write_text(json.dumps({
+        "result": "source_unchanged_reconciled",
+        "candidate_verification_deferred": True,
+        "candidate_check_performed": False,
+        "candidate_sha256": profile["sha256"],
+        "update_available": None,
+        "candidate_source": None,
+        "ota_transport_success": False,
+    }))
+    (work / "ACTIVE_LOCK.json").write_text(json.dumps({
+        "phase": sup.READY_PHASE,
+        "reconciliation_evidence": str(source_path),
+    }))
+    (work / "LAST_CHECK.json").write_text(json.dumps({
+        "device": profile["device"],
+        "ieee": profile["ieee"],
+        "sha256": profile["sha256"],
+        "response": {
+            "status": "ok",
+            "data": {
+                "update_available": True,
+                "source": profile["url"],
+            },
+        },
+    }))
+
+    seen = {}
+    monkeypatch.setattr(
+        pm_guard,
+        "release_source_unchanged",
+        lambda p, evidence: seen.update(profile=p, evidence=Path(evidence)),
+    )
+
+    combined_path = sup.release_pm_after_deferred_reconcile(profile, work)
+    combined = json.loads(combined_path.read_text())
+    assert combined["candidate_check_performed"] is True
+    assert combined["candidate_verification_deferred"] is False
+    assert combined["update_available"] is True
+    assert combined["candidate_source"] == profile["url"]
+    assert seen["profile"] == profile
+    assert seen["evidence"] == combined_path
+
+    lock = json.loads((work / "ACTIVE_LOCK.json").read_text())
+    assert lock["candidate_reconciliation_evidence"] == str(combined_path)
+
