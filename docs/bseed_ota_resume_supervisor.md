@@ -74,14 +74,17 @@ mistaken for transfer attempts. Automatic retry uses a strict monotonic gate:
 - successful transport followed by interview/postflash failure also blocks
   reflashing, because transport success is already known.
 
-Before every permitted retry, canonical `reconcile-source` must prove the
-source build/role is still installed and no OTA remains active. If the exact
+Before every permitted retry, same-role mode uses a 15-second fast source
+reconciliation that proves the exact source build/role, fresh target reachability
+and no active OTA. Candidate availability is intentionally deferred. If the exact
 target GET is missing, same-role mode uses `auto` recovery with **Join All
 disabled**: verified scoped `join_via` first, coordinator-only second. Both
 paths close their permit-join windows in `finally`. If reachability cannot be
 restored, the result is `physical_intervention_required`, not another OTA.
 After reconciliation, fresh `preflight` and exact `check` must pass before
-the next flash. `OTA_SUPERVISOR.json` records the progress history and current
+the next flash. For PM devices, quarantine remains enabled until that check
+confirms the exact image; the supervisor then releases it using immutable
+combined source+candidate evidence. Cross-role resume keeps strict reconcile. `OTA_SUPERVISOR.json` records the progress history and current
 retry decision.
 
 This allows retained-image protocol resume to continue when each iteration
