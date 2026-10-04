@@ -4,8 +4,12 @@ The owner selected the newest sealed non-PM Client for
 BedroomSocketCabinetRight, IEEE `0xa4c13824a7005afb`, confirmed the appliance
 is unplugged, and explicitly accepted the exact no-disassembly continuation.
 Recovery if boot fails remains unproven. Standing owner authorization covers
-qualified newer sealed Client updates on this same socket; do not repeat a risk
-or permission question merely because that version changes.
+all four PM/non-PM Router/Client variants once functioning firmware for the
+relevant board/role has been demonstrated. Do not repeat a risk/permission
+question merely because an authorized newer sealed version or selected socket
+changes. Preserve exact image/device/role/version, live qualification, physical
+load and campaign/network ownership controls; do not equate authorization with
+new measured hardware acceptance.
 
 The exact source is `1.1.3-bseedc7`, EndDevice, `o1jzcxou / TS011F-BS`.
 Destination is `1.1.3-bseedc9`, version `0x11023016`, type 65026, SHA-256

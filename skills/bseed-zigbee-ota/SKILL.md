@@ -175,14 +175,20 @@ This same-role pair is now included in the exact-device recovery gate; preserve
 32-byte blocks, physical-load confirmation, sealed identity, monotonic version,
 fresh qualification and campaign/network ownership checks.
 
-The owner also gave standing authorization to continue qualified newer sealed
-Client updates on this same socket and explicitly requested no repeated risk/
-permission question merely because the Client version changes. Preserve that
-authorization across sessions; maintain exact candidate pins through reviewed
-tooling when another version is selected. Do not re-ask an already supplied
-physical-load confirmation while it still applies. This does not generalize to
-other sockets, PM boards, role changes, failed-campaign retries or fleet rollout,
-and does not authorize inventing load, recovery or acceptance evidence.
+The owner's broader standing authorization applies to all four TS011F variants:
+PM/non-PM, Router/Client. Once functioning firmware has been demonstrated for
+the relevant board/role, continue authorized newer sealed updates without a
+repeated risk/permission question merely because the version or selected socket
+changes. Preserve this instruction across sessions and apply it to the current
+owner-requested rollout. Maintain exact candidate pins through reviewed tooling
+when another version is selected; a pin update is not grounds to ask again.
+Do not repeat an already supplied physical-load confirmation while it still
+applies. Continue exact board/role/hash/version checks, live qualification,
+appropriate role-transition/rejoin handling, network-wide exclusion and failed-
+campaign reconciliation. Do not invent physical-load, recovery or acceptance
+evidence. Prior firmware functioning supports this authorization; it does not
+prove the new bytes' boot, retention, metering or stability, and the runner must
+still keep hardware acceptance separate from transport completion.
 
 See `docs/bseed_bedroom_c9_canary_20261004.md` for the timing correction and
 deployment boundaries. No firmware bytes or sealed identities change here.
