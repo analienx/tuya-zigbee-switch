@@ -1,9 +1,13 @@
 """Safely reconcile a stopped OTA when the exact preflash source is unchanged.
 
 This helper never flashes, retries, re-interviews, binds, or configures the target.
-It requires fresh source identity, a quiet observation window, and an exact OTA
-check proving the intended candidate is still available. Only then may it release
-stale campaign ownership and PM telemetry quarantine.
+Strict/manual mode requires fresh source identity, a quiet observation window and
+an exact OTA check proving the intended candidate is still available.
+
+Supervised fast mode may defer that candidate check because the supervisor runs
+a fresh exact OTA check immediately before any retry. Fast reconciliation still
+requires exact source identity, fresh target GET, matching campaign/network
+locks and a bounded quiet window with no active OTA.
 """
 import argparse
 import datetime as dt
@@ -44,7 +48,7 @@ def inventory_match(devices, profile):
     return d
 
 
-def reconcile(profile_path, confirmation, observe_seconds=45):
+def reconcile(profile_path, confirmation, observe_seconds=45, verify_candidate=True):
     profile = load_profile(profile_path)
     if confirmation != profile['ieee']:
         raise ValueError('Confirm exact IEEE for source-unchanged reconciliation')
@@ -162,20 +166,22 @@ def reconcile(profile_path, confirmation, observe_seconds=45):
             wake.clear()
 
         inventory_match(state['devices'], profile)
-        transaction = 'bseed-reconcile-' + uuid.uuid4().hex
-        state['check_token'] = transaction
-        payload = {'id': profile['ieee'], 'url': profile['index_url'],
-                   'transaction': transaction}
-        client.publish(base + '/bridge/request/device/ota_update/check',
-                       json.dumps(payload), qos=1).wait_for_publish(5)
-        if not checked.wait(max(90, int(profile.get('check_timeout_seconds', 90)))):
-            raise TimeoutError('Exact OTA availability check timed out')
-        response = state['check'] or {}
-        data = response.get('data') or {}
-        if response.get('status') != 'ok' or data.get('update_available') is not True:
-            raise ValueError('Candidate is not still offered as an update')
-        if data.get('source') != profile['url']:
-            raise ValueError('OTA check returned a different candidate source')
+        data = {}
+        if verify_candidate:
+            transaction = 'bseed-reconcile-' + uuid.uuid4().hex
+            state['check_token'] = transaction
+            payload = {'id': profile['ieee'], 'url': profile['index_url'],
+                       'transaction': transaction}
+            client.publish(base + '/bridge/request/device/ota_update/check',
+                           json.dumps(payload), qos=1).wait_for_publish(5)
+            if not checked.wait(max(90, int(profile.get('check_timeout_seconds', 90)))):
+                raise TimeoutError('Exact OTA availability check timed out')
+            response = state['check'] or {}
+            data = response.get('data') or {}
+            if response.get('status') != 'ok' or data.get('update_available') is not True:
+                raise ValueError('Candidate is not still offered as an update')
+            if data.get('source') != profile['url']:
+                raise ValueError('OTA check returned a different candidate source')
 
         inventory_match(state['devices'], profile)
         evidence = {
@@ -186,8 +192,10 @@ def reconcile(profile_path, confirmation, observe_seconds=45):
             'source_build': profile['preflash_build'],
             'source_role': profile['preflash_role'],
             'candidate_sha256': profile['sha256'],
-            'update_available': True,
-            'candidate_source': data.get('source'),
+            'candidate_check_performed': bool(verify_candidate),
+            'candidate_verification_deferred': not verify_candidate,
+            'update_available': True if verify_candidate else None,
+            'candidate_source': data.get('source') if verify_candidate else None,
             'ota_transport_success': False,
             'hardware_acceptance': False,
             'prior_phase': work_lock.get('phase'),
@@ -229,11 +237,16 @@ def main(argv=None):
     parser.add_argument('--profile', required=True)
     parser.add_argument('--confirm-ieee', required=True)
     parser.add_argument('--observe-seconds', type=int, default=45)
+    parser.add_argument('--defer-candidate-check', action='store_true')
     args = parser.parse_args(argv)
     if not 15 <= args.observe_seconds <= 180:
         parser.error('--observe-seconds must be 15..180')
-    print(json.dumps(reconcile(args.profile, args.confirm_ieee,
-                               args.observe_seconds), indent=2))
+    print(json.dumps(reconcile(
+        args.profile,
+        args.confirm_ieee,
+        args.observe_seconds,
+        verify_candidate=not args.defer_candidate_check,
+    ), indent=2))
 
 
 if __name__ == '__main__':
