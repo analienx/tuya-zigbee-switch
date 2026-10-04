@@ -387,11 +387,13 @@ def main():
                   network.read_text(encoding='utf8') if network.exists()
                   else 'not present')
         return
-    if args.mode == 'reconcile-source':
+    if args.mode in ('reconcile-source', 'reconcile-source-fast'):
         if args.confirm_ieee != profile['ieee']:
             raise SystemExit('Source reconciliation refused: confirm exact IEEE')
         cmd = [sys.executable, '-u', str(ROOT/'helper_scripts/bseed_ota_source_reconcile.py'),
                '--profile', args.profile, '--confirm-ieee', args.confirm_ieee]
+        if args.mode == 'reconcile-source-fast':
+            cmd.extend(['--observe-seconds', '15', '--defer-candidate-check'])
         raise SystemExit(subprocess.call(cmd))
     if args.mode == 'audit-pm':
         import uuid
