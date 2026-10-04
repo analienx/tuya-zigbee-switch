@@ -95,6 +95,18 @@ def campaign_cmd(profile_path: Path, mode: str, *, confirm_ieee: str | None = No
     return cmd
 
 
+def source_reconcile_cmd(profile_path: Path, confirm_ieee: str, *, fast: bool) -> list[str]:
+    if not fast:
+        return campaign_cmd(profile_path, "reconcile-source", confirm_ieee=confirm_ieee)
+    return [
+        sys.executable, "-u", str(HELPERS / "bseed_ota_source_reconcile.py"),
+        "--profile", str(profile_path),
+        "--confirm-ieee", confirm_ieee,
+        "--observe-seconds", "15",
+        "--defer-candidate-check",
+    ]
+
+
 def run_logged(cmd: list[str], log_path: Path) -> int:
     """Run a bounded orchestration step with output redirected to disk, never PIPE."""
     log_path.parent.mkdir(parents=True, exist_ok=True)
