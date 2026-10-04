@@ -392,3 +392,101 @@ def test_resume_records_explicit_join_all_policy(tmp_path, monkeypatch):
     assert result["recovery_policy"]["allow_join_all_fallback"] is False
     persisted = json.loads((work / sup.SUPERVISOR_FILE).read_text())
     assert persisted["recovery_policy"]["join_strategy"] == "all"
+
+
+def test_preflight_recovery_accepts_only_exact_scoped_source():
+    profile = {
+        "device": "KitchenSocketLeft",
+        "ieee": "0xa4c138241e3de538",
+        "manufacturer": "b28wrpvx",
+        "model": "TS011F-BS-PM",
+        "preflash_role": "EndDevice",
+        "preflash_build": "1.2.5-bseedcli12",
+        "join_via": "KitchenSocketRight",
+    }
+    target = {
+        "friendly_name": profile["device"],
+        "ieee_address": profile["ieee"],
+        "manufacturer": profile["manufacturer"],
+        "model_id": profile["model"],
+        "type": profile["preflash_role"],
+        "software_build_id": profile["preflash_build"],
+        "interview_state": "SUCCESSFUL",
+    }
+    rejoin.validate_preflight_recovery_state(
+        target,
+        profile,
+        strategy="scoped",
+        allow_global=False,
+        campaign_lock_exists=False,
+        network_lock_exists=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "overrides, match",
+    [
+        ({"strategy": "all"}, "limited to scoped"),
+        ({"allow_global": True}, "never allows Join All"),
+        ({"campaign_lock_exists": True}, "existing campaign lock"),
+        ({"network_lock_exists": True}, "active network OTA lock"),
+    ],
+)
+def test_preflight_recovery_rejects_broad_or_locked_paths(overrides, match):
+    profile = {
+        "device": "KitchenSocketLeft",
+        "ieee": "0xa4c138241e3de538",
+        "manufacturer": "b28wrpvx",
+        "model": "TS011F-BS-PM",
+        "preflash_role": "EndDevice",
+        "preflash_build": "1.2.5-bseedcli12",
+        "join_via": "KitchenSocketRight",
+    }
+    target = {
+        "friendly_name": profile["device"],
+        "ieee_address": profile["ieee"],
+        "manufacturer": profile["manufacturer"],
+        "model_id": profile["model"],
+        "type": profile["preflash_role"],
+        "software_build_id": profile["preflash_build"],
+        "interview_completed": True,
+    }
+    kwargs = dict(
+        strategy="scoped",
+        allow_global=False,
+        campaign_lock_exists=False,
+        network_lock_exists=False,
+    )
+    kwargs.update(overrides)
+    with pytest.raises(ValueError, match=match):
+        rejoin.validate_preflight_recovery_state(target, profile, **kwargs)
+
+
+def test_preflight_recovery_rejects_stale_cached_source_build():
+    profile = {
+        "device": "LivingRoomSocketHifiLeft",
+        "ieee": "0xa4c138da1333dc70",
+        "manufacturer": "b28wrpvx",
+        "model": "TS011F-BS-PM",
+        "preflash_role": "EndDevice",
+        "preflash_build": "1.2.5-bseedcli6",
+        "join_via": "LivingRoomSocketTableLeft",
+    }
+    target = {
+        "friendly_name": profile["device"],
+        "ieee_address": profile["ieee"],
+        "manufacturer": profile["manufacturer"],
+        "model_id": profile["model"],
+        "type": "EndDevice",
+        "software_build_id": "1.2.5-bseedcli12",
+        "interview_completed": True,
+    }
+    with pytest.raises(ValueError, match="build differs"):
+        rejoin.validate_preflight_recovery_state(
+            target,
+            profile,
+            strategy="scoped",
+            allow_global=False,
+            campaign_lock_exists=False,
+            network_lock_exists=False,
+        )
