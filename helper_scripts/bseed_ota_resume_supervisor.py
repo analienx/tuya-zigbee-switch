@@ -370,6 +370,13 @@ def status(profile_path: Path) -> dict[str, Any]:
     lock = read_json(work / "ACTIVE_LOCK.json")
     live = read_json(work / "LIVE_STATUS.json")
     ota_log = latest_ota_jsonl(work)
+    ota_activity = None
+    if ota_log:
+        from bseed_ota_activity_report import inspect_jsonl
+        try:
+            ota_activity = inspect_jsonl(ota_log, ieee=profile["ieee"], sha256=profile["sha256"])
+        except (ValueError, OSError) as error:
+            ota_activity = {"error": str(error), "timeout_sufficiency": "undetermined"}
     pid = supervisor.get("pid") if supervisor else None
     return {
         "at": now(),
@@ -383,7 +390,8 @@ def status(profile_path: Path) -> dict[str, Any]:
         "latest_ota_jsonl": str(ota_log) if ota_log else None,
         "latest_ota_jsonl_age_seconds": file_age_seconds(ota_log) if ota_log else None,
         "latest_ota_events": tail_jsonl(ota_log),
-        "ota_progress_history": ota_progress_history(work),
+        "ota_activity_diagnosis": ota_activity,
+        "ota_progress_history": ota_progress_history(work, profile),
         "retry_progress_gate": progress_retry_gate(ota_progress_history(work, profile)),
         "warning": (
             "Stale supervisor/JSONL output is observer evidence only; it is NOT proof "

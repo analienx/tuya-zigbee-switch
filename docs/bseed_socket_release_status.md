@@ -1,6 +1,19 @@
 # BSEED socket firmware: golden images and role rollout
 
 
+## OTA tooling finalization — 2026-10-10
+
+The four sealed candidate identities below are unchanged. PM/non-PM Router
+and mains-Client OTA recovery now share exact-source and candidate authority,
+progress-gated retries, and per-device time diagnostics. Fresh ZCL power idle
+proof applies only to PM hardware; non-PM uses its own physical-unloaded and
+link-evidence gates. **Three minutes is not a validated default:** documented
+Bedroom non-PM recovery required a longer request wait, while Kitchen PM and
+Hifi experienced other failure modes. See
+[bseed_ota_timeout_evidence_policy_20261010.md](bseed_ota_timeout_evidence_policy_20261010.md).
+Firmware binaries are still sealed offline candidates; individual physical
+role/relay/meter/routing acceptance must not be inferred from CI or OTA status.
+
 ## Current status — 2026-10-04
 
 The September table below is retained as historical rollout context. The current sealed four-variant hardening set is newer:

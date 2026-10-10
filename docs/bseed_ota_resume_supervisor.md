@@ -151,7 +151,9 @@ py -3 helper_scripts\bseed_ota_resume_supervisor.py status ^
 ```
 
 The status output includes the persisted supervisor record, whether its PID is
-still alive, ACTIVE_LOCK/LIVE_STATUS, the newest OTA JSONL age and recent events.
+still alive, ACTIVE_LOCK/LIVE_STATUS, the newest OTA JSONL age, recent events,
+and exact-IEEE/image activity diagnostics. The added activity report deliberately
+cannot infer real block-request inactivity from percentage telemetry.
 Its warning is intentional: stale observer output does not prove transport
 failure.
 
@@ -182,6 +184,6 @@ the canonical reconciliation path be used.
 - PM idle proof requires the custom converter's raw activePower sample stamp and watts; the runner requests power afresh and rejects a repeated cached value. The converter must be deployed and its real reading verified before a live PM OTA.
 - Fast reconciliation archives the previous check and enters a candidate-pending state. This state cannot flash. Check, finalization, and next flash are intentionally separate transitions.
 - The first Hifi attempt reached 0.59 percent. The first supervised retry is progress-eligible against a zero baseline; each later failed iteration must improve strictly. The exact 32-byte/1,200-ms profile remains the conservative starting point, not a universal optimum.
-- A 30-minute per-block inactivity timeout may waste time on a broken link. Consider a 3-minute bound only after independently confirming healthy Hifi block-request intervals; do not change timing on an untested client or infer OTA death from an observer timeout.
+- **Do not recommend 3 minutes for Hifi without block-request traces.** Five minutes previously failed for the non-PM Bedroom Client while it remained alive and a 30-minute wait later completed. Hifi's experimental 180,000 ms private profile change was reverted to 1,800,000 ms; 0.59% and 30 minutes without a published progress change do not establish true block silence. See docs/bseed_ota_timeout_evidence_policy_20261010.md. No OTA was sent.
 - The primitive OTA runner submits only one transfer. No reset, power cycle, broad Join All, manual offset invention, or forced coordinator restart belongs in its normal path.
 - Hifi remains blocked until GitHub-hosted CI is green at the exact final commit, the converter is deployed, and the fresh source, PM and candidate gates pass on live evidence.

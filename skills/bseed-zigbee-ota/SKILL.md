@@ -5,6 +5,23 @@ description: Build, verify and seal BSEED firmware candidates and conduct single
 
 # BSEED Zigbee OTA maintenance
 
+## 2026-10-10 four-variant timing correction
+
+Read docs/bseed_ota_timeout_evidence_policy_20261010.md before recommending a
+per-image-block timeout or resuming any PM/non-PM Router/Client OTA. The prior
+three-minute KitchenLeft PM Client setting is a **device-specific** acceptance
+parameter, not a fleet standard. A non-PM Bedroom Client previously timed out
+with 300,000 ms while still alive and later completed with 1,800,000 ms, and
+Hifi's own earlier 150/600 s attempts failed at different offsets. A gap
+between MQTT percentage messages is NOT proof of no device block requests.
+Hifi's experimental 180,000 ms profile was reverted to 1,800,000 ms until a
+transaction-matched raw block trace supports safer tuning. New read-only
+helper_scripts/bseed_ota_activity_report.py and supervisor status surface
+progress timing without claiming timeout safety or authorizing another OTA.
+Both hardware boards and both firmware roles keep their independent sealed
+payload hashes and hardware acceptance gates. Use **GitHub-hosted CI only** for
+repo verification; inspect/edit locally without running repository test/build.
+
 Use this skill for BSEED firmware builds, release tooling, OTA flashes, transfer failures, role transitions, rejoin diagnostics and handoffs. Read `docs/bseed_targeted_ota_runner.md` and the target's latest evidence before any firmware write. Do not substitute conversational recollection for current hardware identity.
 
 ## Current build workflow (2026-09-28)
@@ -205,6 +222,6 @@ Use `helper_scripts/bseed_ota_resume_supervisor.py`, documented in `docs/bseed_o
 
 For same-role failure, the supervisor parses only JSONL files that contain an actual `ota_request_sent` event; read-only OTA checks do not count as attempts. It records each real attempt's maximum reported `update.progress`. The first failed attempt is compared to 0%. A new automatic retry is permitted only when the just-failed attempt's maximum progress is **strictly greater** than the previous attempt. Equal, lower or absent progress stops with `progress_not_improved`. This prevents an unattended loop that repeatedly dies at the same offset while still allowing protocol-level retained-image resume such as 16% → 46% → completion.
 
-Cross-role resume keeps strict reconciliation: exact source role/build, no active OTA, and exact candidate availability. Same-role resume uses a faster 15-second source-only reconciliation (exact source identity, fresh target GET, no active OTA) and deliberately defers candidate availability to the subsequent fresh `check`. PM telemetry quarantine remains enabled until that check confirms the exact image, then the supervisor releases it using a new immutable combined evidence record before `flash`. `OTA_SUPERVISOR.json` persists progress history and the current retry gate. The supervisor never auto-kills or relaunches merely because observer output is stale: Zigbee2MQTT OTA transport can continue independently of the local observer, so stale JSONL/stdout is not proof of transport failure. Successful transport followed by an interview/postflash failure is not eligible for firmware retry. For non-PM, the load-unplugged confirmation remains mandatory; the supervisor does not weaken recovery or identity gates.
+Cross-role resume keeps strict reconciliation: exact source role/build, no active OTA, and exact candidate availability. Same-role resume uses a faster 15-second source-only reconciliation (exact source identity, fresh target GET, no active OTA) and deliberately defers candidate availability to the subsequent fresh `check`. For PM, quarantine is restored only for the separately proven unchanged **preflash** firmware while the original shared network OTA lock remains held. A new **device-originated ZCL activePower** sample is required for preflight; cached MQTT zero is never an idle proof. The exact candidate check then finalizes reconciliation and releases old ownership before a newly locked single flash. `OTA_SUPERVISOR.json` persists progress history and the current retry gate. The supervisor never auto-kills or relaunches merely because observer output is stale: Zigbee2MQTT OTA transport can continue independently of the local observer, so stale JSONL/stdout is not proof of transport failure. Successful transport followed by an interview/postflash failure is not eligible for firmware retry. For non-PM, the load-unplugged confirmation remains mandatory; the supervisor does not weaken recovery or identity gates.
 
 Firmware-side follow-ups for a later release train (none of these repair an in-flight transfer): send an honest nonzero `minimumBlockPeriod` in block requests so every server paces automatically; extend the block-response wait/retry budget and always emit `upgradeEnd(ABORT)` instead of wedging silently; keep polling aggressively during OTA so parent indirect frames never expire. Paced server OTA is the delivery vehicle for that fixed image; after the fleet carries it, pacing becomes a fallback. Do not flip mains sockets to Router role casually to dodge parenting: that is a topology decision with routing-load and rejoin consequences, use the existing role-transition machinery if it is ever proposed.

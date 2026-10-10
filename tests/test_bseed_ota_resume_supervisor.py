@@ -672,8 +672,9 @@ def test_attempt_history_ignores_unrelated_device_or_image(tmp_path):
     foreign.write_text(json.dumps({"event": "ota_request_sent", "value": {
         "transaction": "foreign", "ieee": profile["ieee"],
         "image_sha256": "b" * 64,
-    }}) + "\\n" + json.dumps({"event": "device_state", "value": {
-        "update": {"progress": 80}}}) + "\\n")
+    }}) + "\n" + json.dumps({"event": "device_state", "value": {
+        "update": {"progress": 80}}}) + "\n")
+    assert len(foreign.read_text().splitlines()) == 2
     assert sup.ota_progress_history(tmp_path, profile) == [{
         "log": str(good), "max_progress": 0.59,
     }]

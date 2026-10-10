@@ -19,6 +19,14 @@ Run `python helper_scripts/bseed_targeted_z2m_ota.py --help` for options. All de
 
 The runner uses an exact IEEE/friendly-name pairing and a fresh, non-retained relay `/get` response; it never commands a relay change. It accepts a **matching OTA transaction with empty `data`** as a legitimate failure response, and ignores foreign transactions/targets. If an OTA was interrupted, check live device state and the Zigbee2MQTT logs before reconciling a stale lock. The local lock cannot detect OTA operations begun by other software; do not run simultaneous campaigns. A 0 W reading alone does not identify the physically connected appliance or guarantee safe power interruption.
 
+**Per-block timeout policy (PM and non-PM):** Do not impose 180,000 ms
+fleet-wide. Bedroom's historically successful retry retained 1,800,000 ms
+after a five-minute failure; Hifi's unproven 180,000 ms experiment has been
+reverted pending block-level evidence. See
+[the evidence-based timing policy](bseed_ota_timeout_evidence_policy_20261010.md)
+and the read-only activity report helper. A percentage plateau is not proof
+of zero OTA imageBlockRequest traffic or an authorization to retry.
+
 **Conservative OTA transfer size:** The runner explicitly sets `default_maximum_data_size` **per flash request**, defaulting to **50 bytes** instead of inheriting a potentially higher Zigbee2MQTT global value (the KitchenLeft bridge was configured for 100 bytes). Override with `--max-block-bytes N` only for a justified diagnostic within Zigbee2MQTT's 10–100-byte limits. The 50-byte default is a risk reduction based on Zigbee2MQTT's documented device compatibility; it is **not evidence that block size caused KitchenSocketLeft's ABORT**. No OTA settings are modified globally by the runner.
 
 ## Profile-driven campaign (preferred for future sessions)

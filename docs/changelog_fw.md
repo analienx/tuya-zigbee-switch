@@ -11,6 +11,14 @@ Please describe what you are working on, under ## Upcoming
 
 ## Upcoming
 
+### OTA orchestration and four-variant release documentation — 2026-10-10
+
+- PM Router/Client and non-PM Router/Client retain their sealed October 4 firmware identities; **no firmware bytes, versions or payloads changed in this tooling pass**.
+- Same-role reconciliation holds network ownership until fresh candidate verification. PM readiness requires new device-originated ZCL power, while non-PM retains separate unloaded/link gates.
+- Read-only per-transaction OTA activity analysis and supervisor status report progress gaps without treating MQTT percentage silence as proof of absent Zigbee block requests.
+- Historical five-minute Bedroom non-PM failures and Hifi's other failed timeout configurations invalidate a blanket three-minute OTA policy. Hifi's experimental 180-second setting was reverted to 1,800 seconds pending raw block-level evidence. See [timing evidence](bseed_ota_timeout_evidence_policy_20261010.md).
+- Offline CI never substitutes for separate PM/non-PM Router/Client hardware acceptance and soak.
+
 ### BSEED socket hardening (2026-10-04)
 
 - **Latest sealed BSEED socket candidates**
