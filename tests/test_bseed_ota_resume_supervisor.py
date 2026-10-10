@@ -515,7 +515,11 @@ def _same_role_profile(tmp_path):
 
 def _ota_progress_log(path, progress):
     rows = [
-        {"event": "ota_request_sent", "value": {"transaction": path.stem}},
+        {"event": "ota_request_sent", "value": {
+            "transaction": path.stem,
+            "ieee": "0xa4c138da1333dc70",
+            "image_sha256": hashlib.sha256(b"fixture").hexdigest(),
+        }},
         {"event": "device_state", "value": {"update": {"state": "updating", "progress": progress}}},
         {"event": "ota_final", "value": {"phase": "update_error"}},
     ]
@@ -564,10 +568,13 @@ def test_same_role_autoresume_stops_when_progress_no_longer_increases(tmp_path, 
         if name == "bseed_ota_source_reconcile.py":
             assert "--defer-candidate-check" in cmd
             assert cmd[cmd.index("--observe-seconds") + 1] == "15"
-            (work / "ACTIVE_LOCK.json").write_text(json.dumps({"phase": sup.READY_PHASE}))
+            (work / "ACTIVE_LOCK.json").write_text(json.dumps({"phase": sup.PENDING_PHASE}))
             return 0
         mode = cmd[cmd.index("--mode") + 1]
-        if mode in ("preflight", "check"):
+        if mode == "check":
+            (work / "ACTIVE_LOCK.json").write_text(json.dumps({"phase": sup.READY_PHASE}))
+            return 0
+        if mode == "preflight":
             return 0
         if mode == "flash":
             flash_count += 1
@@ -578,6 +585,8 @@ def test_same_role_autoresume_stops_when_progress_no_longer_increases(tmp_path, 
         raise AssertionError(mode)
 
     monkeypatch.setattr(sup, "run_logged", fake_run)
+    monkeypatch.setattr(sup, "restore_pm_source_telemetry", lambda *args: None)
+    monkeypatch.setattr(sup, "finalize_deferred_reconcile", lambda *args: None)
     result = sup.resume_same_role(
         profile_path,
         cfg["ieee"],
@@ -640,62 +649,44 @@ def test_fast_source_reconcile_command_defers_candidate_check():
     assert strict[strict.index("--mode") + 1] == "reconcile-source"
 
 
-def test_pm_deferred_release_requires_exact_fresh_check(tmp_path, monkeypatch):
-    import bseed_pm_telemetry_guard as pm_guard
-
+def test_deferred_reconcile_rejects_precheck_ready_phase(tmp_path):
     work = tmp_path / "work"
     work.mkdir()
-    profile = {
+    (work / "ACTIVE_LOCK.json").write_text(json.dumps({
+        "phase": sup.READY_PHASE,
+        "reconciliation_evidence": "outdated",
+    }))
+    assert sup.finalize_deferred_reconcile({
         "device": "LivingRoomSocketHifiLeft",
         "ieee": "0xa4c138da1333dc70",
         "sha256": "a" * 64,
-        "url": "http://example.test/pm-client/firmware.ota",
         "require_pm": True,
-    }
-    (work / "PM_TELEMETRY_GUARD.json").write_text("{}")
-    source_path = work / "source_unchanged.json"
-    source_path.write_text(json.dumps({
-        "result": "source_unchanged_reconciled",
-        "candidate_verification_deferred": True,
-        "candidate_check_performed": False,
-        "candidate_sha256": profile["sha256"],
-        "update_available": None,
-        "candidate_source": None,
-        "ota_transport_success": False,
+    }, work) is None
+
+
+def test_attempt_history_ignores_unrelated_device_or_image(tmp_path):
+    profile = _same_role_profile(tmp_path)
+    good = tmp_path / "ota_bseed-ota-first.jsonl"
+    _ota_progress_log(good, 0.59)
+    foreign = tmp_path / "ota_bseed-ota-foreign.jsonl"
+    foreign.write_text(json.dumps({"event": "ota_request_sent", "value": {
+        "transaction": "foreign", "ieee": profile["ieee"],
+        "image_sha256": "b" * 64,
+    }}) + "\\n" + json.dumps({"event": "device_state", "value": {
+        "update": {"progress": 80}}}) + "\\n")
+    assert sup.ota_progress_history(tmp_path, profile) == [{
+        "log": str(good), "max_progress": 0.59,
+    }]
+
+
+def test_exclusive_supervisor_rejects_duplicate_before_any_side_effect(tmp_path, monkeypatch):
+    cfg = _same_role_profile(tmp_path)
+    work = Path(cfg["workdir"])
+    work.mkdir()
+    (work / "OTA_SUPERVISOR_OWNER.json").write_text(json.dumps({
+        "pid": 10001, "token": "other", "ieee": cfg["ieee"],
     }))
-    (work / "ACTIVE_LOCK.json").write_text(json.dumps({
-        "phase": sup.READY_PHASE,
-        "reconciliation_evidence": str(source_path),
-    }))
-    (work / "LAST_CHECK.json").write_text(json.dumps({
-        "device": profile["device"],
-        "ieee": profile["ieee"],
-        "sha256": profile["sha256"],
-        "response": {
-            "status": "ok",
-            "data": {
-                "update_available": True,
-                "source": profile["url"],
-            },
-        },
-    }))
-
-    seen = {}
-    monkeypatch.setattr(
-        pm_guard,
-        "release_source_unchanged",
-        lambda p, evidence: seen.update(profile=p, evidence=Path(evidence)),
-    )
-
-    combined_path = sup.release_pm_after_deferred_reconcile(profile, work)
-    combined = json.loads(combined_path.read_text())
-    assert combined["candidate_check_performed"] is True
-    assert combined["candidate_verification_deferred"] is False
-    assert combined["update_available"] is True
-    assert combined["candidate_source"] == profile["url"]
-    assert seen["profile"] == profile
-    assert seen["evidence"] == combined_path
-
-    lock = json.loads((work / "ACTIVE_LOCK.json").read_text())
-    assert lock["candidate_reconciliation_evidence"] == str(combined_path)
-
+    monkeypatch.setattr(sup.campaign, "load_profile", lambda _: dict(cfg))
+    with pytest.raises(RuntimeError, match="Supervisor already owns"):
+        sup.resume_same_role(tmp_path / "profile.json", cfg["ieee"], confirm_unloaded=False)
+    assert (work / "OTA_SUPERVISOR_OWNER.json").exists()

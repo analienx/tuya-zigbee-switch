@@ -21,6 +21,7 @@ import paho.mqtt.client as mqtt
 import yaml
 
 from bseed_ota_campaign import load_profile, network_lock_path
+from bseed_targeted_z2m_ota import archive_prior_check
 from bseed_network_campaign_lock import (
     read_lock,
     release_source_unchanged,
@@ -46,6 +47,24 @@ def inventory_match(devices, profile):
     if not interview_ok:
         raise ValueError('Preflash source interview is not complete')
     return d
+
+
+def fresh_source_identity(target, profile):
+    """Inventory is corroborating only; identity MUST come from a new target message."""
+    device = (target or {}).get('device') or {}
+    expected = (profile['ieee'], profile['preflash_build'], profile['preflash_role'])
+    found = (device.get('ieeeAddr'), device.get('softwareBuildID'), device.get('type'))
+    if found != expected:
+        raise ValueError('Fresh source identity build/role/IEEE absent or mismatched: ' + repr(found))
+    if profile.get('relay_get_key', 'state') not in (target or {}):
+        raise ValueError('Fresh target did not answer the requested relay property')
+    return device
+
+
+def atomic_json(path, value):
+    tmp = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
+    tmp.write_text(json.dumps(value, indent=2) + '\n', encoding='utf8')
+    tmp.replace(path)
 
 
 def reconcile(profile_path, confirmation, observe_seconds=45, verify_candidate=True):
@@ -154,9 +173,7 @@ def reconcile(profile_path, confirmation, observe_seconds=45, verify_candidate=T
                        qos=1).wait_for_publish(5)
         if not fresh.wait(14):
             raise TimeoutError('Fresh target GET response missing')
-        nested = (state['target'] or {}).get('device') or {}
-        if nested.get('ieeeAddr') != profile['ieee']:
-            raise ValueError('Fresh target GET IEEE mismatch')
+        fresh_source_identity(state['target'], profile)
 
         quiet_until = time.monotonic() + observe_seconds
         while time.monotonic() < quiet_until:
@@ -166,6 +183,12 @@ def reconcile(profile_path, confirmation, observe_seconds=45, verify_candidate=T
             wake.clear()
 
         inventory_match(state['devices'], profile)
+        if state['update_seen']:
+            raise ValueError('Active OTA seen during quiet observation')
+        # A failed attempt invalidates the old OTA check before the campaign
+        # can enter any new state. Survives supervisor interruption/crash.
+        if not verify_candidate:
+            archive_prior_check(work)
         data = {}
         if verify_candidate:
             transaction = 'bseed-reconcile-' + uuid.uuid4().hex
@@ -182,10 +205,15 @@ def reconcile(profile_path, confirmation, observe_seconds=45, verify_candidate=T
                 raise ValueError('Candidate is not still offered as an update')
             if data.get('source') != profile['url']:
                 raise ValueError('OTA check returned a different candidate source')
+            if data.get('id') != profile['ieee']:
+                raise ValueError('Source reconcile check must target exact IEEE')
+
 
         inventory_match(state['devices'], profile)
+        result_phase = ('source_unchanged_reconciled' if verify_candidate
+                        else 'source_verified_candidate_pending')
         evidence = {
-            'result': 'source_unchanged_reconciled',
+            'result': result_phase,
             'at': now(),
             'ieee': profile['ieee'],
             'device': profile['device'],
@@ -201,6 +229,7 @@ def reconcile(profile_path, confirmation, observe_seconds=45, verify_candidate=T
             'prior_phase': work_lock.get('phase'),
             'quiet_observe_seconds': observe_seconds,
             'fresh_get_ieee_verified': True,
+            'fresh_get_build_role_verified': True,
         }
         evidence_path = work / ('source_unchanged_' + uuid.uuid4().hex + '.json')
         with evidence_path.open('x', encoding='utf8') as handle:
@@ -208,24 +237,25 @@ def reconcile(profile_path, confirmation, observe_seconds=45, verify_candidate=T
             handle.write('\n')
 
         work_lock.update(
-            phase='source_unchanged_reconciled',
+            phase=result_phase,
             reconciled_at=evidence['at'],
             reconciliation_evidence=str(evidence_path),
             ota_transport_success=False,
             hardware_acceptance=False,
         )
-        work_lock_path.write_text(json.dumps(work_lock, indent=2) + '\n', encoding='utf8')
+        atomic_json(work_lock_path, work_lock)
         update_network_lock(
-            network_path, token, 'source_unchanged_reconciled',
+            network_path, token, result_phase,
             reconciled_at=evidence['at'],
             reconciliation_evidence=str(evidence_path),
         )
 
-        if profile.get('require_pm') is True and verify_candidate:
-            from bseed_pm_telemetry_guard import release_source_unchanged as release_pm
-            release_pm(profile, evidence_path)
-
-        release_source_unchanged(network_path, token)
+        if verify_candidate:
+            if profile.get('require_pm') is True:
+                from bseed_pm_telemetry_guard import release_source_unchanged as release_pm
+                release_pm(profile, evidence_path)
+            release_source_unchanged(network_path, token)
+        # Pending holds network ownership until a fresh subsequent check passes.
         return {'evidence': str(evidence_path), **evidence}
     finally:
         client.loop_stop()

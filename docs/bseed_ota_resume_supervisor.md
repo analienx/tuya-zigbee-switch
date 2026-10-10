@@ -81,11 +81,17 @@ target GET is missing, same-role mode uses `auto` recovery with **Join All
 disabled**: verified scoped `join_via` first, coordinator-only second. Both
 paths close their permit-join windows in `finally`. If reachability cannot be
 restored, the result is `physical_intervention_required`, not another OTA.
-After reconciliation, fresh `preflight` and exact `check` must pass before
-the next flash. For PM devices, quarantine remains enabled until that check
-confirms the exact image; the supervisor then releases it using immutable
-combined source+candidate evidence. Cross-role resume keeps strict reconcile. `OTA_SUPERVISOR.json` records the progress history and current
-retry decision.
+After fast source verification the campaign enters a non-flashable
+`source_verified_candidate_pending` phase; the old `LAST_CHECK` is archived and
+the original shared network lock remains held. After PM source-build proof,
+source-firmware telemetry quarantine is restored under the same network lock.
+Fresh `preflight` must prove power from a newly decoded ZCL activePower sample,
+not a cached composite power field. The exact `check` must then match fresh
+transaction, IEEE, source URL, pinned image hash, and timestamp. Only then
+is the campaign reconciled and the shared lock released for one new flash.
+The updated Zigbee2MQTT converter is required for this fresh PM sample gate.
+Cross-role resume keeps strict reconciliation. `OTA_SUPERVISOR.json` records
+the progress history and current retry decision.
 
 This allows retained-image protocol resume to continue when each iteration
 makes objective forward progress, while preventing an unattended loop at the
@@ -167,3 +173,15 @@ failure.
 If an `ota_running` campaign appears wedged, first independently verify live
 device/update state. Only after the transport is known to have stopped should
 the canonical reconciliation path be used.
+
+
+## 2026-10-10 hardening and efficient Hifi retry
+
+- The same-role resume supervisor now obtains atomic, exclusive workdir ownership. A stale owner marker must be reviewed, not silently stolen. Network-wide OTA ownership is held through candidate verification.
+- Every progress record must identify the exact target IEEE and image SHA-256. Progress from another campaign never unlocks another retry.
+- PM idle proof requires the custom converter's raw activePower sample stamp and watts; the runner requests power afresh and rejects a repeated cached value. The converter must be deployed and its real reading verified before a live PM OTA.
+- Fast reconciliation archives the previous check and enters a candidate-pending state. This state cannot flash. Check, finalization, and next flash are intentionally separate transitions.
+- The first Hifi attempt reached 0.59 percent. The first supervised retry is progress-eligible against a zero baseline; each later failed iteration must improve strictly. The exact 32-byte/1,200-ms profile remains the conservative starting point, not a universal optimum.
+- A 30-minute per-block inactivity timeout may waste time on a broken link. Consider a 3-minute bound only after independently confirming healthy Hifi block-request intervals; do not change timing on an untested client or infer OTA death from an observer timeout.
+- The primitive OTA runner submits only one transfer. No reset, power cycle, broad Join All, manual offset invention, or forced coordinator restart belongs in its normal path.
+- Hifi remains blocked until GitHub-hosted CI is green at the exact final commit, the converter is deployed, and the fresh source, PM and candidate gates pass on live evidence.
