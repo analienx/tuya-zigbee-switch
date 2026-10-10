@@ -192,6 +192,23 @@ def validate_metering_preflight(relay, *, non_pm, model, manufacturer, role, max
     return power
 
 
+def independently_fresh_pm_sample(data, *, baseline_ms, request_ms, received_ms):
+    """A composite MQTT message is not proof of a new ZCL meter report.
+
+    The converter's stamp is emitted only from an actual incoming power report.
+    The new stamp must strictly advance beyond the baseline seen before
+    requesting the read; bounded wall-clock skew alone never grants freshness.
+    """
+    stamp = data.get('bseed_pm_sample_time_ms')
+    watts = data.get('bseed_pm_sample_power_w')
+    if not (type(stamp) in (int, float) and type(watts) in (int, float) and
+            math.isfinite(stamp) and math.isfinite(watts) and
+            stamp > (baseline_ms or 0) and
+            request_ms - 5000 <= stamp <= received_ms + 5000):
+        return None
+    return {'power': watts, 'sample_time_ms': stamp}
+
+
 def arguments():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--mode', choices=['preflight', 'check', 'flash'], required=True)
@@ -299,7 +316,21 @@ def main():
         verify_record(json.loads(evidence.read_text(encoding='utf8')), gate_profile, after=after)
     lock = work / 'ACTIVE_LOCK.json'
     old = json.loads(lock.read_text()) if lock.exists() else {}
-    if not (new_campaign_allowed(old)):
+    pending = old.get('phase') == 'source_verified_candidate_pending'
+    if pending:
+        if args.mode not in ('preflight', 'check') or campaign is None:
+            raise AssertionError('Candidate-pending forbids flash; fresh exact check is required')
+        from bseed_network_campaign_lock import read_lock as read_network_lock
+        from bseed_ota_campaign import network_lock_path as shared_network_lock_path
+        owner = read_network_lock(shared_network_lock_path(source_profile, required=True))
+        if not owner or (owner.get('token'), owner.get('device'), owner.get('ieee'), owner.get('image_sha256'),
+                         owner.get('phase')) != (old.get('token'), args.device, args.ieee, args.sha256,
+                                                 'source_verified_candidate_pending'):
+            raise AssertionError('Candidate-pending requires original intact network lock')
+        if (old.get('device'), old.get('ieee'), old.get('sha256')) != (
+                args.device, args.ieee, args.sha256):
+            raise AssertionError('Candidate-pending work lock identity mismatch')
+    elif not new_campaign_allowed(old):
         raise AssertionError('Previous OTA incomplete, failed, or not postflash-accepted; inspect device and reconcile lock manually before another campaign')
     if args.mode == 'check':
         if not (args.index_url):
@@ -309,7 +340,8 @@ def main():
     token = 'bseed-ota-' + uuid.uuid4().hex
     state = {'inventory': None, 'info': None, 'bridge': None, 'relay': None,
              'check': None, 'result': None, 'sent': False,
-             'network_updates': {}}
+             'network_updates': {}, 'pm_baseline_stamp': None, 'pm_fresh': None,
+             'pm_request_started_ms': None}
     ready = threading.Event(); changed = threading.Event(); answered = threading.Event(); fresh_relay = threading.Event()
     log_path = work / ('ota_' + token + '.jsonl')
     def log(event, value):
@@ -353,6 +385,14 @@ def main():
             if isinstance(data, dict):
                 if not message.retain:
                     state['relay'] = data; fresh_relay.set()
+                    if state['pm_request_started_ms'] is not None:
+                        sample = independently_fresh_pm_sample(
+                            data, baseline_ms=state['pm_baseline_stamp'],
+                            request_ms=state['pm_request_started_ms'],
+                            received_ms=time.time() * 1000)
+                        if sample is not None:
+                            state['pm_fresh'] = sample
+                            changed.set()
                 update_state = data.get('update')
                 if isinstance(update_state, dict):
                     write_live_status(
@@ -414,12 +454,38 @@ def main():
                 raise AssertionError('Non-PM relay policy changed')
         if not ((relay.get('device') or {}).get('ieeeAddr') == args.ieee):
             raise AssertionError('Fresh MQTT response IEEE mismatch')
-        power = validate_metering_preflight(relay, non_pm=args.non_pm, model=args.model,
+        if pending or (old.get('phase') == 'source_unchanged_reconciled' and args.mode == 'flash'):
+            fresh_id = relay.get('device') or {}
+            if campaign and (fresh_id.get('softwareBuildID'), fresh_id.get('type')) != (
+                    campaign['preflash_build'], campaign['preflash_role']):
+                raise AssertionError('Fresh target source firmware/role changed since source reconciliation')
+
+        meter_input = relay
+        if campaign and campaign.get('require_pm') is True:
+            # Force an actual PM ZCL read. A fresh relay GET containing cached
+            # "power":0 is NOT fresh load evidence. The converter stamps raw
+            # measurement arrivals, rather than unrelated composite updates.
+            prior_stamp = relay.get('bseed_pm_sample_time_ms')
+            state['pm_baseline_stamp'] = prior_stamp if type(prior_stamp) in (int, float) else 0
+            state['pm_request_started_ms'] = time.time() * 1000
+            state['pm_fresh'] = None
+            client.publish(base + '/' + args.device + '/get',
+                           json.dumps({'power': ''}), qos=1).wait_for_publish(5)
+            meter_deadline = time.monotonic() + 16
+            while time.monotonic() < meter_deadline and state['pm_fresh'] is None:
+                changed.wait(min(0.3, max(0, meter_deadline - time.monotonic())))
+                changed.clear()
+            if state['pm_fresh'] is None:
+                raise AssertionError('No newly decoded ZCL activePower sample; cached PM state cannot authorize OTA')
+            meter_input = {'power': state['pm_fresh']['power']}
+        power = validate_metering_preflight(meter_input, non_pm=args.non_pm, model=args.model,
             manufacturer=args.manufacturer, role=args.role, max_reported_watts=args.max_reported_watts,
             nonpm_router_transition=cross_role and args.role == 'Router', ts0726=getattr(args, 'ts0726', False))
         if not (not (relay.get('update') or {}).get('state') == 'updating'):
             raise AssertionError('Device OTA already running')
-        log('preflight_ok', {'relay': relay.get(args.relay_get_key), 'relay_get_key': args.relay_get_key, 'reported_power_w': power, 'voltage_v': relay.get('voltage'), 'image_sha256': args.sha256, 'mode': args.mode})
+        log('preflight_ok', {'relay': relay.get(args.relay_get_key), 'relay_get_key': args.relay_get_key,
+                             'reported_power_w': power, 'fresh_pm_sample': state['pm_fresh'],
+                             'voltage_v': relay.get('voltage'), 'image_sha256': args.sha256, 'mode': args.mode})
         if args.mode == 'preflight': return
         if args.mode == 'check':
             payload = {'id': args.ieee, 'url': args.index_url, 'transaction': token}
@@ -432,7 +498,11 @@ def main():
                 raise AssertionError('OTA check did not offer an update')
             if not (result['data'].get('source') == args.url):
                 raise AssertionError('OTA index offered a different image URL')
-            record = {'device': args.device, 'ieee': args.ieee, 'sha256': args.sha256, 'timestamp': time.time(), 'response': result}
+            if pending and (result.get('transaction') != token or
+                            (result.get('data') or {}).get('id') != args.ieee):
+                raise AssertionError('Deferred check must return exact transaction and IEEE')
+            record = {'device': args.device, 'ieee': args.ieee, 'sha256': args.sha256,
+                      'timestamp': time.time(), 'transaction': token, 'response': result}
             (work / 'LAST_CHECK.json').write_text(json.dumps(record, indent=2), encoding='utf-8')
             log('check_passed_no_flash', {'status': result['status'], 'data': result.get('data')})
             return
@@ -443,6 +513,11 @@ def main():
             raise AssertionError('OTA check is older than 30 minutes')
         if not (record['response'].get('status') == 'ok'):
             raise AssertionError('Previous OTA check did not succeed')
+        if old.get('phase') == 'source_unchanged_reconciled':
+            reconciled_at = old.get('reconciled_at')
+            if (not reconciled_at or record['timestamp'] <=
+                    dt.datetime.fromisoformat(reconciled_at).timestamp()):
+                raise AssertionError('Flash requires a post-reconciliation OTA check')
         if not (args.mode == 'flash'):
             raise AssertionError()
 

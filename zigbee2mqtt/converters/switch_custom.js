@@ -112,7 +112,18 @@ const bseedPmElectricityMeter = () => {
                 delete data.currentSummDelivered;
                 msg = {...msg, data};
             }
-            return converter.convert(model, msg, publish, options, meta);
+            const decoded = converter.convert(model, msg, publish, options, meta);
+            // Stamp ONLY a real incoming ZCL activePower reading. Zigbee2MQTT
+            // cache_state may repeat old "power" in unrelated relay responses.
+            // BSEED's pinned PM firmware contract uses power multiplier/divisor 1/1.
+            if (msg.cluster === 'haElectricalMeasurement' &&
+                hasFixedScaleContract(msg.device) &&
+                Number.isFinite(msg.data?.activePower) &&
+                decoded && typeof decoded === 'object') {
+                return {...decoded, bseed_pm_sample_time_ms: Date.now(),
+                    bseed_pm_sample_power_w: msg.data.activePower};
+            }
+            return decoded;
         },
     }));
     const legacyConfigure = legacy.configure || [];

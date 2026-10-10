@@ -69,6 +69,24 @@ def test_mqtt_only_samples_can_never_pass_link_gate():
         verify_record(r,p,now=870)
 
 
+def test_backend_clock_skew_is_bounded_without_losing_request_freshness():
+    p=dict(profile(),expect_relay='OFF')
+    evidence=dict(schema=1,passed=True,request_id='req-1',device=p['device'],
+        ieee=p['ieee'],endpoint=2,cluster='genOnOff',attribute='onOff',
+        response_type='readResponse',transaction=42,errors=[],value=0,
+        requested_at=99.3,response_at=99.4)
+    assert verify_probe_evidence(evidence,p,'req-1',100,received_at=100.8) is evidence
+    ahead=dict(evidence,requested_at=105,response_at=105.1)
+    assert verify_probe_evidence(ahead,p,'req-1',100,received_at=100.8) is ahead
+    for requested,responded in ((94.9,95),(100,112.1),(106,106.1),
+                                (118,118.1),(100,99.9)):
+        with pytest.raises(AssertionError,match='timing'):
+            verify_probe_evidence(dict(evidence,requested_at=requested,response_at=responded),
+                                  p,'req-1',100,received_at=100.8)
+    with pytest.raises(AssertionError,match='request_id'):
+        verify_probe_evidence(dict(evidence,request_id='old'),p,'req-1',100,received_at=100.8)
+
+
 def test_reused_probe_evidence_across_samples_is_rejected():
     p=profile();r=record()
     r['samples'][2]['probe_request_id']=r['samples'][0]['probe_request_id']

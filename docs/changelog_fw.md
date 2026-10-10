@@ -6,9 +6,45 @@ _Open the **Outline** (table of contents) from the top right._
 
 Please describe what you are working on, under ## Upcoming
 
+
 ------------------------------------------------------->
 
 ## Upcoming
+
+### OTA orchestration and four-variant release documentation — 2026-10-10
+
+- PM Router/Client and non-PM Router/Client retain their sealed October 4 firmware identities; **no firmware bytes, versions or payloads changed in this tooling pass**.
+- Same-role reconciliation holds network ownership until fresh candidate verification. PM readiness requires new device-originated ZCL power, while non-PM retains separate unloaded/link gates.
+- Read-only per-transaction OTA activity analysis and supervisor status report progress gaps without treating MQTT percentage silence as proof of absent Zigbee block requests.
+- Historical five-minute Bedroom non-PM failures and Hifi's other failed timeout configurations invalidate a blanket three-minute OTA policy. Hifi's experimental 180-second setting was reverted to 1,800 seconds pending raw block-level evidence. See [timing evidence](bseed_ota_timeout_evidence_policy_20261010.md).
+- Offline CI never substitutes for separate PM/non-PM Router/Client hardware acceptance and soak.
+
+### BSEED socket hardening (2026-10-04)
+
+- **Latest sealed BSEED socket candidates**
+  - PM Router: `1.2.5-bseedr12` / `0x12053019` / image type `43556`.
+  - PM mains Client: `1.2.5-bseedcli14` / `0x12053019` / image type `65024`.
+  - non-PM Router: `1.1.3-bseedr12` / `0x11023016` / image type `43555`.
+  - non-PM mains Client: `1.1.3-bseedc9` / `0x11023016` / image type `65026`.
+- **Shared Telink timing/scheduler hardening**
+  - Replaced the wrapping 16 MHz-register-derived `hal_millis()` with accumulated SDK elapsed time, preserving fractional ticks, sleep and wrap handling.
+  - Application tasks now own static SDK timer events so pool pressure cannot silently drop scheduled work; self-rearm and interrupt rearm survive callback finalization.
+- **Client network recovery hardening**
+  - Previously joined devices use SDK rejoin/backoff recovery and do not overlap it with fresh BDB steering.
+  - Rejected recovery starts are paced instead of being retried on every application loop.
+  - The mains Client enforces its 60 s keepalive (250 ms while OTA is active) only while joined, leaving disconnected recovery polling under SDK control.
+- **On-device diagnostics**
+  - Basic `0xFF10` exposes network state, parent-loss/rejoin counters, delivered poll status/counters, uptime and SDK exception information.
+  - Basic `0xFF12` exposes runtime stack/flash service gaps, frame counter, CCA/RX/TX statistics and live LQI/RSSI for post-deployment diagnosis.
+- **Security/runtime hardening**
+  - Network-frame-counter persistence is verified by readback; failed writes can retry the alternate sector and unrecoverable persistence enters fail-stop rather than transmitting with an unsafe counter state.
+  - ZDP management dispatch now validates supported payload lengths and response shapes before native SDK handlers.
+- **non-PM Client c9 hardware evidence**
+  - `BedroomSocketCabinetRight` was updated from `1.1.3-bseedc7` to `1.1.3-bseedc9` with the sealed `0x11023016` image.
+  - Interrupted transfers resumed from retained partial offsets (first ~16%, later ~46%) instead of restarting from zero.
+  - The final OTA completed successfully; the device rebooted and rejoined autonomously as an `EndDevice`, reported `1.1.3-bseedc9`, fresh MQTT state and healthy live ZDO without requiring a post-success power cycle.
+  - Earlier c7 attempts exposed parent/downlink loss and an OTA `ABORT`; power cycling was needed only to recover the old c7 state during failed/interrupted transfer, not to apply c9 after successful OTA.
+- **Scope note:** c9 does **not** introduce a new direct OTA-abort/requery algorithm relative to c7; the relevant `zigbee_ota.c` deferred-requery logic was already present. Its OTA resilience improvements are indirect consequences of the shared timer, scheduler, polling-ownership and network-recovery fixes. Broad fleet acceptance remains a per-board/per-role hardware exercise.
 
 ### Devices
 

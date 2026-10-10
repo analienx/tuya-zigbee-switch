@@ -26,7 +26,7 @@ import uuid
 import paho.mqtt.client as mqtt
 import yaml
 
-from bseed_ota_campaign import load_profile
+from bseed_ota_campaign import load_profile, network_lock_path
 
 
 ELIGIBLE_PHASES = {
@@ -110,6 +110,39 @@ def adapter_transport_error(response: dict | None) -> bool:
     return "SRSP" in error and "after 6000ms" in error
 
 
+def validate_preflight_recovery_state(
+    target: dict,
+    profile: dict,
+    *,
+    strategy: str,
+    allow_global: bool,
+    campaign_lock_exists: bool,
+    network_lock_exists: bool,
+) -> None:
+    if campaign_lock_exists:
+        raise ValueError("Preflight recovery refuses an existing campaign lock")
+    if network_lock_exists:
+        raise ValueError("Preflight recovery refuses an active network OTA lock")
+    if strategy != "scoped":
+        raise ValueError("Preflight recovery is limited to scoped join_via")
+    if allow_global:
+        raise ValueError("Preflight recovery never allows Join All fallback")
+    if not profile.get("join_via"):
+        raise ValueError("Preflight recovery requires profile.join_via")
+    interview_ok = (
+        target.get("interview_completed") is True
+        or target.get("interview_state") == "SUCCESSFUL"
+    )
+    if not target_identity_ok(target, profile):
+        raise ValueError("Cached target identity is absent, ambiguous or mismatched")
+    if target.get("type") != profile.get("preflash_role"):
+        raise ValueError("Cached target role differs from preflash role")
+    if target.get("software_build_id") != profile.get("preflash_build"):
+        raise ValueError("Cached target build differs from preflash build")
+    if not interview_ok:
+        raise ValueError("Cached target interview is incomplete")
+
+
 def permit_payload(mode: str, *, seconds: int, transaction: str, router_name: str | None) -> dict:
     payload = {"time": seconds, "transaction": transaction}
     if mode == "scoped":
@@ -132,6 +165,14 @@ def arguments(argv=None):
     p.add_argument("--probe-every-seconds", type=int, default=5)
     p.add_argument("--join-strategy", choices=JOIN_STRATEGIES)
     p.add_argument("--allow-join-all-fallback", action="store_true")
+    p.add_argument(
+        "--preflight-no-lock",
+        action="store_true",
+        help=(
+            "Scoped pre-OTA reachability recovery. Requires no campaign/network lock, "
+            "exact cached source role/build, and a verified profile.join_via Router."
+        ),
+    )
     return p.parse_args(argv)
 
 
@@ -156,13 +197,20 @@ def main(argv=None) -> None:
 
     work = Path(profile["workdir"])
     lock_path = work / "ACTIVE_LOCK.json"
-    lock = json.loads(lock_path.read_text(encoding="utf8"))
-    if (lock.get("device"), lock.get("ieee"), lock.get("sha256")) != (
-        profile["device"], profile["ieee"], profile["sha256"]
-    ):
-        raise ValueError("Campaign lock identity/hash mismatch")
-    if lock.get("phase") not in ELIGIBLE_PHASES:
-        raise ValueError("Campaign phase is not eligible for source-link recovery")
+    shared_lock_path = network_lock_path(profile, required=True)
+    if a.preflight_no_lock:
+        if requested_strategy != "scoped":
+            raise ValueError("Preflight recovery is limited to scoped join_via")
+        if allow_global:
+            raise ValueError("Preflight recovery never allows Join All fallback")
+    else:
+        lock = json.loads(lock_path.read_text(encoding="utf8"))
+        if (lock.get("device"), lock.get("ieee"), lock.get("sha256")) != (
+            profile["device"], profile["ieee"], profile["sha256"]
+        ):
+            raise ValueError("Campaign lock identity/hash mismatch")
+        if lock.get("phase") not in ELIGIBLE_PHASES:
+            raise ValueError("Campaign phase is not eligible for source-link recovery")
 
     output = Path(a.output).expanduser().resolve()
     if output.exists():
@@ -251,6 +299,15 @@ def main(argv=None) -> None:
         targets = [d for d in devices if d.get("ieee_address") == profile["ieee"]]
         if len(targets) != 1 or not target_identity_ok(targets[0], profile):
             raise ValueError("Cached target identity is absent, ambiguous or mismatched")
+        if a.preflight_no_lock:
+            validate_preflight_recovery_state(
+                targets[0],
+                profile,
+                strategy=requested_strategy,
+                allow_global=allow_global,
+                campaign_lock_exists=lock_path.exists(),
+                network_lock_exists=shared_lock_path.exists(),
+            )
 
         router_name = profile.get("join_via")
         router = verified_router(devices, router_name, profile["ieee"])
@@ -393,6 +450,9 @@ def main(argv=None) -> None:
         "device": profile["device"],
         "ieee": profile["ieee"],
         "requested_strategy": requested_strategy,
+        "recovery_context": (
+            "preflight_no_lock" if a.preflight_no_lock else "campaign_source_recovery"
+        ),
         "allow_join_all_fallback": allow_global,
         "strategy_used": chosen_mode,
         "join_via": profile.get("join_via"),

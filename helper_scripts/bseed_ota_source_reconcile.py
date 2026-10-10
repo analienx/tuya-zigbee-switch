@@ -1,9 +1,13 @@
 """Safely reconcile a stopped OTA when the exact preflash source is unchanged.
 
 This helper never flashes, retries, re-interviews, binds, or configures the target.
-It requires fresh source identity, a quiet observation window, and an exact OTA
-check proving the intended candidate is still available. Only then may it release
-stale campaign ownership and PM telemetry quarantine.
+Strict/manual mode requires fresh source identity, a quiet observation window and
+an exact OTA check proving the intended candidate is still available.
+
+Supervised fast mode may defer that candidate check because the supervisor runs
+a fresh exact OTA check immediately before any retry. Fast reconciliation still
+requires exact source identity, fresh target GET, matching campaign/network
+locks and a bounded quiet window with no active OTA.
 """
 import argparse
 import datetime as dt
@@ -17,6 +21,7 @@ import paho.mqtt.client as mqtt
 import yaml
 
 from bseed_ota_campaign import load_profile, network_lock_path
+from bseed_targeted_z2m_ota import archive_prior_check
 from bseed_network_campaign_lock import (
     read_lock,
     release_source_unchanged,
@@ -44,7 +49,25 @@ def inventory_match(devices, profile):
     return d
 
 
-def reconcile(profile_path, confirmation, observe_seconds=45):
+def fresh_source_identity(target, profile):
+    """Inventory is corroborating only; identity MUST come from a new target message."""
+    device = (target or {}).get('device') or {}
+    expected = (profile['ieee'], profile['preflash_build'], profile['preflash_role'])
+    found = (device.get('ieeeAddr'), device.get('softwareBuildID'), device.get('type'))
+    if found != expected:
+        raise ValueError('Fresh source identity build/role/IEEE absent or mismatched: ' + repr(found))
+    if profile.get('relay_get_key', 'state') not in (target or {}):
+        raise ValueError('Fresh target did not answer the requested relay property')
+    return device
+
+
+def atomic_json(path, value):
+    tmp = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
+    tmp.write_text(json.dumps(value, indent=2) + '\n', encoding='utf8')
+    tmp.replace(path)
+
+
+def reconcile(profile_path, confirmation, observe_seconds=45, verify_candidate=True):
     profile = load_profile(profile_path)
     if confirmation != profile['ieee']:
         raise ValueError('Confirm exact IEEE for source-unchanged reconciliation')
@@ -150,9 +173,7 @@ def reconcile(profile_path, confirmation, observe_seconds=45):
                        qos=1).wait_for_publish(5)
         if not fresh.wait(14):
             raise TimeoutError('Fresh target GET response missing')
-        nested = (state['target'] or {}).get('device') or {}
-        if nested.get('ieeeAddr') != profile['ieee']:
-            raise ValueError('Fresh target GET IEEE mismatch')
+        fresh_source_identity(state['target'], profile)
 
         quiet_until = time.monotonic() + observe_seconds
         while time.monotonic() < quiet_until:
@@ -162,37 +183,53 @@ def reconcile(profile_path, confirmation, observe_seconds=45):
             wake.clear()
 
         inventory_match(state['devices'], profile)
-        transaction = 'bseed-reconcile-' + uuid.uuid4().hex
-        state['check_token'] = transaction
-        payload = {'id': profile['ieee'], 'url': profile['index_url'],
-                   'transaction': transaction}
-        client.publish(base + '/bridge/request/device/ota_update/check',
-                       json.dumps(payload), qos=1).wait_for_publish(5)
-        if not checked.wait(max(90, int(profile.get('check_timeout_seconds', 90)))):
-            raise TimeoutError('Exact OTA availability check timed out')
-        response = state['check'] or {}
-        data = response.get('data') or {}
-        if response.get('status') != 'ok' or data.get('update_available') is not True:
-            raise ValueError('Candidate is not still offered as an update')
-        if data.get('source') != profile['url']:
-            raise ValueError('OTA check returned a different candidate source')
+        if state['update_seen']:
+            raise ValueError('Active OTA seen during quiet observation')
+        # A failed attempt invalidates the old OTA check before the campaign
+        # can enter any new state. Survives supervisor interruption/crash.
+        if not verify_candidate:
+            archive_prior_check(work)
+        data = {}
+        if verify_candidate:
+            transaction = 'bseed-reconcile-' + uuid.uuid4().hex
+            state['check_token'] = transaction
+            payload = {'id': profile['ieee'], 'url': profile['index_url'],
+                       'transaction': transaction}
+            client.publish(base + '/bridge/request/device/ota_update/check',
+                           json.dumps(payload), qos=1).wait_for_publish(5)
+            if not checked.wait(max(90, int(profile.get('check_timeout_seconds', 90)))):
+                raise TimeoutError('Exact OTA availability check timed out')
+            response = state['check'] or {}
+            data = response.get('data') or {}
+            if response.get('status') != 'ok' or data.get('update_available') is not True:
+                raise ValueError('Candidate is not still offered as an update')
+            if data.get('source') != profile['url']:
+                raise ValueError('OTA check returned a different candidate source')
+            if data.get('id') != profile['ieee']:
+                raise ValueError('Source reconcile check must target exact IEEE')
+
 
         inventory_match(state['devices'], profile)
+        result_phase = ('source_unchanged_reconciled' if verify_candidate
+                        else 'source_verified_candidate_pending')
         evidence = {
-            'result': 'source_unchanged_reconciled',
+            'result': result_phase,
             'at': now(),
             'ieee': profile['ieee'],
             'device': profile['device'],
             'source_build': profile['preflash_build'],
             'source_role': profile['preflash_role'],
             'candidate_sha256': profile['sha256'],
-            'update_available': True,
-            'candidate_source': data.get('source'),
+            'candidate_check_performed': bool(verify_candidate),
+            'candidate_verification_deferred': not verify_candidate,
+            'update_available': True if verify_candidate else None,
+            'candidate_source': data.get('source') if verify_candidate else None,
             'ota_transport_success': False,
             'hardware_acceptance': False,
             'prior_phase': work_lock.get('phase'),
             'quiet_observe_seconds': observe_seconds,
             'fresh_get_ieee_verified': True,
+            'fresh_get_build_role_verified': True,
         }
         evidence_path = work / ('source_unchanged_' + uuid.uuid4().hex + '.json')
         with evidence_path.open('x', encoding='utf8') as handle:
@@ -200,24 +237,25 @@ def reconcile(profile_path, confirmation, observe_seconds=45):
             handle.write('\n')
 
         work_lock.update(
-            phase='source_unchanged_reconciled',
+            phase=result_phase,
             reconciled_at=evidence['at'],
             reconciliation_evidence=str(evidence_path),
             ota_transport_success=False,
             hardware_acceptance=False,
         )
-        work_lock_path.write_text(json.dumps(work_lock, indent=2) + '\n', encoding='utf8')
+        atomic_json(work_lock_path, work_lock)
         update_network_lock(
-            network_path, token, 'source_unchanged_reconciled',
+            network_path, token, result_phase,
             reconciled_at=evidence['at'],
             reconciliation_evidence=str(evidence_path),
         )
 
-        if profile.get('require_pm') is True:
-            from bseed_pm_telemetry_guard import release_source_unchanged as release_pm
-            release_pm(profile, evidence_path)
-
-        release_source_unchanged(network_path, token)
+        if verify_candidate:
+            if profile.get('require_pm') is True:
+                from bseed_pm_telemetry_guard import release_source_unchanged as release_pm
+                release_pm(profile, evidence_path)
+            release_source_unchanged(network_path, token)
+        # Pending holds network ownership until a fresh subsequent check passes.
         return {'evidence': str(evidence_path), **evidence}
     finally:
         client.loop_stop()
@@ -229,11 +267,16 @@ def main(argv=None):
     parser.add_argument('--profile', required=True)
     parser.add_argument('--confirm-ieee', required=True)
     parser.add_argument('--observe-seconds', type=int, default=45)
+    parser.add_argument('--defer-candidate-check', action='store_true')
     args = parser.parse_args(argv)
     if not 15 <= args.observe_seconds <= 180:
         parser.error('--observe-seconds must be 15..180')
-    print(json.dumps(reconcile(args.profile, args.confirm_ieee,
-                               args.observe_seconds), indent=2))
+    print(json.dumps(reconcile(
+        args.profile,
+        args.confirm_ieee,
+        args.observe_seconds,
+        verify_candidate=not args.defer_candidate_check,
+    ), indent=2))
 
 
 if __name__ == '__main__':

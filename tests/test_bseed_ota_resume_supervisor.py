@@ -392,3 +392,302 @@ def test_resume_records_explicit_join_all_policy(tmp_path, monkeypatch):
     assert result["recovery_policy"]["allow_join_all_fallback"] is False
     persisted = json.loads((work / sup.SUPERVISOR_FILE).read_text())
     assert persisted["recovery_policy"]["join_strategy"] == "all"
+
+
+def test_preflight_recovery_accepts_only_exact_scoped_source():
+    profile = {
+        "device": "KitchenSocketLeft",
+        "ieee": "0xa4c138241e3de538",
+        "manufacturer": "b28wrpvx",
+        "model": "TS011F-BS-PM",
+        "preflash_role": "EndDevice",
+        "preflash_build": "1.2.5-bseedcli12",
+        "join_via": "KitchenSocketRight",
+    }
+    target = {
+        "friendly_name": profile["device"],
+        "ieee_address": profile["ieee"],
+        "manufacturer": profile["manufacturer"],
+        "model_id": profile["model"],
+        "type": profile["preflash_role"],
+        "software_build_id": profile["preflash_build"],
+        "interview_state": "SUCCESSFUL",
+    }
+    rejoin.validate_preflight_recovery_state(
+        target,
+        profile,
+        strategy="scoped",
+        allow_global=False,
+        campaign_lock_exists=False,
+        network_lock_exists=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "overrides, match",
+    [
+        ({"strategy": "all"}, "limited to scoped"),
+        ({"allow_global": True}, "never allows Join All"),
+        ({"campaign_lock_exists": True}, "existing campaign lock"),
+        ({"network_lock_exists": True}, "active network OTA lock"),
+    ],
+)
+def test_preflight_recovery_rejects_broad_or_locked_paths(overrides, match):
+    profile = {
+        "device": "KitchenSocketLeft",
+        "ieee": "0xa4c138241e3de538",
+        "manufacturer": "b28wrpvx",
+        "model": "TS011F-BS-PM",
+        "preflash_role": "EndDevice",
+        "preflash_build": "1.2.5-bseedcli12",
+        "join_via": "KitchenSocketRight",
+    }
+    target = {
+        "friendly_name": profile["device"],
+        "ieee_address": profile["ieee"],
+        "manufacturer": profile["manufacturer"],
+        "model_id": profile["model"],
+        "type": profile["preflash_role"],
+        "software_build_id": profile["preflash_build"],
+        "interview_completed": True,
+    }
+    kwargs = dict(
+        strategy="scoped",
+        allow_global=False,
+        campaign_lock_exists=False,
+        network_lock_exists=False,
+    )
+    kwargs.update(overrides)
+    with pytest.raises(ValueError, match=match):
+        rejoin.validate_preflight_recovery_state(target, profile, **kwargs)
+
+
+def test_preflight_recovery_rejects_stale_cached_source_build():
+    profile = {
+        "device": "LivingRoomSocketHifiLeft",
+        "ieee": "0xa4c138da1333dc70",
+        "manufacturer": "b28wrpvx",
+        "model": "TS011F-BS-PM",
+        "preflash_role": "EndDevice",
+        "preflash_build": "1.2.5-bseedcli6",
+        "join_via": "LivingRoomSocketTableLeft",
+    }
+    target = {
+        "friendly_name": profile["device"],
+        "ieee_address": profile["ieee"],
+        "manufacturer": profile["manufacturer"],
+        "model_id": profile["model"],
+        "type": "EndDevice",
+        "software_build_id": "1.2.5-bseedcli12",
+        "interview_completed": True,
+    }
+    with pytest.raises(ValueError, match="build differs"):
+        rejoin.validate_preflight_recovery_state(
+            target,
+            profile,
+            strategy="scoped",
+            allow_global=False,
+            campaign_lock_exists=False,
+            network_lock_exists=False,
+        )
+
+
+def _same_role_profile(tmp_path):
+    image = tmp_path / "same-role.ota"
+    image.write_bytes(b"fixture")
+    work = tmp_path / "same-role-work"
+    return {
+        "device": "LivingRoomSocketHifiLeft",
+        "ieee": "0xa4c138da1333dc70",
+        "manufacturer": "b28wrpvx",
+        "model": "TS011F-BS-PM",
+        "preflash_role": "EndDevice",
+        "preflash_build": "1.2.5-bseedcli6",
+        "postflash_role": "EndDevice",
+        "postflash_build": "1.2.5-bseedcli14",
+        "image": str(image),
+        "sha256": hashlib.sha256(image.read_bytes()).hexdigest(),
+        "workdir": str(work),
+        "require_pm": True,
+        "non_pm": False,
+    }
+
+
+def _ota_progress_log(path, progress):
+    rows = [
+        {"event": "ota_request_sent", "value": {
+            "transaction": path.stem,
+            "ieee": "0xa4c138da1333dc70",
+            "image_sha256": hashlib.sha256(b"fixture").hexdigest(),
+        }},
+        {"event": "device_state", "value": {"update": {"state": "updating", "progress": progress}}},
+        {"event": "ota_final", "value": {"phase": "update_error"}},
+    ]
+    path.write_text("\n".join(json.dumps(x) for x in rows) + "\n")
+
+
+def test_progress_gate_requires_strict_increase(tmp_path):
+    check = tmp_path / "ota_bseed-ota-check.jsonl"
+    check.write_text(json.dumps({"event": "check_passed_no_flash", "value": {}}) + "\n")
+    assert sup.ota_attempt_progress(check) is None
+
+    one = [{"max_progress": 0.59}]
+    assert sup.progress_retry_gate(one) == {
+        "allow_retry": True,
+        "previous_progress": 0.0,
+        "current_progress": 0.59,
+        "strictly_improved": True,
+    }
+    assert sup.progress_retry_gate(one + [{"max_progress": 1.2}])["allow_retry"] is True
+    stalled = sup.progress_retry_gate(one + [{"max_progress": 0.59}])
+    assert stalled["allow_retry"] is False
+    assert stalled["strictly_improved"] is False
+
+
+def test_same_role_autoresume_stops_when_progress_no_longer_increases(tmp_path, monkeypatch):
+    cfg = _same_role_profile(tmp_path)
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text(json.dumps(cfg))
+    work = Path(cfg["workdir"])
+    work.mkdir()
+    (work / "ACTIVE_LOCK.json").write_text(json.dumps({
+        "phase": "update_error",
+        "device": cfg["device"],
+        "ieee": cfg["ieee"],
+        "sha256": cfg["sha256"],
+    }))
+    _ota_progress_log(work / "ota_bseed-ota-attempt1.jsonl", 0.59)
+
+    monkeypatch.setattr(sup.campaign, "load_profile", lambda _p: dict(cfg))
+    monkeypatch.setattr(sup, "process_alive", lambda _pid: False)
+    flash_count = 0
+
+    def fake_run(cmd, log):
+        nonlocal flash_count
+        name = Path(cmd[2]).name
+        if name == "bseed_ota_source_reconcile.py":
+            assert "--defer-candidate-check" in cmd
+            assert cmd[cmd.index("--observe-seconds") + 1] == "15"
+            (work / "ACTIVE_LOCK.json").write_text(json.dumps({"phase": sup.PENDING_PHASE}))
+            return 0
+        mode = cmd[cmd.index("--mode") + 1]
+        if mode == "check":
+            (work / "ACTIVE_LOCK.json").write_text(json.dumps({"phase": sup.READY_PHASE}))
+            return 0
+        if mode == "preflight":
+            return 0
+        if mode == "flash":
+            flash_count += 1
+            progress = 1.2
+            _ota_progress_log(work / f"ota_bseed-ota-attempt{flash_count + 1}.jsonl", progress)
+            (work / "ACTIVE_LOCK.json").write_text(json.dumps({"phase": "update_error"}))
+            return 1
+        raise AssertionError(mode)
+
+    monkeypatch.setattr(sup, "run_logged", fake_run)
+    monkeypatch.setattr(sup, "restore_pm_source_telemetry", lambda *args: None)
+    monkeypatch.setattr(sup, "finalize_deferred_reconcile", lambda *args: None)
+    result = sup.resume_same_role(
+        profile_path,
+        cfg["ieee"],
+        confirm_unloaded=False,
+        max_attempts=8,
+        reconcile_wait_seconds=0,
+        reconcile_retry_seconds=1,
+    )
+
+    assert flash_count == 2
+    assert result["state"] == "progress_not_improved"
+    assert result["retry_progress_gate"]["previous_progress"] == 1.2
+    assert result["retry_progress_gate"]["current_progress"] == 1.2
+    assert result["retry_progress_gate"]["allow_retry"] is False
+
+
+def test_same_role_autoresume_does_not_retry_zero_progress_failure(tmp_path, monkeypatch):
+    cfg = _same_role_profile(tmp_path)
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text(json.dumps(cfg))
+    work = Path(cfg["workdir"])
+    work.mkdir()
+    (work / "ACTIVE_LOCK.json").write_text(json.dumps({"phase": "update_error"}))
+    _ota_progress_log(work / "ota_bseed-ota-attempt1.jsonl", 0.0)
+
+    monkeypatch.setattr(sup.campaign, "load_profile", lambda _p: dict(cfg))
+    monkeypatch.setattr(sup, "process_alive", lambda _pid: False)
+    monkeypatch.setattr(
+        sup,
+        "run_logged",
+        lambda *args, **kwargs: pytest.fail("zero-progress failure must not auto-retry"),
+    )
+
+    result = sup.resume_same_role(
+        profile_path,
+        cfg["ieee"],
+        confirm_unloaded=False,
+        max_attempts=8,
+    )
+    assert result["state"] == "progress_not_improved"
+    assert result["retry_progress_gate"]["current_progress"] == 0.0
+
+def test_fast_source_reconcile_command_defers_candidate_check():
+    profile_path = Path("PRIVATE_profile.json")
+    fast = sup.source_reconcile_cmd(
+        profile_path,
+        "0xa4c138da1333dc70",
+        fast=True,
+    )
+    assert Path(fast[2]).name == "bseed_ota_source_reconcile.py"
+    assert "--defer-candidate-check" in fast
+    assert fast[fast.index("--observe-seconds") + 1] == "15"
+
+    strict = sup.source_reconcile_cmd(
+        profile_path,
+        "0xa4c138da1333dc70",
+        fast=False,
+    )
+    assert Path(strict[2]).name == "bseed_ota_campaign.py"
+    assert strict[strict.index("--mode") + 1] == "reconcile-source"
+
+
+def test_deferred_reconcile_rejects_precheck_ready_phase(tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "ACTIVE_LOCK.json").write_text(json.dumps({
+        "phase": sup.READY_PHASE,
+        "reconciliation_evidence": "outdated",
+    }))
+    assert sup.finalize_deferred_reconcile({
+        "device": "LivingRoomSocketHifiLeft",
+        "ieee": "0xa4c138da1333dc70",
+        "sha256": "a" * 64,
+        "require_pm": True,
+    }, work) is None
+
+
+def test_attempt_history_ignores_unrelated_device_or_image(tmp_path):
+    profile = _same_role_profile(tmp_path)
+    good = tmp_path / "ota_bseed-ota-first.jsonl"
+    _ota_progress_log(good, 0.59)
+    foreign = tmp_path / "ota_bseed-ota-foreign.jsonl"
+    foreign.write_text(json.dumps({"event": "ota_request_sent", "value": {
+        "transaction": "foreign", "ieee": profile["ieee"],
+        "image_sha256": "b" * 64,
+    }}) + "\n" + json.dumps({"event": "device_state", "value": {
+        "update": {"progress": 80}}}) + "\n")
+    assert len(foreign.read_text().splitlines()) == 2
+    assert sup.ota_progress_history(tmp_path, profile) == [{
+        "log": str(good), "max_progress": 0.59,
+    }]
+
+
+def test_exclusive_supervisor_rejects_duplicate_before_any_side_effect(tmp_path, monkeypatch):
+    cfg = _same_role_profile(tmp_path)
+    work = Path(cfg["workdir"])
+    work.mkdir()
+    (work / "OTA_SUPERVISOR_OWNER.json").write_text(json.dumps({
+        "pid": 10001, "token": "other", "ieee": cfg["ieee"],
+    }))
+    monkeypatch.setattr(sup.campaign, "load_profile", lambda _: dict(cfg))
+    with pytest.raises(RuntimeError, match="Supervisor already owns"):
+        sup.resume_same_role(tmp_path / "profile.json", cfg["ieee"], confirm_unloaded=False)
+    assert (work / "OTA_SUPERVISOR_OWNER.json").exists()

@@ -54,6 +54,20 @@ def test_consolidated_c7_canary_uses_same_exact_device_gate():
         verify_recovery(bad,confirm_unloaded=True)
 
 
+def test_authorized_c7_to_c9_remains_exact_target_source_hash_and_role():
+    p=canary()
+    p.update(preflash_build='1.1.3-bseedc7', postflash_build='1.1.3-bseedc9',
+             sha256='e52701b83ea7528ed0e9b26cb9e4da0679d125c259c8141e62207c6460738fff')
+    assert verify_recovery(p,confirm_unloaded=True)['recovery_available'] is False
+    with pytest.raises(ValueError,match='Physical load'):
+        verify_recovery(p)
+    for key,value in {'preflash_build':'1.1.3-bseedc6', 'sha256':'0'*64,
+                      'postflash_build':'1.1.3-bseedc10', 'postflash_role':'Router',
+                      'ieee':'0x0011223344556677', 'require_pm':True}.items():
+        with pytest.raises(ValueError):
+            verify_recovery(dict(p,**{key:value}),confirm_unloaded=True)
+
+
 def test_consolidated_force_pair_requires_exact_native_destination():
     p=canary()
     p.update(preflash_build='1.1.3-bseedc7',postflash_build='1.1.3-bseedr10',

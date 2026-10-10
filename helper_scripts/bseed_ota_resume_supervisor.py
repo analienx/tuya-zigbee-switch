@@ -1,17 +1,21 @@
 """BSEED OTA resume/retry supervisor.
 
-Best-practice launcher for long-running OTA transitions:
+Best-practice orchestration for recoverable OTA:
 - never leaves a long-running child attached to an unread PIPE;
 - reconciles a failed source-unchanged campaign before retry;
-- refreshes qualification immediately before transition launch;
-- redirects stdout/stderr to a durable file;
-- persists PID/profile/log metadata for later status checks;
+- preserves the existing qualified cross-role transition path;
+- supports same-role auto-resume only while OTA progress strictly increases;
+- disables Join All for same-role automatic recovery;
+- redirects orchestration output to durable files;
+- persists PID/profile/log/progress metadata for later status checks;
 - never treats stale observer output as proof that Zigbee2MQTT OTA stopped.
 """
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import functools
+import uuid
 import hashlib
 import json
 import os
@@ -31,7 +35,39 @@ import bseed_ota_campaign as campaign
 SUPERVISOR_FILE = "OTA_SUPERVISOR.json"
 RECONCILABLE_PHASES = {"ota_running", "update_error", "update_timeout_or_unconfirmed"}
 READY_PHASE = "source_unchanged_reconciled"
+PENDING_PHASE = "source_verified_candidate_pending"
 JOIN_STRATEGIES = ("none", "scoped", "coordinator", "all", "auto")
+
+
+def exclusive_supervisor(func):
+    """Atomic per-workdir owner: a second process cannot mutate shared evidence.
+
+    Stale owner markers fail closed instead of being auto-deleted while an OTA
+    might still be live. An operator may archive one after independent checks.
+    """
+    @functools.wraps(func)
+    def wrapped(profile_path, *args, **kwargs):
+        profile = campaign.load_profile(profile_path)
+        work = Path(profile["workdir"])
+        work.mkdir(parents=True, exist_ok=True)
+        lock_path = work / "OTA_SUPERVISOR_OWNER.json"
+        token = uuid.uuid4().hex
+        record = {"pid": os.getpid(), "token": token, "created_at": now(),
+                  "ieee": profile["ieee"], "image_sha256": profile["sha256"]}
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            raise RuntimeError("Supervisor already owns this workdir (or stale owner needs review): " + str(lock_path))
+        try:
+            with os.fdopen(fd, "w", encoding="utf8") as handle:
+                handle.write(json.dumps(record) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            return func(profile_path, *args, **kwargs)
+        finally:
+            if (read_json(lock_path) or {}).get("token") == token:
+                lock_path.unlink()
+    return wrapped
 
 
 def now() -> str:
@@ -91,6 +127,18 @@ def campaign_cmd(profile_path: Path, mode: str, *, confirm_ieee: str | None = No
     if confirm_unloaded:
         cmd.append("--confirm-load-unplugged")
     return cmd
+
+
+def source_reconcile_cmd(profile_path: Path, confirm_ieee: str, *, fast: bool) -> list[str]:
+    if not fast:
+        return campaign_cmd(profile_path, "reconcile-source", confirm_ieee=confirm_ieee)
+    return [
+        sys.executable, "-u", str(HELPERS / "bseed_ota_source_reconcile.py"),
+        "--profile", str(profile_path),
+        "--confirm-ieee", confirm_ieee,
+        "--observe-seconds", "15",
+        "--defer-candidate-check",
+    ]
 
 
 def run_logged(cmd: list[str], log_path: Path) -> int:
@@ -157,6 +205,164 @@ def tail_jsonl(path: Path | None, limit: int = 8) -> list[dict[str, Any]]:
     return rows
 
 
+def ota_attempt_progress(path: Path, profile: dict[str, Any] | None = None) -> float | None:
+    """Return max reported percent for a real flash attempt, else None."""
+    sent = False
+    maximum = 0.0
+    identity_ok = profile is None
+    try:
+        lines = path.read_text(encoding="utf8", errors="replace").splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        try:
+            item = json.loads(line)
+        except ValueError:
+            continue
+        if item.get("event") == "ota_request_sent":
+            marker = item.get("value") or {}
+            identity_ok = (profile is None or
+                           (marker.get("ieee"), marker.get("image_sha256")) ==
+                           (profile["ieee"], profile["sha256"]))
+            sent = bool(identity_ok and marker.get("transaction"))
+            maximum = 0.0
+            continue
+        if not sent or item.get("event") != "device_state":
+            continue
+        update = (item.get("value") or {}).get("update") or {}
+        value = update.get("progress")
+        if isinstance(value, (int, float)):
+            maximum = max(maximum, float(value))
+    return maximum if sent else None
+
+
+def ota_progress_history(work: Path, profile: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    attempts = []
+    for path in sorted(work.glob("ota_bseed-ota-*.jsonl"), key=lambda p: p.stat().st_mtime):
+        progress = ota_attempt_progress(path, profile)
+        if progress is not None:
+            attempts.append({"log": str(path), "max_progress": progress})
+    return attempts
+
+
+def progress_retry_gate(history: list[dict[str, Any]]) -> dict[str, Any]:
+    current = float(history[-1]["max_progress"]) if history else 0.0
+    previous = float(history[-2]["max_progress"]) if len(history) > 1 else 0.0
+    return {
+        "allow_retry": bool(history) and current > previous,
+        "previous_progress": previous,
+        "current_progress": current,
+        "strictly_improved": bool(history) and current > previous,
+    }
+
+
+def restore_pm_source_telemetry(profile: dict[str, Any], work: Path) -> None:
+    """Known source firmware may publish PM again while original OTA stays locked."""
+    if profile.get("require_pm") is not True:
+        return
+    work_lock = read_json(work / "ACTIVE_LOCK.json") or {}
+    if work_lock.get("phase") != PENDING_PHASE:
+        return
+    token = work_lock.get("token")
+    evidence = work_lock.get("reconciliation_evidence")
+    if not evidence or not token:
+        raise RuntimeError("Missing exact pending reconciliation authority")
+    guard = work / "PM_TELEMETRY_GUARD.json"
+    released = work / ("PM_TELEMETRY_RELEASED_SOURCE_PENDING_" + token + ".json")
+    if released.exists():
+        record = read_json(released) or {}
+        if (record.get("phase"), record.get("evidence"), record.get("ieee"),
+                record.get("sha256"), record.get("token")) != (
+                "released_source_pending", evidence, profile["ieee"],
+                profile["sha256"], token):
+            raise RuntimeError("Archived PM telemetry release does not match pending campaign")
+        if guard.exists():
+            raise RuntimeError("PM guard and pending release both exist")
+        return
+    if not guard.exists():
+        raise RuntimeError("PM quarantine state unknown; missing active guard and release evidence")
+    from bseed_pm_telemetry_guard import release_source_pending
+    release_source_pending(profile, Path(evidence))
+
+
+def finalize_deferred_reconcile(profile: dict[str, Any], work: Path) -> Path | None:
+    """Only this post-check transition grants new OTA eligibility and releases owner."""
+    from bseed_network_campaign_lock import read_lock, update, release_source_unchanged
+    from bseed_ota_campaign import network_lock_path
+    lock_path = work / "ACTIVE_LOCK.json"
+    lock = read_json(lock_path) or {}
+    if lock.get("phase") != PENDING_PHASE:
+        if lock.get("phase") in (None, READY_PHASE, "preflight_abort", "postflash_accepted"):
+            return None
+        raise RuntimeError("Unexpected campaign phase during candidate finalization")
+    token = lock.get("token")
+    network_path = network_lock_path(profile, required=True)
+    network = read_lock(network_path)
+    if not network or (network.get("token"), network.get("device"),
+                       network.get("ieee"), network.get("image_sha256"),
+                       network.get("phase")) != (
+            token, profile["device"], profile["ieee"], profile["sha256"], PENDING_PHASE):
+        raise RuntimeError("Pending original network campaign ownership missing")
+    raw = lock.get("reconciliation_evidence")
+    source_path = Path(raw) if raw else None
+    if (not source_path or source_path.resolve().parent != work.resolve() or
+            not source_path.name.startswith("source_unchanged_")):
+        raise RuntimeError("Source evidence outside exact private campaign workdir")
+    source = read_json(source_path) or {}
+    if (source.get("result"), source.get("ieee"), source.get("device"),
+            source.get("candidate_sha256"), source.get("source_build"),
+            source.get("source_role"), source.get("fresh_get_build_role_verified"),
+            source.get("candidate_verification_deferred")) != (
+            PENDING_PHASE, profile["ieee"], profile["device"], profile["sha256"],
+            profile["preflash_build"], profile["preflash_role"], True, True):
+        raise RuntimeError("Source evidence cannot authorize deferred check completion")
+    checked = read_json(work / "LAST_CHECK.json") or {}
+    response = checked.get("response") or {}
+    data = response.get("data") or {}
+    source_epoch = dt.datetime.fromisoformat(source["at"]).timestamp()
+    check_epoch = checked.get("timestamp")
+    clock = dt.datetime.now().timestamp()
+    if (type(check_epoch) not in (int, float) or
+            not source_epoch < check_epoch <= clock + 5 or
+            not 0 <= clock - check_epoch <= 900):
+        raise RuntimeError("Deferred OTA check is stale, out of order or in the future")
+    transaction = checked.get("transaction")
+    if (not isinstance(transaction, str) or not transaction.startswith("bseed-ota-") or
+            response.get("transaction") != transaction or
+            data.get("id") != profile["ieee"] or
+            response.get("status") != "ok" or data.get("update_available") is not True or
+            data.get("source") != profile["url"] or
+            (checked.get("device"), checked.get("ieee"), checked.get("sha256")) != (
+                profile["device"], profile["ieee"], profile["sha256"])):
+        raise RuntimeError("Deferred candidate check identity/transaction/URL/hash mismatch")
+    if profile.get("require_pm") is True:
+        restore_pm_source_telemetry(profile, work)
+    combined = dict(source)
+    combined.update(result=READY_PHASE, candidate_check_performed=True,
+                    candidate_verification_deferred=False, update_available=True,
+                    candidate_source=profile["url"], candidate_confirmed_at=now(),
+                    candidate_transaction=transaction,
+                    candidate_check_record=str(work / "LAST_CHECK.json"))
+    combined_path = work / ("source_unchanged_candidate_confirmed_" + uuid.uuid4().hex + ".json")
+    with combined_path.open("x", encoding="utf8") as handle:
+        json.dump(combined, handle, indent=2)
+        handle.write("\n")
+    # Keep the source-reconciliation timestamp BEFORE the new check.
+    # The primitive flash must reject any check older than reconciliation.
+    lock.update(phase=READY_PHASE, reconciled_at=source["at"],
+                candidate_confirmed_at=combined["candidate_confirmed_at"],
+                reconciliation_evidence=str(combined_path),
+                candidate_reconciliation_evidence=str(combined_path))
+    write_json_atomic(lock_path, lock)
+    update(network_path, token, READY_PHASE,
+           reconciled_at=lock["reconciled_at"], reconciliation_evidence=str(combined_path))
+    release_source_unchanged(network_path, token)
+    return combined_path
+
+
+# Backward-compatible name for callers; finalizes both PM and non-PM safely.
+release_pm_after_deferred_reconcile = finalize_deferred_reconcile
+
 def status(profile_path: Path) -> dict[str, Any]:
     profile = campaign.load_profile(profile_path)
     work = Path(profile["workdir"])
@@ -164,6 +370,15 @@ def status(profile_path: Path) -> dict[str, Any]:
     lock = read_json(work / "ACTIVE_LOCK.json")
     live = read_json(work / "LIVE_STATUS.json")
     ota_log = latest_ota_jsonl(work)
+    exact_history = ota_progress_history(work, profile)
+    real_attempt_log = Path(exact_history[-1]["log"]) if exact_history else None
+    ota_activity = None
+    if real_attempt_log:
+        from bseed_ota_activity_report import inspect_jsonl
+        try:
+            ota_activity = inspect_jsonl(real_attempt_log, ieee=profile["ieee"], sha256=profile["sha256"])
+        except (ValueError, OSError) as error:
+            ota_activity = {"error": str(error), "timeout_sufficiency": "undetermined"}
     pid = supervisor.get("pid") if supervisor else None
     return {
         "at": now(),
@@ -177,6 +392,10 @@ def status(profile_path: Path) -> dict[str, Any]:
         "latest_ota_jsonl": str(ota_log) if ota_log else None,
         "latest_ota_jsonl_age_seconds": file_age_seconds(ota_log) if ota_log else None,
         "latest_ota_events": tail_jsonl(ota_log),
+        "latest_real_attempt_jsonl": str(real_attempt_log) if real_attempt_log else None,
+        "ota_activity_diagnosis": ota_activity,
+        "ota_progress_history": exact_history,
+        "retry_progress_gate": progress_retry_gate(exact_history),
         "warning": (
             "Stale supervisor/JSONL output is observer evidence only; it is NOT proof "
             "that Zigbee2MQTT OTA transport stopped. Verify live device/update state "
@@ -217,12 +436,13 @@ def source_rejoin_cmd(profile_path: Path, confirm_ieee: str, output: Path, *,
 def reconcile_until_ready(profile_path: Path, confirm_ieee: str, work: Path,
                           orchestration_log: Path, *, wait_seconds: int,
                           retry_seconds: int, join_strategy: str = "auto",
-                          allow_join_all_fallback: bool = False) -> str | None:
-    """Use canonical reconciliation until an orphaned/failed source is proven ready.
+                          allow_join_all_fallback: bool = False,
+                          fast: bool = False) -> str | None:
+    """Use source reconciliation until an orphaned/failed source is proven ready.
 
-    Every attempt is read-only with respect to firmware. The canonical helper
-    itself refuses while OTA is still active, while the target is unreachable,
-    or when exact source identity/candidate availability cannot be proven.
+    Strict mode also proves candidate availability. Fast same-role mode proves
+    exact source identity, fresh reachability and a 15-second no-OTA quiet
+    window, then defers candidate verification to the fresh pre-flash check.
     """
     deadline = time.monotonic() + max(0, wait_seconds)
     attempts = 0
@@ -230,18 +450,18 @@ def reconcile_until_ready(profile_path: Path, confirm_ieee: str, work: Path,
     while True:
         lock = read_json(work / "ACTIVE_LOCK.json")
         phase = lock.get("phase") if lock else None
-        if phase in (None, READY_PHASE):
+        if phase in (None, READY_PHASE) or (fast and phase == PENDING_PHASE):
             return phase
         if phase not in ("ota_running", *RECONCILABLE_PHASES):
             raise RuntimeError(f"Campaign phase {phase!r} is not reconcilable")
         attempts += 1
         rc = run_logged(
-            campaign_cmd(profile_path, "reconcile-source", confirm_ieee=confirm_ieee),
+            source_reconcile_cmd(profile_path, confirm_ieee, fast=fast),
             orchestration_log,
         )
         lock = read_json(work / "ACTIVE_LOCK.json")
         phase = lock.get("phase") if lock else None
-        if rc == 0 and phase == READY_PHASE:
+        if rc == 0 and phase == (PENDING_PHASE if fast else READY_PHASE):
             return phase
         if (rc != 0 and join_strategy != "none" and not source_rejoin_attempted and
                 "Fresh target GET response missing" in _last_logged_run(orchestration_log)):
@@ -273,6 +493,7 @@ def reconcile_until_ready(profile_path: Path, confirm_ieee: str, work: Path,
         time.sleep(max(1, retry_seconds))
 
 
+@exclusive_supervisor
 def resume_transition(profile_path: Path, confirm_ieee: str, *,
                       confirm_unloaded: bool,
                       reconcile_wait_seconds: int = 600,
@@ -362,6 +583,163 @@ def resume_transition(profile_path: Path, confirm_ieee: str, *,
     return record
 
 
+@exclusive_supervisor
+def resume_same_role(
+    profile_path: Path,
+    confirm_ieee: str,
+    *,
+    confirm_unloaded: bool,
+    max_attempts: int = 12,
+    reconcile_wait_seconds: int = 600,
+    reconcile_retry_seconds: int = 20,
+) -> dict[str, Any]:
+    profile = campaign.load_profile(profile_path)
+    if confirm_ieee != profile["ieee"]:
+        raise ValueError("Exact IEEE confirmation mismatch")
+    if profile["preflash_role"] != profile["postflash_role"]:
+        raise ValueError("Same-role resume refuses a cross-role campaign")
+    if profile.get("non_pm") is True and not confirm_unloaded:
+        raise ValueError("Non-PM same-role resume requires load-unplugged confirmation")
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be at least 1")
+
+    work = Path(profile["workdir"])
+    work.mkdir(parents=True, exist_ok=True)
+    supervisor_path = work / SUPERVISOR_FILE
+    previous_supervisor = read_json(supervisor_path)
+    if previous_supervisor and process_alive(previous_supervisor.get("pid")):
+        raise RuntimeError(
+            f"Existing supervised process PID {previous_supervisor.get('pid')} is still alive; "
+            "refusing duplicate OTA launch"
+        )
+
+    stamp = dt.datetime.now().strftime("%Y%m%dT%H%M%S")
+    orchestration_log = work / f"same_role_resume_{stamp}.log"
+    launched = 0
+
+    def persist(state: str, **extra: Any) -> dict[str, Any]:
+        history = ota_progress_history(work, profile)
+        record = {
+            "schema": 2,
+            "state": state,
+            "updated_at": now(),
+            "pid": os.getpid(),
+            "mode": "same-role-auto-resume",
+            "device": profile["device"],
+            "ieee": profile["ieee"],
+            "profile": str(profile_path),
+            "profile_sha256": hashlib.sha256(profile_path.read_bytes()).hexdigest(),
+            "image_sha256": profile["sha256"],
+            "launched_attempts": launched,
+            "progress_history": history,
+            "retry_progress_gate": progress_retry_gate(history),
+            "recovery_policy": {
+                "join_strategy": "auto",
+                "allow_join_all_fallback": False,
+                "join_via": profile.get("join_via"),
+            },
+            "orchestration_log": str(orchestration_log),
+            **extra,
+        }
+        write_json_atomic(supervisor_path, record)
+        return record
+
+    persist("starting")
+    while launched < max_attempts:
+        lock = read_json(work / "ACTIVE_LOCK.json")
+        phase = lock.get("phase") if lock else None
+
+        if phase in ("postflash_candidate", "postflash_accepted"):
+            return persist("installed", phase=phase)
+        if phase == "ota_running":
+            return persist(
+                "blocked_active_transport",
+                phase=phase,
+                reason="ota_running must be independently proven stopped before reconciliation",
+            )
+        if phase in RECONCILABLE_PHASES:
+            gate = progress_retry_gate(ota_progress_history(work, profile))
+            if not gate["allow_retry"]:
+                return persist(
+                    "progress_not_improved",
+                    phase=phase,
+                    reason="automatic retry requires strict OTA progress increase versus previous iteration",
+                )
+            persist("reconciling", phase=phase)
+            try:
+                phase = reconcile_until_ready(
+                    profile_path,
+                    confirm_ieee,
+                    work,
+                    orchestration_log,
+                    wait_seconds=reconcile_wait_seconds,
+                    retry_seconds=reconcile_retry_seconds,
+                    join_strategy="auto",
+                    allow_join_all_fallback=False,
+                    fast=True,
+                )
+            except RuntimeError as error:
+                return persist(
+                    "physical_intervention_required",
+                    phase=phase,
+                    reason=str(error),
+                )
+        elif phase == PENDING_PHASE:
+            if not progress_retry_gate(ota_progress_history(work, profile))["allow_retry"]:
+                return persist("progress_not_improved", phase=phase)
+        elif phase not in (None, READY_PHASE):
+            return persist("stopped_nonrecoverable", phase=phase)
+
+        try:
+            restore_pm_source_telemetry(profile, work)
+        except (RuntimeError, ValueError, OSError) as error:
+            return persist("pm_source_restore_failed", phase=phase, reason=str(error))
+        if run_logged(campaign_cmd(profile_path, "preflight"), orchestration_log):
+            return persist("preflight_failed")
+        if run_logged(campaign_cmd(profile_path, "check"), orchestration_log):
+            return persist("check_failed")
+        try:
+            release_pm_after_deferred_reconcile(profile, work)
+        except (RuntimeError, ValueError) as error:
+            return persist("pm_deferred_release_failed", reason=str(error))
+
+        launched += 1
+        persist("flashing", attempt=launched)
+        flash_rc = run_logged(
+            campaign_cmd(
+                profile_path,
+                "flash",
+                confirm_ieee=confirm_ieee,
+                confirm_unloaded=confirm_unloaded,
+            ),
+            orchestration_log,
+        )
+        lock = read_json(work / "ACTIVE_LOCK.json") or {}
+        phase = lock.get("phase")
+        if phase in ("postflash_candidate", "postflash_accepted"):
+            return persist("installed", phase=phase, flash_exit=flash_rc)
+        if flash_rc == 0:
+            return persist("postflash_followup_required", phase=phase, flash_exit=flash_rc)
+        if phase not in RECONCILABLE_PHASES:
+            return persist("stopped_nonrecoverable", phase=phase, flash_exit=flash_rc)
+
+        gate = progress_retry_gate(ota_progress_history(work, profile))
+        if not gate["allow_retry"]:
+            return persist(
+                "progress_not_improved",
+                phase=phase,
+                flash_exit=flash_rc,
+                reason="failed attempt did not exceed previous iteration progress",
+            )
+        persist(
+            "retry_eligible_progress_improved",
+            phase=phase,
+            flash_exit=flash_rc,
+        )
+
+    return persist("retry_budget_exhausted", max_attempts=max_attempts)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -375,6 +753,14 @@ def main(argv: list[str] | None = None) -> None:
     resume.add_argument("--join-strategy", choices=JOIN_STRATEGIES)
     resume.add_argument("--allow-join-all-fallback", action="store_true", default=None)
 
+    same = sub.add_parser("resume-same-role")
+    same.add_argument("--profile", required=True)
+    same.add_argument("--confirm-ieee", required=True)
+    same.add_argument("--confirm-load-unplugged", action="store_true")
+    same.add_argument("--max-attempts", type=int, default=12)
+    same.add_argument("--reconcile-wait-seconds", type=int, default=600)
+    same.add_argument("--reconcile-retry-seconds", type=int, default=20)
+
     show = sub.add_parser("status")
     show.add_argument("--profile", required=True)
 
@@ -383,15 +769,25 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "status":
         print(json.dumps(status(profile_path), indent=2, default=str))
         return
-    result = resume_transition(
-        profile_path,
-        args.confirm_ieee,
-        confirm_unloaded=args.confirm_load_unplugged,
-        reconcile_wait_seconds=args.reconcile_wait_seconds,
-        reconcile_retry_seconds=args.reconcile_retry_seconds,
-        join_strategy=args.join_strategy,
-        allow_join_all_fallback=args.allow_join_all_fallback,
-    )
+    if args.command == "resume-same-role":
+        result = resume_same_role(
+            profile_path,
+            args.confirm_ieee,
+            confirm_unloaded=args.confirm_load_unplugged,
+            max_attempts=args.max_attempts,
+            reconcile_wait_seconds=args.reconcile_wait_seconds,
+            reconcile_retry_seconds=args.reconcile_retry_seconds,
+        )
+    else:
+        result = resume_transition(
+            profile_path,
+            args.confirm_ieee,
+            confirm_unloaded=args.confirm_load_unplugged,
+            reconcile_wait_seconds=args.reconcile_wait_seconds,
+            reconcile_retry_seconds=args.reconcile_retry_seconds,
+            join_strategy=args.join_strategy,
+            allow_join_all_fallback=args.allow_join_all_fallback,
+        )
     print(json.dumps(result, indent=2, default=str))
 
 

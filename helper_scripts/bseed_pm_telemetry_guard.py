@@ -162,6 +162,62 @@ def validate_source_unchanged_release(profile, record, evidence, lock):
     return True
 
 
+def release_source_pending(profile, evidence_path):
+    """Restore proven preflash-firmware PM telemetry without authorizing a new OTA.
+
+    Network ownership must remain with this failed campaign; fresh load samples
+    are required independently before candidate check and new flash.
+    """
+    if profile.get('require_pm') is not True:
+        return
+    path = guard_path(profile)
+    record = json.loads(path.read_text(encoding='utf8'))
+    evidence = json.loads(Path(evidence_path).read_text(encoding='utf8'))
+    lock = json.loads((path.parent / 'ACTIVE_LOCK.json').read_text(encoding='utf8'))
+    from bseed_ota_campaign import network_lock_path
+    from bseed_network_campaign_lock import read_lock
+    network = read_lock(network_lock_path(profile, required=True))
+    if (record.get('ieee'), record.get('sha256'), record.get('phase')) != (
+            profile['ieee'], profile['sha256'], 'enabled'):
+        raise ValueError('PM source-pending quarantine identity mismatch')
+    if (lock.get('phase'), lock.get('token'), lock.get('ieee'),
+            lock.get('sha256'), lock.get('reconciliation_evidence')) != (
+            'source_verified_candidate_pending', record.get('token'),
+            profile['ieee'], profile['sha256'], str(evidence_path)):
+        raise ValueError('PM source-pending work authority mismatch')
+    if not network or (network.get('phase'), network.get('token'), network.get('ieee'),
+                       network.get('image_sha256')) != (
+            'source_verified_candidate_pending', record.get('token'),
+            profile['ieee'], profile['sha256']):
+        raise ValueError('PM source-pending network ownership mismatch')
+    if (evidence.get('result'), evidence.get('ieee'), evidence.get('source_build'),
+            evidence.get('source_role'), evidence.get('candidate_sha256'),
+            evidence.get('fresh_get_build_role_verified')) != (
+            'source_verified_candidate_pending', profile['ieee'],
+            profile['preflash_build'], profile['preflash_role'],
+            profile['sha256'], True):
+        raise ValueError('PM release lacks genuine fresh preflash source identity')
+    if dt.datetime.fromisoformat(evidence['at']) <= dt.datetime.fromisoformat(record['started']):
+        raise ValueError('PM source evidence predates quarantine')
+    bridge = bridge_for(profile)
+    try:
+        bridge.start()
+        device = target(bridge, profile)
+        if (device.get('software_build_id'), device.get('type')) != (
+                profile['preflash_build'], profile['preflash_role']):
+            raise ValueError('PM source changed before telemetry restoration')
+        set_option(bridge, profile, False)
+        record.update(phase='released_source_pending',
+                      evidence=str(evidence_path),
+                      released_at=dt.datetime.now(dt.timezone.utc).isoformat(),
+                      transport_phase_preserved='source_verified_candidate_pending')
+        path.write_text(json.dumps(record, indent=2) + '\n', encoding='utf8')
+        path.rename(path.with_name(
+            'PM_TELEMETRY_RELEASED_SOURCE_PENDING_' + str(lock['token']) + '.json'))
+    finally:
+        bridge.stop()
+
+
 def release_source_unchanged(profile, evidence_path):
     if profile.get('require_pm') is not True:
         return

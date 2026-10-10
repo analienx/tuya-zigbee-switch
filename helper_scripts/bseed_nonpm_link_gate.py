@@ -20,6 +20,9 @@ import yaml
 SAMPLES = 3
 MIN_SPACING_S = 25
 MAX_LATENCY_S = 12
+# Match the installed backend's issued_at age/skew bound. Hosts have separate
+# wall clocks; a correlated fresh read may legitimately be slightly earlier.
+MAX_CLOCK_SKEW_S = 5
 MAX_EVIDENCE_AGE_S = 600
 PROBE_SCHEMA = 1
 DEFAULT_PROBE_ENDPOINT = 2
@@ -49,7 +52,7 @@ def _expected_probe_value(profile):
     raise ValueError('Unsupported expected relay state')
 
 
-def verify_probe_evidence(evidence, profile, request_id, gate_requested_at):
+def verify_probe_evidence(evidence, profile, request_id, gate_requested_at, *, received_at=None):
     endpoint = int(profile.get('link_probe_endpoint', DEFAULT_PROBE_ENDPOINT))
     cluster = profile.get('link_probe_cluster', DEFAULT_PROBE_CLUSTER)
     attribute = profile.get('link_probe_attribute', DEFAULT_PROBE_ATTRIBUTE)
@@ -73,9 +76,13 @@ def verify_probe_evidence(evidence, profile, request_id, gate_requested_at):
         raise AssertionError('Backend read probe missing ZCL transaction sequence')
     requested = evidence.get('requested_at')
     responded = evidence.get('response_at')
+    if received_at is None:
+        received_at = gate_requested_at + MAX_LATENCY_S + MAX_CLOCK_SKEW_S
     if not (type(requested) in (int, float) and
             type(responded) in (int, float) and
-            gate_requested_at <= requested <= responded and
+            gate_requested_at - MAX_CLOCK_SKEW_S <= requested <= responded and
+            responded <= received_at + MAX_CLOCK_SKEW_S and
+            requested <= gate_requested_at + MAX_LATENCY_S + MAX_CLOCK_SKEW_S and
             responded - requested <= MAX_LATENCY_S):
         raise AssertionError('Backend read probe timing is invalid')
     if evidence.get('errors'):
@@ -110,7 +117,7 @@ def run_probe(profile, work, sequence, gate_requested_at):
             raise AssertionError('Backend read probe produced no evidence file')
         evidence = json.loads(output.read_text(encoding='utf8'))
         return verify_probe_evidence(
-            evidence, profile, request_id, gate_requested_at)
+            evidence, profile, request_id, gate_requested_at, received_at=time.time())
     finally:
         output.unlink(missing_ok=True)
 

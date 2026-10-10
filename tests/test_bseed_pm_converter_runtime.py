@@ -106,6 +106,12 @@ const makeDevice = (build, manufacturer = 'b28wrpvx') => {
         endpoints: [ep], getEndpoint: () => ep, ieeeAddr: ep.deviceIeeeAddress};
 };
 ''' + helper + r'''
+const assertSampled = (result, expected, watts) => {
+    assert.equal(result.bseed_pm_sample_power_w, watts);
+    assert.ok(Number.isFinite(result.bseed_pm_sample_time_ms));
+    const {bseed_pm_sample_time_ms, bseed_pm_sample_power_w, ...standard} = result;
+    assert.deepEqual(standard, expected);
+};
 (async () => {
     let sequence = 1;
     for (const build of ['1.2.5-bseedcli6', '1.2.5-bseedcli12', '1.2.5-bseedr9']) {
@@ -117,8 +123,8 @@ const makeDevice = (build, manufacturer = 'b28wrpvx') => {
         const early = (cluster, data) => extension.fromZigbee.find(f => f.cluster === cluster).convert(earlyModel,
             {cluster, data, device, endpoint: ep, type: 'attributeReport', meta: {zclTransactionSequenceNumber: sequence++}},
             () => {}, {}, {device});
-        assert.deepEqual(early('haElectricalMeasurement', {rmsVoltage: 23000, rmsCurrent: 1250, activePower: 288}),
-            {voltage: 230, current: 1.25, power: 288});
+        assertSampled(early('haElectricalMeasurement', {rmsVoltage: 23000, rmsCurrent: 1250, activePower: 288}),
+            {voltage: 230, current: 1.25, power: 288}, 288);
         assert.deepEqual(early('seMetering', {currentSummDelivered: 12345}), {energy: 12.345});
         // Decode real ZCL UINT48 frames with the pinned Herdsman runtime, then
         // pass them through the real ZHC converter. Invalid totals must never
@@ -157,10 +163,13 @@ const makeDevice = (build, manufacturer = 'b28wrpvx') => {
         const decode = (cluster, data) => extension.fromZigbee.find(f => f.cluster === cluster).convert(model,
             {cluster, data, device, endpoint: ep, type: 'attributeReport', meta: {zclTransactionSequenceNumber: sequence++}},
             () => {}, {}, {device});
-        assert.deepEqual(decode('haElectricalMeasurement', {rmsVoltage: 23000, rmsCurrent: 1250, activePower: 288}),
-            {voltage: 230, current: 1.25, power: 288});
+        assertSampled(decode('haElectricalMeasurement', {rmsVoltage: 23000, rmsCurrent: 1250, activePower: 288}),
+            {voltage: 230, current: 1.25, power: 288}, 288);
         assert.deepEqual(decode('seMetering', {currentSummDelivered: 12345}), {energy: 12.345});
-        assert.deepEqual(decode('haElectricalMeasurement', {rmsCurrent: 0, activePower: 0}), {current: 0, power: 0});
+        assertSampled(decode('haElectricalMeasurement', {rmsCurrent: 0, activePower: 0}),
+            {current: 0, power: 0}, 0);
+        assert.deepEqual(decode('haElectricalMeasurement', {rmsVoltage: 22900}),
+            {voltage: 229});
         console.log(JSON.stringify(ep.reports));
       }
     }

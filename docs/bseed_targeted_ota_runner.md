@@ -11,13 +11,21 @@ Requires Python 3, `paho-mqtt`, PyYAML, local access to an independently verifie
 3. Prepare a **private, one-entry OTA JSON index** matching the stock device's manufacturer, image type and wrapper image, with the correct `fileSize`, `sha512`, URL and version. Serve it alongside the image; do not modify `index_bseed.json` or use a general fleet index for a Client experiment.
 4. Run `--mode preflight`, then `--mode check` with `--index-url` pointing at that one-entry JSON index. The read-only check must return `update_available: true` and the exact expected image URL.
 5. Only after inspecting the check response, run `--mode flash` with the **same** device, image and SHA-256. The check record expires after 30 minutes. The program refuses identity/role mismatch, unexpected relay state, elevated/missing reported power, offline bridge, open permit-join, bad image/hash, or a conflicting local OTA lock.
-6. Keep the image HTTP server and monitoring alive. A success response is only the OTA service result; separately verify the installed firmware build, successful re-interview, Client role, preserved IEEE, endpoint-2 relay, physical power-on behavior, endpoint-1 PM measurements, bindings, zero-load reporting and mesh/parent health. A failed or incomplete OTA must **not** be blindly retried.
+6. Keep the image HTTP server and monitoring alive. A success response is only the OTA service result; separately verify the installed firmware build, successful re-interview, Client role, preserved IEEE, endpoint-2 relay, physical power-on behavior, endpoint-1 PM measurements, bindings, zero-load reporting and mesh/parent health. A failed or incomplete OTA must **not** be blindly retried. For a same-role recoverable failure, use `bseed_ota_resume_supervisor.py resume-same-role`: it reconciles the exact source, permits only scoped/coordinator recovery with Join All disabled, refreshes preflight/check, and automatically submits another flash only while each failed real OTA attempt reaches a strictly higher maximum `update.progress` than the previous attempt. The first failure is compared with 0%; equal/lower/missing progress stops automatic retry.
 
 ## Arguments and limitations
 
 Run `python helper_scripts/bseed_targeted_z2m_ota.py --help` for options. All device identifiers, expected preflash identity, firmware path, SHA-256, URL, MQTT config path, broker and private workdir are supplied via CLI; no household-specific values are built into the repository script. `--native-image` compares the OTA content from offset 56 to independently verify a stock-facing wrapper contains the intended custom payload.
 
 The runner uses an exact IEEE/friendly-name pairing and a fresh, non-retained relay `/get` response; it never commands a relay change. It accepts a **matching OTA transaction with empty `data`** as a legitimate failure response, and ignores foreign transactions/targets. If an OTA was interrupted, check live device state and the Zigbee2MQTT logs before reconciling a stale lock. The local lock cannot detect OTA operations begun by other software; do not run simultaneous campaigns. A 0 W reading alone does not identify the physically connected appliance or guarantee safe power interruption.
+
+**Per-block timeout policy (PM and non-PM):** Do not impose 180,000 ms
+fleet-wide. Bedroom's historically successful retry retained 1,800,000 ms
+after a five-minute failure; Hifi's unproven 180,000 ms experiment has been
+reverted pending block-level evidence. See
+[the evidence-based timing policy](bseed_ota_timeout_evidence_policy_20261010.md)
+and the read-only activity report helper. A percentage plateau is not proof
+of zero OTA imageBlockRequest traffic or an authorization to retry.
 
 **Conservative OTA transfer size:** The runner explicitly sets `default_maximum_data_size` **per flash request**, defaulting to **50 bytes** instead of inheriting a potentially higher Zigbee2MQTT global value (the KitchenLeft bridge was configured for 100 bytes). Override with `--max-block-bytes N` only for a justified diagnostic within Zigbee2MQTT's 10–100-byte limits. The 50-byte default is a risk reduction based on Zigbee2MQTT's documented device compatibility; it is **not evidence that block size caused KitchenSocketLeft's ABORT**. No OTA settings are modified globally by the runner.
 
