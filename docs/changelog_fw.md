@@ -11,6 +11,16 @@ Please describe what you are working on, under ## Upcoming
 
 ## Upcoming
 
+### PM physical-unloaded preflash option — 2026-10-10
+
+- Custom PM TS011F-BS-PM Router and Client may skip **live preflash activePower**
+  only with an explicit private-profile physical-unloaded policy and exact
+  `--confirm-load-unplugged` flash attestation. Default PM metering gate
+  remains unchanged; this does not disable telemetry quarantine or postflash
+  PM metering/energy/physical-load acceptance.
+- Live state, firmware identity, OTA network lock, image hash and single-target
+  isolation continue to gate every flash. No firmware image bytes changed.
+
 ### OTA orchestration and four-variant release documentation — 2026-10-10
 
 - PM Router/Client and non-PM Router/Client retain their sealed October 4 firmware identities; **no firmware bytes, versions or payloads changed in this tooling pass**.

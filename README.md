@@ -2,6 +2,12 @@
 
 Hardware-focused custom Zigbee firmware for selected BSEED devices, built on top of [romasku/tuya-zigbee-switch](https://github.com/romasku/tuya-zigbee-switch).
 
+**PM OTA preflash:** For verified physically unloaded custom PM TS011F-BS-PM sockets,
+live power readings can be deferred until postflash using the explicit
+[physical-unloaded preflash route](docs/bseed_targeted_ota_runner.md);
+device identity, electrical safety confirmation, OTA locking, converter
+quarantine, and postflash metering acceptance are not bypassed.
+
 **Project identity:** Analienx BSEED firmware (based on Romasku). The BSEED variants, testing and deployment tooling belong to this fork; the reusable switch framework remains Romasku-derived. Keep upstream attribution and licenses intact; do not call every generic Romasku device an Analienx build.
 
 [![CI](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/test.yml/badge.svg)](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/test.yml)

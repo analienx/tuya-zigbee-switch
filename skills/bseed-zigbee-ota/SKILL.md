@@ -5,6 +5,21 @@ description: Build, verify and seal BSEED firmware candidates and conduct single
 
 # BSEED Zigbee OTA maintenance
 
+## PM physically unloaded preflash route (2026-10-10)
+
+An offline PM sensor is **not itself a reason to block firmware OTA** if the
+custom PM TS011F-BS-PM socket is independently verified physically unloaded.
+Explicitly set `pm_preflash_load_proof=physically_unloaded` in its PRIVATE
+profile and supply `--confirm-load-unplugged` with exact IEEE for every new
+flash/transition attempt. `require_pm=true` stays mandatory. Read-only
+preflight/check can proceed without a new activePower sample on that route.
+The default `meter` route still demands a genuinely new raw ZCL report;
+cached 0 W never counts. Do not infer unloaded status from the target's name
+or a relay MQTT state. OTA hash, source firmware, image server, network
+ownership and converter telemetry quarantine still gate flashing.
+Postflash PM metering and physical load-to-zero acceptance remain mandatory.
+See docs/bseed_targeted_ota_runner.md.
+
 ## 2026-10-10 four-variant timing correction
 
 Read docs/bseed_ota_timeout_evidence_policy_20261010.md before recommending a
