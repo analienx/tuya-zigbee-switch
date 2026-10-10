@@ -267,7 +267,7 @@ def main():
                 raise ValueError('Runner tuple differs from canonical profile: ' + key)
         if args.non_pm != (campaign.get('non_pm') is True):
             raise ValueError('Runner board mode differs from canonical profile')
-        if args.pm_preflash_physical_unloaded != (campaign.get('pm_preflash_load_proof') == 'physically_unloaded'):
+        if getattr(args, 'pm_preflash_physical_unloaded', False) != (campaign.get('pm_preflash_load_proof') == 'physically_unloaded'):
             raise ValueError('Runner PM load proof differs from canonical profile')
         from bseed_socket_version_policy import split_manufacturer as _split_board
         if getattr(args, 'ts0726', False) != (_split_board(campaign.get('manufacturer', ''))[0] == 'iedhxgyi'):
@@ -275,10 +275,10 @@ def main():
         if args.non_pm and getattr(args, 'ts0726', False):
             raise ValueError('Runner metering exceptions are mutually exclusive')
         require_increasing(campaign)
-    if args.pm_preflash_physical_unloaded and not (args.manufacturer == 'b28wrpvx' and
+    if getattr(args, 'pm_preflash_physical_unloaded', False) and not (args.manufacturer == 'b28wrpvx' and
             args.model == 'TS011F-BS-PM' and not args.non_pm and not args.ts0726):
         raise ValueError('Physical PM preflight requires exact custom BSEED PM board')
-    if args.mode == 'flash' and args.pm_preflash_physical_unloaded and not args.confirm_load_unplugged:
+    if args.mode == 'flash' and getattr(args, 'pm_preflash_physical_unloaded', False) and not args.confirm_load_unplugged:
         raise ValueError('PM physical-proof OTA requires explicit load-unplugged confirmation')
     cross_role = campaign is not None and campaign['preflash_role'] != campaign['postflash_role']
     source_profile = campaign
@@ -302,7 +302,7 @@ def main():
             raise ValueError('Runner recovery inputs differ from canonical profile')
         recovery_gate(campaign, confirm_unloaded=args.confirm_load_unplugged)
     elif args.hardware_evidence or (args.confirm_load_unplugged and not (
-            args.mode == 'flash' and args.pm_preflash_physical_unloaded)):
+            args.mode == 'flash' and getattr(args, 'pm_preflash_physical_unloaded', False))):
         raise ValueError('Hardware recovery evidence is non-PM-only; physical PM confirmation requires pinned flash')
     verify_image(args)
     work = Path(args.workdir); work.mkdir(parents=True, exist_ok=True)
@@ -470,7 +470,7 @@ def main():
                 raise AssertionError('Fresh target source firmware/role changed since source reconciliation')
 
         meter_input = relay
-        if campaign and campaign.get('require_pm') is True and not args.pm_preflash_physical_unloaded:
+        if campaign and campaign.get('require_pm') is True and not getattr(args, 'pm_preflash_physical_unloaded', False):
             # Force an actual PM ZCL read. A fresh relay GET containing cached
             # "power":0 is NOT fresh load evidence. The converter stamps raw
             # measurement arrivals, rather than unrelated composite updates.
@@ -487,7 +487,7 @@ def main():
             if state['pm_fresh'] is None:
                 raise AssertionError('No newly decoded ZCL activePower sample; cached PM state cannot authorize OTA')
             meter_input = {'power': state['pm_fresh']['power']}
-        if args.pm_preflash_physical_unloaded:
+        if getattr(args, 'pm_preflash_physical_unloaded', False):
             # No guessed zero watts. The flash-only human physical-unloaded
             # attestation replaces live PM input; postflash metering is mandatory.
             power = None
