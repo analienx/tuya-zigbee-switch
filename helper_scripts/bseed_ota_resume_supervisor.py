@@ -370,11 +370,13 @@ def status(profile_path: Path) -> dict[str, Any]:
     lock = read_json(work / "ACTIVE_LOCK.json")
     live = read_json(work / "LIVE_STATUS.json")
     ota_log = latest_ota_jsonl(work)
+    exact_history = ota_progress_history(work, profile)
+    real_attempt_log = Path(exact_history[-1]["log"]) if exact_history else None
     ota_activity = None
-    if ota_log:
+    if real_attempt_log:
         from bseed_ota_activity_report import inspect_jsonl
         try:
-            ota_activity = inspect_jsonl(ota_log, ieee=profile["ieee"], sha256=profile["sha256"])
+            ota_activity = inspect_jsonl(real_attempt_log, ieee=profile["ieee"], sha256=profile["sha256"])
         except (ValueError, OSError) as error:
             ota_activity = {"error": str(error), "timeout_sufficiency": "undetermined"}
     pid = supervisor.get("pid") if supervisor else None
@@ -390,9 +392,10 @@ def status(profile_path: Path) -> dict[str, Any]:
         "latest_ota_jsonl": str(ota_log) if ota_log else None,
         "latest_ota_jsonl_age_seconds": file_age_seconds(ota_log) if ota_log else None,
         "latest_ota_events": tail_jsonl(ota_log),
+        "latest_real_attempt_jsonl": str(real_attempt_log) if real_attempt_log else None,
         "ota_activity_diagnosis": ota_activity,
-        "ota_progress_history": ota_progress_history(work, profile),
-        "retry_progress_gate": progress_retry_gate(ota_progress_history(work, profile)),
+        "ota_progress_history": exact_history,
+        "retry_progress_gate": progress_retry_gate(exact_history),
         "warning": (
             "Stale supervisor/JSONL output is observer evidence only; it is NOT proof "
             "that Zigbee2MQTT OTA transport stopped. Verify live device/update state "

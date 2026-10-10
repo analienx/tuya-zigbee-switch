@@ -152,8 +152,10 @@ py -3 helper_scripts\bseed_ota_resume_supervisor.py status ^
 
 The status output includes the persisted supervisor record, whether its PID is
 still alive, ACTIVE_LOCK/LIVE_STATUS, the newest OTA JSONL age, recent events,
-and exact-IEEE/image activity diagnostics. The added activity report deliberately
-cannot infer real block-request inactivity from percentage telemetry.
+and exact-IEEE/image activity diagnostics. Diagnosis selects the latest actual
+transaction for this device/image, even when newer read-only check logs exist.
+The activity report deliberately cannot infer real block-request inactivity
+from percentage telemetry.
 Its warning is intentional: stale observer output does not prove transport
 failure.
 

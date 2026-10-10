@@ -124,3 +124,19 @@ def test_boolean_nan_and_infinite_progress_not_accepted(tmp_path):
     assert result["maximum_reported_percent"] is None
     assert result["reported_progress_samples"] == 0
     assert result["phase"] == "failed_before_observed_progress"
+
+
+def test_status_diagnoses_last_real_attempt_not_newer_check_only(tmp_path, monkeypatch):
+    import bseed_ota_resume_supervisor as sup
+    ieee, sha = "0x0000000000000001", "a" * 64
+    real = _write_log(tmp_path / "ota_bseed-ota-real.jsonl", ieee, sha)
+    newer_check = tmp_path / "ota_bseed-ota-check.jsonl"
+    newer_check.write_text(json.dumps({"event": "check_passed_no_flash",
+                                      "value": {"update_available": True}}) + "\n")
+    profile = {"device": "Fixture", "ieee": ieee, "sha256": sha, "workdir": str(tmp_path)}
+    monkeypatch.setattr(sup.campaign, "load_profile", lambda _source: dict(profile))
+    result = sup.status(tmp_path / "profile.json")
+    assert result["latest_real_attempt_jsonl"] == str(real)
+    assert result["ota_activity_diagnosis"]["maximum_reported_percent"] == 0.59
+    assert len(result["ota_progress_history"]) == 1
+    assert result["retry_progress_gate"]["allow_retry"] is True
