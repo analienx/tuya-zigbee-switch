@@ -86,6 +86,11 @@ def fixture(tmp_path, monkeypatch, fresh_build="1.2.5-bseedcli6", fresh_role="En
                     "transaction":tx,"status":"ok","data":{
                         "id":IEEE,"update_available":True,"source":profile["url"]}},retained=False)
             return SimpleNamespace(wait_for_publish=lambda _s:None)
+    # CI intentionally also tests with Paho MQTT 1.x, while the production
+    # runner requires MQTT 2.x. Stub only the callback enum for this mock-only
+    # test so it exercises the real state machine on both test environments.
+    monkeypatch.setattr(sr.mqtt, "CallbackAPIVersion",
+                        SimpleNamespace(VERSION2=2), raising=False)
     monkeypatch.setattr(sr.mqtt, "Client", Client)
     return profile,work,net
 
