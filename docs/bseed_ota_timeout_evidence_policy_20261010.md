@@ -17,6 +17,16 @@ Zigbee2MQTT officially defaults to 150,000 ms per-block REQUEST-INACTIVITY timeo
 
 Historical non-PM traces show MAC_BAD_STATE coordinator transmit failures and client downlink imageBlockResponse loss even as uplink imageBlockRequests arrived. Retained offsets and retries can make progress without solving the underlying RF/firmware cause.
 
+### Preflash power-monitoring opt-out (2026-10-10)
+
+Both PM Router and PM Client may defer fresh activePower measurement until
+postflash if they are **physically unloaded**. Use the explicit private profile
+`pm_preflash_load_proof=physically_unloaded` and operator
+`--confirm-load-unplugged` during flash. Otherwise, the meter route
+still requires a new raw ZCL power report; cached zero remains unsafe evidence.
+PM firmware/role, converter quarantine, exact-image and network-OTA safeguards
+are not bypassed. Physical disconnection is independent of the relay state.
+
 ### Timing decision policy
 
 1. Do NOT globally set 180,000 ms for PM or non-PM. Keep each sealed campaign's reviewed profile value unless independently measured block-request intervals justify a different value. Bedroom FORCE's explicit 1,800,000 ms minimum stays.

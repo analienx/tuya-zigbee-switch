@@ -29,6 +29,31 @@ of zero OTA imageBlockRequest traffic or an authorization to retry.
 
 **Conservative OTA transfer size:** The runner explicitly sets `default_maximum_data_size` **per flash request**, defaulting to **50 bytes** instead of inheriting a potentially higher Zigbee2MQTT global value (the KitchenLeft bridge was configured for 100 bytes). Override with `--max-block-bytes N` only for a justified diagnostic within Zigbee2MQTT's 10–100-byte limits. The 50-byte default is a risk reduction based on Zigbee2MQTT's documented device compatibility; it is **not evidence that block size caused KitchenSocketLeft's ABORT**. No OTA settings are modified globally by the runner.
 
+## PM preflash without live power metering (physically unloaded only)
+
+For the custom PM TS011F-BS-PM board, **live activePower is not universally
+required before OTA** when the operator has independently verified that **no
+appliance is plugged into the socket**. In its private single-target campaign
+profile, set `"pm_preflash_load_proof": "physically_unloaded"` while retaining
+`"require_pm": true`. The default remains `"meter"`, requiring a new
+device-originated ZCL activePower sample. The physical route never invents a
+0-W measurement; read-only preflight/check records the pending attestation,
+and the flash itself requires `--confirm-load-unplugged` with exact IEEE.
+
+The physical route does **not** disable the PM Zigbee2MQTT converter's
+pre-OTA telemetry-quarantine lifecycle; if the converter is not installed,
+that remains an independent firmware/HA consistency gate. Metering, ZCL
+reporting, calibration, cumulative energy and controlled load-to-zero
+still require **postflash** verification. The physical confirmation is NOT
+automatically inferred from MQTT relay state, cached 0 W, Hifi's name,
+or user preference not to measure. Unknown/attached load fails closed.
+
+The policy is checked again in the primitive OTA runner and supervised retry,
+and applies only to the exact custom PM board, never stock PM wrappers,
+other boards or the non-PM recovery gate. This is a new software-side
+alternative for the preflash load-safety proof, **not a hardware acceptance
+waiver**.
+
 ## Profile-driven campaign (preferred for future sessions)
 
 Read `skills/bseed-zigbee-ota/SKILL.md` first. Copy `docs/bseed_ota_profile.example.json` to a **private location outside this repository**, replace every placeholder with independently verified values and use a unique `workdir` for each campaign. Ensure `index_output` is inside the private LAN image-server root, not in git. The image file and index must be reachable by Zigbee2MQTT at their exact HTTP URLs; a profile alone does not start the HTTP server or back up a device.

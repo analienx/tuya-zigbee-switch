@@ -223,10 +223,11 @@ def arguments():
     p.add_argument('--expect-relay', choices=['ON', 'OFF'], required=True)
     p.add_argument('--relay-get-key', choices=['state','state_relay'], default='state')
     p.add_argument('--max-reported-watts', type=float, default=1.0)
+    p.add_argument('--pm-preflash-physical-unloaded', action='store_true', help='Exact custom PM board only: defer live metering to postflash; require physically unloaded attestation for flash')
     p.add_argument('--non-pm', action='store_true', help='Strict non-PM TS011F-BS Client exception; never use for PM devices')
     p.add_argument('--ts0726', action='store_true', help='Strict TS0726-3-BS Router exception (no metering hardware); never use for PM devices')
     p.add_argument('--hardware-evidence', help='Private exact-board recovery readback attestation, non-PM flash only')
-    p.add_argument('--confirm-load-unplugged', action='store_true', help='Non-PM flash only; operator has just verified no appliance attached')
+    p.add_argument('--confirm-load-unplugged', action='store_true', help='Operator has just physically verified no appliance attached; required for PM physical-proof flash')
     p.add_argument('--preflash-build')
     p.add_argument('--preflash-relay-physical-mode')
     p.add_argument('--timeout-seconds', type=int, default=2400)
@@ -266,12 +267,19 @@ def main():
                 raise ValueError('Runner tuple differs from canonical profile: ' + key)
         if args.non_pm != (campaign.get('non_pm') is True):
             raise ValueError('Runner board mode differs from canonical profile')
+        if args.pm_preflash_physical_unloaded != (campaign.get('pm_preflash_load_proof') == 'physically_unloaded'):
+            raise ValueError('Runner PM load proof differs from canonical profile')
         from bseed_socket_version_policy import split_manufacturer as _split_board
         if getattr(args, 'ts0726', False) != (_split_board(campaign.get('manufacturer', ''))[0] == 'iedhxgyi'):
             raise ValueError('Runner TS0726 mode differs from canonical profile')
         if args.non_pm and getattr(args, 'ts0726', False):
             raise ValueError('Runner metering exceptions are mutually exclusive')
         require_increasing(campaign)
+    if args.pm_preflash_physical_unloaded and not (args.manufacturer == 'b28wrpvx' and
+            args.model == 'TS011F-BS-PM' and not args.non_pm and not args.ts0726):
+        raise ValueError('Physical PM preflight requires exact custom BSEED PM board')
+    if args.mode == 'flash' and args.pm_preflash_physical_unloaded and not args.confirm_load_unplugged:
+        raise ValueError('PM physical-proof OTA requires explicit load-unplugged confirmation')
     cross_role = campaign is not None and campaign['preflash_role'] != campaign['postflash_role']
     source_profile = campaign
     if not (10 <= args.max_block_bytes <= 100):
@@ -293,8 +301,9 @@ def main():
                 args.preflash_relay_physical_mode != campaign.get('preflash_relay_physical_mode')):
             raise ValueError('Runner recovery inputs differ from canonical profile')
         recovery_gate(campaign, confirm_unloaded=args.confirm_load_unplugged)
-    elif args.hardware_evidence or args.confirm_load_unplugged:
-        raise ValueError('Non-PM hardware recovery flags are valid only for non-PM flash')
+    elif args.hardware_evidence or (args.confirm_load_unplugged and not (
+            args.mode == 'flash' and args.pm_preflash_physical_unloaded)):
+        raise ValueError('Hardware recovery evidence is non-PM-only; physical PM confirmation requires pinned flash')
     verify_image(args)
     work = Path(args.workdir); work.mkdir(parents=True, exist_ok=True)
     if args.mode == 'check':
@@ -461,7 +470,7 @@ def main():
                 raise AssertionError('Fresh target source firmware/role changed since source reconciliation')
 
         meter_input = relay
-        if campaign and campaign.get('require_pm') is True:
+        if campaign and campaign.get('require_pm') is True and not args.pm_preflash_physical_unloaded:
             # Force an actual PM ZCL read. A fresh relay GET containing cached
             # "power":0 is NOT fresh load evidence. The converter stamps raw
             # measurement arrivals, rather than unrelated composite updates.
@@ -478,13 +487,20 @@ def main():
             if state['pm_fresh'] is None:
                 raise AssertionError('No newly decoded ZCL activePower sample; cached PM state cannot authorize OTA')
             meter_input = {'power': state['pm_fresh']['power']}
-        power = validate_metering_preflight(meter_input, non_pm=args.non_pm, model=args.model,
-            manufacturer=args.manufacturer, role=args.role, max_reported_watts=args.max_reported_watts,
-            nonpm_router_transition=cross_role and args.role == 'Router', ts0726=getattr(args, 'ts0726', False))
+        if args.pm_preflash_physical_unloaded:
+            # No guessed zero watts. The flash-only human physical-unloaded
+            # attestation replaces live PM input; postflash metering is mandatory.
+            power = None
+            load_proof = 'physically_unloaded_confirmed' if args.mode == 'flash' else 'requires_physical_confirmation_at_flash'
+        else:
+            power = validate_metering_preflight(meter_input, non_pm=args.non_pm, model=args.model,
+                manufacturer=args.manufacturer, role=args.role, max_reported_watts=args.max_reported_watts,
+                nonpm_router_transition=cross_role and args.role == 'Router', ts0726=getattr(args, 'ts0726', False))
+            load_proof = 'fresh_pm' if campaign and campaign.get('require_pm') is True else 'board_specific_nonpm'
         if not (not (relay.get('update') or {}).get('state') == 'updating'):
             raise AssertionError('Device OTA already running')
         log('preflight_ok', {'relay': relay.get(args.relay_get_key), 'relay_get_key': args.relay_get_key,
-                             'reported_power_w': power, 'fresh_pm_sample': state['pm_fresh'],
+                             'load_proof': load_proof, 'reported_power_w': power, 'fresh_pm_sample': state['pm_fresh'],
                              'voltage_v': relay.get('voltage'), 'image_sha256': args.sha256, 'mode': args.mode})
         if args.mode == 'preflight': return
         if args.mode == 'check':

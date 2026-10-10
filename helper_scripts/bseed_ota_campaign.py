@@ -38,6 +38,13 @@ def validate_pm_mode(data):
         raise ValueError('Campaign manufacturer/model must be strings')
     custom = not manufacturer.startswith(('_TZ3000_', '_TZ3002_'))
     board = manufacturer.removeprefix('_TZ3000_').removeprefix('_TZ3002_')
+    proof = data.get('pm_preflash_load_proof', 'meter')
+    if proof not in ('meter', 'physically_unloaded'):
+        raise ValueError('PM preflash load proof must be meter or physically_unloaded')
+    if proof == 'physically_unloaded' and not (custom and board == 'b28wrpvx' and
+            model == 'TS011F-BS-PM' and data.get('require_pm') is True and
+            data.get('non_pm') is not True):
+        raise ValueError('Physical PM preflash load proof only for exact custom PM socket')
     if custom and board == 'b28wrpvx':
         if model != 'TS011F-BS-PM' or data.get('require_pm') is not True or data.get('non_pm') is True:
             raise ValueError('Custom PM campaign b28wrpvx/TS011F-BS-PM requires matching board/model,'
@@ -193,6 +200,10 @@ def runner_args(profile, mode, *, confirm_unloaded=False):
         cmd.extend(['--native-image', str(profile['native_image'])])
     if profile.get('relay_get_key'):
         cmd.extend(['--relay-get-key', profile['relay_get_key']])
+    if profile.get('pm_preflash_load_proof') == 'physically_unloaded':
+        cmd.append('--pm-preflash-physical-unloaded')
+        if mode == 'flash' and confirm_unloaded:
+            cmd.append('--confirm-load-unplugged')
     if profile.get('non_pm') is True:
         cmd.append('--non-pm')
         if mode == 'flash':
@@ -338,11 +349,15 @@ def main():
     parser.add_argument('--profile', required=True, help='Private JSON profile outside git')
     parser.add_argument('--mode', choices=['prepare', 'preflight', 'link-gate', 'qualify', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'reconcile-installed', 'reconcile-source', 'provision-pm', 'audit-pm', 'postflash', 'reinterview', 'status'], required=True)
     parser.add_argument('--confirm-ieee', help='Required for flash, transition, rejoin, metadata and provision-pm; must match profile IEEE exactly')
-    parser.add_argument('--confirm-load-unplugged', action='store_true', help='Non-PM flash only: operator just verified no physical appliance is connected')
+    parser.add_argument('--confirm-load-unplugged', action='store_true', help='Flash/transition: operator just physically verified no appliance attached; required for non-PM and PM physical-proof route')
     args = parser.parse_args()
     profile = load_profile(args.profile)
-    if args.confirm_load_unplugged and not (args.mode in ('flash', 'transition') and profile.get('non_pm') is True):
-        raise SystemExit('--confirm-load-unplugged is accepted only for explicitly targeted non-PM flash')
+    physical_pm = profile.get('require_pm') is True and profile.get('pm_preflash_load_proof') == 'physically_unloaded'
+    if args.confirm_load_unplugged and not (args.mode in ('flash', 'transition') and
+            (profile.get('non_pm') is True or physical_pm)):
+        raise SystemExit('--confirm-load-unplugged is only valid for non-PM or pinned PM physical-proof flash')
+    if args.mode in ('flash', 'transition') and physical_pm and not args.confirm_load_unplugged:
+        raise SystemExit('PM physical-proof flash requires fresh --confirm-load-unplugged attestation')
     if profile.get('require_pm') and profile['postflash_role'] == 'Router' and args.mode in ('flash','transition','rejoin'):
         if profile.get('force_test_transition') is True:
             if args.mode == 'flash':
@@ -513,8 +528,8 @@ def main():
         if profile.get('non_pm') is True:
             from bseed_nonpm_recovery_gate import verify_recovery
             verify_recovery(profile, confirm_unloaded=args.confirm_load_unplugged)
-        elif args.confirm_load_unplugged:
-            raise SystemExit('Load confirmation flag is only valid for non-PM flash')
+        elif args.confirm_load_unplugged and not physical_pm:
+            raise SystemExit('Load confirmation requires the explicit PM physical-proof route')
         if profile.get('require_pm') and profile['postflash_role'] == 'EndDevice':
             provision_cmd(profile, args.confirm_ieee, work / 'pm_prevalidated.json')
         print('EXPLICIT_FLASH_TARGET', profile['ieee'], profile['device'], flush=True)
