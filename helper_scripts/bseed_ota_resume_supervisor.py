@@ -513,7 +513,7 @@ def resume_transition(profile_path: Path, confirm_ieee: str, *,
     if profile["preflash_role"] == profile["postflash_role"]:
         raise ValueError("Resume supervisor is for cross-role transition campaigns")
     if (profile.get("non_pm") is True or profile.get("pm_preflash_load_proof") == "physically_unloaded") and not confirm_unloaded:
-        raise ValueError("Physical unloaded confirmation required for this transition")
+        raise ValueError("load-unplugged confirmation required for this transition")
 
     work = Path(profile["workdir"])
     work.mkdir(parents=True, exist_ok=True)
@@ -599,7 +599,7 @@ def resume_same_role(
     if profile["preflash_role"] != profile["postflash_role"]:
         raise ValueError("Same-role resume refuses a cross-role campaign")
     if (profile.get("non_pm") is True or profile.get("pm_preflash_load_proof") == "physically_unloaded") and not confirm_unloaded:
-        raise ValueError("Physical unloaded confirmation required for same-role resume")
+        raise ValueError("load-unplugged confirmation required for same-role resume")
     if max_attempts < 1:
         raise ValueError("max_attempts must be at least 1")
 
