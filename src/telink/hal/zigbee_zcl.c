@@ -239,7 +239,7 @@ static void af_rx_callback(void *arg) {
 #ifdef BSEED_MAINS_CLIENT
     telink_zigbee_hal_client_note_inbound();
 #endif
-#if ZB_ROUTER_ROLE
+#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
     telink_zigbee_hal_router_note_inbound();
 #endif
     zcl_rx_handler(arg);
