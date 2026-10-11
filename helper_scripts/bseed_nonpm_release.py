@@ -9,8 +9,8 @@ CONFIG = 'o1jzcxou;TS011F-BS;LC2;SB4u;RC3;ID2;M;'
 # Fresh shared version allocated by the canonical allocator on GitHub Actions.
 ROUTER = dict(role='Router', build='1.1.3-bseedr12', version=0x11023016, type=43555,
               artifact='forward.ota', board=BOARD, config=CONFIG, date=RELEASE_DATE)
-CLIENT = dict(role='EndDevice', build='1.1.3-bseedc9', version=0x11023016, type=65026,
-              artifact='forward.ota', board=BOARD, config=CONFIG, date=RELEASE_DATE)
+CLIENT = dict(role='EndDevice', build='1.1.3-bseedc10', version=0x11023017, type=65026,
+              artifact='forward.ota', board=BOARD, config=CONFIG, date='20261011')
 CANDIDATES = {'router': ROUTER, 'client': CLIENT}
 
 
@@ -25,7 +25,7 @@ def main():
     print(item['build'])
     print(hex(item['version']))
     print(item['version'])
-    print(RELEASE_DATE)
+    print(item['date'])
 
 
 if __name__ == '__main__':

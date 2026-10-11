@@ -6,8 +6,9 @@ import struct
 
 from bseed_ota_identity import IdentityError, parse_ota_header, require_embedded_string
 
-CLIENT = {'role': 'EndDevice', 'build': '1.2.5-bseedcli14',
-          'version': 0x12053019, 'type': 65024, 'artifact': 'forward.ota'}
+CLIENT = {'role': 'EndDevice', 'build': '1.2.5-bseedcli15',
+          'version': 0x1205301A, 'type': 65024, 'artifact': 'forward.ota',
+          'date': '20261011'}
 ROUTER = {'role': 'Router', 'build': '1.2.5-bseedr12',
           'version': 0x12053019, 'type': 43556, 'artifact': 'forward.ota'}
 CANDIDATES = {'client': CLIENT, 'router': ROUTER}
@@ -20,8 +21,10 @@ def validate_candidate_set():
     for item in CANDIDATES.values():
         if not item['build'].isascii() or not 1 <= len(item['build']) <= 16:
             raise IdentityError('candidate Basic build ID must fit 16 ASCII bytes')
-    if CLIENT['version'] != ROUTER['version']:
-        raise IdentityError('PM Client/Router candidates must share one native version')
+    # Router and Client are separate OTA image types. A Client-only recovery
+    # release must never force re-labeling immutable Router bytes.
+    if CLIENT['version'] <= ROUTER['version']:
+        raise IdentityError('new PM Client recovery version must advance')
     if CLIENT['type'] != 65024 or ROUTER['type'] != 43556:
         raise IdentityError('unexpected PM role image type')
 
@@ -72,7 +75,7 @@ def main():
     print(item['build'])
     print(hex(item['version']))
     print(item['version'])
-    print(RELEASE_DATE)
+    print(item.get('date', RELEASE_DATE))
 
 
 if __name__ == '__main__':

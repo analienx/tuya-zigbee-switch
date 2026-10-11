@@ -16,6 +16,7 @@ typedef struct {void (*handler)(void *); void *arg;} hal_task_t;
 #define RESPONSE_POLL_RATE 250u
 #define RET_OK 0
 static uint32_t rate, delay, calls, failures;
+static void client_health_recovery_tick(void) {}
 static bool joined = true;
 static bool zb_isDeviceJoinedNwk(void) {return joined;}
 static u8 zb_setPollRate(uint32_t r) {
