@@ -256,6 +256,51 @@ static void client_health_recovery_tick(void) {
 #endif
 
 #if ZB_ROUTER_ROLE
+/* A Router is allowed to remain JOINED despite no longer having a usable
+ * route to the trust center. Validate real bidirectional reachability with
+ * the vendor's supported ZDO Node Descriptor request to coordinator 0x0000.
+ * At most one outstanding request, every 6m plus stable IEEE stagger.
+ * Four actual request/response failures and 20m with no authenticated ZCL
+ * inbound are required before trying one secure, non-destructive rejoin.
+ * Silence alone never initiates recovery; a successful coordinator response
+ * or any authenticated inbound cancels the failure streak. */
+#define ROUTER_PROBE_INTERVAL_MS          (6u * 60u * 1000u)
+#define ROUTER_PROBE_DEADLINE_MS          (30u * 1000u)
+#define ROUTER_PROBE_FAILURE_THRESHOLD     4u
+#define ROUTER_QUIET_MIN_MS               (20u * 60u * 1000u)
+#define ROUTER_REJOIN_COOLDOWN_MS         (30u * 60u * 1000u)
+#define ROUTER_ONE_SHOT_DEADLINE_MS       (10u * 60u * 1000u)
+static bool     router_probe_initialized;
+static bool     router_probe_pending;
+static bool     router_one_shot_active;
+static bool     router_one_shot_attempted;
+static uint8_t  router_probe_failures;
+static uint32_t router_last_probe_ms;
+static uint32_t router_last_positive_ms;
+static uint32_t router_one_shot_ms;
+
+void telink_zigbee_hal_router_note_inbound(void) {
+    if (!router_probe_initialized)
+        return;
+    router_last_positive_ms = hal_millis();
+    router_probe_failures = 0;
+    router_probe_pending = false;
+}
+
+static void router_coordinator_node_desc_response(void *arg) {
+    if (!router_probe_pending || arg == NULL)
+        return;
+    zdo_zdpDataInd_t *ind = (zdo_zdpDataInd_t *)arg;
+    if (ind->length < sizeof(zdo_node_descript_resp_t))
+        return;
+    zdo_node_descript_resp_t *rsp = (zdo_node_descript_resp_t *)ind->zpdu;
+    if (rsp->status == ZDO_SUCCESS && rsp->nwk_addr_interest == 0x0000u) {
+        router_last_positive_ms = hal_millis();
+        router_probe_failures = 0;
+        router_probe_pending = false;
+    }
+}
+
 /* Last resort for an SDK rejoin/backoff whose ownership or radio task has
  * stalled beyond the SDK's normal bounded retry windows. This is not an
  * inference from a quiet but still-JOINED Router: such an inference requires
@@ -272,27 +317,112 @@ static bool router_recovery_timer_active;
 static bool router_reboot_scheduled;
 
 void telink_zigbee_hal_router_recovery_tick(void) {
-    if (zb_isDeviceJoinedNwk() || zb_isDeviceFactoryNew()) {
-        router_recovery_timer_active = false;
-        return;
-    }
-
     uint32_t now = hal_millis();
-    if (!router_recovery_timer_active) {
-        router_recovery_since_ms = now;
-        router_recovery_timer_active = true;
-        return;
-    }
-
     uint32_t stagger_ms =
         ((((uint32_t)g_zbMacPib.extAddress[1] << 8) |
           g_zbMacPib.extAddress[7]) % 120000u);
-    if (!router_reboot_scheduled &&
-        (uint32_t)(now - router_recovery_since_ms) >=
-            ROUTER_RECOVERY_STALL_MS + stagger_ms) {
-        router_reboot_scheduled = true;
-        printf("Router: network unavailable for 45m; controlled rescue reboot\r\n");
-        schedule_reboot(2000);
+
+    if (zb_isDeviceFactoryNew() || !zb_isDeviceJoinedNwk()) {
+        router_probe_initialized = false;
+        router_probe_pending = false;
+        router_one_shot_active = false;
+        if (zb_isDeviceFactoryNew()) {
+            router_recovery_timer_active = false;
+            return;
+        }
+        if (!router_recovery_timer_active) {
+            router_recovery_since_ms = now;
+            router_recovery_timer_active = true;
+            return;
+        }
+        if (!router_reboot_scheduled &&
+            (uint32_t)(now - router_recovery_since_ms) >=
+                ROUTER_RECOVERY_STALL_MS + stagger_ms) {
+            router_reboot_scheduled = true;
+            printf("Router: rejoin stalled for 45m; controlled rescue reboot\r\n");
+            schedule_reboot(2000);
+        }
+        return;
+    }
+
+    router_recovery_timer_active = false;
+    if (network_recovery_state != TELINK_NETWORK_RECOVERY_IDLE ||
+        telink_zigbee_hal_router_ota_in_progress()) {
+        /* An OTA transfer or SDK backoff owns network operations. Do not
+         * overlap ZDO probes or active rejoin while it is working. */
+        router_probe_pending = false;
+        router_probe_failures = 0;
+        router_probe_initialized = false;
+        return;
+    }
+
+    if (!router_probe_initialized) {
+        router_probe_initialized = true;
+        router_last_probe_ms = now;
+        router_last_positive_ms = now;
+        return;
+    }
+
+    if (router_one_shot_active) {
+        if ((uint32_t)(now - router_one_shot_ms) <
+            ROUTER_ONE_SHOT_DEADLINE_MS)
+            return;
+        /* Never overlap a request whose completion has not been reported.
+         * Keep the cooldown; probes may resume but no second one-shot starts
+         * until after it, regardless of the vendor callback behavior. */
+        router_one_shot_active = false;
+        firmware_health_increment(&firmware_health.rejoin_failure);
+        printf("Router: missing one-shot completion; cooldown\r\n");
+    }
+
+    if (router_probe_pending &&
+        (uint32_t)(now - router_last_probe_ms) >= ROUTER_PROBE_DEADLINE_MS) {
+        router_probe_pending = false;
+        if (router_probe_failures < UINT8_MAX)
+            router_probe_failures++;
+    }
+
+    if (router_probe_failures >= ROUTER_PROBE_FAILURE_THRESHOLD &&
+        (uint32_t)(now - router_last_positive_ms) >= ROUTER_QUIET_MIN_MS &&
+        (!router_one_shot_attempted ||
+         (uint32_t)(now - router_one_shot_ms) >=
+             ROUTER_REJOIN_COOLDOWN_MS)) {
+        /* Require a verified failure history, never infer link loss merely
+         * from the absence of application traffic. No BDB steering, factory
+         * reset, counter rollback, channel changes or parent-based logic. */
+        router_one_shot_attempted = true;
+        router_one_shot_active = true;
+        router_one_shot_ms = now;
+        router_probe_pending = false;
+        firmware_health_increment(&firmware_health.rejoin_start);
+        zb_rejoinSecModeSet(REJOIN_SECURITY);
+        u8 status = zb_rejoinReq(zb_apsChannelMaskGet(), g_bdbAttrs.scanDuration);
+        if (status != RET_OK) {
+            router_one_shot_active = false;
+            firmware_health_increment(&firmware_health.rejoin_failure);
+            printf("Router: secure one-shot rejoin rejected: %u\r\n", status);
+        } else {
+            printf("Router: coordinator unreachable; secure one-shot rejoin\r\n");
+        }
+        return;
+    }
+
+    if (!router_probe_pending &&
+        (uint32_t)(now - router_last_probe_ms) >=
+            ROUTER_PROBE_INTERVAL_MS + stagger_ms) {
+        zdo_node_descriptor_req_t req;
+        u8 sequence = 0;
+        req.nwk_addr_interest = 0x0000u;
+        router_last_probe_ms = now;
+        zdo_status_t status = zb_zdoNodeDescReq(0x0000u, &req, &sequence,
+                                                router_coordinator_node_desc_response);
+        if (status == ZDO_SUCCESS) {
+            router_probe_pending = true;
+        } else {
+            if (router_probe_failures < UINT8_MAX)
+                router_probe_failures++;
+            printf("Router: coordinator ZDO probe rejected: %u\r\n", status);
+        }
     }
 }
 #endif
@@ -416,6 +546,10 @@ void bdb_init_callback(u8 status, u8 joinedNetwork) {
 
 void bdb_commissioning_callback(u8 status, void *arg) {
     printf("BDB commissioning callback, status: %d\r\n", status);
+#if ZB_ROUTER_ROLE
+    if (status != BDB_COMMISSION_STA_IN_PROGRESS)
+        router_one_shot_active = false;
+#endif
 #ifdef BSEED_MAINS_CLIENT
     /* A one-shot rejoin has a terminal BDB completion. Do not confuse this
     * with the SDK-owned, ongoing rejoin-with-backoff recovery sequence. */
