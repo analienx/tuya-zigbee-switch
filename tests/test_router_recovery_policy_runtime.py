@@ -33,6 +33,31 @@ int main(void) {
                                         now - min_20m + 1u, min_20m));
     CHECK(bseed_router_timeout_evidence(4u, 4u, now,
                                        now - min_20m, min_20m));
+    /* Route repair first: no rejoin under 4 confirmed failures, no instant
+     * scan during neighbor activity, a full 15-minute fleet-wide stagger. */
+    CHECK(!bseed_router_rejoin_eligible(false, false, now,
+          now - min_60m, now - 1000u, min_20m, min_60m, min_20m,
+          15u * 60u * 1000u));
+    CHECK(!bseed_router_rejoin_eligible(true, true, now,
+          now - min_60m - 1u, now - 1000u, min_20m, min_60m, min_20m, 0u));
+    CHECK(!bseed_router_rejoin_eligible(true, false, now,
+          now - min_60m - 1u, now - 1000u, min_20m, min_60m, min_20m,
+          15u * 60u * 1000u));
+    CHECK(bseed_router_rejoin_eligible(true, false, now,
+          now - min_60m - 15u * 60u * 1000u, now - 1000u,
+          min_20m, min_60m, min_20m, 15u * 60u * 1000u));
+    CHECK(!bseed_router_rejoin_eligible(true, false, now,
+          now - min_20m, now - 30u * 60u * 1000u,
+          min_20m, min_60m, min_20m, 15u * 60u * 1000u));
+    CHECK(bseed_router_rejoin_eligible(true, false, now,
+          now - min_20m - 15u * 60u * 1000u,
+          now - 30u * 60u * 1000u, min_20m, min_60m,
+          min_20m, 15u * 60u * 1000u));
+    CHECK(bseed_router_rejoin_eligible(true, false, 1000u,
+          (uint32_t)(1000u - min_20m - 15u * 60u * 1000u),
+          (uint32_t)(1000u - min_60m), min_20m, min_60m,
+          min_20m, 15u * 60u * 1000u));
+
     CHECK(!bseed_router_queue_stall_evidence(7u, 8u, now,
                                             now - min_60m, min_60m));
     CHECK(!bseed_router_queue_stall_evidence(8u, 8u, now,
@@ -90,3 +115,4 @@ def test_real_telink_driver_uses_verified_policy():
     assert "bseed_router_timeout_evidence(" in source
     assert "bseed_router_queue_stall_evidence(" in source
     assert "bseed_router_joined_rescue_eligible(" in source
+    assert "bseed_router_rejoin_eligible(" in source
