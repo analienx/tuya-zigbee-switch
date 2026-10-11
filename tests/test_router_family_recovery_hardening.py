@@ -44,7 +44,9 @@ def test_telink_router_rescue_never_resets_factory_new_or_joined():
     body = source.split("void telink_zigbee_hal_router_recovery_tick(void)", 1)[
         1
     ].split("#endif", 1)[0]
-    assert "zb_isDeviceJoinedNwk() || zb_isDeviceFactoryNew()" in body
+    assert "if (zb_isDeviceFactoryNew() || !zb_isDeviceJoinedNwk())" in body
+    assert "if (zb_isDeviceFactoryNew() ||" in body
+    assert "telink_zigbee_hal_router_ota_in_progress()" in body
     assert "ROUTER_RECOVERY_STALL_MS" in body
     assert "router_reboot_scheduled" in body
     assert "schedule_reboot(2000)" in body
@@ -56,8 +58,8 @@ def test_telink_router_rescue_never_resets_factory_new_or_joined():
 def test_telink_superloop_services_router_watchdog_without_clients():
     main = TELINK_MAIN.read_text(encoding="utf-8")
     header = TELINK_HEADER.read_text(encoding="utf-8")
-    assert "#if ZB_ROUTER_ROLE\n        telink_zigbee_hal_router_recovery_tick();\n#endif" in main
-    assert "#if ZB_ROUTER_ROLE" in header
+    assert "#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE\n        telink_zigbee_hal_router_recovery_tick();\n#endif" in main
+    assert "#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE" in header
     assert "void telink_zigbee_hal_router_recovery_tick(void);" in header
 
 
@@ -98,6 +100,8 @@ def test_router_recovery_pauses_during_ota_and_expires_stale_ownership():
     network = TELINK.read_text(encoding="utf-8")
     ota = Path("src/telink/hal/zigbee_ota.c").read_text(encoding="utf-8")
     assert "telink_zigbee_hal_router_ota_in_progress()" in network
+    assert "IMAGE_UPGRADE_STATUS_NORMAL" in ota
+    assert "zcl_attr_imageUpgradeStatus != IMAGE_UPGRADE_STATUS_NORMAL" in ota
     assert "ROUTER_OTA_ACTIVITY_LEASE_MS" in ota
     assert "router_ota_in_progress = true" in ota
     assert "router_ota_in_progress = false" in ota
@@ -118,3 +122,56 @@ def test_ts0726_has_explicit_distinct_candidate_and_exact_sha_ci():
     assert "BSEED_TS0726_RELEASE_CHANNEL: router-recovery-candidate" in ci
     assert 'test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"' in ci
     assert "bseed_ota_identity.py gate" in ci
+
+
+def test_inbound_neighbor_zcl_does_not_spoof_coordinator_reachability():
+    source = TELINK.read_text(encoding="utf-8")
+    inbound = source.split("void telink_zigbee_hal_router_note_inbound(void) {", 1)[1].split(
+        "static void router_coordinator_node_desc_response", 1
+    )[0]
+    assert "router_last_inbound_ms = hal_millis()" in inbound
+    assert "router_probe_failures = 0" not in inbound
+    assert "router_probe_pending = false" not in inbound
+    assert "router_last_positive_ms = hal_millis()" not in inbound
+    assert "router_last_positive_ms = hal_millis()" in source.split(
+        "static void router_coordinator_node_desc_response", 1
+    )[1].split("/* Last resort", 1)[0]
+
+
+def test_isolation_rescue_requires_many_failed_probes_and_earlier_rejoins():
+    source = TELINK.read_text(encoding="utf-8")
+    method = source.split("void telink_zigbee_hal_router_recovery_tick(void) {", 1)[1].split(
+        "#endif", 1
+    )[0]
+    assert "ROUTER_ISOLATED_REBOOT_MS" in method
+    assert "ROUTER_INBOUND_GRACE_MS" in method
+    assert "router_one_shot_attempts >= ROUTER_MIN_REJOIN_ATTEMPTS" in method
+    assert "router_last_inbound_ms" in method
+    assert "router_reboot_scheduled = true" in method
+    assert "router_one_shot_active" in method
+    assert "repeated_response_timeouts || stuck_request_queue" in method
+
+
+def test_sdk_joins_rearm_device_announce_even_without_join_state_edge():
+    net = TELINK.read_text(encoding="utf-8")
+    app = APP.read_text(encoding="utf-8")
+    header = Path("src/app.h").read_text(encoding="utf-8")
+    callback = net.split("void bdb_commissioning_callback(u8 status, void *arg) {", 1)[1]
+    success = callback.split("case BDB_COMMISSION_STA_SUCCESS:", 1)[1].split("break;", 1)[0]
+    assert "app_rearm_network_announcement();" in success
+    assert "void app_rearm_network_announcement(void)" in app
+    assert "announce_retry_pending = false" in app.split(
+        "void app_rearm_network_announcement(void)", 1
+    )[1].split("}", 1)[0]
+    assert "void app_rearm_network_announcement(void);" in header
+
+
+def test_router_watchdog_never_instruments_coordinator_or_client_role():
+    for path in (TELINK, TELINK_HEADER, TELINK_MAIN,
+                 Path("src/telink/hal/zigbee_ota.c"),
+                 Path("src/telink/hal/zigbee_zcl.c")):
+        source = path.read_text(encoding="utf-8")
+        assert "#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE" in source
+    assert "#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE" in TELINK.read_text(
+        encoding="utf-8"
+    )
