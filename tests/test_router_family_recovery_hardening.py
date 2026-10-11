@@ -69,13 +69,14 @@ def test_routers_probe_real_coordinator_reachability_before_secure_rejoin():
     assert "router_coordinator_node_desc_response" in source
     assert "rsp->status == ZDO_SUCCESS" in source
     assert "rsp->nwk_addr_interest == 0x0000u" in source
+    assert "ind->src_addr == 0x0000u" in source
     assert "ROUTER_PROBE_FAILURE_THRESHOLD" in source
     assert "ROUTER_PROBE_REJECT_THRESHOLD" in source
     assert "ROUTER_REJECT_QUIET_MS" in source
     assert "router_probe_sequence" in source
     assert "rsp->seq_num == router_probe_sequence" in source
     assert "ROUTER_QUIET_MIN_MS" in source
-    assert "router_probe_failures >= ROUTER_PROBE_FAILURE_THRESHOLD" in source
+    assert "bseed_router_timeout_evidence(" in source
     assert "ROUTER_REJOIN_COOLDOWN_MS" in source
     assert "zb_rejoinSecModeSet(REJOIN_SECURITY)" in source
     assert "zb_rejoinReq(zb_apsChannelMaskGet()" in source
@@ -145,7 +146,8 @@ def test_isolation_rescue_requires_many_failed_probes_and_earlier_rejoins():
     )[0]
     assert "ROUTER_ISOLATED_REBOOT_MS" in method
     assert "ROUTER_INBOUND_GRACE_MS" in method
-    assert "router_one_shot_attempts >= ROUTER_MIN_REJOIN_ATTEMPTS" in method
+    assert "bseed_router_joined_rescue_eligible(" in method
+    assert "ROUTER_MIN_REJOIN_ATTEMPTS" in method
     assert "router_last_inbound_ms" in method
     assert "router_reboot_scheduled = true" in method
     assert "router_one_shot_active" in method
