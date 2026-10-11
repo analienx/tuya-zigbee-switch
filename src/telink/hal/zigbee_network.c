@@ -11,6 +11,7 @@
 #include "hal/tasks.h"
 #include "hal/timer.h"
 #include "hal/firmware_health.h"
+#include "device_config/reset.h"
 #include "hal/zigbee.h"
 #include "telink_zigbee_hal.h"
 #include "version_cfg.h"
@@ -252,6 +253,48 @@ static void client_health_recovery_tick(void) {
     }
 }
 
+#endif
+
+#if ZB_ROUTER_ROLE
+/* Last resort for an SDK rejoin/backoff whose ownership or radio task has
+ * stalled beyond the SDK's normal bounded retry windows. This is not an
+ * inference from a quiet but still-JOINED Router: such an inference requires
+ * independent, affirmative delivery-failure evidence.
+ *
+ * A controlled reboot retains NVM, network security material, bindings and
+ * relay state. It does not leave or factory-reset the network. Spread the
+ * delay by the stable IEEE bytes to avoid simultaneous mesh-wide restarts.
+ * One rescue maximum per boot; a genuine prolonged coordinator outage can
+ * never cause a rapid reset loop. */
+#define ROUTER_RECOVERY_STALL_MS (45u * 60u * 1000u)
+static uint32_t router_recovery_since_ms;
+static bool router_recovery_timer_active;
+static bool router_reboot_scheduled;
+
+void telink_zigbee_hal_router_recovery_tick(void) {
+    if (zb_isDeviceJoinedNwk() || zb_isDeviceFactoryNew()) {
+        router_recovery_timer_active = false;
+        return;
+    }
+
+    uint32_t now = hal_millis();
+    if (!router_recovery_timer_active) {
+        router_recovery_since_ms = now;
+        router_recovery_timer_active = true;
+        return;
+    }
+
+    uint32_t stagger_ms =
+        ((((uint32_t)g_zbMacPib.extAddress[1] << 8) |
+          g_zbMacPib.extAddress[7]) % 120000u);
+    if (!router_reboot_scheduled &&
+        (uint32_t)(now - router_recovery_since_ms) >=
+            ROUTER_RECOVERY_STALL_MS + stagger_ms) {
+        router_reboot_scheduled = true;
+        printf("Router: network unavailable for 45m; controlled rescue reboot\r\n");
+        schedule_reboot(2000);
+    }
+}
 #endif
 
 // Telink ZDO callbacks
