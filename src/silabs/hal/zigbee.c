@@ -254,6 +254,14 @@ static uint32_t silabs_router_last_good_ms;
 static uint32_t silabs_router_last_rejoin_ms;
 
 void silabs_router_recovery_tick(void) {
+    uint32_t now = hal_millis();
+    if (silabs_router_rejoin_pending &&
+        (uint32_t)(now - silabs_router_last_rejoin_ms) >=
+            SILABS_ROUTER_ORPHAN_MS) {
+        silabs_router_rejoin_pending = false;
+        silabs_router_rejoin_orphaned = true;
+        printf("Silabs Router: SDK rejoin completion missing; safe-hold\n");
+    }
     sl_zigbee_node_type_t role;
     if (sl_zigbee_af_get_node_type(&role) != SL_STATUS_OK ||
         role != SL_ZIGBEE_ROUTER ||
@@ -264,7 +272,6 @@ void silabs_router_recovery_tick(void) {
         return;
     }
 
-    uint32_t now = hal_millis();
     /* Deterministically stagger scans; fixed, stable EUI avoids synchronized
      * retries in a large Router mesh. */
     uint8_t eui[8] = {0};
@@ -363,7 +370,9 @@ hal_zigbee_network_status_t hal_zigbee_get_network_status() {
 
     if (ns == SL_ZIGBEE_JOINED_NETWORK) {
         return HAL_ZIGBEE_NETWORK_JOINED;
-    } else if (ns == SL_ZIGBEE_JOINING_NETWORK || network_steering_in_progress) {
+    } else if (ns == SL_ZIGBEE_JOINING_NETWORK ||
+               network_steering_in_progress || silabs_router_rejoin_pending ||
+               silabs_router_rejoin_orphaned) {
         return HAL_ZIGBEE_NETWORK_JOINING;
     } else {
         return HAL_ZIGBEE_NETWORK_NOT_JOINED;
@@ -394,7 +403,8 @@ void sl_zigbee_af_stack_status_cb(sl_status_t status) {
         silabs_router_probe_initialized = false;
         app_rearm_network_announcement();
     } else if (status == SL_STATUS_NETWORK_DOWN) {
-        silabs_router_rejoin_pending = false;
+        /* An encrypted one-shot intentionally takes the stack DOWN first.
+         * Keep ownership until subsequent NETWORK_UP or bounded timeout. */
         silabs_router_probe_initialized = false;
     }
     notify_network_status_change();
@@ -408,7 +418,8 @@ void hal_zigbee_start_network_steering() {
     /* On a joined Router, network steering opens the network for joining;
      * it is NOT a connectivity probe or route repair operation. */
     if (sl_zigbee_af_network_state() == SL_ZIGBEE_JOINED_NETWORK ||
-        network_steering_in_progress) {
+        network_steering_in_progress || silabs_router_rejoin_pending ||
+        silabs_router_rejoin_orphaned) {
         return;
     }
 
