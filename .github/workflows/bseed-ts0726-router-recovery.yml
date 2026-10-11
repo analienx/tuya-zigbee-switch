@@ -65,7 +65,10 @@ jobs:
               'image type': manifest['otaHeader']['imageType'] == 45577,
               'stock wrapper payload': manifest['stockConversion']['payloadFromByte56Identical'] is True,
           }
-          assert all(checks.values()), checks
+          failures = [name for name, passed in checks.items() if not passed]
+          if failures:
+              raise SystemExit('TS0726 Router recovery identity refused: ' +
+                               ', '.join(failures))
           print('Exact-head TS0726 Router recovery identity and payload verified')
           PY
       - name: Upload isolated evidence; do not publish or flash
