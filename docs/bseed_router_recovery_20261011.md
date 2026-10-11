@@ -52,26 +52,47 @@ All Telink Routers share `src/telink/hal/zigbee_network.c`; no per-board fork.
   Time an unanswered request out after 30 seconds. Track queue or SDK
   request rejections separately: require at least eight consecutive rejected
   requests plus 60 minutes without positive inbound before recovery.
-- Any incoming authenticated application ZCL or successful coordinator ZDO
-  response resets the failure streak and records positive evidence.
-- After at least **four failed probes** and **20 minutes without any positive
-  inbound evidence**, request one secure ZDO rejoin using the same saved
-  channel mask and security (no factory reset, no BDB network steering).
-- The one-shot is protected by a 10-minute callback deadline and a 30-minute
-  cooldown; ordinary SDK-owned `zb_rejoinReqWithBackOff` is never overlapped.
-- During active OTA, both probes and rejoin are suppressed. If the SDK loses
-  every OTA completion callback, OTA ownership expires after two hours rather
-  than suppressing automatic recovery indefinitely. An OTA over two hours
-  remains a specific hardware canary case.
+- Only a validated coordinator Node Descriptor response resets the
+  coordinator-probe failure history. Neighbor-origin application ZCL updates
+  **separate local-traffic evidence**; it must not make an unreachable trust
+  center look reachable. Coordinator responses must match source 0x0000,
+  request sequence, interest address and successful descriptor result.
+- After at least **four unanswered probes** and **20 minutes without a
+  successful coordinator response**, consider one secure ZDO rejoin using
+  the saved channel mask and security (no factory reset or BDB steering).
+  Eight consecutive immediate SDK ZDO request rejections require a stronger
+  60-minute coordinator-silence condition.
+- The one-shot owns Zigbee recovery even across a temporary NOT_JOINED
+  transition; ordinary SDK-owned `zb_rejoinReqWithBackOff` cannot overlap.
+  On a missing terminal callback at 10 minutes the one-shot becomes
+  **orphaned**, blocking additional rejoin launches; a separate bounded
+  software-rescue path is used if the node stays isolated.
+- The one-shot has a 30-minute retry cooldown after normal completion.
+  A continuously joined Router remains eligible for a *single* last-resort
+  checkpointed software reboot only after **3 hours without coordinator
+  success, at least 90 minutes without neighbor ZCL, and repeated confirmed
+  probe failures and/or orphaned SDK recovery**. A 15-minute per-router
+  reboot stagger prevents synchronized restarts.
+- During an active OTA, probes, rejoin and rescue are suppressed. Two-hour
+  callback lease expiry may clear stale ownership **only if the Telink SDK
+  itself reports NORMAL OTA status**; it cannot interrupt a genuine active or
+  paused transfer.
 - When a previously joined Telink Router is continuously NOT_JOINED for
   45 minutes plus an independent 0–15-minute mesh-wide stagger, it
-  schedules **one per boot** controlled, metering-checkpointed
+  schedules a **single** controlled, metering-checkpointed
   software reboot per boot if not in OTA; network keys, binding state, IEEE
   address, Zigbee membership NVM and relay state are not deliberately cleared.
   This is a last resort, **not** the response to ordinary route errors.
 - All roles re-arm Device Announce after observed unjoin/rejoin and retry
-  rejected requests every 5s. Silicon Labs steering start failures clear
-  their state and are retried at a bounded rate.
+  rejected enqueue requests every 5s. Both Telink and Silicon Labs have
+  an explicit SDK-confirmed join-epoch hook, covering rejoin without an
+  observable NOT_JOINED interval. Silicon Labs rejected or ambiguous
+  steering completions are cooled down before retrying.
+- The Router recovery watchdog is excluded from Telink coordinators. The
+  existing coordinator `parentInfo`, always-on radio and power descriptors
+  remain intact. Silicon Labs **joined-but-isolated** route-repair is not
+  implemented by this Telink-specific candidate and remains a separate
+  release blocker for any Silicon Labs deployment.
 
 ## Candidate identities (not published)
 
@@ -89,6 +110,8 @@ firmware binaries and OTA indices remain untouched.
 ## Offline and hardware acceptance gates
 
 **Offline:** exact candidate SHA on GitHub-hosted Actions only; test/lint,
+native C policy threshold and 32-bit timer-wrap tests, join/rejoin callback
+fault injection, no-overlap/role/preprocessor contract guards,
 pinned TC32 builds for PM and non-PM; both PM and non-PM Router/Client role
 matrices; isolated TS0726 Router recovery artifact; OTA embedded Basic identity,
 header, deterministic hashes, canonical release allocation, no old tuple relabel
