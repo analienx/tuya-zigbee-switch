@@ -9,7 +9,7 @@ import shutil
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-POLICY = ROOT / "src/telink/hal/router_recovery_policy.h"
+POLICY = ROOT / "src/hal/router_recovery_policy.h"
 NETWORK = ROOT / "src/telink/hal/zigbee_network.c"
 
 PROGRAM = r"""
