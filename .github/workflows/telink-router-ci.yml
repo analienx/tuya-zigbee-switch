@@ -149,7 +149,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "${{ needs.bseed-ts011f-router.result }}" = "success"
+          test "${{ needs['bseed-ts011f-router'].result }}" = "success"
 
       - name: Checkout exact source
         uses: actions/checkout@v4
