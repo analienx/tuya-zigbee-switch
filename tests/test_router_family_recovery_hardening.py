@@ -199,3 +199,40 @@ def test_existing_coordinator_parent_and_rx_on_idle_contract_is_unchanged():
     assert "g_zbNIB.parentInfo = MAC_DATA_POLL_KEEPALIVE_BIT" in init
     assert "#if ZB_ROUTER_ROLE || defined(BSEED_MAINS_CLIENT)" in init
     assert "af_nodeDescRxOnWhenIdleUpdate(1)" in init
+
+
+def test_router_one_shot_retains_sdk_ownership_across_transient_not_joined():
+    source = TELINK.read_text(encoding="utf-8")
+    tick = source.split("void telink_zigbee_hal_router_recovery_tick(void) {", 1)[1].split(
+        "// Telink ZDO callbacks", 1
+    )[0]
+    lost = tick.split("if (zb_isDeviceFactoryNew() || !zb_isDeviceJoinedNwk())", 1)[1].split(
+        "router_recovery_timer_active = false;", 1
+    )[0]
+    assert "router_one_shot_stalled = true" in lost
+    assert "ROUTER_ONE_SHOT_DEADLINE_MS" in lost
+    status = source.split(
+        "hal_zigbee_network_status_t hal_zigbee_get_network_status(void)", 1
+    )[1].split("void hal_register_on_network_status_change_callback", 1)[0]
+    assert "router_one_shot_active || router_one_shot_stalled" in status
+    assert "return HAL_ZIGBEE_NETWORK_JOINING" in status
+    steering = source.split("void hal_zigbee_start_network_steering(void) {", 1)[1]
+    assert "if (router_one_shot_active || router_one_shot_stalled)" in steering
+    assert steering.index("router_one_shot_stalled") < steering.index(
+        "zb_rejoinReqWithBackOff" if "zb_rejoinReqWithBackOff" in steering else
+        "start_rejoin_with_backoff()"
+    )
+    callback = source.split("void bdb_commissioning_callback(u8 status, void *arg) {", 1)[1]
+    assert "if (status != BDB_COMMISSION_STA_IN_PROGRESS)" in callback
+    assert "router_one_shot_stalled = false" in callback
+
+
+def test_orphaned_one_shot_cannot_launch_another_rejoin():
+    source = TELINK.read_text(encoding="utf-8")
+    method = source.split("void telink_zigbee_hal_router_recovery_tick(void) {", 1)[1].split(
+        "// Telink ZDO callbacks", 1
+    )[0]
+    assert "if (!router_one_shot_stalled &&" in method
+    assert "router_one_shot_stalled ? ROUTER_MIN_REJOIN_ATTEMPTS" in method
+    assert "ROUTER_INBOUND_GRACE_MS" in method
+    assert "router_probe_initialized = false" in method
