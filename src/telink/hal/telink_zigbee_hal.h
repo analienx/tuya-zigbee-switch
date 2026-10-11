@@ -17,7 +17,7 @@
 
 // Network module functions (implemented in zigbee_network.c)
 void telink_zigbee_hal_network_init(void);
-#if ZB_ROUTER_ROLE
+#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
 /* Periodic last-resort recovery for a non-factory-new Router stuck unjoined. */
 void telink_zigbee_hal_router_recovery_tick(void);
 void telink_zigbee_hal_router_note_inbound(void);
