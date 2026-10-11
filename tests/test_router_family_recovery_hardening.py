@@ -259,3 +259,44 @@ def test_route_repair_precedes_disruptive_secure_rejoin():
     assert "status != BDB_COMMISSION_STA_IN_PROGRESS" not in terminal.split(
         "#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE", 1
     )[1].split("#endif", 1)[0]
+
+
+def test_silabs_router_coordinator_probe_and_encrypted_rejoin_are_wired():
+    source = SILABS.read_text(encoding="utf-8")
+    app = Path("src/silabs/main.c").read_text(encoding="utf-8")
+    assert "silabs_router_recovery_tick();" in app
+    assert "sl_zigbee_af_get_node_type(&role)" in source
+    assert "role != SL_ZIGBEE_ROUTER" in source
+    assert "sl_zigbee_node_descriptor_request(" in source
+    assert "SL_ZIGBEE_APS_OPTION_ENABLE_ROUTE_DISCOVERY" in source
+    assert "sl_zigbee_get_last_stack_zig_dev_request_sequence()" in source
+    assert "sl_zigbee_af_pre_zdo_message_received_cb(" in source
+    assert "source == 0x0000u" in source
+    assert "aps->clusterId == 0x8002u" in source
+    assert "message[0] == silabs_router_probe_sequence" in source
+    assert "bseed_router_timeout_evidence(" in source
+    assert "bseed_router_rejoin_eligible(" in source
+    assert "sl_zigbee_find_and_rejoin_network(" in source
+    assert "true, (uint32_t)1u << channel" in source
+    assert "SL_ZIGBEE_DEVICE_TYPE_UNCHANGED" in source
+    assert "silabs_router_rejoin_orphaned" in source
+    assert "silabs_router_rejoin_pending" in source
+    assert "silabs_router_ota_transfer_seen" in source
+    assert "cmd->commandId == 0x05u" in source
+    assert "sl_zigbee_permit_joining(" not in source
+
+
+def test_persistent_router_budget_is_required_before_both_rescue_paths():
+    network = TELINK.read_text(encoding="utf-8")
+    budget = Path("src/telink/hal/router_recovery_budget.c").read_text(encoding="utf-8")
+    items = Path("src/device_config/nvm_items.h").read_text(encoding="utf-8")
+    make = Path("src/telink/Makefile").read_text(encoding="utf-8")
+    assert network.count("bseed_router_rescue_budget_consume()") == 2
+    assert "bseed_router_rescue_budget_note_good_coordinator(" in network
+    assert "bseed_router_rescue_budget_note_failure();" in network
+    assert "#define NV_ITEM_ROUTER_RESCUE_BUDGET    70" in items
+    assert "router_recovery_budget.c" in make
+    assert "BSEED_RESCUE_MAX 2u" in budget
+    assert "BSEED_RESCUE_GOOD_REPLIES 24u" in budget
+    assert "12u * 60u * 60u" in budget
+    assert "hal_nvm_read(" in budget and "hal_nvm_write(" in budget
