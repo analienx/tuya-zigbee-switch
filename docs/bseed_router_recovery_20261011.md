@@ -51,17 +51,20 @@ All Telink Routers share `src/telink/hal/zigbee_network.c`; no per-board fork.
   Accept only a complete response with SUCCESS and coordinator address.
   Time an unanswered request out after 30 seconds. Track queue or SDK
   request rejections separately: require at least eight consecutive rejected
-  requests plus 60 minutes without positive inbound before recovery.
+  requests plus 60 minutes without a successful coordinator reply before
+  recovery.
 - Only a validated coordinator Node Descriptor response resets the
   coordinator-probe failure history. Neighbor-origin application ZCL updates
   **separate local-traffic evidence**; it must not make an unreachable trust
   center look reachable. Coordinator responses must match source 0x0000,
   request sequence, interest address and successful descriptor result.
 - After at least **four unanswered probes** and **20 minutes without a
-  successful coordinator response**, consider one secure ZDO rejoin using
-  the saved channel mask and security (no factory reset or BDB steering).
-  Eight consecutive immediate SDK ZDO request rejections require a stronger
-  60-minute coordinator-silence condition.
+  successful coordinator response** (or **60 minutes if there is recent
+  inbound neighbor traffic**), consider a secure ZDO rejoin using the saved
+  channel mask and security (no factory reset or BDB steering). Actual
+  rejoin is further staggered by 0–15 minutes. Eight consecutive immediate
+  SDK ZDO request rejections require a stronger 60-minute coordinator-silence
+  condition and the same per-router stagger.
 - The one-shot owns Zigbee recovery even across a temporary NOT_JOINED
   transition; ordinary SDK-owned `zb_rejoinReqWithBackOff` cannot overlap.
   On a missing terminal callback at 10 minutes the one-shot becomes
@@ -93,6 +96,62 @@ All Telink Routers share `src/telink/hal/zigbee_network.c`; no per-board fork.
   remain intact. Silicon Labs **joined-but-isolated** route-repair is not
   implemented by this Telink-specific candidate and remains a separate
   release blocker for any Silicon Labs deployment.
+
+## Best-practices alignment — independent 11 Oct review
+
+Primary references: [Silicon Labs Zigbee Networking Concepts / route repair](https://docs.silabs.com/zigbee/8.2.3/zigbee-concepts/networking-concepts),
+[Silicon Labs Zigbee Standard Security / rejoin](https://docs.silabs.com/zigbee/8.2.1/zigbee-security/03-standard-security),
+[Silicon Labs Source Routing](https://docs.silabs.com/zigbee/8.2.0/zigbee-stack-api/source-route),
+and pinned [Telink 3.7.2.0 SDK APIs](https://github.com/telink-semi/telink_zigbee_sdk/blob/master/tl_zigbee_sdk/stack/zigbee/zbapi/zb_api.h).
+
+1. **Route discovery and repair before rejoin.** APS/NWK route discovery is the
+   normal reaction when a unicast cannot reach its destination. The 6m ZDO
+   coordinator request is a low-rate real bidirectional exchange using the
+   stack's native routing mechanism and can refresh reachability. Four timed-out
+   exchanges or a sustained ZDO queue failure are prerequisite evidence, not
+   a one-off `NWK_NO_ROUTE` alarm. If the Router is **still servicing
+   neighbors**, require **60 minutes coordinator silence** instead of 20.
+   Add a **0–15-minute per-IEEE stagger to actual secure rejoin** (not just
+   the ZDO probe or last-resort reboot). Both safeguards reduce churn during
+   coordinator or RF outages on a mesh with 60+ Routers.
+2. **Source-route asymmetry is an independent hazard.** A Router-to-coordinator
+   ZDO request that gets a coordinator reply proves this exchange succeeded,
+   but does **not** guarantee the coordinator's independent source-routed ZCL
+   requests follow a healthy path. `NWK_NO_ROUTE` at Zigbee2MQTT may need
+   coordinator-side route-record/MTORR refresh, source-route table sizing,
+   routing/neighbor telemetry and coordinator health fixes. Hardware canary
+   requires **two separate verified directions**: Router-originated ZDO
+   request/response and coordinator-originated relay/read traffic.
+3. **Separate membership, security and routing.** SDK JOINED state alone is
+   insufficient; *one* failed health probe alone is also insufficient. A
+   secure rejoin is attempted only after prolonged demonstrated failure;
+   its original network credentials and IEEE identity are retained. Network
+   permit-join is **not required** for a secure Zigbee rejoin; code never
+   enables it. No unencrypted trust-center fallback, factory reset or PAN
+   reformation is introduced.
+4. **One SDK operation at a time.** Telink 3.7.2.0 has distinct
+   `zb_rejoinReqWithBackOff` and one-shot `zb_rejoinReq` lifecycles. A
+   nonterminal `BDB_COMMISSION_STA_PARENT_LOST` cannot release one-shot
+   ownership or start backoff on top of it. Release ownership only on
+   terminal success/failure. If callback is missing, keep an orphan guard
+   and use a delayed non-destructive rescue rather than starting another scan.
+5. **Active OTA is a stronger safety condition than a timer.** Read the SDK
+   Image Upgrade Status, not merely our callback timer; pause recovery until
+   it is NORMAL and any callback-owned lease expires. Check the actual state
+   throughout an interrupted/resumed OTA.
+6. **Fleet and coordinator protection.** Do not instrument the coordinator
+   with application Router watchdog code. Preserve child routing, receiver
+   power settings, relay/metering state, security counters and NVM. Keep
+   checkpointed software reboot exceptionally rare and staggered. CI proofs
+   do not establish child retention or live route repair.
+
+**Explicit remaining limitations:** This PR cannot guarantee a Router that
+has a wedged radio or watchdog/superloop never ticking will execute any
+software-based recovery. The last-resort `schedule_reboot` only runs while
+that loop still executes; a genuine hardware or total scheduler hang requires
+an independent hardware watchdog or power intervention. Silicon Labs
+JOINED-but-isolated recovery is not yet implemented. Coordinator-source-route
+repair requires changes outside this device firmware and separate acceptance.
 
 ## Candidate identities (not published)
 
