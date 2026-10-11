@@ -294,9 +294,27 @@ def test_persistent_router_budget_is_required_before_both_rescue_paths():
     assert network.count("bseed_router_rescue_budget_consume()") == 2
     assert "bseed_router_rescue_budget_note_good_coordinator(" in network
     assert "bseed_router_rescue_budget_note_failure();" in network
-    assert "#define NV_ITEM_ROUTER_RESCUE_BUDGET    70" in items
+    assert re.search(r"#define\s+NV_ITEM_ROUTER_RESCUE_BUDGET\s+70\\b", items)
     assert "router_recovery_budget.c" in make
     assert "BSEED_RESCUE_MAX 2u" in budget
     assert "BSEED_RESCUE_GOOD_REPLIES 24u" in budget
     assert "12u * 60u * 60u" in budget
     assert "hal_nvm_read(" in budget and "hal_nvm_write(" in budget
+
+
+def test_silabs_secure_retry_never_falls_back_to_steering():
+    silabs = SILABS.read_text(encoding="utf-8")
+    callback = silabs.split("void sl_zigbee_af_stack_status_cb(sl_status_t status)", 1)[1]
+    callback = callback.split("void hal_zigbee_leave_network", 1)[0]
+    assert "silabs_router_rejoin_down_events" in callback
+    assert "silabs_router_rejoin_down_events == 2u" in callback
+    assert "silabs_router_rejoin_pending = false" in callback
+    steering = silabs.split("void hal_zigbee_start_network_steering()", 1)[1]
+    assert "silabs_router_rejoin_attempted" in steering
+    assert "sl_zigbee_find_and_rejoin_network(" in steering
+    assert steering.index("sl_zigbee_find_and_rejoin_network(") < steering.index(
+        "sl_zigbee_af_network_steering_start()"
+    )
+    assert "SILABS_ROUTER_REJOIN_GAP_MS" in steering
+    assert "silabs_router_ota_transfer_seen" in steering
+    assert "silabs_router_rejoin_orphaned" in steering
