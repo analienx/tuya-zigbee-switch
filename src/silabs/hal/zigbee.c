@@ -83,10 +83,15 @@ static uint32_t on_command_callback(sl_service_opcode_t opcode,
 bool sl_zigbee_af_pre_command_received_cb(sl_zigbee_af_cluster_command_t *cmd) {
     if (cmd != NULL && cmd->apsFrame != NULL &&
         cmd->apsFrame->clusterId == 0x0019u &&
-        cmd->commandId == 0x05u) {
-        /* An OTA Image Block Response is proof of an active transfer.
-         * Hold route-recovery scans off for this entire boot, including
-         * paused/resumed transfers with missing completion callbacks. */
+        (cmd->commandId == 0x05u ||
+         (cmd->commandId == 0x02u &&
+          cmd->buffer != NULL && cmd->bufLen > cmd->payloadStartIndex &&
+          cmd->buffer[cmd->payloadStartIndex] == 0x00u))) {
+        /* OTA Image Block Response, or a successful Query Next Image
+         * response indicating a transfer is about to start. Not a
+         * routine NO_IMAGE_AVAILABLE query: that would suppress all
+         * future Router healing on an otherwise idle OTA client.
+         * Retain OTA guard for this boot, including pauses/resumes. */
         silabs_router_ota_transfer_seen = true;
     }
     silabs_router_last_inbound_ms = hal_millis();
