@@ -33,6 +33,9 @@
 // TODO: make configurable via ZCL
 #define POLLING_INTERVAL_MS    100
 
+/* Defined by src/silabs/hal/zigbee.c; read-only routing probes by default. */
+void silabs_router_recovery_tick(void);
+
 void drop_old_ota_image_if_any() {
     // Drop old OTA image if any exists
     // Allows to re-download FORCE image multiple times
