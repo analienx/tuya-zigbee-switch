@@ -24,6 +24,12 @@ if [[ "${BSEED_TS0726_RELEASE_CHANNEL:-}" == 'currentlevel-canary' ]]; then
     SW_BUILD='1.1.9-bseedlv3'
     FILE_VERSION_HEX='0x1102300F'
     FILE_VERSION_DEC=285356047
+elif [[ "${BSEED_TS0726_RELEASE_CHANNEL:-}" == 'router-recovery-candidate' ]]; then
+    # Unique, non-published recovery candidate. Never relabel the historical
+    # v8/lv3 images when shared Router firmware changes.
+    SW_BUILD='1.1.9-bseedrv1'
+    FILE_VERSION_HEX='0x11023010'
+    FILE_VERSION_DEC=285356048
 elif [[ -n "${BSEED_TS0726_RELEASE_CHANNEL:-}" ]]; then
     echo 'ERROR: unknown BSEED TS0726 release channel' >&2
     exit 2
