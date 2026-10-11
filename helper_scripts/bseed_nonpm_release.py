@@ -8,7 +8,7 @@ BOARD = 'OUTLET_BSEED_TS011F'
 CONFIG = 'o1jzcxou;TS011F-BS;LC2;SB4u;RC3;ID2;M;'
 # Fresh shared version allocated by the canonical allocator on GitHub Actions.
 ROUTER = dict(role='Router', build='1.1.3-bseedr13', version=0x11023018, type=43555,
-              artifact='forward.ota', board=BOARD, config=CONFIG, date=RELEASE_DATE)
+              artifact='forward.ota', board=BOARD, config=CONFIG, date='20261011')
 CLIENT = dict(role='EndDevice', build='1.1.3-bseedc11', version=0x11023019, type=65026,
               artifact='forward.ota', board=BOARD, config=CONFIG, date='20261011')
 CANDIDATES = {'router': ROUTER, 'client': CLIENT}
