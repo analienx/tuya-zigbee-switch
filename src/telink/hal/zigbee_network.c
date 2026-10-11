@@ -326,7 +326,8 @@ void telink_zigbee_hal_router_recovery_tick(void) {
         router_probe_initialized = false;
         router_probe_pending = false;
         router_one_shot_active = false;
-        if (zb_isDeviceFactoryNew()) {
+        if (zb_isDeviceFactoryNew() ||
+            telink_zigbee_hal_router_ota_in_progress()) {
             router_recovery_timer_active = false;
             return;
         }
