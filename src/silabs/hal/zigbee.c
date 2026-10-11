@@ -247,6 +247,7 @@ static bool     silabs_router_probe_pending;
 static bool     silabs_router_rejoin_pending;
 static bool     silabs_router_rejoin_orphaned;
 static bool     silabs_router_rejoin_attempted;
+static uint8_t  silabs_router_rejoin_down_events;
 static uint8_t  silabs_router_probe_sequence;
 static uint8_t  silabs_router_failed_probes;
 static uint32_t silabs_router_last_probe_ms;
@@ -330,6 +331,7 @@ void silabs_router_recovery_tick(void) {
             SL_ZIGBEE_DEVICE_TYPE_UNCHANGED);
         if (st == SL_STATUS_OK) {
             silabs_router_rejoin_pending = true;
+            silabs_router_rejoin_down_events = 0;
         } else {
             printf("Silabs Router: encrypted rejoin rejected 0x%lx\n",
                    (unsigned long)st);
@@ -407,12 +409,20 @@ void sl_zigbee_af_stack_status_cb(sl_status_t status) {
     if (status == SL_STATUS_NETWORK_UP) {
         silabs_router_rejoin_pending = false;
         silabs_router_rejoin_orphaned = false;
+        silabs_router_rejoin_down_events = 0;
         silabs_router_failed_probes = 0;
         silabs_router_probe_initialized = false;
         app_rearm_network_announcement();
     } else if (status == SL_STATUS_NETWORK_DOWN) {
-        /* An encrypted one-shot intentionally takes the stack DOWN first.
-         * Keep ownership until subsequent NETWORK_UP or bounded timeout. */
+        /* SDK rejoin emits initial DOWN while scanning, then terminal DOWN
+         * on a failed attempt (or UP on success). Only the second DOWN
+         * releases ownership. Never race a new steering scan with the first. */
+        if (silabs_router_rejoin_pending &&
+            silabs_router_rejoin_down_events < 2u) {
+            silabs_router_rejoin_down_events++;
+            if (silabs_router_rejoin_down_events == 2u)
+                silabs_router_rejoin_pending = false;
+        }
         silabs_router_probe_initialized = false;
     }
     notify_network_status_change();
@@ -423,6 +433,29 @@ void hal_zigbee_leave_network() {
 }
 
 void hal_zigbee_start_network_steering() {
+    /* Once this Router has attempted secure recovery, NEVER fall back to BDB
+     * fresh join simply because a rejoin temporarily made it NOT_JOINED. */
+    if (silabs_router_rejoin_attempted &&
+        sl_zigbee_af_network_state() != SL_ZIGBEE_JOINED_NETWORK) {
+        if (silabs_router_ota_transfer_seen ||
+            silabs_router_rejoin_pending || silabs_router_rejoin_orphaned ||
+            (uint32_t)(hal_millis() - silabs_router_last_rejoin_ms) <
+                SILABS_ROUTER_REJOIN_GAP_MS)
+            return;
+        uint8_t channel = sl_zigbee_get_radio_channel();
+        if (channel < 11u || channel > 26u)
+            return;
+        silabs_router_last_rejoin_ms = hal_millis();
+        sl_status_t st = sl_zigbee_find_and_rejoin_network(
+            true, (uint32_t)1u << channel,
+            SL_ZIGBEE_REJOIN_DUE_TO_APP_EVENT_1,
+            SL_ZIGBEE_DEVICE_TYPE_UNCHANGED);
+        if (st == SL_STATUS_OK) {
+            silabs_router_rejoin_pending = true;
+            silabs_router_rejoin_down_events = 0;
+        }
+        return;
+    }
     /* On a joined Router, network steering opens the network for joining;
      * it is NOT a connectivity probe or route repair operation. */
     if (sl_zigbee_af_network_state() == SL_ZIGBEE_JOINED_NETWORK ||
