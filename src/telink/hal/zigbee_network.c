@@ -610,6 +610,9 @@ void bdb_commissioning_callback(u8 status, void *arg) {
 #endif
     switch (status) {
     case BDB_COMMISSION_STA_SUCCESS:
+        /* A Router can complete a secure rejoin while zb_isDeviceJoinedNwk()
+         * never became false in the main loop. Do not miss this join epoch. */
+        app_rearm_network_announcement();
         if (network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN)
             firmware_health_increment(&firmware_health.rejoin_success);
         network_recovery_state      = TELINK_NETWORK_RECOVERY_IDLE;
