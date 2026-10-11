@@ -258,6 +258,7 @@ static void client_health_recovery_tick(void) {
 #endif
 
 #if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
+
 /* A Router is allowed to remain JOINED despite no longer having a usable
  * route to the trust center. Validate real bidirectional reachability with
  * the vendor's supported ZDO Node Descriptor request to coordinator 0x0000.
@@ -268,16 +269,16 @@ static void client_health_recovery_tick(void) {
  * evidence but MUST NOT falsely prove that 0x0000 is reachable. */
 #define ROUTER_PROBE_INTERVAL_MS          (6u * 60u * 1000u)
 #define ROUTER_PROBE_DEADLINE_MS          (30u * 1000u)
-#define ROUTER_PROBE_FAILURE_THRESHOLD     4u
-#define ROUTER_PROBE_REJECT_THRESHOLD      8u
-#define ROUTER_REJECT_QUIET_MS             (60u * 60u * 1000u)
+#define ROUTER_PROBE_FAILURE_THRESHOLD    4u
+#define ROUTER_PROBE_REJECT_THRESHOLD     8u
+#define ROUTER_REJECT_QUIET_MS            (60u * 60u * 1000u)
 #define ROUTER_QUIET_MIN_MS               (20u * 60u * 1000u)
 #define ROUTER_REJOIN_COOLDOWN_MS         (30u * 60u * 1000u)
 #define ROUTER_ONE_SHOT_DEADLINE_MS       (10u * 60u * 1000u)
-#define ROUTER_ISOLATED_REBOOT_MS          (3u * 60u * 60u * 1000u)
-#define ROUTER_INBOUND_GRACE_MS            (90u * 60u * 1000u)
-#define ROUTER_MIN_REJOIN_ATTEMPTS         2u
-#define ROUTER_ACTIVE_NEIGHBOR_HOLD_MS     (60u * 60u * 1000u)
+#define ROUTER_ISOLATED_REBOOT_MS         (3u * 60u * 60u * 1000u)
+#define ROUTER_INBOUND_GRACE_MS           (90u * 60u * 1000u)
+#define ROUTER_MIN_REJOIN_ATTEMPTS        2u
+#define ROUTER_ACTIVE_NEIGHBOR_HOLD_MS    (60u * 60u * 1000u)
 #define ROUTER_NEIGHBOR_ACTIVITY_MS       (15u * 60u * 1000u)
 static bool     router_probe_initialized;
 static bool     router_probe_pending;
@@ -296,6 +297,7 @@ static uint32_t router_one_shot_ms;
 void telink_zigbee_hal_router_note_inbound(void) {
     if (!router_probe_initialized)
         return;
+
     /* Neighbors can reach this Router even when coordinator 0x0000 cannot.
      * Do not discard a pending coordinator timeout or its failure history. */
     router_last_inbound_ms = hal_millis();
@@ -304,19 +306,22 @@ void telink_zigbee_hal_router_note_inbound(void) {
 static void router_coordinator_node_desc_response(void *arg) {
     if (!router_probe_pending || arg == NULL)
         return;
+
     zdo_zdpDataInd_t *ind = (zdo_zdpDataInd_t *)arg;
     if (ind->length < sizeof(zdo_node_descript_resp_t))
         return;
+
     zdo_node_descript_resp_t *rsp = (zdo_node_descript_resp_t *)ind->zpdu;
     /* Ignore late replies from an earlier ZDO request after its timeout. */
     if (ind->src_addr == 0x0000u &&
         rsp->seq_num == router_probe_sequence &&
         rsp->status == ZDO_SUCCESS && rsp->nwk_addr_interest == 0x0000u) {
-        router_last_positive_ms = hal_millis();
-        router_last_inbound_ms = router_last_positive_ms;
-        router_probe_failures = 0;
-        router_probe_rejections = 0;
+        router_last_positive_ms  = hal_millis();
+        router_last_inbound_ms   = router_last_positive_ms;
+        router_probe_failures    = 0;
+        router_probe_rejections  = 0;
         router_one_shot_attempts = 0;
+
         /* A valid coordinator response restores liveness, not proof that an
          * unrelated in-flight SDK rejoin is terminal. Keep SDK ownership
          * until its real completion callback to prevent overlapping scans. */
@@ -350,21 +355,23 @@ void telink_zigbee_hal_router_recovery_tick(void) {
          g_zbMacPib.extAddress[7]);
     uint32_t stagger_ms        = ieee_stagger_seed % 120000u;
     uint32_t reboot_stagger_ms = ieee_stagger_seed % (15u * 60u * 1000u);
+
     /* Rejoin scans interrupt Router service. Spread actual rejoin attempts
-     * over 15m, not merely the first 2m of low-impact ZDO health probes. */
+    * over 15m, not merely the first 2m of low-impact ZDO health probes. */
     uint32_t rejoin_stagger_ms = reboot_stagger_ms;
 
     if (zb_isDeviceFactoryNew() || !zb_isDeviceJoinedNwk()) {
         router_probe_initialized = false;
         router_probe_pending     = false;
+
         /* A one-shot may temporarily leave the network. It still owns the
          * SDK until a terminal BDB callback, even if JOINED goes false.
          * On missing completion, hold a separate orphan guard and let the
          * existing 45-minute not-joined rescue run; never overlap backoff. */
         if (router_one_shot_active &&
             (uint32_t)(now - router_one_shot_ms) >=
-                ROUTER_ONE_SHOT_DEADLINE_MS) {
-            router_one_shot_active = false;
+            ROUTER_ONE_SHOT_DEADLINE_MS) {
+            router_one_shot_active  = false;
             router_one_shot_stalled = true;
             firmware_health_increment(&firmware_health.rejoin_failure);
             printf("Router: lost one-shot callback while unjoined; isolate SDK\r\n");
@@ -394,19 +401,19 @@ void telink_zigbee_hal_router_recovery_tick(void) {
         telink_zigbee_hal_router_ota_in_progress()) {
         /* An OTA transfer or SDK backoff owns network operations. Do not
          * overlap ZDO probes or active rejoin while it is working. */
-        router_probe_pending = false;
-        router_probe_failures = 0;
-        router_probe_rejections = 0;
+        router_probe_pending     = false;
+        router_probe_failures    = 0;
+        router_probe_rejections  = 0;
         router_probe_initialized = false;
         return;
     }
 
     if (!router_probe_initialized) {
         router_probe_initialized = true;
-        router_last_probe_ms = now;
+        router_last_probe_ms     = now;
         if (!router_one_shot_stalled) {
-            router_last_positive_ms = now;
-            router_last_inbound_ms = now;
+            router_last_positive_ms  = now;
+            router_last_inbound_ms   = now;
             router_one_shot_attempts = 0;
         }
         return;
@@ -420,7 +427,7 @@ void telink_zigbee_hal_router_recovery_tick(void) {
         /* Never overlap a request whose completion has not been reported.
          * Keep the cooldown; probes may resume but no second one-shot starts
          * until after it, regardless of the vendor callback behavior. */
-        router_one_shot_active = false;
+        router_one_shot_active  = false;
         router_one_shot_stalled = true;
         firmware_health_increment(&firmware_health.rejoin_failure);
         printf("Router: missing one-shot completion; block overlapping recovery\r\n");
@@ -436,12 +443,14 @@ void telink_zigbee_hal_router_recovery_tick(void) {
     bool repeated_response_timeouts = bseed_router_timeout_evidence(
         router_probe_failures, ROUTER_PROBE_FAILURE_THRESHOLD, now,
         router_last_positive_ms, ROUTER_QUIET_MIN_MS);
+
     /* Queue pressure is not lost routing. Only a much longer series of
      * synchronous request rejections with NO inbound evidence can count as
      * a stuck vendor ZDO subsystem, never as a single missing ACK. */
     bool stuck_request_queue = bseed_router_queue_stall_evidence(
         router_probe_rejections, ROUTER_PROBE_REJECT_THRESHOLD, now,
         router_last_positive_ms, ROUTER_REJECT_QUIET_MS);
+
     /* The BSEED last-resort reset addresses a truly wedged but nominally
      * JOINED Router. A long coordinator outage by itself is insufficient:
      * require both failed rejoin attempts and prolonged absence of *all*
@@ -449,7 +458,7 @@ void telink_zigbee_hal_router_recovery_tick(void) {
     if (bseed_router_joined_rescue_eligible(
             router_reboot_scheduled, router_one_shot_active,
             router_one_shot_stalled ? ROUTER_MIN_REJOIN_ATTEMPTS :
-                                      router_one_shot_attempts,
+            router_one_shot_attempts,
             ROUTER_MIN_REJOIN_ATTEMPTS, now,
             router_last_positive_ms, router_last_inbound_ms,
             ROUTER_ISOLATED_REBOOT_MS + reboot_stagger_ms,
@@ -469,15 +478,15 @@ void telink_zigbee_hal_router_recovery_tick(void) {
             ROUTER_NEIGHBOR_ACTIVITY_MS, rejoin_stagger_ms) &&
         (!router_one_shot_attempted ||
          (uint32_t)(now - router_one_shot_ms) >=
-             ROUTER_REJOIN_COOLDOWN_MS)) {
+         ROUTER_REJOIN_COOLDOWN_MS)) {
         /* Require a verified failure history, never infer link loss merely
          * from the absence of application traffic. No BDB steering, factory
          * reset, counter rollback, channel changes or parent-based logic. */
         router_one_shot_attempted = true;
-        router_one_shot_active = true;
+        router_one_shot_active    = true;
         if (router_one_shot_attempts < UINT8_MAX)
             router_one_shot_attempts++;
-        router_one_shot_ms = now;
+        router_one_shot_ms   = now;
         router_probe_pending = false;
         firmware_health_increment(&firmware_health.rejoin_start);
         zb_rejoinSecModeSet(REJOIN_SECURITY);
@@ -640,7 +649,7 @@ void bdb_commissioning_callback(u8 status, void *arg) {
      * Other BDB indications must not give a second SDK operation ownership. */
     if (status == BDB_COMMISSION_STA_SUCCESS ||
         status == BDB_COMMISSION_STA_REJOIN_FAILURE) {
-        router_one_shot_active = false;
+        router_one_shot_active  = false;
         router_one_shot_stalled = false;
     }
 #endif
@@ -773,7 +782,7 @@ void hal_zigbee_leave_network(void) {
     network_recovery_state      = TELINK_NETWORK_RECOVERY_IDLE;
     network_start_retry_pending = false;
 #if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
-    router_one_shot_active = false;
+    router_one_shot_active  = false;
     router_one_shot_stalled = false;
 #endif
     zb_nlmeLeaveReq(&leaveReq);
