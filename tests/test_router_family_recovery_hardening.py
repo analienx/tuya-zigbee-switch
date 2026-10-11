@@ -68,6 +68,10 @@ def test_routers_probe_real_coordinator_reachability_before_secure_rejoin():
     assert "rsp->status == ZDO_SUCCESS" in source
     assert "rsp->nwk_addr_interest == 0x0000u" in source
     assert "ROUTER_PROBE_FAILURE_THRESHOLD" in source
+    assert "ROUTER_PROBE_REJECT_THRESHOLD" in source
+    assert "ROUTER_REJECT_QUIET_MS" in source
+    assert "router_probe_sequence" in source
+    assert "rsp->seq_num == router_probe_sequence" in source
     assert "ROUTER_QUIET_MIN_MS" in source
     assert "router_probe_failures >= ROUTER_PROBE_FAILURE_THRESHOLD" in source
     assert "ROUTER_REJOIN_COOLDOWN_MS" in source
