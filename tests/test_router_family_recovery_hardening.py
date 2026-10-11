@@ -22,8 +22,8 @@ def test_announcement_rearmed_for_all_roles_and_retried_on_local_failure():
     assert "ANNOUNCE_RETRY_MS" in body
     assert "hal_millis() - last_announce_attempt_ms" in body
     assert "hal_zigbee_send_announce() == HAL_ZIGBEE_OK" in body
-    assert body.index("hal_zigbee_send_announce() == HAL_ZIGBEE_OK") < body.index(
-        "boot_announce_sent"
+    assert body.index("hal_zigbee_send_announce() == HAL_ZIGBEE_OK") < (
+        re.search(r"boot_announce_sent\s*=\s*true", body).start()
     )
     assert "schedule_network_reset" not in body
 
