@@ -91,8 +91,8 @@ def test_coordinator_heartbeat_separates_neighbor_evidence():
     assert "ROUTER_PROBE_INTERVAL_MS" in source
     assert "ROUTER_PROBE_DEADLINE_MS" in source
     assert "router_probe_pending" in source
-    assert "router_probe_failures = 0" in source
-    assert "router_last_positive_ms = hal_millis()" in source
+    assert re.search(r"router_probe_failures\s*=\s*0", source)
+    assert re.search(r"router_last_positive_ms\s*=\s*hal_millis\(\)", source)
     assert "telink_zigbee_hal_router_note_inbound" in source
     zcl = Path("src/telink/hal/zigbee_zcl.c").read_text(encoding="utf-8")
     assert "telink_zigbee_hal_router_note_inbound();" in zcl
@@ -135,7 +135,7 @@ def test_inbound_neighbor_zcl_does_not_spoof_coordinator_reachability():
     assert "router_probe_failures = 0" not in inbound
     assert "router_probe_pending = false" not in inbound
     assert "router_last_positive_ms = hal_millis()" not in inbound
-    assert "router_last_positive_ms = hal_millis()" in source.split(
+    assert re.search(r"router_last_positive_ms\s*=\s*hal_millis\(\)", source.split(
         "static void router_coordinator_node_desc_response", 1
     )[1].split("/* Last resort", 1)[0]
 
