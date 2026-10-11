@@ -39,7 +39,7 @@ def test_correct_crc_does_not_mask_wrong_basic_string_length():
 
 def test_candidate_set_rejects_nonmonotonic_client_version(monkeypatch):
     monkeypatch.setitem(ROUTER, 'version', CLIENT['version'] + 1)
-    with pytest.raises(IdentityError, match='Client recovery version must advance'):
+    with pytest.raises(IdentityError, match='must share one version'):
         validate_candidate_set()
 
 

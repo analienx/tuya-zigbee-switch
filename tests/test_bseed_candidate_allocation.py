@@ -15,8 +15,9 @@ def test_candidates_follow_canonical_board_allocator():
     document = json.loads((ROOT / 'zigbee2mqtt/ota/bseed_identity.json').read_text())
     registry = {int(line['image_type']): copy.deepcopy(line) for line in document['lines']}
 
-    # PM shared migration code changes both roles: allocate a new Router,
-    # then Client. Keep every sealed historical board tuple unchanged.
+    # Shared-source PM roles get a common new version on distinct image
+    # types, matching the historical PM paired-release policy.
+    assert ROUTER['version'] == CLIENT['version']
     local = copy.deepcopy(registry)
     for candidate in (ROUTER, CLIENT):
         line = local[candidate['type']]
@@ -26,8 +27,6 @@ def test_candidates_follow_canonical_board_allocator():
         allocation = emit_make_vars(local, candidate['type'], candidate['build'])
         assert int(allocation['FILE_VERSION'], 0) == candidate['version']
         assert allocation['VERSION_STR'] == candidate['build']
-        local[candidate['type']]['versions'].append({
-            'file_version': candidate['version'], 'version_str': candidate['build']})
 
     local = copy.deepcopy(registry)
     line = local[NONPM['client']['type']]

@@ -7,7 +7,7 @@ import struct
 from bseed_ota_identity import IdentityError, parse_ota_header, require_embedded_string
 
 CLIENT = {'role': 'EndDevice', 'build': '1.2.5-bseedcli16',
-          'version': 0x1205301C, 'type': 65024, 'artifact': 'forward.ota',
+          'version': 0x1205301B, 'type': 65024, 'artifact': 'forward.ota',
           'date': '20261011'}
 ROUTER = {'role': 'Router', 'build': '1.2.5-bseedr13',
           'version': 0x1205301B, 'type': 43556, 'artifact': 'forward.ota',
@@ -22,10 +22,11 @@ def validate_candidate_set():
     for item in CANDIDATES.values():
         if not item['build'].isascii() or not 1 <= len(item['build']) <= 16:
             raise IdentityError('candidate Basic build ID must fit 16 ASCII bytes')
-    # Shared PM NVM implementation affects both native roles. Allocate fresh
-    # Router then Client identities: never relabel sealed r12 or cli15 bytes.
-    if CLIENT['version'] <= ROUTER['version']:
-        raise IdentityError('new PM Client recovery version must advance')
+    # Both shared-source PM roles use one new native file version under
+    # distinct image types, as the established PM release policy requires.
+    # Never relabel sealed r12 or cli15 bytes with changed firmware.
+    if CLIENT['version'] != ROUTER['version']:
+        raise IdentityError('new PM Router/Client roles must share one version')
     if CLIENT['type'] != 65024 or ROUTER['type'] != 43556:
         raise IdentityError('unexpected PM role image type')
 
