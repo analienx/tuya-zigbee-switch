@@ -60,6 +60,64 @@ def read_lock(path):
     return data
 
 
+def ownership_diagnosis(record):
+    """Read-only distinction between a network lease and hardware acceptance.
+
+    A successful transport is not proof of retention, relay behaviour or
+    device acceptance. This function **never** releases ownership, changes a
+    campaign phase, or grants authorization for a subsequent OTA.
+    """
+    if record is None:
+        return {
+            'network_ownership': 'unclaimed',
+            'transport_state': 'none',
+            'hardware_acceptance': 'not_assessed',
+            'release_authorized': False,
+        }
+    if not isinstance(record, dict) or record.get('schema') != SCHEMA:
+        raise ValueError('Invalid network ownership record')
+    phase = record.get('phase')
+    if phase in ('ota_transfer_ok_postflash_unverified', 'postflash_candidate'):
+        transport = 'completed'
+        acceptance = 'unverified'
+        next_step = 'review_terminalization_and_preserve_failed_acceptance'
+    elif phase == ACCEPTED_PHASE:
+        transport = 'completed'
+        acceptance = 'accepted_recorded'
+        next_step = 'existing_explicit_accepted_release'
+    elif phase in (RECONCILED_PHASE, SOURCE_UNCHANGED_PHASE):
+        transport = 'reconciled'
+        acceptance = 'unverified'
+        next_step = 'existing_evidence_backed_reconciled_release'
+    elif phase in ('ota_running', 'preflight_complete'):
+        transport = 'active_or_unknown'
+        acceptance = 'not_assessed'
+        next_step = 'retain_network_ownership'
+    elif phase in ('update_error', 'update_timeout_or_unconfirmed',
+                   'source_verified_candidate_pending'):
+        transport = 'unconfirmed'
+        acceptance = 'unverified'
+        next_step = 'reconcile_source_or_installed_image'
+    elif phase == 'preflight_abort':
+        transport = 'not_started'
+        acceptance = 'not_assessed'
+        next_step = 'existing_preflight_abort_release'
+    else:
+        transport = 'unknown'
+        acceptance = 'unverified'
+        next_step = 'manual_investigation'
+    return {
+        'network_ownership': 'held',
+        'owner_device': record.get('device'),
+        'owner_ieee': record.get('ieee'),
+        'phase': phase,
+        'transport_state': transport,
+        'hardware_acceptance': acceptance,
+        'release_authorized': False,
+        'next_step': next_step,
+    }
+
+
 def acquire(path, *, network_id, token, device, ieee, image_sha256):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
