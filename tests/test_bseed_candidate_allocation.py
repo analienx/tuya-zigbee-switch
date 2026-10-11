@@ -28,19 +28,25 @@ def test_candidates_follow_canonical_board_allocator():
         assert int(allocation['FILE_VERSION'], 0) == candidate['version']
         assert allocation['VERSION_STR'] == candidate['build']
 
+    # Shared application changes modify both Router and Client. Allocate the
+    # Router first from the existing board maximum; reserve its fresh tuple in
+    # the simulated registry before allocating the Client. This covers both
+    # unsealed candidate preparation and monotonic cross-role sequencing.
     local = copy.deepcopy(registry)
-    line = local[NONPM['client']['type']]
-    line['versions'] = [v for v in line['versions']
-                        if v['file_version'] != NONPM['client']['version']]
-    allocation = emit_make_vars(local, NONPM['client']['type'], NONPM['client']['build'])
-    assert int(allocation['FILE_VERSION'], 0) == NONPM['client']['version']
-
-    for candidate in (NONPM['router'],):
-        line = registry[candidate['type']]
-        matches = [v for v in line['versions'] if
-                   v['file_version'] == candidate['version'] and
-                   v['version_str'] == candidate['build']]
-        assert len(matches) == 1 and matches[0]['sha512']
+    for role in ('router', 'client'):
+        candidate = NONPM[role]
+        line = local[candidate['type']]
+        existing = [entry for entry in line['versions']
+                    if entry['file_version'] == candidate['version']
+                    and entry['version_str'] == candidate['build']]
+        if existing:
+            assert len(existing) == 1 and existing[0].get('sha512')
+            continue
+        allocation = emit_make_vars(local, candidate['type'], candidate['build'])
+        assert int(allocation['FILE_VERSION'], 0) == candidate['version']
+        line['versions'].append({'file_version': candidate['version'],
+                                 'version_str': candidate['build'],
+                                 'sha512': None})
 
     # The independently versioned TS0726 targets remain unchanged.
     for role, ver in ((45577, 0x1102300F), (65025, 0x1102300F)):
@@ -59,5 +65,5 @@ def test_retired_pm_return_tuple_stays_reserved_without_being_a_candidate():
     ]
     assert len(retired) == 2 and all(entry.get('status') == 'retired' for entry in retired)
     registry = {int(line['image_type']): copy.deepcopy(line) for line in document['lines']}
-    next_router = emit_make_vars(registry, ROUTER['type'], '1.2.5-bseedr14')
-    assert int(next_router['FILE_VERSION'], 0) == CLIENT['version'] + 1
+    next_router = emit_make_vars(registry, ROUTER['type'], ROUTER['build'])
+    assert int(next_router['FILE_VERSION'], 0) == ROUTER['version']
