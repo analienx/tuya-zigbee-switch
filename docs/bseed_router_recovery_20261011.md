@@ -219,9 +219,11 @@ recover a permanently broken radio peripheral or physical RF outage.
 The last-resort `schedule_reboot` requires the superloop to keep running.
 The reboot budget is now persistent, fail-closed and independently
 tested (see above), but the firmware still requires one-device hardware proof
-that the NVM item survives OTA, reset and genuine coordinator outages. Silicon Labs
-JOINED-but-isolated recovery is not yet implemented. Coordinator-source-route
-repair requires changes outside this device firmware and separate acceptance.
+that the NVM item survives OTA, reset and genuine coordinator outages.
+Silicon Labs joined-but-isolated recovery is implemented in this draft, but
+its EFR32MG21 compiler gate and hardware OTA/rejoin acceptance remain pending.
+Active coordinator source-route repair still requires adapter-specific changes
+outside device firmware; the new tool delivers read-only evidence only.
 
 ## Candidate identities (not published)
 
