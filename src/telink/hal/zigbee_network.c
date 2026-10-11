@@ -11,6 +11,7 @@
 #include "hal/tasks.h"
 #include "hal/timer.h"
 #include "hal/firmware_health.h"
+#include "router_recovery_policy.h"
 #include "device_config/reset.h"
 #include "app.h"
 #include "hal/zigbee.h"
@@ -407,25 +408,26 @@ void telink_zigbee_hal_router_recovery_tick(void) {
             router_probe_failures++;
     }
 
-    bool repeated_response_timeouts =
-        router_probe_failures >= ROUTER_PROBE_FAILURE_THRESHOLD &&
-        (uint32_t)(now - router_last_positive_ms) >= ROUTER_QUIET_MIN_MS;
+    bool repeated_response_timeouts = bseed_router_timeout_evidence(
+        router_probe_failures, ROUTER_PROBE_FAILURE_THRESHOLD, now,
+        router_last_positive_ms, ROUTER_QUIET_MIN_MS);
     /* Queue pressure is not lost routing. Only a much longer series of
      * synchronous request rejections with NO inbound evidence can count as
      * a stuck vendor ZDO subsystem, never as a single missing ACK. */
-    bool stuck_request_queue =
-        router_probe_rejections >= ROUTER_PROBE_REJECT_THRESHOLD &&
-        (uint32_t)(now - router_last_positive_ms) >= ROUTER_REJECT_QUIET_MS;
+    bool stuck_request_queue = bseed_router_queue_stall_evidence(
+        router_probe_rejections, ROUTER_PROBE_REJECT_THRESHOLD, now,
+        router_last_positive_ms, ROUTER_REJECT_QUIET_MS);
     /* The BSEED last-resort reset addresses a truly wedged but nominally
      * JOINED Router. A long coordinator outage by itself is insufficient:
      * require both failed rejoin attempts and prolonged absence of *all*
      * incoming application traffic before one checkpointed rescue reboot. */
-    if (!router_reboot_scheduled && !router_one_shot_active &&
-        router_one_shot_attempts >= ROUTER_MIN_REJOIN_ATTEMPTS &&
-        (uint32_t)(now - router_last_positive_ms) >=
-            ROUTER_ISOLATED_REBOOT_MS + reboot_stagger_ms &&
-        (uint32_t)(now - router_last_inbound_ms) >= ROUTER_INBOUND_GRACE_MS &&
-        (repeated_response_timeouts || stuck_request_queue)) {
+    if (bseed_router_joined_rescue_eligible(
+            router_reboot_scheduled, router_one_shot_active,
+            router_one_shot_attempts, ROUTER_MIN_REJOIN_ATTEMPTS, now,
+            router_last_positive_ms, router_last_inbound_ms,
+            ROUTER_ISOLATED_REBOOT_MS + reboot_stagger_ms,
+            ROUTER_INBOUND_GRACE_MS,
+            repeated_response_timeouts || stuck_request_queue)) {
         router_reboot_scheduled = true;
         printf("Router: joined but isolated for 3h; controlled rescue reboot\r\n");
         schedule_reboot(2000);
