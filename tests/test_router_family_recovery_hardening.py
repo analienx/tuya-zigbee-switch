@@ -177,3 +177,16 @@ def test_router_watchdog_never_instruments_coordinator_or_client_role():
     assert "#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE" in TELINK.read_text(
         encoding="utf-8"
     )
+
+
+def test_silabs_stack_up_callback_rearms_join_epoch_and_completion_is_cooldown_bound():
+    silabs = SILABS.read_text(encoding="utf-8")
+    status = silabs.split("void sl_zigbee_af_stack_status_cb(sl_status_t status) {", 1)[1]
+    status = status.split("void hal_zigbee_leave_network", 1)[0]
+    assert "status == SL_STATUS_NETWORK_UP" in status
+    assert "app_rearm_network_announcement();" in status
+    complete = silabs.split(
+        "void sl_zigbee_af_network_steering_complete_cb(", 1
+    )[1].split("static uint8_t make_frame_control", 1)[0]
+    assert "sl_zigbee_af_network_state() != SL_ZIGBEE_JOINED_NETWORK" in complete
+    assert "network_steering_retry_pending" in complete
