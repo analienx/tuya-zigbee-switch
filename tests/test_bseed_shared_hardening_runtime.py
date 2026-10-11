@@ -123,6 +123,18 @@ static uint32_t now, rejoin_calls, steer_calls;
 static bool joined, factory_new;
 static u8 fail_start;
 static struct {u8 scanDuration;} g_bdbAttrs;
+#ifdef BSEED_MAINS_CLIENT
+#define MAC_SUCCESS 0
+#define MAC_STA_NO_DATA 0xeb
+static bool ota_fast_poll_active;
+static struct { unsigned char extAddress[8]; } g_zbMacPib;
+static u8 zb_setPollRate(uint32_t ms) {(void)ms; return RET_OK;}
+static u8 zb_rejoinReq(uint32_t channel,u8 duration)
+    {(void)channel;(void)duration; return RET_OK;}
+#define REJOIN_SECURITY 1
+static void zb_rejoinSecModeSet(u8 mode) {assert(mode==REJOIN_SECURITY);}
+static uint32_t desired_mains_client_poll_ms(void) { return 60000u; }
+#endif
 uint32_t hal_millis(void) {return now;}
 static bool zb_isDeviceJoinedNwk(void) {return joined;}
 static bool zb_isDeviceFactoryNew(void) {return factory_new;}

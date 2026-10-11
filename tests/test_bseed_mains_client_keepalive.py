@@ -10,8 +10,8 @@ def test_mains_client_refreshes_parent_on_initial_join_and_rejoin():
     assert 'zb_setPollRate(desired_mains_client_poll_ms())' in source
     # join + commissioning-success + OTA-restore (hal_zigbee_set_ota_poll_active)
     assert source.count('configure_mains_client_keepalive();')==3
-    pat=r'#ifdef BSEED_MAINS_CLIENT\s+configure_mains_client_keepalive\(\);\s+#endif\s+#if defined\(ZB_ED_ROLE\) && !defined\(BSEED_MAINS_CLIENT\)'
-    assert len(re.findall(pat,source))==2
+    assert source.count('client_health_join_epoch();')==2
+    assert source.count('configure_mains_client_keepalive();')==3
     assert 'if (status != RET_OK)' in source
 
 

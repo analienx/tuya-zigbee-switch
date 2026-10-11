@@ -33,6 +33,7 @@ void zdo_leave_confirmation_callback(nlme_leave_cnf_t *pLeaveCnf);
 #define OTA_POLL_VERIFY_MS                1000u
 static hal_task_t keepalive_verify_task;
 static bool       ota_fast_poll_active = false;
+static void client_health_recovery_tick(void);
 
 static uint32_t desired_mains_client_poll_ms(void) {
     return ota_fast_poll_active ? RESPONSE_POLL_RATE : MAINS_CLIENT_KEEPALIVE_POLL_MS;
@@ -49,6 +50,7 @@ static void keepalive_verify_handler(void *arg) {
             next_ms = ota_fast_poll_active ? OTA_POLL_VERIFY_MS : KEEPALIVE_RETRY_MS;
         }
     }
+    client_health_recovery_tick();
     hal_tasks_schedule(&keepalive_verify_task, next_ms);
 }
 
@@ -112,8 +114,151 @@ static void network_start_attempt(void) {
 static hal_network_status_change_callback_t network_status_change_callback =
     NULL;
 
+#ifdef BSEED_MAINS_CLIENT
+
+/*
+ * The SDK can retain JOINED after the parent ceases to acknowledge MAC polls.
+ * In that state the ordinary parent-loss callback/rejoin-backoff never starts,
+ * although Zigbee2MQTT cannot route to the socket. Detect actual MAC poll
+ * liveness instead of just checking the configured poll rate.
+ *
+ * This is a non-destructive, one-shot *network rejoin*, not BDB steering,
+ * factory reset, radio reset, watchdog reset, or relay manipulation.
+ * The SDK guarantees a completion callback for zb_rejoinReq(). The distinct
+ * zb_rejoinReqWithBackOff() owns normal parent-loss recovery until success.
+ */
+#define CLIENT_PARENT_SILENCE_MS            (12u * 60u * 1000u)
+#define CLIENT_HEALTH_REJOIN_COOLDOWN_MS    (15u * 60u * 1000u)
+#define CLIENT_POLL_FAILURE_THRESHOLD       4u
+#define CLIENT_ONE_SHOT_DEADLINE_MS         (10u * 60u * 1000u)
+
+static uint32_t client_health_last_good_ms;
+static uint32_t client_health_last_confirm_ms;
+static uint32_t client_health_last_probe_ms;
+static uint32_t client_health_last_keepalive_refresh_ms;
+static uint8_t  client_poll_failure_streak;
+static bool     client_health_initialized;
+static bool     client_health_probe_active;
+static bool     client_health_probe_attempted;
+
+static void client_health_join_epoch(void) {
+    uint32_t now = hal_millis();
+
+    client_health_last_good_ms              = now;
+    client_health_last_confirm_ms           = now;
+    client_health_last_keepalive_refresh_ms = now;
+    client_poll_failure_streak              = 0;
+    client_health_initialized  = true;
+    client_health_probe_active = false;
+    /* Preserve last attempt across rejoin to avoid synchronized thrashing. */
+}
+
+/* Called only for an authenticated inbound ZCL indication. */
+void telink_zigbee_hal_client_note_inbound(void) {
+    if (!client_health_initialized)
+        return;
+
+    client_health_last_good_ms = hal_millis();
+    client_poll_failure_streak = 0;
+    client_health_probe_active = false; /* live downlink beats a lost callback */
+}
+
+static void client_health_poll_confirmation(u8 status) {
+    uint32_t now = hal_millis();
+
+    if (!client_health_initialized)
+        return;
+
+    client_health_last_confirm_ms = now;
+    if (status == MAC_SUCCESS || status == MAC_STA_NO_DATA) {
+        /* NO_DATA is a successful MAC parent ACK, not a failure. */
+        client_health_last_good_ms = now;
+        client_poll_failure_streak = 0;
+
+        /* A live parent ACK also closes an orphaned one-shot ownership bit
+         * if the vendor omitted a BDB callback after successful recovery. */
+        client_health_probe_active = false;
+    } else if (client_poll_failure_streak < UINT8_MAX) {
+        client_poll_failure_streak++;
+    }
+}
+
+static void client_health_recovery_tick(void) {
+    uint32_t now = hal_millis();
+
+    if (!client_health_initialized || ota_fast_poll_active ||
+        network_recovery_state != TELINK_NETWORK_RECOVERY_IDLE ||
+        !zb_isDeviceJoinedNwk() || zb_isDeviceFactoryNew()) {
+        return;
+    }
+
+    /* The one-shot API documents a terminal callback. Still bound ownership
+     * in case a broken SDK silently drops it: retain the normal cooldown
+     * before attempting another *single* one-shot request. A full SDK-owned
+     * rejoin-with-backoff is never forcibly cancelled or overlapped. */
+    if (client_health_probe_active) {
+        if (now - client_health_last_probe_ms < CLIENT_ONE_SHOT_DEADLINE_MS) {
+            return;
+        }
+        client_health_probe_active = false;
+        firmware_health_increment(&firmware_health.rejoin_failure);
+        printf("Mains client: missing one-shot completion; cooldown\r\n");
+    }
+
+    /* Healthy quiet devices are normal. No ZCL traffic, or simply no poll
+     * callbacks on an RX-on device, cannot prove the parent is broken.
+     * A rejoin requires multiple explicit failed MAC confirmations. */
+    /* Spread recovery scans across devices after a shared parent outage.
+     * IEEE suffix is immutable for this node and requires no NVM writes. */
+    uint32_t stagger_ms = (((uint32_t)g_zbMacPib.extAddress[1] << 8) |
+                           g_zbMacPib.extAddress[7]) % 120000u;
+    uint32_t silence_limit = CLIENT_PARENT_SILENCE_MS + stagger_ms;
+    if (now - client_health_last_good_ms < silence_limit) {
+        return;
+    }
+    if (client_poll_failure_streak < CLIENT_POLL_FAILURE_THRESHOLD) {
+        /* If the SDK's poll timer stopped producing confirmations, refresh
+         * its existing configuration at low frequency; do NOT scan/rejoin
+         * a silent but otherwise healthy Client. */
+        if (now - client_health_last_confirm_ms >= silence_limit &&
+            now - client_health_last_keepalive_refresh_ms >= silence_limit) {
+            client_health_last_keepalive_refresh_ms = now;
+            (void)zb_setPollRate(desired_mains_client_poll_ms());
+            printf("Mains client: no poll confirmations; refresh keepalive\r\n");
+        }
+        return;
+    }
+    if (client_health_probe_attempted &&
+        now - client_health_last_probe_ms < CLIENT_HEALTH_REJOIN_COOLDOWN_MS) {
+        return;
+    }
+
+    /* Set ownership before requesting a one-shot rejoin; a synchronous
+     * completion callback must not race the active marker. */
+    client_health_last_probe_ms   = now;
+    client_health_probe_attempted = true;
+    client_health_probe_active    = true;
+    firmware_health_increment(&firmware_health.rejoin_start);
+    printf("Mains client: parent MAC poll silent; one-shot rejoin\r\n");
+
+    /* No trust-center join window is required: retain the current network
+     * key and request the secure rejoin path explicitly. */
+    zb_rejoinSecModeSet(REJOIN_SECURITY);
+    u8 status = zb_rejoinReq(zb_apsChannelMaskGet(), g_bdbAttrs.scanDuration);
+    if (status != RET_OK) {
+        client_health_probe_active = false;
+        firmware_health_increment(&firmware_health.rejoin_failure);
+        printf("Mains client: one-shot rejoin rejected: %u\r\n", status);
+    }
+}
+
+#endif
+
 // Telink ZDO callbacks
 static void zdo_sync_confirmation_callback(nlme_sync_cnf_t *confirmation) {
+#ifdef BSEED_MAINS_CLIENT
+    client_health_poll_confirmation(confirmation->status);
+#endif
     firmware_health.last_poll_status = confirmation->status;
     /* An acknowledged poll with no queued data is a healthy parent response. */
     firmware_health_increment((confirmation->status == MAC_SUCCESS ||
@@ -205,6 +350,7 @@ void bdb_init_callback(u8 status, u8 joinedNetwork) {
         network_start_retry_pending = false;
         if (joinedNetwork) {
 #ifdef BSEED_MAINS_CLIENT
+            client_health_join_epoch();
             configure_mains_client_keepalive();
 #endif
 #if defined(ZB_ED_ROLE) && !defined(BSEED_MAINS_CLIENT)
@@ -227,6 +373,12 @@ void bdb_init_callback(u8 status, u8 joinedNetwork) {
 
 void bdb_commissioning_callback(u8 status, void *arg) {
     printf("BDB commissioning callback, status: %d\r\n", status);
+#ifdef BSEED_MAINS_CLIENT
+    /* A one-shot rejoin has a terminal BDB completion. Do not confuse this
+    * with the SDK-owned, ongoing rejoin-with-backoff recovery sequence. */
+    if (status != BDB_COMMISSION_STA_IN_PROGRESS)
+        client_health_probe_active = false;
+#endif
     switch (status) {
     case BDB_COMMISSION_STA_SUCCESS:
         if (network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN)
@@ -234,6 +386,7 @@ void bdb_commissioning_callback(u8 status, void *arg) {
         network_recovery_state      = TELINK_NETWORK_RECOVERY_IDLE;
         network_start_retry_pending = false;
 #ifdef BSEED_MAINS_CLIENT
+        client_health_join_epoch();
         configure_mains_client_keepalive();
 #endif
 #if defined(ZB_ED_ROLE) && !defined(BSEED_MAINS_CLIENT)
@@ -310,6 +463,11 @@ hal_zigbee_network_status_t hal_zigbee_get_network_status(void) {
         network_start_retry_pending = false;
         return HAL_ZIGBEE_NETWORK_JOINED;
     }
+#ifdef BSEED_MAINS_CLIENT
+    if (client_health_probe_active) {
+        return HAL_ZIGBEE_NETWORK_JOINING;
+    }
+#endif
     if (network_recovery_state != TELINK_NETWORK_RECOVERY_IDLE) {
         return HAL_ZIGBEE_NETWORK_JOINING;
     }
@@ -345,6 +503,9 @@ void hal_zigbee_start_network_steering(void) {
     // devices that already own network state use the SDK's rejoin/backoff
     // recovery. Never let the two operations overlap.
     if (network_recovery_state != TELINK_NETWORK_RECOVERY_IDLE ||
+#ifdef BSEED_MAINS_CLIENT
+        client_health_probe_active ||
+#endif
         !network_start_ready()) {
         return;
     }

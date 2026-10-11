@@ -37,9 +37,9 @@ def test_correct_crc_does_not_mask_wrong_basic_string_length():
         verify_native_image(bytes(data), CLIENT)
 
 
-def test_candidate_set_rejects_mismatched_shared_version(monkeypatch):
+def test_candidate_set_rejects_nonmonotonic_client_version(monkeypatch):
     monkeypatch.setitem(ROUTER, 'version', CLIENT['version'] + 1)
-    with pytest.raises(IdentityError, match='share one native version'):
+    with pytest.raises(IdentityError, match='Client recovery version must advance'):
         validate_candidate_set()
 
 
