@@ -405,6 +405,9 @@ def main():
                   else 'not present')
             print('NETWORK_LOCK_DIAGNOSIS',
                   json.dumps(ownership_diagnosis(owner), sort_keys=True))
+            from bseed_transfer_terminalization import historical_unaccepted
+            print('HISTORICAL_UNACCEPTED_TRANSFERS',
+                  json.dumps(historical_unaccepted(network), sort_keys=True))
         return
     if args.mode == 'reconcile-source':
         if args.confirm_ieee != profile['ieee']:
