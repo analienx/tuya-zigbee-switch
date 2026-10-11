@@ -1,0 +1,68 @@
+name: Silicon Labs Router recovery compile (SDK pinned)
+on:
+  pull_request:
+    paths:
+      - 'src/silabs/**'
+      - 'src/app.c'
+      - 'src/app.h'
+      - 'src/hal/**'
+      - 'src/telink/hal/router_recovery_policy.h'
+      - '.github/workflows/bseed-silabs-router-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  silabs-router-compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Install native and cross toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make cmake unzip bzip2 curl git python3 \
+            gcc-arm-none-eabi libnewlib-arm-none-eabi
+      - name: Prove exact source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain)"
+      - name: Download SDK 2025.6.2 and Silicon Labs CLI tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          make -C src/silabs -f tools.mk all
+      - name: Generate EFR32MG21 Router project
+        shell: bash
+        run: |
+          set -euo pipefail
+          make -C src/silabs gen DEVICE_TYPE=router
+      - name: Compile EFR32MG21 Router
+        shell: bash
+        run: |
+          set -euo pipefail
+          make -C src/silabs build DEVICE_TYPE=router
+      - name: Record pinned source, compiler and SDK evidence only
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p build/silabs-recovery-evidence
+          git rev-parse HEAD > build/silabs-recovery-evidence/source-commit.txt
+          arm-none-eabi-gcc --version | head -1 > build/silabs-recovery-evidence/compiler.txt
+          grep 'SIMPLICITY_SDK_VERSION :=' src/silabs/tools.mk > build/silabs-recovery-evidence/sdk-version.txt
+          find build/silabs/zigbee/build/release -maxdepth 1 -name '*.s37' \
+            -exec sha256sum {} \; > build/silabs-recovery-evidence/router-sha256.txt 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: silabs-router-compile-${{ github.event.pull_request.head.sha || github.sha }}
+          path: build/silabs-recovery-evidence/
+          if-no-files-found: error
