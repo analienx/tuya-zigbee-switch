@@ -152,6 +152,11 @@ static bool     boot_announce_sent;
 static bool     announce_retry_pending;
 static uint32_t last_announce_attempt_ms;
 
+void app_rearm_network_announcement(void) {
+    boot_announce_sent = false;
+    announce_retry_pending = false;
+}
+
 bool app_prepare_reboot(void) {
     energy_monitoring_tick();
     return metering_cluster_checkpoint();
