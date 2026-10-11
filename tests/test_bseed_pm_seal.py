@@ -15,13 +15,9 @@ from test_bseed_pm_variant_matrix import sample_artifact
 
 
 def registry():
-    # Router bytes were sealed in an earlier release. The Client now advances
-    # independently; do not allow a new unsigned old-Router tuple to bypass
-    # the cross-role monotonic allocation rule.
+    # Both PM roles have fresh versions because shared NVM code changed.
     return {'lines': [{'image_type': c['type'], 'board_key': 'pm', 'versions': [
-        {'file_version': c['version'], 'version_str': c['build'],
-         'sha512': hashlib.sha512(ota_image(c)).hexdigest()
-                  if c['role'] == 'Router' else None}
+        {'file_version': c['version'], 'version_str': c['build'], 'sha512': None}
     ]} for c in (CLIENT, ROUTER)]}
 
 

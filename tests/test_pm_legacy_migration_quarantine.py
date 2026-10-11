@@ -1,14 +1,8 @@
-"""PM legacy migration must never wedge the boot in a reboot loop.
+"""Keep PM NVM migration bounded without destroying historical energy.
 
-A corrupt legacy record (wrong size) or a persistently failing NVM write
-makes the copy step return false, and app_init answers that with a scheduled
-reboot. Without a bound that is an infinite reboot loop: dark LED, dead
-network, working local button. The migration must count attempts and, after
-a small bound, quarantine the poison legacy items and boot with compiled
-defaults.
-
-These tests drive the real PM stub binary against file-backed NVM, one
-process per boot, exactly like power cycles.
+Repeated migration failures must not reboot-loop, but fallback never
+authorizes erasing original energy/calibration/protection records.
+Real stub boots exercise file-backed NVM across simulated resets.
 """
 import shutil
 import struct
@@ -97,7 +91,7 @@ def pm_stub():
     _clean_nvm()
 
 
-def test_repeated_write_failure_quarantines_after_bounded_attempts(pm_stub):
+def test_repeated_write_failure_preserves_legacy_after_bounded_attempts(pm_stub):
     _clean_nvm()
     _write_device_config(PM_CONFIG)
     _seed_legacy()
@@ -106,20 +100,20 @@ def test_repeated_write_failure_quarantines_after_bounded_attempts(pm_stub):
     for expected in (1, 2, 3):
         result = _run(env)
         assert result.returncode == 0
-        assert "quarantin" not in result.stdout.lower()
+        assert "legacy nvm preserved" not in result.stdout.lower()
         assert _attempts() == expected
         for item in LEGACY_ITEMS:
             assert _item(item).exists()
 
     final = _run(env)
     assert final.returncode == 0
-    assert "quarantin" in final.stdout.lower()
+    assert "legacy nvm preserved" in final.stdout.lower()
     for item in LEGACY_ITEMS:
-        assert not _item(item).exists()
-    assert _attempts() is None
+        assert _item(item).exists()
+    assert _attempts() == 3
 
 
-def test_capped_counter_quarantines_on_next_boot_without_injection(pm_stub):
+def test_capped_counter_preserves_legacy_on_next_boot(pm_stub):
     _clean_nvm()
     _write_device_config(PM_CONFIG)
     _seed_legacy()
@@ -127,9 +121,9 @@ def test_capped_counter_quarantines_on_next_boot_without_injection(pm_stub):
 
     result = _run()
     assert result.returncode == 0
-    assert "quarantin" in result.stdout.lower()
+    assert "legacy nvm preserved" in result.stdout.lower()
     for item in LEGACY_ITEMS:
-        assert not _item(item).exists()
+        assert _item(item).exists()
 
 
 def test_corrupt_size_record_fails_gracefully_and_counts(pm_stub):
@@ -142,13 +136,39 @@ def test_corrupt_size_record_fails_gracefully_and_counts(pm_stub):
     assert _attempts() == 1
 
 
-def test_uncountable_counter_write_still_boots_with_quarantine(pm_stub):
+def test_uncountable_counter_write_still_boots_without_erasing(pm_stub):
     _clean_nvm()
     _write_device_config(PM_CONFIG)
     _seed_legacy()
 
     result = _run({"STUB_NVM_FAIL_WRITE": "64@1,52@1"})
     assert result.returncode == 0
-    assert "quarantin" in result.stdout.lower()
+    assert "legacy nvm preserved" in result.stdout.lower()
     for item in LEGACY_ITEMS:
-        assert not _item(item).exists()
+        assert _item(item).exists()
+
+
+
+def test_unified_zero_and_higher_legacy_energy_are_never_overwritten(pm_stub):
+    _clean_nvm()
+    _write_device_config(PM_CONFIG)
+    _seed_legacy(energy=struct.pack("<Q", 750))
+    # This could be an explicit user reset, so max(old,new) would be unsafe.
+    _item(64).write_bytes(struct.pack("<Q", 0))
+    result = _run()
+    assert result.returncode == 0
+    assert "energy conflict old=750 Wh new=0 Wh" in result.stdout
+    assert struct.unpack("<Q", _item(40).read_bytes())[0] == 750
+    assert struct.unpack("<Q", _item(64).read_bytes())[0] == 0
+
+
+def test_invalid_legacy_uint48_energy_kept_for_supervised_recovery(pm_stub):
+    _clean_nvm()
+    _write_device_config(PM_CONFIG)
+    _seed_legacy(energy=struct.pack("<Q", 1 << 48))
+    result = _run()
+    assert result.returncode == 0
+    assert "invalid legacy energy" in result.stdout.lower()
+    assert _attempts() == 1
+    assert _item(40).exists()
+    assert not _item(64).exists()
