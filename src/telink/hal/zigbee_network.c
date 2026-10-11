@@ -407,7 +407,9 @@ void telink_zigbee_hal_router_recovery_tick(void) {
     if (network_recovery_state != TELINK_NETWORK_RECOVERY_IDLE ||
         telink_zigbee_hal_router_ota_in_progress()) {
         /* An OTA transfer or SDK backoff owns network operations. Do not
-         * overlap ZDO probes or active rejoin while it is working. */
+         * overlap ZDO probes or active rejoin while it is working.
+         * Do not credit this interval toward 12h verified good health. */
+        bseed_router_rescue_budget_note_failure();
         router_probe_pending     = false;
         router_probe_failures    = 0;
         router_probe_rejections  = 0;
