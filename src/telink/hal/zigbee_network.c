@@ -280,6 +280,7 @@ static void client_health_recovery_tick(void) {
 static bool     router_probe_initialized;
 static bool     router_probe_pending;
 static bool     router_one_shot_active;
+static bool     router_one_shot_stalled;
 static bool     router_one_shot_attempted;
 static uint8_t  router_probe_failures;
 static uint8_t  router_probe_rejections;
@@ -314,6 +315,8 @@ static void router_coordinator_node_desc_response(void *arg) {
         router_probe_failures = 0;
         router_probe_rejections = 0;
         router_one_shot_attempts = 0;
+        router_one_shot_stalled = false;
+        router_one_shot_active = false;
         router_probe_pending = false;
     }
 }
@@ -348,7 +351,18 @@ void telink_zigbee_hal_router_recovery_tick(void) {
     if (zb_isDeviceFactoryNew() || !zb_isDeviceJoinedNwk()) {
         router_probe_initialized = false;
         router_probe_pending     = false;
-        router_one_shot_active   = false;
+        /* A one-shot may temporarily leave the network. It still owns the
+         * SDK until a terminal BDB callback, even if JOINED goes false.
+         * On missing completion, hold a separate orphan guard and let the
+         * existing 45-minute not-joined rescue run; never overlap backoff. */
+        if (router_one_shot_active &&
+            (uint32_t)(now - router_one_shot_ms) >=
+                ROUTER_ONE_SHOT_DEADLINE_MS) {
+            router_one_shot_active = false;
+            router_one_shot_stalled = true;
+            firmware_health_increment(&firmware_health.rejoin_failure);
+            printf("Router: lost one-shot callback while unjoined; isolate SDK\r\n");
+        }
         if (zb_isDeviceFactoryNew() ||
             telink_zigbee_hal_router_ota_in_progress()) {
             router_recovery_timer_active = false;
@@ -384,9 +398,11 @@ void telink_zigbee_hal_router_recovery_tick(void) {
     if (!router_probe_initialized) {
         router_probe_initialized = true;
         router_last_probe_ms = now;
-        router_last_positive_ms = now;
-        router_last_inbound_ms = now;
-        router_one_shot_attempts = 0;
+        if (!router_one_shot_stalled) {
+            router_last_positive_ms = now;
+            router_last_inbound_ms = now;
+            router_one_shot_attempts = 0;
+        }
         return;
     }
 
@@ -399,8 +415,9 @@ void telink_zigbee_hal_router_recovery_tick(void) {
          * Keep the cooldown; probes may resume but no second one-shot starts
          * until after it, regardless of the vendor callback behavior. */
         router_one_shot_active = false;
+        router_one_shot_stalled = true;
         firmware_health_increment(&firmware_health.rejoin_failure);
-        printf("Router: missing one-shot completion; cooldown\r\n");
+        printf("Router: missing one-shot completion; block overlapping recovery\r\n");
     }
 
     if (router_probe_pending &&
@@ -425,7 +442,9 @@ void telink_zigbee_hal_router_recovery_tick(void) {
      * incoming application traffic before one checkpointed rescue reboot. */
     if (bseed_router_joined_rescue_eligible(
             router_reboot_scheduled, router_one_shot_active,
-            router_one_shot_attempts, ROUTER_MIN_REJOIN_ATTEMPTS, now,
+            router_one_shot_stalled ? ROUTER_MIN_REJOIN_ATTEMPTS :
+                                      router_one_shot_attempts,
+            ROUTER_MIN_REJOIN_ATTEMPTS, now,
             router_last_positive_ms, router_last_inbound_ms,
             ROUTER_ISOLATED_REBOOT_MS + reboot_stagger_ms,
             ROUTER_INBOUND_GRACE_MS,
@@ -436,7 +455,8 @@ void telink_zigbee_hal_router_recovery_tick(void) {
         return;
     }
 
-    if ((repeated_response_timeouts || stuck_request_queue) &&
+    if (!router_one_shot_stalled &&
+        (repeated_response_timeouts || stuck_request_queue) &&
         (!router_one_shot_attempted ||
          (uint32_t)(now - router_one_shot_ms) >=
              ROUTER_REJOIN_COOLDOWN_MS)) {
@@ -605,8 +625,10 @@ void bdb_init_callback(u8 status, u8 joinedNetwork) {
 void bdb_commissioning_callback(u8 status, void *arg) {
     printf("BDB commissioning callback, status: %d\r\n", status);
 #if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
-    if (status != BDB_COMMISSION_STA_IN_PROGRESS)
+    if (status != BDB_COMMISSION_STA_IN_PROGRESS) {
         router_one_shot_active = false;
+        router_one_shot_stalled = false;
+    }
 #endif
 #ifdef BSEED_MAINS_CLIENT
     /* A one-shot rejoin has a terminal BDB completion. Do not confuse this
@@ -706,6 +728,10 @@ hal_zigbee_network_status_t hal_zigbee_get_network_status(void) {
         return HAL_ZIGBEE_NETWORK_JOINING;
     }
 #endif
+#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
+    if (router_one_shot_active || router_one_shot_stalled)
+        return HAL_ZIGBEE_NETWORK_JOINING;
+#endif
     if (network_recovery_state != TELINK_NETWORK_RECOVERY_IDLE) {
         return HAL_ZIGBEE_NETWORK_JOINING;
     }
@@ -726,6 +752,10 @@ void hal_zigbee_leave_network(void) {
     leaveReq.rejoin             = 0;
     network_recovery_state      = TELINK_NETWORK_RECOVERY_IDLE;
     network_start_retry_pending = false;
+#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
+    router_one_shot_active = false;
+    router_one_shot_stalled = false;
+#endif
     zb_nlmeLeaveReq(&leaveReq);
     notify_about_network_status_change();
 }
@@ -736,6 +766,10 @@ void hal_zigbee_start_network_steering(void) {
         return;
     }
 
+#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
+    if (router_one_shot_active || router_one_shot_stalled)
+        return;
+#endif
     // The public HAL name is historical. On Telink this entry point now means
     // "ensure connectivity": factory-new devices perform BDB steering, while
     // devices that already own network state use the SDK's rejoin/backoff
