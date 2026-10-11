@@ -38,7 +38,7 @@ static inline bool bseed_router_rejoin_eligible(
     bool serving_neighbors =
         (uint32_t)(now - last_inbound) < inbound_active_window_ms;
     uint32_t minimum = serving_neighbors ? serving_neighbors_min_ms :
-                                           quiet_min_ms;
+                       quiet_min_ms;
     return (uint32_t)(now - last_coordinator_reply) >= minimum + stagger_ms;
 }
 
