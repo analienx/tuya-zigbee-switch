@@ -147,7 +147,7 @@ void app_init(void) {
 /* Device announces are per join epoch, not per boot. Failed local enqueue
  * must not be mistaken for successful delivery. Both Telink and Silicon
  * Labs use the same application logic for this recovery boundary. */
-#define ANNOUNCE_RETRY_MS 5000u
+#define ANNOUNCE_RETRY_MS    5000u
 static bool     boot_announce_sent;
 static bool     announce_retry_pending;
 static uint32_t last_announce_attempt_ms;
@@ -180,17 +180,17 @@ void app_task() {
      * Re-announce once after the observed loss; only retry a rejected local
      * transmit at a bounded rate. No NVM, role or relay state is changed. */
     if (network_status != HAL_ZIGBEE_NETWORK_JOINED) {
-        boot_announce_sent = false;
+        boot_announce_sent     = false;
         announce_retry_pending = false;
     } else if (!boot_announce_sent &&
                (!announce_retry_pending ||
                 (uint32_t)(hal_millis() - last_announce_attempt_ms) >=
-                    ANNOUNCE_RETRY_MS)) {
+                ANNOUNCE_RETRY_MS)) {
         last_announce_attempt_ms = hal_millis();
-        announce_retry_pending = true;
+        announce_retry_pending   = true;
         if (hal_zigbee_send_announce() == HAL_ZIGBEE_OK) {
             init_energy_reporting();
-            boot_announce_sent = true;
+            boot_announce_sent     = true;
             announce_retry_pending = false;
         }
     }
