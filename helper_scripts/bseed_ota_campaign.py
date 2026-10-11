@@ -398,9 +398,13 @@ def main():
             print(filename, f.read_text(encoding='utf8') if f.exists() else 'not present')
         network = network_lock_path(profile)
         if network is not None:
+            from bseed_network_campaign_lock import read_lock, ownership_diagnosis
+            owner = read_lock(network)
             print('NETWORK_LOCK', network,
-                  network.read_text(encoding='utf8') if network.exists()
+                  network.read_text(encoding='utf8') if owner is not None
                   else 'not present')
+            print('NETWORK_LOCK_DIAGNOSIS',
+                  json.dumps(ownership_diagnosis(owner), sort_keys=True))
         return
     if args.mode == 'reconcile-source':
         if args.confirm_ieee != profile['ieee']:

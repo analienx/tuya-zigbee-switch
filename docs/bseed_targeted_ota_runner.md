@@ -75,6 +75,16 @@ python helper_scripts/bseed_ota_campaign.py --profile /private/target.json --mod
 
 `prepare` verifies image bytes, SHA-256, stock-facing OTA header/tuple, native payload identity (when supplied), the exact single matching template entry and HTTP image integrity before writing a private single-entry index. It refuses to overwrite a different existing private index. `preflight`/`check`/`flash` delegate to `bseed_targeted_z2m_ota.py` without reimplementing its safety logic. `flash` requires a second explicit exact IEEE. `postflash` independently uses a read-only, bounded MQTT observation, writes an immutable private JSON snapshot and returns nonzero if role/build/interview/live state cannot be verified. It **does not** restart, re-interview, pair, toggle or flash the device. MQTT state events and cached metadata alone cannot establish physical relay safety; independent hardware and functional checks are mandatory.
 
+**Lease versus acceptance diagnostics:** `--mode status` prints
+`NETWORK_LOCK_DIAGNOSIS`, separately identifying exclusive network ownership,
+transport outcome and hardware acceptance. For `ota_transfer_ok_postflash_unverified`,
+transport is **complete** but acceptance is **unverified** and the network
+lock remains held. This is never an implicit hardware pass or authorization to
+release ownership. The reviewed terminalization and immutable failed-acceptance
+ledger design is tracked in [issue #72](https://github.com/analienx/tuya-zigbee-switch/issues/72).
+A remote host/tool rejection before `RDC_SLRUNNER_START` must not be
+misdiagnosed as a local runner policy error or retried through another transport.
+
 **Lock semantics:** A successful Zigbee2MQTT OTA response now yields `ota_transfer_ok_postflash_unverified` rather than `update_ok`; this remains a blocking state until a separately verified acceptance is explicitly recorded. Legacy `update_ok` locks also block new campaigns. A separate workdir is not a way to circumvent an unresolved previous OTA: inspect other campaign locks and live Zigbee2MQTT OTA activity before beginning anything. `status` only reads the current workdir's local lock and last check.
 
 ## Automated cross-role migration and metadata reconciliation (2026-09-20)
