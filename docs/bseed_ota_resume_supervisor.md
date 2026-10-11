@@ -90,6 +90,9 @@ not a cached composite power field. The exact `check` must then match fresh
 transaction, IEEE, source URL, pinned image hash, and timestamp. Only then
 is the campaign reconciled and the shared lock released for one new flash.
 The updated Zigbee2MQTT converter is required for this fresh PM sample gate.
+For physically unloaded custom PM sockets the explicit pinned physical-proof
+route replaces that **preflash** fresh metering check; the candidate-pending
+preflight itself still loads and validates the exact private campaign profile.
 Cross-role resume keeps strict reconciliation. `OTA_SUPERVISOR.json` records
 the progress history and current retry decision.
 

@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'helper_scripts'))
-from bseed_targeted_z2m_ota import verify_image, write_live_status
+from bseed_targeted_z2m_ota import verify_image, write_live_status, needs_canonical_campaign
 from tests.bseed_image_fixture import image_for
 
 
@@ -199,3 +199,18 @@ def test_flash_uses_single_shared_network_authority_before_submit():
     assert src.index('shared_network_lock_path(source_profile, required=True)') < src.index('acquire_network_lock(')
     assert src.index('acquire_network_lock(') < src.index('payload = update_payload(')
     assert src.index('if active_updates:') < src.index('acquire_network_lock(')
+
+
+@pytest.mark.parametrize(("mode","profile","expected"), [
+    ("preflight", "C:/private/campaign.json", True),
+    ("preflight", None, False),
+    ("preflight", "", False),
+    ("check", "C:/private/campaign.json", True),
+    ("flash", "C:/private/campaign.json", True),
+    ("check", None, True),
+    ("flash", None, True),
+])
+def test_pending_source_preflight_loads_canonical_campaign(mode, profile, expected):
+    # A direct preflight without private profile still cannot unlock
+    # source_verified_candidate_pending; the pending check requires campaign.
+    assert needs_canonical_campaign(mode, profile) is expected
