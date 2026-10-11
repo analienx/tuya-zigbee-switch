@@ -49,8 +49,9 @@ All Telink Routers share `src/telink/hal/zigbee_network.c`; no per-board fork.
 - Every 6 minutes plus a deterministic 0–120s IEEE-derived stagger, make at
   most one pending ZDO Node Descriptor request to coordinator `0x0000`.
   Accept only a complete response with SUCCESS and coordinator address.
-  Time an unanswered request out after 30 seconds; counting a synchronous
-  ZDO request error as a failed probe also requires repeat occurrences.
+  Time an unanswered request out after 30 seconds. Track queue or SDK
+  request rejections separately: require at least eight consecutive rejected
+  requests plus 60 minutes without positive inbound before recovery.
 - Any incoming authenticated application ZCL or successful coordinator ZDO
   response resets the failure streak and records positive evidence.
 - After at least **four failed probes** and **20 minutes without any positive
