@@ -20,7 +20,7 @@ void ota_process_msg_callback(u8 evt, u8 status);
 
 static hal_task_t ota_checkpoint_reboot_task;
 
-#if ZB_ROUTER_ROLE
+#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
 /* Recovery probes and rejoin must not collide with Router OTA transfers.
  * The callback lease may expire only when the SDK itself reports NORMAL.
  * Slow or paused image download must NEVER be interrupted by the watchdog.
@@ -117,7 +117,7 @@ void hal_ota_cluster_setup(hal_zigbee_cluster *cluster) {
 }
 
 void ota_process_msg_callback(u8 evt, u8 status) {
-#if ZB_ROUTER_ROLE
+#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
     if (evt == OTA_EVT_START && status == ZCL_STA_SUCCESS) {
         router_ota_in_progress = true;
         router_ota_started_ms = hal_millis();
