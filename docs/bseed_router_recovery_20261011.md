@@ -145,11 +145,19 @@ and pinned [Telink 3.7.2.0 SDK APIs](https://github.com/telink-semi/telink_zigbe
    checkpointed software reboot exceptionally rare and staggered. CI proofs
    do not establish child retention or live route repair.
 
-**Explicit remaining limitations:** This PR cannot guarantee a Router that
-has a wedged radio or watchdog/superloop never ticking will execute any
-software-based recovery. The last-resort `schedule_reboot` only runs while
-that loop still executes; a genuine hardware or total scheduler hang requires
-an independent hardware watchdog or power intervention. Silicon Labs
+**Explicit remaining limitations:** The Telink main loop already starts
+the hardware watchdog via `drv_wd_setInterval(1000)` and `drv_wd_start()`,
+clearing it around the stack/application loop. A total MCU stall should
+therefore invoke the **existing** hardware watchdog, not the new Router
+rejoin logic. A Zigbee stack that remains nominally runnable but can no longer
+exchange network traffic continues to feed that watchdog and requires the
+application's independent bounded connectivity checks; those checks cannot
+recover a permanently broken radio peripheral or physical RF outage.
+The last-resort `schedule_reboot` requires the superloop to keep running.
+A software reboot budget currently limits resets to one **per boot**, not
+one across multiple power cycles; prolonged genuine network outages may
+therefore cause later repeated rescue reboots. Measure and enforce a
+persistent fleet-safe budget before mass deployment. Silicon Labs
 JOINED-but-isolated recovery is not yet implemented. Coordinator-source-route
 repair requires changes outside this device firmware and separate acceptance.
 
