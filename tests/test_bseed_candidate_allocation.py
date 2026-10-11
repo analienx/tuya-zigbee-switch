@@ -15,20 +15,28 @@ def test_candidates_follow_canonical_board_allocator():
     document = json.loads((ROOT / 'zigbee2mqtt/ota/bseed_identity.json').read_text())
     registry = {int(line['image_type']): copy.deepcopy(line) for line in document['lines']}
 
-    # PM/non-PM Router versions remain immutable. New Client-only releases
-    # allocate *after* the existing board maximum, not at the Router version.
-    for candidate in (CLIENT, NONPM['client']):
-        local = copy.deepcopy(registry)
+    # PM shared migration code changes both roles: allocate a new Router,
+    # then Client. Keep every sealed historical board tuple unchanged.
+    local = copy.deepcopy(registry)
+    for candidate in (ROUTER, CLIENT):
         line = local[candidate['type']]
-        line['versions'] = [
-            v for v in line['versions']
-            if v['file_version'] != candidate['version']
-        ]
+        line['versions'] = [v for v in line['versions']
+                            if v['file_version'] != candidate['version']]
+    for candidate in (ROUTER, CLIENT):
         allocation = emit_make_vars(local, candidate['type'], candidate['build'])
         assert int(allocation['FILE_VERSION'], 0) == candidate['version']
         assert allocation['VERSION_STR'] == candidate['build']
+        local[candidate['type']]['versions'].append({
+            'file_version': candidate['version'], 'version_str': candidate['build']})
 
-    for candidate in (ROUTER, NONPM['router']):
+    local = copy.deepcopy(registry)
+    line = local[NONPM['client']['type']]
+    line['versions'] = [v for v in line['versions']
+                        if v['file_version'] != NONPM['client']['version']]
+    allocation = emit_make_vars(local, NONPM['client']['type'], NONPM['client']['build'])
+    assert int(allocation['FILE_VERSION'], 0) == NONPM['client']['version']
+
+    for candidate in (NONPM['router'],):
         line = registry[candidate['type']]
         matches = [v for v in line['versions'] if
                    v['file_version'] == candidate['version'] and
@@ -52,5 +60,5 @@ def test_retired_pm_return_tuple_stays_reserved_without_being_a_candidate():
     ]
     assert len(retired) == 2 and all(entry.get('status') == 'retired' for entry in retired)
     registry = {int(line['image_type']): copy.deepcopy(line) for line in document['lines']}
-    next_router = emit_make_vars(registry, ROUTER['type'], '1.2.5-bseedr13')
+    next_router = emit_make_vars(registry, ROUTER['type'], '1.2.5-bseedr14')
     assert int(next_router['FILE_VERSION'], 0) == CLIENT['version'] + 1

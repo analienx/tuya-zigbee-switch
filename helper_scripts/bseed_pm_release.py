@@ -7,10 +7,11 @@ import struct
 from bseed_ota_identity import IdentityError, parse_ota_header, require_embedded_string
 
 CLIENT = {'role': 'EndDevice', 'build': '1.2.5-bseedcli16',
-          'version': 0x1205301B, 'type': 65024, 'artifact': 'forward.ota',
+          'version': 0x1205301C, 'type': 65024, 'artifact': 'forward.ota',
           'date': '20261011'}
-ROUTER = {'role': 'Router', 'build': '1.2.5-bseedr12',
-          'version': 0x12053019, 'type': 43556, 'artifact': 'forward.ota'}
+ROUTER = {'role': 'Router', 'build': '1.2.5-bseedr13',
+          'version': 0x1205301B, 'type': 43556, 'artifact': 'forward.ota',
+          'date': '20261011'}
 CANDIDATES = {'client': CLIENT, 'router': ROUTER}
 RELEASE_DATE = '20261003'  # Immutable input for this candidate set, not wall-clock build time.
 
@@ -21,8 +22,8 @@ def validate_candidate_set():
     for item in CANDIDATES.values():
         if not item['build'].isascii() or not 1 <= len(item['build']) <= 16:
             raise IdentityError('candidate Basic build ID must fit 16 ASCII bytes')
-    # Router and Client are separate OTA image types. A Client-only recovery
-    # release must never force re-labeling immutable Router bytes.
+    # Shared PM NVM implementation affects both native roles. Allocate fresh
+    # Router then Client identities: never relabel sealed r12 or cli15 bytes.
     if CLIENT['version'] <= ROUTER['version']:
         raise IdentityError('new PM Client recovery version must advance')
     if CLIENT['type'] != 65024 or ROUTER['type'] != 43556:

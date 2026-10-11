@@ -2,7 +2,7 @@
 
 - Never delete historical PM energy NVM slot 40, calibration slot 44, overload slot 51 or the retry marker on repeated migration failures. Respect the retry cap while preserving forensic/recovery data.
 - Detect and log a higher old energy counter conflicting with the unified destination but never silently overwrite an intentional reset. Reject out-of-range uint64 energy before copying into Zigbee UINT48.
-- Reserve unique PM Client candidate 1.2.5-bseedcli16, type 65024, version 0x1205301B; source only, not sealed, flashed or hardware accepted. Historical firmware and Router bytes remain immutable.
+- Reserve unique PM Router 1.2.5-bseedr13 type 43556 / 0x1205301B and PM Client 1.2.5-bseedcli16 type 65024 / 0x1205301C. Shared-source migration fix changes both Router and Client bytes; historically sealed r12/cli15 identities remain immutable. Neither new candidate is sealed, flashed or hardware accepted.
 - HifiLeft's old 0.75 kWh may have been a cached value. Its cli14 live counter first became 0 at 10:37:42 after upgrade; root cause cannot be proven without internal NVM records, so this source change is prospective and no loss is silently backfilled or global OTA lock cleared.
 
 ## Unreleased - new candidate PM cli15 / non-PM c10 (NOT flashed)

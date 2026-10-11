@@ -55,9 +55,9 @@ def test_generated_converter_loads_and_pm_nonpm_contracts_stay_separate(tmp_path
     # The PM Client next version is reserved, not deployed. The generated
     # converter must continue recognising the already sealed image; the
     # unreleased candidate must never be misrepresented as deployed.
-    for candidate in CANDIDATES.values():
-        if candidate['role'] == 'Router':
-            assert '"' + candidate['build'] + '"' in rendered
+    # Converter recognizes the approved sealed versions, not reserved
+    # Router r13 / Client cli16 pending hardware acceptance.
+    assert '"1.2.5-bseedr12"' in rendered
     assert '"1.2.5-bseedcli14"' in rendered
     converter.write_text(rendered)
     script = r'''

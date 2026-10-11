@@ -45,7 +45,7 @@ static bool copy_item_if_destination_absent(uint16_t legacy_item,
             if (hal_nvm_read(legacy_item, size,
                              (uint8_t *)&legacy) == HAL_NVM_SUCCESS &&
                 legacy.accumulated_energy_wh >
-                    destination.accumulated_energy_wh) {
+                destination.accumulated_energy_wh) {
                 printf("PM NVM migration: energy conflict old=%llu Wh "
                        "new=%llu Wh; both retained\r\n",
                        (unsigned long long)legacy.accumulated_energy_wh,

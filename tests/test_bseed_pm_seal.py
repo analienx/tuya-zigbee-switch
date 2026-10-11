@@ -15,13 +15,9 @@ from test_bseed_pm_variant_matrix import sample_artifact
 
 
 def registry():
-    # Router bytes were sealed in an earlier release. The Client now advances
-    # independently; do not allow a new unsigned old-Router tuple to bypass
-    # the cross-role monotonic allocation rule.
+    # Both PM roles have fresh versions because shared NVM code changed.
     return {'lines': [{'image_type': c['type'], 'board_key': 'pm', 'versions': [
-        {'file_version': c['version'], 'version_str': c['build'],
-         'sha512': hashlib.sha512(ota_image(c)).hexdigest()
-                  if c['role'] == 'Router' else None}
+        {'file_version': c['version'], 'version_str': c['build'], 'sha512': None}
     ]} for c in (CLIENT, ROUTER)]}
 
 
@@ -89,8 +85,7 @@ def test_nonpm_bundle_can_be_sealed_with_pm_without_crossing_board_identity(tmp_
     for candidate in CANDIDATES.values():
         original['lines'].append(dict(image_type=candidate['type'], board_key='o1jzcxou', versions=[
             dict(file_version=candidate['version'], version_str=candidate['build'],
-                 sha512=hashlib.sha512(ota_image(candidate)).hexdigest()
-                        if candidate['role'] == 'Router' else None)]))
+                 sha512=None)]))
     sealed, _ = verify_bundle(matrix, 'a' * 40, original)
     verify_nonpm(nonpm, 'a' * 40)
     artifacts = [((nonpm / role / 'forward.ota').read_bytes(), c, c['type'])
