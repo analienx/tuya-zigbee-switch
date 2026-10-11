@@ -20,7 +20,7 @@ def iso(seconds):
     return (NOW + dt.timedelta(seconds=seconds)).isoformat()
 
 
-def setup(tmp_path):
+def make_case(tmp_path):
     img = tmp_path / 'client.ota'
     img.write_bytes(b'sealed-candidate-fixture')
     work = tmp_path / 'hifi-work'
@@ -82,7 +82,7 @@ def setup(tmp_path):
 
 
 def test_read_only_diagnosis_preserves_energy_and_relay_failures(tmp_path):
-    p, net, q, post, approval = setup(tmp_path)
+    p, net, q, post, approval = make_case(tmp_path)
     before = net.read_bytes()
     record = t.inspect(p, net, q, post, approval, now=NOW)
     assert record['hardware_acceptance'] == 'unverified'
@@ -112,7 +112,7 @@ def test_read_only_diagnosis_preserves_energy_and_relay_failures(tmp_path):
     ('post', 'fresh_mqtt_state_observed', False),
 ])
 def test_refuse_missing_wrong_or_stale_evidence(tmp_path, mutation):
-    p, net, q, post, approval = setup(tmp_path)
+    p, net, q, post, approval = make_case(tmp_path)
     obj = {'q': q, 'approval': approval, 'post': post}[mutation[0]]
     obj[mutation[1]] = mutation[2]
     with pytest.raises(ValueError):
@@ -126,7 +126,7 @@ def test_refuse_missing_wrong_or_stale_evidence(tmp_path, mutation):
     'postflash_accepted',
 ])
 def test_unknown_or_uncompleted_transfer_never_releases(tmp_path, bad_phase):
-    p, net, q, post, approval = setup(tmp_path)
+    p, net, q, post, approval = make_case(tmp_path)
     update(net, approval['token'], bad_phase)
     with pytest.raises(ValueError, match='Only completed'):
         t.inspect(p, net, q, post, approval, now=NOW)
@@ -134,7 +134,7 @@ def test_unknown_or_uncompleted_transfer_never_releases(tmp_path, bad_phase):
 
 
 def test_guard_prevents_terminalization_for_active_quarantine(tmp_path):
-    p, net, q, post, approval = setup(tmp_path)
+    p, net, q, post, approval = make_case(tmp_path)
     guard = Path(p['workdir']) / 'PM_TELEMETRY_GUARD.json'
     guard.write_text('{}')
     with pytest.raises(ValueError, match='quarantine'):
@@ -142,7 +142,7 @@ def test_guard_prevents_terminalization_for_active_quarantine(tmp_path):
 
 
 def test_commit_archives_exact_bytes_and_leaves_immutable_failure_ledger(tmp_path):
-    p, net, q, post, approval = setup(tmp_path)
+    p, net, q, post, approval = make_case(tmp_path)
     original = net.read_bytes()
     receipt = t.commit(p, net, q, post, approval,
                        evidence_sha256={'quiet': 'a' * 64}, now=NOW)
@@ -169,7 +169,7 @@ def test_commit_archives_exact_bytes_and_leaves_immutable_failure_ledger(tmp_pat
 
 
 def test_failed_archive_preserves_authority_and_blocks_future_acquisition(tmp_path, monkeypatch):
-    p, net, q, post, approval = setup(tmp_path)
+    p, net, q, post, approval = make_case(tmp_path)
     def fail_rename(*args, **kwargs):
         raise OSError('simulated filesystem failure')
     monkeypatch.setattr(t.os, 'rename', fail_rename)
@@ -183,7 +183,7 @@ def test_failed_archive_preserves_authority_and_blocks_future_acquisition(tmp_pa
 
 
 def test_second_commit_refused_without_corrupting_original_ledger(tmp_path):
-    p, net, q, post, approval = setup(tmp_path)
+    p, net, q, post, approval = make_case(tmp_path)
     t.commit(p, net, q, post, approval, evidence_sha256={}, now=NOW)
     existing = t.artifact_paths(net, approval['token'])['committed'].read_bytes()
     with pytest.raises((RuntimeError, ValueError)):
@@ -192,14 +192,14 @@ def test_second_commit_refused_without_corrupting_original_ledger(tmp_path):
 
 
 def test_actual_image_mutation_is_rejected(tmp_path):
-    p, net, q, post, approval = setup(tmp_path)
+    p, net, q, post, approval = make_case(tmp_path)
     Path(p['image']).write_bytes(b'different')
     with pytest.raises(ValueError, match='Candidate image'):
         t.inspect(p, net, q, post, approval, now=NOW)
 
 
 def test_pending_network_lease_guard_is_fail_closed(tmp_path):
-    p, net, q, post, approval = setup(tmp_path)
+    p, net, q, post, approval = make_case(tmp_path)
     pending_path(net).write_text('unresolved journal')
     with pytest.raises(RuntimeError, match='terminalization pending'):
         acquire(net, network_id=p['network_id'], token='second',
@@ -207,7 +207,7 @@ def test_pending_network_lease_guard_is_fail_closed(tmp_path):
 
 
 def test_historical_archive_tampering_detected(tmp_path):
-    p, net, q, post, approval = setup(tmp_path)
+    p, net, q, post, approval = make_case(tmp_path)
     t.commit(p, net, q, post, approval, evidence_sha256={}, now=NOW)
     paths = t.artifact_paths(net, approval['token'])
     paths['archive'].write_text('corrupt')
