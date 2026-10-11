@@ -294,7 +294,8 @@ void sl_zigbee_af_network_steering_complete_cb(sl_status_t status,
     (void)totalBeacons;
     (void)joinAttempts;
     (void)finalState;
-    network_steering_in_progress     = false;
+    network_steering_in_progress = false;
+
     /* Even if steering reports success, don't immediately start it again
      * when the stack has not yet transitioned to JOINED. */
     network_steering_retry_pending =
