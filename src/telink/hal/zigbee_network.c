@@ -783,7 +783,7 @@ uint32_t hal_zigbee_get_poll_rate_ms(void) {
 void telink_zigbee_hal_network_init(void) {
     zb_init();
 
-#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
+#if ZB_ROUTER_ROLE
     /* Zigbee R23 section 3.6.10 requires a parent that accepts End Device
      * Timeout requests to advertise at least one supported keepalive method.
      * Telink 3.7.2.0 initializes nwkParentInformation to zero even though its
@@ -794,7 +794,7 @@ void telink_zigbee_hal_network_init(void) {
 #endif
 
     zb_zdoCbRegister(&zdo_callbacks);
-#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE || defined(BSEED_MAINS_CLIENT)
+#if ZB_ROUTER_ROLE || defined(BSEED_MAINS_CLIENT)
     // A mains client is a Zigbee End Device only in the topology sense. Keep
     // the radio on continuously, advertise mains power, and do not enable the
     // sleepy-end-device polling model. ZB_MAC_RX_ON_WHEN_IDLE=1 also seeds the
