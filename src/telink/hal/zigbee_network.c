@@ -326,9 +326,14 @@ static bool router_reboot_scheduled;
 
 void telink_zigbee_hal_router_recovery_tick(void) {
     uint32_t now = hal_millis();
-    uint32_t stagger_ms =
-        ((((uint32_t)g_zbMacPib.extAddress[1] << 8) |
-          g_zbMacPib.extAddress[7]) % 120000u);
+    /* Three IEEE bytes spread even a >60-Router mesh across the full
+     * jitter windows. A 16-bit suffix can only stagger by ~65 seconds. */
+    uint32_t ieee_stagger_seed =
+        (((uint32_t)g_zbMacPib.extAddress[1] << 16) |
+         ((uint32_t)g_zbMacPib.extAddress[4] << 8) |
+         g_zbMacPib.extAddress[7]);
+    uint32_t stagger_ms = ieee_stagger_seed % 120000u;
+    uint32_t reboot_stagger_ms = ieee_stagger_seed % (15u * 60u * 1000u);
 
     if (zb_isDeviceFactoryNew() || !zb_isDeviceJoinedNwk()) {
         router_probe_initialized = false;
@@ -346,7 +351,7 @@ void telink_zigbee_hal_router_recovery_tick(void) {
         }
         if (!router_reboot_scheduled &&
             (uint32_t)(now - router_recovery_since_ms) >=
-                ROUTER_RECOVERY_STALL_MS + stagger_ms) {
+                ROUTER_RECOVERY_STALL_MS + reboot_stagger_ms) {
             router_reboot_scheduled = true;
             printf("Router: rejoin stalled for 45m; controlled rescue reboot\r\n");
             schedule_reboot(2000);
