@@ -184,6 +184,43 @@ def artifact_paths(authority, token):
     }
 
 
+def historical_unaccepted(authority):
+    """Read-only independent acceptance history even when another owner exists.
+
+    A broken receipt/archive is surfaced as an integrity problem; never silently
+    promote a historical failed device to accepted.
+    """
+    authority = Path(authority)
+    prefix = authority.name + '.terminal-'
+    records = []
+    for receipt in sorted(authority.parent.glob(prefix + '*.committed.json')):
+        entry = json.loads(receipt.read_text(encoding='utf8'))
+        if (entry.get('network_id') is None or
+                entry.get('hardware_acceptance') != 'unverified' or
+                entry.get('network_ownership_state') != 'released_unaccepted'):
+            raise ValueError('Invalid historical acceptance record: ' + receipt.name)
+        token = entry.get('token')
+        if not isinstance(token, str) or not token:
+            raise ValueError('Missing immutable receipt token')
+        paths = artifact_paths(authority, token)
+        if paths['committed'] != receipt:
+            raise ValueError('Receipt belongs to a different Zigbee authority')
+        archive = paths['archive']
+        if (not archive.is_file() or
+                digest_file(archive) != entry.get('archived_network_lock_sha256')):
+            raise ValueError('Historical archived ownership hash mismatch')
+        records.append({
+            'device': entry['device'], 'ieee': entry['ieee'],
+            'installed_build': entry['installed_build'],
+            'hardware_acceptance': entry['hardware_acceptance'],
+            'postflash_findings': entry['postflash_findings'],
+            'original_preflash_state': entry['original_preflash_state'],
+            'observed_postflash_state': entry['observed_postflash_state'],
+            'archive_integrity_verified': True,
+        })
+    return records
+
+
 def inspect(profile, network_path, quiet, post, approval, *, now=None):
     """Read-only proposal. No release, flashing or device commands."""
     network = read_lock(network_path)
