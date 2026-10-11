@@ -240,6 +240,7 @@ static void client_health_recovery_tick(void) {
     client_health_probe_active    = true;
     firmware_health_increment(&firmware_health.rejoin_start);
     printf("Mains client: parent MAC poll silent; one-shot rejoin\r\n");
+
     /* No trust-center join window is required: retain the current network
      * key and request the secure rejoin path explicitly. */
     zb_rejoinSecModeSet(REJOIN_SECURITY);
