@@ -162,6 +162,10 @@ def test_commit_archives_exact_bytes_and_leaves_immutable_failure_ledger(tmp_pat
             device='Other', ieee='0x00124b0000000002', image_sha256='b' * 64)
     assert read_lock(net)['device'] == 'Other'
     assert artifacts['committed'].exists()
+    history = t.historical_unaccepted(net)
+    assert len(history) == 1
+    assert history[0]['archive_integrity_verified'] is True
+    assert history[0]['postflash_findings'] == post['issues']
 
 
 def test_failed_archive_preserves_authority_and_blocks_future_acquisition(tmp_path, monkeypatch):
@@ -200,3 +204,12 @@ def test_pending_network_lease_guard_is_fail_closed(tmp_path):
     with pytest.raises(RuntimeError, match='terminalization pending'):
         acquire(net, network_id=p['network_id'], token='second',
                 device='Other', ieee='0x00124b0000000002', image_sha256='c' * 64)
+
+
+def test_historical_archive_tampering_detected(tmp_path):
+    p, net, q, post, approval = setup(tmp_path)
+    t.commit(p, net, q, post, approval, evidence_sha256={}, now=NOW)
+    paths = t.artifact_paths(net, approval['token'])
+    paths['archive'].write_text('corrupt')
+    with pytest.raises(ValueError, match='archived ownership hash'):
+        t.historical_unaccepted(net)
