@@ -318,6 +318,7 @@ static void router_coordinator_node_desc_response(void *arg) {
         rsp->seq_num == router_probe_sequence &&
         rsp->status == ZDO_SUCCESS && rsp->nwk_addr_interest == 0x0000u) {
         router_last_positive_ms  = hal_millis();
+        bseed_router_rescue_budget_note_good_coordinator(router_last_positive_ms);
         router_last_inbound_ms   = router_last_positive_ms;
         router_probe_failures    = 0;
         router_probe_rejections  = 0;
@@ -362,6 +363,7 @@ void telink_zigbee_hal_router_recovery_tick(void) {
     uint32_t rejoin_stagger_ms = reboot_stagger_ms;
 
     if (zb_isDeviceFactoryNew() || !zb_isDeviceJoinedNwk()) {
+        bseed_router_rescue_budget_note_failure();
         router_probe_initialized = false;
         router_probe_pending     = false;
 
@@ -389,10 +391,14 @@ void telink_zigbee_hal_router_recovery_tick(void) {
         }
         if (!router_reboot_scheduled &&
             (uint32_t)(now - router_recovery_since_ms) >=
-            ROUTER_RECOVERY_STALL_MS + reboot_stagger_ms) {
+                ROUTER_RECOVERY_STALL_MS + reboot_stagger_ms) {
             router_reboot_scheduled = true;
-            printf("Router: rejoin stalled for 45m; controlled rescue reboot\r\n");
-            schedule_reboot(2000);
+            if (bseed_router_rescue_budget_consume()) {
+                printf("Router: stalled rejoin, budgeted checkpoint reboot\r\n");
+                schedule_reboot(2000);
+            } else {
+                printf("Router: rescue reboot denied by persistent NVM budget\r\n");
+            }
         }
         return;
     }
@@ -437,6 +443,7 @@ void telink_zigbee_hal_router_recovery_tick(void) {
     if (router_probe_pending &&
         (uint32_t)(now - router_last_probe_ms) >= ROUTER_PROBE_DEADLINE_MS) {
         router_probe_pending = false;
+        bseed_router_rescue_budget_note_failure();
         if (router_probe_failures < UINT8_MAX)
             router_probe_failures++;
     }
@@ -466,8 +473,12 @@ void telink_zigbee_hal_router_recovery_tick(void) {
             ROUTER_INBOUND_GRACE_MS,
             repeated_response_timeouts || stuck_request_queue)) {
         router_reboot_scheduled = true;
-        printf("Router: joined but isolated for 3h; controlled rescue reboot\r\n");
-        schedule_reboot(2000);
+        if (bseed_router_rescue_budget_consume()) {
+            printf("Router: joined isolated, budgeted checkpoint reboot\r\n");
+            schedule_reboot(2000);
+        } else {
+            printf("Router: isolated rescue denied by persistent NVM budget\r\n");
+        }
         return;
     }
 
@@ -516,6 +527,7 @@ void telink_zigbee_hal_router_recovery_tick(void) {
             router_probe_sequence   = sequence;
             router_probe_pending    = true;
         } else {
+            bseed_router_rescue_budget_note_failure();
             if (router_probe_rejections < UINT8_MAX)
                 router_probe_rejections++;
             printf("Router: coordinator ZDO probe rejected: %u\r\n", status);
