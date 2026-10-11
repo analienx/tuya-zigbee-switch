@@ -22,6 +22,26 @@ static inline bool bseed_router_queue_stall_evidence(
            (uint32_t)(now - last_coordinator_reply) >= min_silence_ms;
 }
 
+/* Protect a functioning local mesh when the coordinator route is temporarily
+ * broken. A ZDO Node Descriptor round-trip first exercises ordinary NWK route
+ * discovery/repair. Successful neighbor ZCL traffic means other Zigbee nodes
+ * still depend on this Router; use a longer, deterministic retry window before
+ * any potentially disruptive secure rejoin. */
+static inline bool bseed_router_rejoin_eligible(
+    bool coordinator_path_bad, bool recovery_orphaned,
+    uint32_t now, uint32_t last_coordinator_reply, uint32_t last_inbound,
+    uint32_t quiet_min_ms, uint32_t serving_neighbors_min_ms,
+    uint32_t inbound_active_window_ms, uint32_t stagger_ms) {
+    if (!coordinator_path_bad || recovery_orphaned)
+        return false;
+
+    bool serving_neighbors =
+        (uint32_t)(now - last_inbound) < inbound_active_window_ms;
+    uint32_t minimum = serving_neighbors ? serving_neighbors_min_ms :
+                                           quiet_min_ms;
+    return (uint32_t)(now - last_coordinator_reply) >= minimum + stagger_ms;
+}
+
 /* A prolonged global coordinator outage cannot, by itself, reboot every
  * router. Require previous active recovery attempts and no inbound ZCL.
  * Caller must also enforce joined, not-factory-new and no OTA conditions. */
