@@ -163,6 +163,14 @@ void app_task() {
         hal_zigbee_get_network_status() != HAL_ZIGBEE_NETWORK_JOINING) {
         hal_zigbee_start_network_steering();
     }
+#ifdef BSEED_MAINS_CLIENT
+    /* A successful SDK rejoin starts a new join epoch. Restore the announce
+     * without resetting relay/energy state or re-running device migration. */
+    if (hal_zigbee_get_network_status() == HAL_ZIGBEE_NETWORK_NOT_JOINED ||
+        hal_zigbee_get_network_status() == HAL_ZIGBEE_NETWORK_JOINING) {
+        boot_announce_sent = false;
+    }
+#endif
     if (!boot_announce_sent &&
         hal_zigbee_get_network_status() == HAL_ZIGBEE_NETWORK_JOINED) {
         hal_zigbee_send_announce();

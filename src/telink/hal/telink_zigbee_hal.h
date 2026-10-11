@@ -40,6 +40,11 @@ void telink_zigbee_hal_zcl_init(hal_zigbee_endpoint *endpoints,
                                 uint8_t endpoints_cnt);
 af_simple_descriptor_t *telink_zigbee_hal_zcl_get_descriptors(void);
 
+/* Inbound frames are positive Zigbee network-liveness evidence for Clients. */
+#ifdef BSEED_MAINS_CLIENT
+void telink_zigbee_hal_client_note_inbound(void);
+#endif
+
 void telink_gpio_hal_setup_wake_ups();
 
 void telink_gpio_reinit_after_deep_retention();

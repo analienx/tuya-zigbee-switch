@@ -1,3 +1,11 @@
+## Unreleased - mains Client passive-connectivity recovery (source only, NOT flashed)
+
+- Both PM and non-PM mains Clients now observe actual parent MAC poll confirmations, counting acknowledged no-data polls as healthy, and inbound Zigbee ZCL activity. Detect a stale internal JOINED state after at least 12 minutes of absent activity, four unsuccessful MAC polls or no poll confirmations, with up to 2 minutes of per-IEEE scan stagger.
+- Only then submit one SDK one-shot rejoin, at most once per 15 minutes, without factory reset, network credential erase, relay manipulation, reboot, or overlap with OTA. Keep the original SDK-owned rejoin-with-backoff for ordinary parent-loss indications. Callback closes ownership and a verified successful join starts a new health epoch.
+- Re-announce after a genuine Client join transition, not repeatedly in steady state. Do not infer availability solely from a stored Zigbee2MQTT interview record.
+- This is a source change requiring clean GitHub-hosted PM/non-PM matrices and hardware validation. It does not alter sealed c9/cli14 images or retroactively repair sockets already running them. Exact next version allocation remains a separate release gate.
+- SDK 3.7.2.0 release notes explicitly describe zb_rejoinReqWithBackOff as continuing until success. Never start a second backoff operation merely because BDB reported an intermediate failure.
+
 _Open the **Outline** (table of contents) from the top right._
 
 # Firmware Changelog
