@@ -238,10 +238,16 @@ def arguments():
     return p.parse_args()
 
 
+def needs_canonical_campaign(mode, profile_path):
+    # A pending-source preflight MUST attach the exact signed-off campaign.
+    # Direct preflight without a profile remains valid only outside pending.
+    return mode in ('check', 'flash') or (mode == 'preflight' and bool(profile_path))
+
+
 def main():
     args = arguments()
     campaign = None
-    if args.mode in ('check', 'flash'):
+    if needs_canonical_campaign(args.mode, args.campaign_profile):
         if not args.campaign_profile:
             raise ValueError('Use the canonical campaign with a private profile for check/flash')
         from bseed_ota_campaign import load_profile
