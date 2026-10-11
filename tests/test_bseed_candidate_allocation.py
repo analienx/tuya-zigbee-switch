@@ -14,24 +14,30 @@ from bseed_nonpm_release import CANDIDATES as NONPM
 def test_candidates_follow_canonical_board_allocator():
     document = json.loads((ROOT / 'zigbee2mqtt/ota/bseed_identity.json').read_text())
     registry = {int(line['image_type']): copy.deepcopy(line) for line in document['lines']}
-    groups = [[ROUTER, CLIENT], list(NONPM.values()), [
-        {'type': 45577, 'version': 0x1102300F, 'build': '1.1.9-bseedlv3'},
-        {'type': 65025, 'version': 0x1102300F, 'build': '1.1.8-bseedcli3'}]]
-    # Replay the original allocation point for the current candidates. The
-    # later PM .17 return experiment is now a retired tombstone, not a release,
-    # but remains reserved in the real registry so future allocations skip it.
-    pairs = {(c['type'], c['version']) for group in groups for c in group}
-    for image_type, line in registry.items():
-        line['versions'] = [v for v in line['versions'] if (image_type, v['file_version']) not in pairs]
-    for group in groups:
-        for candidate in group:
-            allocation = emit_make_vars(registry, candidate['type'], candidate['build'])
-            assert int(allocation['FILE_VERSION'], 0) == candidate['version']
-            assert allocation['VERSION_STR'] == candidate['build']
-        for candidate in group:
-            registry[candidate['type']]['versions'].append({
-                'file_version': candidate['version'], 'version_str': candidate['build']})
 
+    # PM/non-PM Router versions remain immutable. New Client-only releases
+    # allocate *after* the existing board maximum, not at the Router version.
+    for candidate in (CLIENT, NONPM['client']):
+        local = copy.deepcopy(registry)
+        line = local[candidate['type']]
+        line['versions'] = [
+            v for v in line['versions']
+            if v['file_version'] != candidate['version']
+        ]
+        allocation = emit_make_vars(local, candidate['type'], candidate['build'])
+        assert int(allocation['FILE_VERSION'], 0) == candidate['version']
+        assert allocation['VERSION_STR'] == candidate['build']
+
+    for candidate in (ROUTER, NONPM['router']):
+        line = registry[candidate['type']]
+        matches = [v for v in line['versions'] if
+                   v['file_version'] == candidate['version'] and
+                   v['version_str'] == candidate['build']]
+        assert len(matches) == 1 and matches[0]['sha512']
+
+    # The independently versioned TS0726 targets remain unchanged.
+    for role, ver in ((45577, 0x1102300F), (65025, 0x1102300F)):
+        assert ver > max(v['file_version'] for v in registry[role]['versions'])
 
 
 def test_retired_pm_return_tuple_stays_reserved_without_being_a_candidate():
@@ -46,8 +52,5 @@ def test_retired_pm_return_tuple_stays_reserved_without_being_a_candidate():
     ]
     assert len(retired) == 2 and all(entry.get('status') == 'retired' for entry in retired)
     registry = {int(line['image_type']): copy.deepcopy(line) for line in document['lines']}
-    for line in registry.values():
-        line['versions'] = [v for v in line['versions'] if
-                            v['file_version'] != ROUTER['version']]
-    next_router = emit_make_vars(registry, ROUTER['type'], ROUTER['build'])
-    assert int(next_router['FILE_VERSION'], 0) == ROUTER['version']
+    next_router = emit_make_vars(registry, ROUTER['type'], '1.2.5-bseedr13')
+    assert int(next_router['FILE_VERSION'], 0) == CLIENT['version'] + 1
