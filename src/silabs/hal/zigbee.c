@@ -1,4 +1,5 @@
 #include "hal/zigbee.h"
+#include "app.h"
 #include "hal/timer.h"
 
 #include "app/framework/include/af.h"
@@ -245,7 +246,10 @@ void hal_register_on_network_status_change_callback(
 }
 
 void sl_zigbee_af_stack_status_cb(sl_status_t status) {
-    (void)status;
+    /* A successful secure rejoin can occur without the application seeing a
+     * NOT_JOINED interval; explicitly rearm the per-epoch Device Announce. */
+    if (status == SL_STATUS_NETWORK_UP)
+        app_rearm_network_announcement();
     notify_network_status_change();
 }
 
@@ -291,7 +295,11 @@ void sl_zigbee_af_network_steering_complete_cb(sl_status_t status,
     (void)joinAttempts;
     (void)finalState;
     network_steering_in_progress     = false;
-    network_steering_retry_pending   = (status != SL_STATUS_OK);
+    /* Even if steering reports success, don't immediately start it again
+     * when the stack has not yet transitioned to JOINED. */
+    network_steering_retry_pending =
+        (status != SL_STATUS_OK ||
+         sl_zigbee_af_network_state() != SL_ZIGBEE_JOINED_NETWORK);
     network_steering_last_attempt_ms = hal_millis();
 
     notify_network_status_change();
