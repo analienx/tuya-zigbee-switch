@@ -137,7 +137,7 @@ def test_inbound_neighbor_zcl_does_not_spoof_coordinator_reachability():
     assert "router_last_positive_ms = hal_millis()" not in inbound
     assert re.search(r"router_last_positive_ms\s*=\s*hal_millis\(\)", source.split(
         "static void router_coordinator_node_desc_response", 1
-    )[1].split("/* Last resort", 1)[0]
+    )[1].split("/* Last resort", 1)[0])
 
 
 def test_isolation_rescue_requires_many_failed_probes_and_earlier_rejoins():
