@@ -16,6 +16,8 @@ from pathlib import Path
 import socket
 import tempfile
 
+from bseed_network_mutex import network_mutex, require_no_pending
+
 SCHEMA = 1
 ACCEPTED_PHASE = 'postflash_accepted'
 RECONCILED_PHASE = 'installed_image_reconciled'
@@ -119,74 +121,79 @@ def ownership_diagnosis(record):
 
 
 def acquire(path, *, network_id, token, device, ieee, image_sha256):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    record = {
-        'schema': SCHEMA,
-        'network_id': network_id,
-        'token': token,
-        'device': device,
-        'ieee': ieee,
-        'image_sha256': image_sha256,
-        'phase': 'preflight_complete',
-        'owner_host': socket.gethostname(),
-        'acquired_at': now_iso(),
-        'updated_at': now_iso(),
-    }
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    try:
-        fd = os.open(path, flags, 0o600)
-    except FileExistsError as error:
-        existing = read_lock(path)
-        raise RuntimeError(
-            'Zigbee network already has campaign ownership: ' +
-            json.dumps(existing, sort_keys=True)[:600]) from error
-    with os.fdopen(fd, 'w', encoding='utf8') as handle:
-        json.dump(record, handle, indent=2)
-        handle.write('\n')
-        handle.flush()
-        os.fsync(handle.fileno())
-    return record
-
-
-def update(path, token, phase, **extra):
-    path = Path(path)
-    current = read_lock(path)
-    if current is None:
-        raise RuntimeError('Network campaign lock disappeared')
-    if current.get('token') != token:
-        raise RuntimeError('Network campaign lock token mismatch')
-    updated = dict(current)
-    updated.update(extra)
-    updated['phase'] = phase
-    updated['updated_at'] = now_iso()
-    fd, tmp_name = tempfile.mkstemp(
-        prefix=path.name + '.', suffix='.tmp', dir=str(path.parent))
-    tmp = Path(tmp_name)
-    try:
+    with network_mutex(path):
+        require_no_pending(path)
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            'schema': SCHEMA,
+            'network_id': network_id,
+            'token': token,
+            'device': device,
+            'ieee': ieee,
+            'image_sha256': image_sha256,
+            'phase': 'preflight_complete',
+            'owner_host': socket.gethostname(),
+            'acquired_at': now_iso(),
+            'updated_at': now_iso(),
+        }
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        try:
+            fd = os.open(path, flags, 0o600)
+        except FileExistsError as error:
+            existing = read_lock(path)
+            raise RuntimeError(
+                'Zigbee network already has campaign ownership: ' +
+                json.dumps(existing, sort_keys=True)[:600]) from error
         with os.fdopen(fd, 'w', encoding='utf8') as handle:
-            json.dump(updated, handle, indent=2)
+            json.dump(record, handle, indent=2)
             handle.write('\n')
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp, path)
-    finally:
-        tmp.unlink(missing_ok=True)
-    return updated
+        return record
+
+
+def update(path, token, phase, **extra):
+    with network_mutex(path):
+        path = Path(path)
+        current = read_lock(path)
+        if current is None:
+            raise RuntimeError('Network campaign lock disappeared')
+        if current.get('token') != token:
+            raise RuntimeError('Network campaign lock token mismatch')
+        updated = dict(current)
+        updated.update(extra)
+        updated['phase'] = phase
+        updated['updated_at'] = now_iso()
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=path.name + '.', suffix='.tmp', dir=str(path.parent))
+        tmp = Path(tmp_name)
+        try:
+            with os.fdopen(fd, 'w', encoding='utf8') as handle:
+                json.dump(updated, handle, indent=2)
+                handle.write('\n')
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
+        return updated
 
 
 def _release_phase(path, token, allowed_phase):
-    current = read_lock(path)
-    if current is None:
-        raise RuntimeError('Network campaign lock disappeared before release')
-    if current.get('token') != token:
-        raise RuntimeError('Network campaign lock token mismatch')
-    if current.get('phase') != allowed_phase:
-        raise RuntimeError(
-            'Network ownership may not release from phase ' +
-            str(current.get('phase')))
-    Path(path).unlink()
-    return True
+    with network_mutex(path):
+        require_no_pending(path)
+        current = read_lock(path)
+        if current is None:
+            raise RuntimeError('Network campaign lock disappeared before release')
+        if current.get('token') != token:
+            raise RuntimeError('Network campaign lock token mismatch')
+        if current.get('phase') != allowed_phase:
+            raise RuntimeError(
+                'Network ownership may not release from phase ' +
+                str(current.get('phase')))
+        Path(path).unlink()
+        return True
 
 
 def release_preflight_abort(path, token):
