@@ -5,6 +5,7 @@
 #include "app/framework/plugin/ota-client/ota-client.h"
 #include "network-steering.h"
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 #define MAX_CLUSTERS    32
