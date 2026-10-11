@@ -64,7 +64,8 @@ All Telink Routers share `src/telink/hal/zigbee_network.c`; no per-board fork.
   than suppressing automatic recovery indefinitely. An OTA over two hours
   remains a specific hardware canary case.
 - When a previously joined Telink Router is continuously NOT_JOINED for
-  45 minutes plus stagger, it schedules **one** controlled, metering-checkpointed
+  45 minutes plus an independent 0–15-minute mesh-wide stagger, it
+  schedules **one per boot** controlled, metering-checkpointed
   software reboot per boot if not in OTA; network keys, binding state, IEEE
   address, Zigbee membership NVM and relay state are not deliberately cleared.
   This is a last resort, **not** the response to ordinary route errors.
