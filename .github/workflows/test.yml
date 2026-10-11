@@ -135,6 +135,8 @@ jobs:
           python3 helper_scripts/make_z2m_custom_converters.py --z2m-v1 device_db.yaml > converter-canary/switch_custom_z2m_v1.js
           node --check converter-canary/switch_custom.js
           node --check converter-canary/switch_custom_z2m_v1.js
+          python3 helper_scripts/bseed_converter_release.py --converter converter-canary/switch_custom.js --output converter-canary/converter-release.json
+          python3 helper_scripts/bseed_converter_release.py --converter converter-canary/switch_custom.js --output converter-canary/converter-release.json --check
           sha256sum converter-canary/switch_custom.js converter-canary/switch_custom_z2m_v1.js | tee converter-canary/SHA256SUMS
           diff -u zigbee2mqtt/converters/switch_custom.js converter-canary/switch_custom.js > converter-canary/current-vs-generated.patch
       - name: Upload converter canary
