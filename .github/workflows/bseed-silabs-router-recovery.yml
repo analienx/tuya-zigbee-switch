@@ -35,11 +35,14 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
           test -z "$(git status --porcelain)"
-      - name: Download SDK 2025.6.2 and Silicon Labs CLI tools
+      - name: Install SDK, SLC generator and ZAP (no flashing tools)
         shell: bash
         run: |
           set -euo pipefail
-          make -C src/silabs -f tools.mk all
+          # Simplicity Commander is only required for .gbl/OTA packaging or
+          # flashing; its vendor endpoint currently returns HTTP 403 on CI.
+          # A source-only build needs SDK, SLC, ZAP and the ARM compiler.
+          make -C src/silabs -f tools.mk simplicity_sdk slc-cli zap trust
       - name: Generate EFR32MG21 Router project
         shell: bash
         run: |
