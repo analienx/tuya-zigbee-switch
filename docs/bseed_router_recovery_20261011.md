@@ -93,9 +93,9 @@ All Telink Routers share `src/telink/hal/zigbee_network.c`; no per-board fork.
   steering completions are cooled down before retrying.
 - The Router recovery watchdog is excluded from Telink coordinators. The
   existing coordinator `parentInfo`, always-on radio and power descriptors
-  remain intact. Silicon Labs **joined-but-isolated** route-repair is not
-  implemented by this Telink-specific candidate and remains a separate
-  release blocker for any Silicon Labs deployment.
+  remain intact. Silicon Labs **joined-but-isolated** route recovery is
+  now implemented as a separate native Zigbee stack path (below), but remains
+  a release blocker until the genuine EFR32 SDK build and hardware canary pass.
 
 ## Best-practices alignment — independent 11 Oct review
 
