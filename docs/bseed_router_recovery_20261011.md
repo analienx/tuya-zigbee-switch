@@ -145,6 +145,69 @@ and pinned [Telink 3.7.2.0 SDK APIs](https://github.com/telink-semi/telink_zigbe
    checkpointed software reboot exceptionally rare and staggered. CI proofs
    do not establish child retention or live route repair.
 
+## Gaps closed in subsequent code review — persistent budget and other stacks
+
+### Flash-backed rescue budget
+
+Telink Routers use `NV_ITEM_ROUTER_RESCUE_BUDGET=70`, an independent
+4-byte application-NVM record with magic, complemented counter and checksum.
+**No network security, relay, metering or existing configuration record is
+rewritten by the budget.** Before **either** checkpointed rescue reboot,
+the controller must successfully advance, re-read and verify this record.
+At most **two self-rescue reboots across multiple power cycles** are allowed.
+Unknown/corrupt read and write/readback failures fail closed (deny reboot).
+The budget is restored to zero only after **12 hours of successful, unbroken
+coordinator reachability and 24 positive ZDO responses**. Timeouts,
+rejected ZDO sends, SDK rejoin intervals and OTA periods reset the health
+window. This is not a real-time-clock-dependent rate limit; it intentionally
+never resets merely because someone power cycled the socket. Expect at most
+three 4-byte NVM writes per sustained outage/recovery cycle (two consumes and
+one proven reset), not one per main-loop tick.
+
+Host CI includes a compiled C fault-injection test simulating software boots,
+NVM corruption, flash read/write denial and 12-hour health proof.
+
+### Silicon Labs joined-but-isolated recovery
+
+`src/silabs/hal/zigbee.c` now tracks coordinator Node Descriptor
+request/replies independently of network JOINED, with a single pending
+request, 30-second response deadline, 6-minute plus device-specific jitter,
+four unsuccessful responses plus a quiet window and up to 60-minute delay
+while other nodes still communicate. The request uses native
+`SL_ZIGBEE_APS_OPTION_ENABLE_ROUTE_DISCOVERY`. An encrypted
+`sl_zigbee_find_and_rejoin_network(true,...)` attempts only the *current*
+channel and retains device type/network credentials. No insecure fallback,
+permit-join, factory reset or automatic mass reboot exists. Stack UP/DOWN
+callbacks guard in-flight rejoin ownership and cooldown; a missing callback
+or OTA image-block transfer suppresses disruptive recovery. The post-rejoin
+NOT_JOINED path continues with encrypted rejoin rather than BDB steering.
+**No hardware deployment or acceptance is implied:** exact-head
+EFR32MG21 compile and RF/OTA canary are mandatory.
+
+### Coordinator source-route diagnosis
+
+`helper_scripts/bseed_coordinator_route_triage.py` consumes a local
+operator-supplied Zigbee2MQTT log extract and an exact IEEE/NWK identity
+and emits **only sanitized read-only counters**. It distinguishes
+coordinator->Router `NWK_NO_ROUTE`/source-route errors and actual inbound
+traffic, identifies possible asymmetric routing, and keeps Z-Stack
+and Ember-specific remediation distinct. For example:
+
+```sh
+python helper_scripts/bseed_coordinator_route_triage.py \\
+  --log /path/to/read-only-z2m-extract.log \\
+  --ieee 0xa4c138ac993cc245 --nwk 0x69D8 --adapter zstack
+```
+
+Never apply Ember `stack_config.json` concentrator settings or an
+Ember MTORR API to Z-Stack hardware. The diagnostic tool does not
+send MQTT requests, networkmap scans, resets, firmware updates or commands.
+An operator must separately validate **coordinator-originated ZCL read**
+and **Router-originated ZDO/ZCL traffic** before approving any targeted
+coordinator repair. Source-route table management is coordinator-specific,
+and one device's successful outgoing ZDO probe does not prove the
+coordinator's own outgoing source route is healthy.
+
 **Explicit remaining limitations:** The Telink main loop already starts
 the hardware watchdog via `drv_wd_setInterval(1000)` and `drv_wd_start()`,
 clearing it around the stack/application loop. A total MCU stall should
@@ -154,10 +217,9 @@ exchange network traffic continues to feed that watchdog and requires the
 application's independent bounded connectivity checks; those checks cannot
 recover a permanently broken radio peripheral or physical RF outage.
 The last-resort `schedule_reboot` requires the superloop to keep running.
-A software reboot budget currently limits resets to one **per boot**, not
-one across multiple power cycles; prolonged genuine network outages may
-therefore cause later repeated rescue reboots. Measure and enforce a
-persistent fleet-safe budget before mass deployment. Silicon Labs
+The reboot budget is now persistent, fail-closed and independently
+tested (see above), but the firmware still requires one-device hardware proof
+that the NVM item survives OTA, reset and genuine coordinator outages. Silicon Labs
 JOINED-but-isolated recovery is not yet implemented. Coordinator-source-route
 repair requires changes outside this device firmware and separate acceptance.
 
