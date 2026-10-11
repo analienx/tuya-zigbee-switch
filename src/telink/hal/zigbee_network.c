@@ -12,6 +12,7 @@
 #include "hal/timer.h"
 #include "hal/firmware_health.h"
 #include "device_config/reset.h"
+#include "app.h"
 #include "hal/zigbee.h"
 #include "telink_zigbee_hal.h"
 #include "version_cfg.h"
