@@ -317,8 +317,16 @@ void silabs_router_recovery_tick(void) {
         silabs_router_last_rejoin_ms = now;
         /* ENCRYPTED, preserve network credentials, channel-mask=current.
          * No insecure fallback, BDB steering, permit-join or factory reset. */
+        uint8_t channel = sl_zigbee_get_radio_channel();
+        if (channel < 11u || channel > 26u) {
+            printf("Silabs Router: invalid current channel, no rejoin\n");
+            return;
+        }
+        /* Scan only the saved operational channel on first recovery:
+         * no broad multi-channel scan disrupting neighboring children. */
         sl_status_t st = sl_zigbee_find_and_rejoin_network(
-            true, 0, SL_ZIGBEE_REJOIN_DUE_TO_APP_EVENT_1,
+            true, (uint32_t)1u << channel,
+            SL_ZIGBEE_REJOIN_DUE_TO_APP_EVENT_1,
             SL_ZIGBEE_DEVICE_TYPE_UNCHANGED);
         if (st == SL_STATUS_OK) {
             silabs_router_rejoin_pending = true;
