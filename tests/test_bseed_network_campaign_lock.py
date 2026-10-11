@@ -13,6 +13,7 @@ from bseed_network_campaign_lock import (
     acquire,
     authority_path,
     read_lock,
+    ownership_diagnosis,
     release_accepted,
     release_preflight_abort,
     release_reconciled,
@@ -128,3 +129,41 @@ def test_authority_configuration_fails_closed(tmp_path):
     bad = dict(p, network_lock_dir=p['workdir'])
     with pytest.raises(ValueError, match='independent'):
         require_profile_authority(bad)
+
+
+def test_terminal_transport_is_not_hardware_acceptance_or_permission(tmp_path):
+    p = profile(tmp_path, 'work-a')
+    path = require_profile_authority(p)
+    acquire(path, network_id=p['network_id'], token='one',
+            device='SocketA', ieee='0x00124b0000000001',
+            image_sha256='a' * 64)
+    update(path, 'one', 'ota_transfer_ok_postflash_unverified')
+    original = path.read_bytes()
+    diagnosis = ownership_diagnosis(read_lock(path))
+    assert diagnosis['network_ownership'] == 'held'
+    assert diagnosis['transport_state'] == 'completed'
+    assert diagnosis['hardware_acceptance'] == 'unverified'
+    assert diagnosis['release_authorized'] is False
+    assert diagnosis['next_step'] == 'review_terminalization_and_preserve_failed_acceptance'
+    assert path.read_bytes() == original
+    with pytest.raises(RuntimeError):
+        release_accepted(path, 'one')
+
+
+def test_diagnosis_never_releases_or_authorizes_unknown_states(tmp_path):
+    p = profile(tmp_path, 'work-a')
+    path = require_profile_authority(p)
+    assert ownership_diagnosis(None)['network_ownership'] == 'unclaimed'
+    acquire(path, network_id=p['network_id'], token='one',
+            device='SocketA', ieee='0x00124b0000000001',
+            image_sha256='a' * 64)
+    for phase in ('ota_running', 'update_error', 'update_timeout_or_unconfirmed',
+                  'postflash_candidate', 'postflash_accepted',
+                  'source_unchanged_reconciled', 'unexpected'):
+        update(path, 'one', phase)
+        baseline = path.read_bytes()
+        d = ownership_diagnosis(read_lock(path))
+        assert d['network_ownership'] == 'held'
+        assert d['release_authorized'] is False
+        assert d['phase'] == phase
+        assert path.read_bytes() == baseline
