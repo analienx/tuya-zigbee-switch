@@ -328,39 +328,40 @@ static void router_coordinator_node_desc_response(void *arg) {
  * delay by the stable IEEE bytes to avoid simultaneous mesh-wide restarts.
  * One rescue maximum per boot; a genuine prolonged coordinator outage can
  * never cause a rapid reset loop. */
-#define ROUTER_RECOVERY_STALL_MS (45u * 60u * 1000u)
+#define ROUTER_RECOVERY_STALL_MS    (45u * 60u * 1000u)
 static uint32_t router_recovery_since_ms;
-static bool router_recovery_timer_active;
-static bool router_reboot_scheduled;
+static bool     router_recovery_timer_active;
+static bool     router_reboot_scheduled;
 
 void telink_zigbee_hal_router_recovery_tick(void) {
     uint32_t now = hal_millis();
+
     /* Three IEEE bytes spread even a >60-Router mesh across the full
      * jitter windows. A 16-bit suffix can only stagger by ~65 seconds. */
     uint32_t ieee_stagger_seed =
         (((uint32_t)g_zbMacPib.extAddress[1] << 16) |
          ((uint32_t)g_zbMacPib.extAddress[4] << 8) |
          g_zbMacPib.extAddress[7]);
-    uint32_t stagger_ms = ieee_stagger_seed % 120000u;
+    uint32_t stagger_ms        = ieee_stagger_seed % 120000u;
     uint32_t reboot_stagger_ms = ieee_stagger_seed % (15u * 60u * 1000u);
 
     if (zb_isDeviceFactoryNew() || !zb_isDeviceJoinedNwk()) {
         router_probe_initialized = false;
-        router_probe_pending = false;
-        router_one_shot_active = false;
+        router_probe_pending     = false;
+        router_one_shot_active   = false;
         if (zb_isDeviceFactoryNew() ||
             telink_zigbee_hal_router_ota_in_progress()) {
             router_recovery_timer_active = false;
             return;
         }
         if (!router_recovery_timer_active) {
-            router_recovery_since_ms = now;
+            router_recovery_since_ms     = now;
             router_recovery_timer_active = true;
             return;
         }
         if (!router_reboot_scheduled &&
             (uint32_t)(now - router_recovery_since_ms) >=
-                ROUTER_RECOVERY_STALL_MS + reboot_stagger_ms) {
+            ROUTER_RECOVERY_STALL_MS + reboot_stagger_ms) {
             router_reboot_scheduled = true;
             printf("Router: rejoin stalled for 45m; controlled rescue reboot\r\n");
             schedule_reboot(2000);
@@ -393,6 +394,7 @@ void telink_zigbee_hal_router_recovery_tick(void) {
         if ((uint32_t)(now - router_one_shot_ms) <
             ROUTER_ONE_SHOT_DEADLINE_MS)
             return;
+
         /* Never overlap a request whose completion has not been reported.
          * Keep the cooldown; probes may resume but no second one-shot starts
          * until after it, regardless of the vendor callback behavior. */
@@ -462,17 +464,17 @@ void telink_zigbee_hal_router_recovery_tick(void) {
 
     if (!router_probe_pending &&
         (uint32_t)(now - router_last_probe_ms) >=
-            ROUTER_PROBE_INTERVAL_MS + stagger_ms) {
+        ROUTER_PROBE_INTERVAL_MS + stagger_ms) {
         zdo_node_descriptor_req_t req;
         u8 sequence = 0;
         req.nwk_addr_interest = 0x0000u;
-        router_last_probe_ms = now;
+        router_last_probe_ms  = now;
         zdo_status_t status = zb_zdoNodeDescReq(0x0000u, &req, &sequence,
                                                 router_coordinator_node_desc_response);
         if (status == ZDO_SUCCESS) {
             router_probe_rejections = 0;
-            router_probe_sequence = sequence;
-            router_probe_pending = true;
+            router_probe_sequence   = sequence;
+            router_probe_pending    = true;
         } else {
             if (router_probe_rejections < UINT8_MAX)
                 router_probe_rejections++;
@@ -480,6 +482,7 @@ void telink_zigbee_hal_router_recovery_tick(void) {
         }
     }
 }
+
 #endif
 
 // Telink ZDO callbacks
