@@ -5,6 +5,7 @@ hardware power-isolation / route-failure canary evidence.
 """
 
 from pathlib import Path
+import re
 
 APP = Path("src/app.c")
 TELINK = Path("src/telink/hal/zigbee_network.c")
@@ -17,12 +18,12 @@ def test_announcement_rearmed_for_all_roles_and_retried_on_local_failure():
     source = APP.read_text(encoding="utf-8")
     body = source.split("void app_task()", 1)[1]
     assert "if (network_status != HAL_ZIGBEE_NETWORK_JOINED)" in body
-    assert "boot_announce_sent = false" in body
+    assert re.search(r"boot_announce_sent\s*=\s*false", body)
     assert "ANNOUNCE_RETRY_MS" in body
     assert "hal_millis() - last_announce_attempt_ms" in body
     assert "hal_zigbee_send_announce() == HAL_ZIGBEE_OK" in body
     assert body.index("hal_zigbee_send_announce() == HAL_ZIGBEE_OK") < body.index(
-        "boot_announce_sent = true"
+        "boot_announce_sent"
     )
     assert "schedule_network_reset" not in body
 
@@ -85,7 +86,7 @@ def test_routers_probe_real_coordinator_reachability_before_secure_rejoin():
     )[1].split("#endif", 1)[0]
 
 
-def test_coordinator_heartbeat_is_low_frequency_and_cancels_on_inbound():
+def test_coordinator_heartbeat_separates_neighbor_evidence():
     source = TELINK.read_text(encoding="utf-8")
     assert "ROUTER_PROBE_INTERVAL_MS" in source
     assert "ROUTER_PROBE_DEADLINE_MS" in source
@@ -223,7 +224,8 @@ def test_router_one_shot_retains_sdk_ownership_across_transient_not_joined():
         "start_rejoin_with_backoff()"
     )
     callback = source.split("void bdb_commissioning_callback(u8 status, void *arg) {", 1)[1]
-    assert "if (status != BDB_COMMISSION_STA_IN_PROGRESS)" in callback
+    assert "status == BDB_COMMISSION_STA_SUCCESS" in callback
+    assert "status == BDB_COMMISSION_STA_REJOIN_FAILURE" in callback
     assert "router_one_shot_stalled = false" in callback
 
 
@@ -232,7 +234,28 @@ def test_orphaned_one_shot_cannot_launch_another_rejoin():
     method = source.split("void telink_zigbee_hal_router_recovery_tick(void) {", 1)[1].split(
         "// Telink ZDO callbacks", 1
     )[0]
-    assert "if (!router_one_shot_stalled &&" in method
+    assert "bseed_router_rejoin_eligible(" in method
+    assert "router_one_shot_stalled, now" in method
     assert "router_one_shot_stalled ? ROUTER_MIN_REJOIN_ATTEMPTS" in method
     assert "ROUTER_INBOUND_GRACE_MS" in method
     assert "router_probe_initialized = false" in method
+
+
+def test_route_repair_precedes_disruptive_secure_rejoin():
+    source = TELINK.read_text(encoding="utf-8")
+    assert "ROUTER_ACTIVE_NEIGHBOR_HOLD_MS" in source
+    assert "ROUTER_NEIGHBOR_ACTIVITY_MS" in source
+    assert "rejoin_stagger_ms = reboot_stagger_ms;" in source
+    assert "bseed_router_rejoin_eligible(" in source
+    callback = source.split("void bdb_commissioning_callback(u8 status, void *arg) {", 1)[1]
+    parent = callback.split("case BDB_COMMISSION_STA_PARENT_LOST:", 1)[1].split(
+        "case BDB_COMMISSION_STA_REJOIN_FAILURE:", 1
+    )[0]
+    assert "if (router_one_shot_active || router_one_shot_stalled)" in parent
+    assert "break;" in parent
+    terminal = callback.split("switch (status)", 1)[0]
+    assert "status == BDB_COMMISSION_STA_SUCCESS" in terminal
+    assert "status == BDB_COMMISSION_STA_REJOIN_FAILURE" in terminal
+    assert "status != BDB_COMMISSION_STA_IN_PROGRESS" not in terminal.split(
+        "#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE", 1
+    )[1].split("#endif", 1)[0]
