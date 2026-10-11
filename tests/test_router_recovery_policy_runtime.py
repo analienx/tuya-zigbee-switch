@@ -16,7 +16,7 @@ PROGRAM = r"""
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
-#include "src/telink/hal/router_recovery_policy.h"
+#include "src/hal/router_recovery_policy.h"
 
 #define CHECK(test) do { if (!(test)) {     fprintf(stderr, "Router policy failed at line %d: %s\n", __LINE__, #test);     return 1; } } while (0)
 
