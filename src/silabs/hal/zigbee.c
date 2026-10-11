@@ -216,7 +216,7 @@ sl_zigbee_af_status_t sl_zigbee_af_external_attribute_write_cb(
 static bool     network_steering_in_progress = false;
 static bool     network_steering_retry_pending;
 static uint32_t network_steering_last_attempt_ms;
-#define NETWORK_STEERING_RETRY_MS 10000u
+#define NETWORK_STEERING_RETRY_MS    10000u
 
 hal_zigbee_network_status_t hal_zigbee_get_network_status() {
     sl_zigbee_network_status_t ns = sl_zigbee_af_network_state();
@@ -264,15 +264,15 @@ void hal_zigbee_start_network_steering() {
     uint32_t now = hal_millis();
     if (network_steering_retry_pending &&
         (uint32_t)(now - network_steering_last_attempt_ms) <
-            NETWORK_STEERING_RETRY_MS) {
+        NETWORK_STEERING_RETRY_MS) {
         return;
     }
 
     /* Silicon Labs explicitly documents synchronous rejection (e.g. scan
      * queue full, invalid state). Never latch JOINING on a rejected start. */
     network_steering_last_attempt_ms = now;
-    network_steering_retry_pending = true;
-    network_steering_in_progress = true;
+    network_steering_retry_pending   = true;
+    network_steering_in_progress     = true;
     sl_status_t status = sl_zigbee_af_network_steering_start();
     if (status != SL_STATUS_OK) {
         network_steering_in_progress = false;
@@ -290,8 +290,8 @@ void sl_zigbee_af_network_steering_complete_cb(sl_status_t status,
     (void)totalBeacons;
     (void)joinAttempts;
     (void)finalState;
-    network_steering_in_progress = false;
-    network_steering_retry_pending = (status != SL_STATUS_OK);
+    network_steering_in_progress     = false;
+    network_steering_retry_pending   = (status != SL_STATUS_OK);
     network_steering_last_attempt_ms = hal_millis();
 
     notify_network_status_change();
