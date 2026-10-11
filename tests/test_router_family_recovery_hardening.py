@@ -190,3 +190,12 @@ def test_silabs_stack_up_callback_rearms_join_epoch_and_completion_is_cooldown_b
     )[1].split("static uint8_t make_frame_control", 1)[0]
     assert "sl_zigbee_af_network_state() != SL_ZIGBEE_JOINED_NETWORK" in complete
     assert "network_steering_retry_pending" in complete
+
+
+def test_existing_coordinator_parent_and_rx_on_idle_contract_is_unchanged():
+    source = TELINK.read_text(encoding="utf-8")
+    init = source.split("void telink_zigbee_hal_network_init(void) {", 1)[1]
+    assert "#if ZB_ROUTER_ROLE\n" in init
+    assert "g_zbNIB.parentInfo = MAC_DATA_POLL_KEEPALIVE_BIT" in init
+    assert "#if ZB_ROUTER_ROLE || defined(BSEED_MAINS_CLIENT)" in init
+    assert "af_nodeDescRxOnWhenIdleUpdate(1)" in init
