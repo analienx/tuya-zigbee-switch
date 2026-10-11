@@ -260,10 +260,10 @@ static void client_health_recovery_tick(void) {
  * route to the trust center. Validate real bidirectional reachability with
  * the vendor's supported ZDO Node Descriptor request to coordinator 0x0000.
  * At most one outstanding request, every 6m plus stable IEEE stagger.
- * Four actual request/response failures and 20m with no authenticated ZCL
- * inbound are required before trying one secure, non-destructive rejoin.
- * Silence alone never initiates recovery; a successful coordinator response
- * or any authenticated inbound cancels the failure streak. */
+ * Four actual request/response failures and 20m without a successful
+ * coordinator response are required for one secure, non-destructive rejoin.
+ * Inbound application ZCL from another Router is positive local mesh
+ * evidence but MUST NOT falsely prove that 0x0000 is reachable. */
 #define ROUTER_PROBE_INTERVAL_MS          (6u * 60u * 1000u)
 #define ROUTER_PROBE_DEADLINE_MS          (30u * 1000u)
 #define ROUTER_PROBE_FAILURE_THRESHOLD     4u
@@ -272,24 +272,28 @@ static void client_health_recovery_tick(void) {
 #define ROUTER_QUIET_MIN_MS               (20u * 60u * 1000u)
 #define ROUTER_REJOIN_COOLDOWN_MS         (30u * 60u * 1000u)
 #define ROUTER_ONE_SHOT_DEADLINE_MS       (10u * 60u * 1000u)
+#define ROUTER_ISOLATED_REBOOT_MS          (3u * 60u * 60u * 1000u)
+#define ROUTER_INBOUND_GRACE_MS            (90u * 60u * 1000u)
+#define ROUTER_MIN_REJOIN_ATTEMPTS         2u
 static bool     router_probe_initialized;
 static bool     router_probe_pending;
 static bool     router_one_shot_active;
 static bool     router_one_shot_attempted;
 static uint8_t  router_probe_failures;
 static uint8_t  router_probe_rejections;
+static uint8_t  router_one_shot_attempts;
 static uint8_t  router_probe_sequence;
 static uint32_t router_last_probe_ms;
-static uint32_t router_last_positive_ms;
+static uint32_t router_last_positive_ms; /* only coordinator ZDO replies */
+static uint32_t router_last_inbound_ms;  /* any authenticated application ZCL */
 static uint32_t router_one_shot_ms;
 
 void telink_zigbee_hal_router_note_inbound(void) {
     if (!router_probe_initialized)
         return;
-    router_last_positive_ms = hal_millis();
-    router_probe_failures = 0;
-    router_probe_rejections = 0;
-    router_probe_pending = false;
+    /* Neighbors can reach this Router even when coordinator 0x0000 cannot.
+     * Do not discard a pending coordinator timeout or its failure history. */
+    router_last_inbound_ms = hal_millis();
 }
 
 static void router_coordinator_node_desc_response(void *arg) {
@@ -303,8 +307,10 @@ static void router_coordinator_node_desc_response(void *arg) {
     if (rsp->seq_num == router_probe_sequence &&
         rsp->status == ZDO_SUCCESS && rsp->nwk_addr_interest == 0x0000u) {
         router_last_positive_ms = hal_millis();
+        router_last_inbound_ms = router_last_positive_ms;
         router_probe_failures = 0;
         router_probe_rejections = 0;
+        router_one_shot_attempts = 0;
         router_probe_pending = false;
     }
 }
@@ -375,6 +381,8 @@ void telink_zigbee_hal_router_recovery_tick(void) {
         router_probe_initialized = true;
         router_last_probe_ms = now;
         router_last_positive_ms = now;
+        router_last_inbound_ms = now;
+        router_one_shot_attempts = 0;
         return;
     }
 
@@ -406,6 +414,22 @@ void telink_zigbee_hal_router_recovery_tick(void) {
     bool stuck_request_queue =
         router_probe_rejections >= ROUTER_PROBE_REJECT_THRESHOLD &&
         (uint32_t)(now - router_last_positive_ms) >= ROUTER_REJECT_QUIET_MS;
+    /* The BSEED last-resort reset addresses a truly wedged but nominally
+     * JOINED Router. A long coordinator outage by itself is insufficient:
+     * require both failed rejoin attempts and prolonged absence of *all*
+     * incoming application traffic before one checkpointed rescue reboot. */
+    if (!router_reboot_scheduled && !router_one_shot_active &&
+        router_one_shot_attempts >= ROUTER_MIN_REJOIN_ATTEMPTS &&
+        (uint32_t)(now - router_last_positive_ms) >=
+            ROUTER_ISOLATED_REBOOT_MS + reboot_stagger_ms &&
+        (uint32_t)(now - router_last_inbound_ms) >= ROUTER_INBOUND_GRACE_MS &&
+        (repeated_response_timeouts || stuck_request_queue)) {
+        router_reboot_scheduled = true;
+        printf("Router: joined but isolated for 3h; controlled rescue reboot\r\n");
+        schedule_reboot(2000);
+        return;
+    }
+
     if ((repeated_response_timeouts || stuck_request_queue) &&
         (!router_one_shot_attempted ||
          (uint32_t)(now - router_one_shot_ms) >=
@@ -415,6 +439,8 @@ void telink_zigbee_hal_router_recovery_tick(void) {
          * reset, counter rollback, channel changes or parent-based logic. */
         router_one_shot_attempted = true;
         router_one_shot_active = true;
+        if (router_one_shot_attempts < UINT8_MAX)
+            router_one_shot_attempts++;
         router_one_shot_ms = now;
         router_probe_pending = false;
         firmware_health_increment(&firmware_health.rejoin_start);
