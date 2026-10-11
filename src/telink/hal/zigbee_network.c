@@ -275,6 +275,7 @@ static bool     router_probe_pending;
 static bool     router_one_shot_active;
 static bool     router_one_shot_attempted;
 static uint8_t  router_probe_failures;
+static uint8_t  router_probe_sequence;
 static uint32_t router_last_probe_ms;
 static uint32_t router_last_positive_ms;
 static uint32_t router_one_shot_ms;
@@ -294,7 +295,9 @@ static void router_coordinator_node_desc_response(void *arg) {
     if (ind->length < sizeof(zdo_node_descript_resp_t))
         return;
     zdo_node_descript_resp_t *rsp = (zdo_node_descript_resp_t *)ind->zpdu;
-    if (rsp->status == ZDO_SUCCESS && rsp->nwk_addr_interest == 0x0000u) {
+    /* Ignore late replies from an earlier ZDO request after its timeout. */
+    if (rsp->seq_num == router_probe_sequence &&
+        rsp->status == ZDO_SUCCESS && rsp->nwk_addr_interest == 0x0000u) {
         router_last_positive_ms = hal_millis();
         router_probe_failures = 0;
         router_probe_pending = false;
@@ -418,6 +421,7 @@ void telink_zigbee_hal_router_recovery_tick(void) {
         zdo_status_t status = zb_zdoNodeDescReq(0x0000u, &req, &sequence,
                                                 router_coordinator_node_desc_response);
         if (status == ZDO_SUCCESS) {
+            router_probe_sequence = sequence;
             router_probe_pending = true;
         } else {
             if (router_probe_failures < UINT8_MAX)
