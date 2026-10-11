@@ -12,6 +12,7 @@
 #include "hal/timer.h"
 #include "hal/firmware_health.h"
 #include "router_recovery_policy.h"
+#include "router_recovery_budget.h"
 #include "device_config/reset.h"
 #include "app.h"
 #include "hal/zigbee.h"
