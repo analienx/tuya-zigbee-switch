@@ -8,6 +8,7 @@
 #include "hal/nvm.h"
 #include "hal/printf_selector.h"
 #include "hal/system.h"
+#include "hal/timer.h"
 #include "hal/zigbee.h"
 #include "hal/zigbee_ota.h"
 #include "zigbee/battery_cluster.h"
@@ -143,7 +144,13 @@ void app_init(void) {
 #endif
 }
 
-static bool boot_announce_sent = false;
+/* Device announces are per join epoch, not per boot. Failed local enqueue
+ * must not be mistaken for successful delivery. Both Telink and Silicon
+ * Labs use the same application logic for this recovery boundary. */
+#define ANNOUNCE_RETRY_MS 5000u
+static bool     boot_announce_sent;
+static bool     announce_retry_pending;
+static uint32_t last_announce_attempt_ms;
 
 bool app_prepare_reboot(void) {
     energy_monitoring_tick();
@@ -159,22 +166,27 @@ void app_task() {
     poll_control_cluster_update();
 #endif
 
-    if (hal_zigbee_get_network_status() != HAL_ZIGBEE_NETWORK_JOINED &&
-        hal_zigbee_get_network_status() != HAL_ZIGBEE_NETWORK_JOINING) {
+    hal_zigbee_network_status_t network_status = hal_zigbee_get_network_status();
+    if (network_status == HAL_ZIGBEE_NETWORK_NOT_JOINED) {
         hal_zigbee_start_network_steering();
     }
-#ifdef BSEED_MAINS_CLIENT
-    /* A successful SDK rejoin starts a new join epoch. Restore the announce
-     * without resetting relay/energy state or re-running device migration. */
-    if (hal_zigbee_get_network_status() == HAL_ZIGBEE_NETWORK_NOT_JOINED ||
-        hal_zigbee_get_network_status() == HAL_ZIGBEE_NETWORK_JOINING) {
+
+    /* A Router or Client can regain network membership without rebooting.
+     * Re-announce once after the observed loss; only retry a rejected local
+     * transmit at a bounded rate. No NVM, role or relay state is changed. */
+    if (network_status != HAL_ZIGBEE_NETWORK_JOINED) {
         boot_announce_sent = false;
-    }
-#endif
-    if (!boot_announce_sent &&
-        hal_zigbee_get_network_status() == HAL_ZIGBEE_NETWORK_JOINED) {
-        hal_zigbee_send_announce();
-        init_energy_reporting();
-        boot_announce_sent = true;
+        announce_retry_pending = false;
+    } else if (!boot_announce_sent &&
+               (!announce_retry_pending ||
+                (uint32_t)(hal_millis() - last_announce_attempt_ms) >=
+                    ANNOUNCE_RETRY_MS)) {
+        last_announce_attempt_ms = hal_millis();
+        announce_retry_pending = true;
+        if (hal_zigbee_send_announce() == HAL_ZIGBEE_OK) {
+            init_energy_reporting();
+            boot_announce_sent = true;
+            announce_retry_pending = false;
+        }
     }
 }
