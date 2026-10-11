@@ -21,6 +21,9 @@ sl_zigbee_af_attribute_metadata_t attributes_buffer[MAX_ATTRS];
 hal_zigbee_endpoint *hal_endpoints;
 uint8_t hal_endpoints_cnt;
 static hal_zcl_activity_callback_t zcl_activity_callback = NULL;
+/* Shared with early AF receive callbacks, before Router recovery functions. */
+static bool     silabs_router_ota_transfer_seen;
+static uint32_t silabs_router_last_inbound_ms;
 
 static void notify_zcl_activity(void) {
     if (zcl_activity_callback != NULL) {
@@ -244,12 +247,10 @@ static bool     silabs_router_probe_pending;
 static bool     silabs_router_rejoin_pending;
 static bool     silabs_router_rejoin_orphaned;
 static bool     silabs_router_rejoin_attempted;
-static bool     silabs_router_ota_transfer_seen;
 static uint8_t  silabs_router_probe_sequence;
 static uint8_t  silabs_router_failed_probes;
 static uint32_t silabs_router_last_probe_ms;
 static uint32_t silabs_router_last_good_ms;
-static uint32_t silabs_router_last_inbound_ms;
 static uint32_t silabs_router_last_rejoin_ms;
 
 void silabs_router_recovery_tick(void) {
