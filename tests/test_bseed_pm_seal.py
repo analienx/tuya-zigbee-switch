@@ -85,7 +85,8 @@ def test_nonpm_bundle_can_be_sealed_with_pm_without_crossing_board_identity(tmp_
     for candidate in CANDIDATES.values():
         original['lines'].append(dict(image_type=candidate['type'], board_key='o1jzcxou', versions=[
             dict(file_version=candidate['version'], version_str=candidate['build'],
-                 sha512=None)]))
+                 sha512=hashlib.sha512(ota_image(candidate)).hexdigest()
+                        if candidate['role'] == 'Router' else None)]))
     sealed, _ = verify_bundle(matrix, 'a' * 40, original)
     verify_nonpm(nonpm, 'a' * 40)
     artifacts = [((nonpm / role / 'forward.ota').read_bytes(), c, c['type'])
