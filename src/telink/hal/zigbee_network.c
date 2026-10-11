@@ -267,6 +267,8 @@ static void client_health_recovery_tick(void) {
 #define ROUTER_PROBE_INTERVAL_MS          (6u * 60u * 1000u)
 #define ROUTER_PROBE_DEADLINE_MS          (30u * 1000u)
 #define ROUTER_PROBE_FAILURE_THRESHOLD     4u
+#define ROUTER_PROBE_REJECT_THRESHOLD      8u
+#define ROUTER_REJECT_QUIET_MS             (60u * 60u * 1000u)
 #define ROUTER_QUIET_MIN_MS               (20u * 60u * 1000u)
 #define ROUTER_REJOIN_COOLDOWN_MS         (30u * 60u * 1000u)
 #define ROUTER_ONE_SHOT_DEADLINE_MS       (10u * 60u * 1000u)
@@ -275,6 +277,7 @@ static bool     router_probe_pending;
 static bool     router_one_shot_active;
 static bool     router_one_shot_attempted;
 static uint8_t  router_probe_failures;
+static uint8_t  router_probe_rejections;
 static uint8_t  router_probe_sequence;
 static uint32_t router_last_probe_ms;
 static uint32_t router_last_positive_ms;
@@ -285,6 +288,7 @@ void telink_zigbee_hal_router_note_inbound(void) {
         return;
     router_last_positive_ms = hal_millis();
     router_probe_failures = 0;
+    router_probe_rejections = 0;
     router_probe_pending = false;
 }
 
@@ -300,6 +304,7 @@ static void router_coordinator_node_desc_response(void *arg) {
         rsp->status == ZDO_SUCCESS && rsp->nwk_addr_interest == 0x0000u) {
         router_last_positive_ms = hal_millis();
         router_probe_failures = 0;
+        router_probe_rejections = 0;
         router_probe_pending = false;
     }
 }
@@ -356,6 +361,7 @@ void telink_zigbee_hal_router_recovery_tick(void) {
          * overlap ZDO probes or active rejoin while it is working. */
         router_probe_pending = false;
         router_probe_failures = 0;
+        router_probe_rejections = 0;
         router_probe_initialized = false;
         return;
     }
@@ -386,8 +392,16 @@ void telink_zigbee_hal_router_recovery_tick(void) {
             router_probe_failures++;
     }
 
-    if (router_probe_failures >= ROUTER_PROBE_FAILURE_THRESHOLD &&
-        (uint32_t)(now - router_last_positive_ms) >= ROUTER_QUIET_MIN_MS &&
+    bool repeated_response_timeouts =
+        router_probe_failures >= ROUTER_PROBE_FAILURE_THRESHOLD &&
+        (uint32_t)(now - router_last_positive_ms) >= ROUTER_QUIET_MIN_MS;
+    /* Queue pressure is not lost routing. Only a much longer series of
+     * synchronous request rejections with NO inbound evidence can count as
+     * a stuck vendor ZDO subsystem, never as a single missing ACK. */
+    bool stuck_request_queue =
+        router_probe_rejections >= ROUTER_PROBE_REJECT_THRESHOLD &&
+        (uint32_t)(now - router_last_positive_ms) >= ROUTER_REJECT_QUIET_MS;
+    if ((repeated_response_timeouts || stuck_request_queue) &&
         (!router_one_shot_attempted ||
          (uint32_t)(now - router_one_shot_ms) >=
              ROUTER_REJOIN_COOLDOWN_MS)) {
@@ -421,11 +435,12 @@ void telink_zigbee_hal_router_recovery_tick(void) {
         zdo_status_t status = zb_zdoNodeDescReq(0x0000u, &req, &sequence,
                                                 router_coordinator_node_desc_response);
         if (status == ZDO_SUCCESS) {
+            router_probe_rejections = 0;
             router_probe_sequence = sequence;
             router_probe_pending = true;
         } else {
-            if (router_probe_failures < UINT8_MAX)
-                router_probe_failures++;
+            if (router_probe_rejections < UINT8_MAX)
+                router_probe_rejections++;
             printf("Router: coordinator ZDO probe rejected: %u\r\n", status);
         }
     }
