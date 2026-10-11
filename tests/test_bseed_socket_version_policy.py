@@ -203,5 +203,6 @@ def test_policy_is_wired_before_index_and_runtime_operations():
     runner = (ROOT / 'helper_scripts/bseed_targeted_z2m_ota.py').read_text()
     assert campaign.index('require_increasing(profile)') < campaign.index('destination.write_text')
     assert runner.index('require_increasing(campaign)') < runner.index('verify_image(args)', runner.index('def main'))
-    assert "if args.mode in ('check', 'flash'):" in runner
+    assert 'if needs_canonical_campaign(args.mode, args.campaign_profile):' in runner
+    assert runner.index('if needs_canonical_campaign(args.mode, args.campaign_profile):') < runner.index('require_increasing(campaign)')
     assert "'--campaign-profile'" in campaign
