@@ -6,8 +6,8 @@ import struct
 
 from bseed_ota_identity import IdentityError, parse_ota_header, require_embedded_string
 
-CLIENT = {'role': 'EndDevice', 'build': '1.2.5-bseedcli15',
-          'version': 0x1205301A, 'type': 65024, 'artifact': 'forward.ota',
+CLIENT = {'role': 'EndDevice', 'build': '1.2.5-bseedcli16',
+          'version': 0x1205301B, 'type': 65024, 'artifact': 'forward.ota',
           'date': '20261011'}
 ROUTER = {'role': 'Router', 'build': '1.2.5-bseedr12',
           'version': 0x12053019, 'type': 43556, 'artifact': 'forward.ota'}
