@@ -305,7 +305,8 @@ static void router_coordinator_node_desc_response(void *arg) {
         return;
     zdo_node_descript_resp_t *rsp = (zdo_node_descript_resp_t *)ind->zpdu;
     /* Ignore late replies from an earlier ZDO request after its timeout. */
-    if (rsp->seq_num == router_probe_sequence &&
+    if (ind->src_addr == 0x0000u &&
+        rsp->seq_num == router_probe_sequence &&
         rsp->status == ZDO_SUCCESS && rsp->nwk_addr_interest == 0x0000u) {
         router_last_positive_ms = hal_millis();
         router_last_inbound_ms = router_last_positive_ms;
