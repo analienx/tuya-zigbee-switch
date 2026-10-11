@@ -6,7 +6,7 @@
 #include "app/framework/plugin/ota-client/ota-client.h"
 #include "network-steering.h"
 #include "app/util/zigbee-framework/zigbee-device-common.h"
-#include "telink/hal/router_recovery_policy.h"
+#include "hal/router_recovery_policy.h"
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
