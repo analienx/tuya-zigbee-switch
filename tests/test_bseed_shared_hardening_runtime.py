@@ -131,6 +131,8 @@ static struct { unsigned char extAddress[8]; } g_zbMacPib;
 static u8 zb_setPollRate(uint32_t ms) {(void)ms; return RET_OK;}
 static u8 zb_rejoinReq(uint32_t channel,u8 duration)
     {(void)channel;(void)duration; return RET_OK;}
+#define REJOIN_SECURITY 1
+static void zb_rejoinSecModeSet(u8 mode) {assert(mode==REJOIN_SECURITY);}
 static uint32_t desired_mains_client_poll_ms(void) { return 60000u; }
 #endif
 uint32_t hal_millis(void) {return now;}

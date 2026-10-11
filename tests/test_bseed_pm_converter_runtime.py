@@ -52,8 +52,13 @@ const select = (cs, endpointName) => cs.find(c =>
 def test_generated_converter_loads_and_pm_nonpm_contracts_stay_separate(tmp_path):
     converter = tmp_path / 'switch_custom.js'
     rendered = _render()
+    # The PM Client next version is reserved, not deployed. The generated
+    # converter must continue recognising the already sealed image; the
+    # unreleased candidate must never be misrepresented as deployed.
     for candidate in CANDIDATES.values():
-        assert '"' + candidate['build'] + '"' in rendered
+        if candidate['role'] == 'Router':
+            assert '"' + candidate['build'] + '"' in rendered
+    assert '"1.2.5-bseedcli14"' in rendered
     converter.write_text(rendered)
     script = r'''
 const assert = require('node:assert/strict');

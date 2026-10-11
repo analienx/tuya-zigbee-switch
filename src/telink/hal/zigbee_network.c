@@ -127,10 +127,10 @@ static hal_network_status_change_callback_t network_status_change_callback =
  * The SDK guarantees a completion callback for zb_rejoinReq(). The distinct
  * zb_rejoinReqWithBackOff() owns normal parent-loss recovery until success.
  */
-#define CLIENT_PARENT_SILENCE_MS             (12u * 60u * 1000u)
-#define CLIENT_HEALTH_REJOIN_COOLDOWN_MS     (15u * 60u * 1000u)
-#define CLIENT_POLL_FAILURE_THRESHOLD        4u
-#define CLIENT_ONE_SHOT_DEADLINE_MS          (10u * 60u * 1000u)
+#define CLIENT_PARENT_SILENCE_MS            (12u * 60u * 1000u)
+#define CLIENT_HEALTH_REJOIN_COOLDOWN_MS    (15u * 60u * 1000u)
+#define CLIENT_POLL_FAILURE_THRESHOLD       4u
+#define CLIENT_ONE_SHOT_DEADLINE_MS         (10u * 60u * 1000u)
 
 static uint32_t client_health_last_good_ms;
 static uint32_t client_health_last_confirm_ms;
@@ -144,12 +144,12 @@ static bool     client_health_probe_attempted;
 static void client_health_join_epoch(void) {
     uint32_t now = hal_millis();
 
-    client_health_last_good_ms    = now;
-    client_health_last_confirm_ms = now;
+    client_health_last_good_ms              = now;
+    client_health_last_confirm_ms           = now;
     client_health_last_keepalive_refresh_ms = now;
-    client_poll_failure_streak    = 0;
-    client_health_initialized     = true;
-    client_health_probe_active    = false;
+    client_poll_failure_streak              = 0;
+    client_health_initialized  = true;
+    client_health_probe_active = false;
     /* Preserve last attempt across rejoin to avoid synchronized thrashing. */
 }
 
@@ -174,6 +174,7 @@ static void client_health_poll_confirmation(u8 status) {
         /* NO_DATA is a successful MAC parent ACK, not a failure. */
         client_health_last_good_ms = now;
         client_poll_failure_streak = 0;
+
         /* A live parent ACK also closes an orphaned one-shot ownership bit
          * if the vendor omitted a BDB callback after successful recovery. */
         client_health_probe_active = false;
@@ -239,6 +240,9 @@ static void client_health_recovery_tick(void) {
     client_health_probe_active    = true;
     firmware_health_increment(&firmware_health.rejoin_start);
     printf("Mains client: parent MAC poll silent; one-shot rejoin\r\n");
+    /* No trust-center join window is required: retain the current network
+     * key and request the secure rejoin path explicitly. */
+    zb_rejoinSecModeSet(REJOIN_SECURITY);
     u8 status = zb_rejoinReq(zb_apsChannelMaskGet(), g_bdbAttrs.scanDuration);
     if (status != RET_OK) {
         client_health_probe_active = false;
@@ -370,7 +374,7 @@ void bdb_commissioning_callback(u8 status, void *arg) {
     printf("BDB commissioning callback, status: %d\r\n", status);
 #ifdef BSEED_MAINS_CLIENT
     /* A one-shot rejoin has a terminal BDB completion. Do not confuse this
-     * with the SDK-owned, ongoing rejoin-with-backoff recovery sequence. */
+    * with the SDK-owned, ongoing rejoin-with-backoff recovery sequence. */
     if (status != BDB_COMMISSION_STA_IN_PROGRESS)
         client_health_probe_active = false;
 #endif
