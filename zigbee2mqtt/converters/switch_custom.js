@@ -85,17 +85,6 @@ const bseedPmElectricityMeter = () => {
     ]);
     const hasFixedScaleContract = device => device?.modelID === "TS011F-BS-PM" &&
         device.manufacturerName === "b28wrpvx" && knownBuilds.has(device.softwareBuildID);
-    // Legacy PM Router builds may expose no usable Basic softwareBuildID. The
-    // campaign proves that source independently via the exact OTA fileVersion.
-    // For freshness only, raw activePower=0 is scale-invariant, so it is safe to
-    // timestamp that one exact null-build board case without trusting nonzero
-    // legacy metering or enabling fixed-scale configuration.
-    const canStampFreshPower = (device, rawPower) => hasFixedScaleContract(device) ||
-        (device?.modelID === "TS011F-BS-PM" &&
-         device.manufacturerName === "b28wrpvx" &&
-         (device.softwareBuildID === undefined || device.softwareBuildID === null ||
-          device.softwareBuildID === "") &&
-         rawPower === 0);
     const scales = {
         haElectricalMeasurement: {acVoltageMultiplier: 1, acVoltageDivisor: 100,
             acCurrentMultiplier: 1, acCurrentDivisor: 1000, acPowerMultiplier: 1, acPowerDivisor: 1},
@@ -129,7 +118,7 @@ const bseedPmElectricityMeter = () => {
             // cache_state may repeat old "power" in unrelated relay responses.
             // BSEED's pinned PM firmware contract uses power multiplier/divisor 1/1.
             if (msg.cluster === 'haElectricalMeasurement' &&
-                canStampFreshPower(msg.device, msg.data?.activePower) &&
+                hasFixedScaleContract(msg.device) &&
                 Number.isFinite(msg.data?.activePower) &&
                 decoded && typeof decoded === 'object') {
                 return {...decoded, bseed_pm_sample_time_ms: Date.now(),

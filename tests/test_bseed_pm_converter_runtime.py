@@ -197,12 +197,14 @@ const assertSampled = (result, expected, watts) => {
         const extension = bseedPmElectricityMeter();
         const converter = extension.fromZigbee.find(f => f.cluster === 'haElectricalMeasurement');
         const zero = converter.convert({}, {cluster: 'haElectricalMeasurement', data: {activePower: 0},
-            device, endpoint: ep, type: 'readResponse'}, () => {}, {}, {device});
+            device, endpoint: ep, type: 'readResponse', meta: {zclTransactionSequenceNumber: sequence++}},
+            () => {}, {}, {device});
         assert.equal(zero.power, 0);
         assert.equal(zero.bseed_pm_sample_power_w, 0);
         assert.ok(Number.isFinite(zero.bseed_pm_sample_time_ms));
         const nonzero = converter.convert({}, {cluster: 'haElectricalMeasurement', data: {activePower: 7},
-            device, endpoint: ep, type: 'readResponse'}, () => {}, {}, {device});
+            device, endpoint: ep, type: 'readResponse', meta: {zclTransactionSequenceNumber: sequence++}},
+            () => {}, {}, {device});
         assert.equal(nonzero.power, 7);
         assert.equal(nonzero.bseed_pm_sample_power_w, undefined);
         assert.equal(nonzero.bseed_pm_sample_time_ms, undefined);
