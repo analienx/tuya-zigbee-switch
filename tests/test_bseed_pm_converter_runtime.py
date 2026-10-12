@@ -189,6 +189,24 @@ const assertSampled = (result, expected, watts) => {
         await assert.rejects(extension.configure[0](device, {}, {}), /scale-read-failed/);
         assert.deepEqual(ep.cache, before);
     }
+    // Legacy PM Router source can have no usable Basic build string. A raw
+    // zero activePower sample is scale-invariant and may be freshness-stamped,
+    // but nonzero null-build power must remain untrusted/unstamped.
+    {
+        const device = makeDevice(undefined), ep = device.endpoints[0];
+        const extension = bseedPmElectricityMeter();
+        const converter = extension.fromZigbee.find(f => f.cluster === 'haElectricalMeasurement');
+        const zero = converter.convert({}, {cluster: 'haElectricalMeasurement', data: {activePower: 0},
+            device, endpoint: ep, type: 'readResponse'}, () => {}, {}, {device});
+        assert.equal(zero.power, 0);
+        assert.equal(zero.bseed_pm_sample_power_w, 0);
+        assert.ok(Number.isFinite(zero.bseed_pm_sample_time_ms));
+        const nonzero = converter.convert({}, {cluster: 'haElectricalMeasurement', data: {activePower: 7},
+            device, endpoint: ep, type: 'readResponse'}, () => {}, {}, {device});
+        assert.equal(nonzero.power, 7);
+        assert.equal(nonzero.bseed_pm_sample_power_w, undefined);
+        assert.equal(nonzero.bseed_pm_sample_time_ms, undefined);
+    }
     const wrongBoard = makeDevice('1.2.5-bseedcli11', 'another-board');
     await assert.rejects(bseedPmElectricityMeter().configure[0](wrongBoard, {}, {}), /scale-read-failed/);
     assert.deepEqual(wrongBoard.endpoints[0].cache, {});
