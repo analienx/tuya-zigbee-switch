@@ -17,6 +17,14 @@
 
 // Network module functions (implemented in zigbee_network.c)
 void telink_zigbee_hal_network_init(void);
+
+#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
+/* Periodic last-resort recovery for a non-factory-new Router stuck unjoined. */
+void telink_zigbee_hal_router_recovery_tick(void);
+void telink_zigbee_hal_router_note_inbound(void);
+bool telink_zigbee_hal_router_ota_in_progress(void);
+
+#endif
 void telink_zigbee_hal_bdb_init(af_simple_descriptor_t *endpoint_descriptor);
 
 /* Safe before or after ota_init(): a pre-init join is remembered and starts

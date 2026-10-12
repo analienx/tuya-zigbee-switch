@@ -119,8 +119,9 @@ firmware_health_t firmware_health;
 typedef enum {HAL_ZIGBEE_NETWORK_NOT_JOINED,HAL_ZIGBEE_NETWORK_JOINED,HAL_ZIGBEE_NETWORK_JOINING} hal_zigbee_network_status_t;
 typedef void (*hal_network_status_change_callback_t)(hal_zigbee_network_status_t);
 hal_zigbee_network_status_t hal_zigbee_get_network_status(void);
-static uint32_t now, rejoin_calls, steer_calls;
+static uint32_t now, rejoin_calls, steer_calls, announce_rearms;
 static bool joined, factory_new;
+static void app_rearm_network_announcement(void) {announce_rearms++;}
 static u8 fail_start;
 static struct {u8 scanDuration;} g_bdbAttrs;
 #ifdef BSEED_MAINS_CLIENT
@@ -165,6 +166,8 @@ int main(void) {
     now+=4999; hal_zigbee_start_network_steering(); assert(steer_calls==1);
     now++; fail_start=0; hal_zigbee_start_network_steering(); assert(steer_calls==2);
     assert(hal_zigbee_get_network_status()==HAL_ZIGBEE_NETWORK_JOINING);
+    bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,0);
+    assert(announce_rearms==1); /* proven new-epoch announce hook */
     return 0;
 }
 '''

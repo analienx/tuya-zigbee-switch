@@ -33,6 +33,8 @@ source:
 - {path: ../../base_components/led.c}
 - {path: ../../base_components/network_indicator.c}
 - {path: ../../base_components/relay.c}
+- {path: ../../base_components/overload_protection.c}
+- {path: ../../base_components/energy_measurement/hlw8012.c}
 - {path: ../../base_components/battery.h}
 - {path: ../../base_components/button.h}
 - {path: ../../base_components/led.h}
@@ -48,7 +50,13 @@ source:
 - {path: ../../device_config/reset.c}
 - {path: ../../device_config/reset.h}
 - {path: ../../device_config/nvm_migrations.c}
+- {path: ../../device_config/device_migration.c}
+- {path: ../../device_config/pm_legacy_migration.c}
 - {path: ../../zigbee/basic_cluster.c}
+- {path: ../../zigbee/electrical_measurement_cluster.c}
+- {path: ../../zigbee/metering_cluster.c}
+- {path: ../../zigbee/zcl_write_string_gate.c}
+- {path: ../../zigbee/zcl_write_dispatch.c}
 - {path: ../../zigbee/battery_cluster.c}
 - {path: ../../zigbee/general_commands.c}
 - {path: ../../zigbee/group_cluster.c}
