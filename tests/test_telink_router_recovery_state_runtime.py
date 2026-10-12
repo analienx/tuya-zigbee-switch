@@ -91,14 +91,18 @@ int main(void) {
     /* Timed-out ZDO requests count but must not cause an immediate rejoin. */
     now+=31000; telink_zigbee_hal_router_recovery_tick();
     assert(router_probe_failures==1 && rejoin_calls==0);
-    for(unsigned i=0;i<3;i++) {
+    for(unsigned i=0;i<2;i++) {
         now+=600000; telink_zigbee_hal_router_recovery_tick();
         assert(router_probe_pending);
         now+=31000; telink_zigbee_hal_router_recovery_tick();
         assert(router_probe_failures==i+2);
     }
     assert(rejoin_calls==0);
+    /* Fourth confirmed unanswered coordinator request crosses the recovery
+     * threshold; its same tick can legitimately launch the one-shot. */
     now+=600000; telink_zigbee_hal_router_recovery_tick();
+    assert(router_probe_pending);
+    now+=31000; telink_zigbee_hal_router_recovery_tick();
     assert(rejoin_calls==1 && router_one_shot_active);
     assert(!router_probe_pending && rescue_calls==0);
 
