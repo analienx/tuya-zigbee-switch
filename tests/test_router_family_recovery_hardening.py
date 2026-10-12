@@ -296,8 +296,8 @@ def test_persistent_router_budget_is_required_before_both_rescue_paths():
     assert "bseed_router_rescue_budget_note_failure();" in network
     assert re.search(r"#define\s+NV_ITEM_ROUTER_RESCUE_BUDGET\s+70\b", items)
     assert "router_recovery_budget.c" in make
-    assert "BSEED_RESCUE_MAX 2u" in budget
-    assert "BSEED_RESCUE_GOOD_REPLIES 24u" in budget
+    assert re.search(r"#define\s+BSEED_RESCUE_MAX\s+2u\b", budget)
+    assert re.search(r"#define\s+BSEED_RESCUE_GOOD_REPLIES\s+24u\b", budget)
     assert "12u * 60u * 60u" in budget
     assert "hal_nvm_read(" in budget and "hal_nvm_write(" in budget
 
