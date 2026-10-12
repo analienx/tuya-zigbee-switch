@@ -35,19 +35,40 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
           test -z "$(git status --porcelain)"
-      - name: Install SDK, SLC generator and ZAP (no flashing tools)
+      - name: Install official SLT 1.2.1 and configure SLC-CLI
         shell: bash
         run: |
           set -euo pipefail
-          # Simplicity Commander is only required for .gbl/OTA packaging or
-          # flashing; its vendor endpoint currently returns HTTP 403 on CI.
-          # A source-only build needs SDK, SLC, ZAP and the ARM compiler.
-          make -C src/silabs -f tools.mk simplicity_sdk slc-cli zap trust
+          # Silicon Labs deprecated the direct slc_cli_linux.zip download.
+          # SLT is its supported CI tool and includes Java/SLC dependencies.
+          curl --fail --location --retry 3 \
+            https://www.silabs.com/documents/public/software/slt-cli-1.2.1-linux-x64.zip \
+            --output "${RUNNER_TEMP}/slt-cli.zip"
+          mkdir -p "${RUNNER_TEMP}/slt"
+          unzip -q "${RUNNER_TEMP}/slt-cli.zip" -d "${RUNNER_TEMP}/slt"
+          SLT=$(find "${RUNNER_TEMP}/slt" -type f -name slt | head -1)
+          test -n "$SLT"
+          chmod +x "$SLT"
+          "$SLT" --version
+          cat > "${RUNNER_TEMP}/slt/pkg.slt" <<'RECIPE'
+          version = "0"
+          [dependency]
+          slc-cli = "~"
+          RECIPE
+          "$SLT" install --non-interactive -f "${RUNNER_TEMP}/slt/pkg.slt"
+          # Use the SDK pinned by this repository, not an unreviewed latest.
+          make -C src/silabs -f tools.mk simplicity_sdk zap
+          SLC=$(find "$HOME/.silabs/slt/installs" -type f -name slc -print -quit)
+          test -n "$SLC"
+          chmod +x "$SLC"
+          echo "SLC_DIR=$(dirname "$SLC")" >> "$GITHUB_ENV"
+          "$SLC" --version
       - name: Generate EFR32MG21 Router project
         shell: bash
         run: |
           set -euo pipefail
-          make -C src/silabs gen DEVICE_TYPE=router
+          make -C src/silabs gen DEVICE_TYPE=router \
+            SLC_DIR="$SLC_DIR"
       - name: Compile EFR32MG21 Router
         shell: bash
         run: |
