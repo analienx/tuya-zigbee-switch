@@ -294,7 +294,7 @@ def test_persistent_router_budget_is_required_before_both_rescue_paths():
     assert network.count("bseed_router_rescue_budget_consume()") == 2
     assert "bseed_router_rescue_budget_note_good_coordinator(" in network
     assert "bseed_router_rescue_budget_note_failure();" in network
-    assert re.search(r"#define\s+NV_ITEM_ROUTER_RESCUE_BUDGET\s+70\\b", items)
+    assert re.search(r"#define\s+NV_ITEM_ROUTER_RESCUE_BUDGET\s+70\b", items)
     assert "router_recovery_budget.c" in make
     assert "BSEED_RESCUE_MAX 2u" in budget
     assert "BSEED_RESCUE_GOOD_REPLIES 24u" in budget
