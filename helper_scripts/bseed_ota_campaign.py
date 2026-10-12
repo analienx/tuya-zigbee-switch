@@ -347,11 +347,14 @@ def verified_router_pm_candidate(profile):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', required=True, help='Private JSON profile outside git')
-    parser.add_argument('--mode', choices=['prepare', 'preflight', 'link-gate', 'qualify', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'reconcile-installed', 'reconcile-source', 'provision-pm', 'audit-pm', 'postflash', 'reinterview', 'status'], required=True)
-    parser.add_argument('--confirm-ieee', help='Required for flash, transition, rejoin, metadata and provision-pm; must match profile IEEE exactly')
+    parser.add_argument('--mode', choices=['prepare', 'preflight', 'link-gate', 'qualify', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'reconcile-installed', 'reconcile-source', 'abandon-source', 'provision-pm', 'audit-pm', 'postflash', 'reinterview', 'status'], required=True)
+    parser.add_argument('--confirm-ieee', help='Required for flash, transition, rejoin, metadata, reconciliation, abandonment and provision-pm; must match profile IEEE exactly')
+    parser.add_argument('--confirm-sha256', help='Abandon-source only: exact failed candidate SHA-256')
     parser.add_argument('--confirm-load-unplugged', action='store_true', help='Flash/transition: operator just physically verified no appliance attached; required for non-PM and PM physical-proof route')
     args = parser.parse_args()
     profile = load_profile(args.profile)
+    if args.confirm_sha256 and args.mode != 'abandon-source':
+        raise SystemExit('--confirm-sha256 is only valid for --mode abandon-source')
     physical_pm = profile.get('require_pm') is True and profile.get('pm_preflash_load_proof') == 'physically_unloaded'
     if args.confirm_load_unplugged and not (args.mode in ('flash', 'transition') and
             (profile.get('non_pm') is True or physical_pm)):
@@ -411,6 +414,16 @@ def main():
             raise SystemExit('Source reconciliation refused: confirm exact IEEE')
         cmd = [sys.executable, '-u', str(ROOT/'helper_scripts/bseed_ota_source_reconcile.py'),
                '--profile', args.profile, '--confirm-ieee', args.confirm_ieee]
+        raise SystemExit(subprocess.call(cmd))
+    if args.mode == 'abandon-source':
+        if args.confirm_ieee != profile['ieee']:
+            raise SystemExit('Failed-campaign abandonment refused: confirm exact IEEE')
+        if args.confirm_sha256 != profile['sha256']:
+            raise SystemExit('Failed-campaign abandonment refused: confirm exact candidate SHA-256')
+        cmd = [sys.executable, '-u', str(ROOT/'helper_scripts/bseed_abandon_failed_campaign.py'),
+               '--profile', args.profile, '--confirm-ieee', args.confirm_ieee,
+               '--confirm-sha256', args.confirm_sha256,
+               '--reason', 'operator_abandoned']
         raise SystemExit(subprocess.call(cmd))
     if args.mode == 'audit-pm':
         import uuid
@@ -572,7 +585,7 @@ def main():
             record_postflash_candidate(profile)
         raise SystemExit(post_status)
     elif args.confirm_ieee:
-        raise SystemExit('--confirm-ieee may only be supplied for flash, transition, rejoin, metadata, reconcile-installed, reconcile-source, reinterview or provision-pm')
+        raise SystemExit('--confirm-ieee may only be supplied for flash, transition, rejoin, metadata, reconcile-installed, reconcile-source, abandon-source, reinterview or provision-pm')
     raise SystemExit(subprocess.call(runner_args(profile, args.mode)))
 
 
