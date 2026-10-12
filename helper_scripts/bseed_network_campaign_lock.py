@@ -20,6 +20,7 @@ SCHEMA = 1
 ACCEPTED_PHASE = 'postflash_accepted'
 RECONCILED_PHASE = 'installed_image_reconciled'
 SOURCE_UNCHANGED_PHASE = 'source_unchanged_reconciled'
+ABANDONED_PHASE = 'source_unchanged_abandoned'
 
 
 def now_iso():
@@ -89,6 +90,10 @@ def ownership_diagnosis(record):
         transport = 'reconciled'
         acceptance = 'unverified'
         next_step = 'existing_evidence_backed_reconciled_release'
+    elif phase == ABANDONED_PHASE:
+        transport = 'abandoned_source_unchanged'
+        acceptance = 'unverified'
+        next_step = 'release_abandoned_campaign'
     elif phase in ('ota_running', 'preflight_complete'):
         transport = 'active_or_unknown'
         acceptance = 'not_assessed'
@@ -214,3 +219,12 @@ def release_source_unchanged(path, token):
     This is not transport success and not hardware acceptance.
     """
     return _release_phase(path, token, SOURCE_UNCHANGED_PHASE)
+
+
+def release_abandoned(path, token):
+    """Release only a failed campaign explicitly terminalized after fresh
+    proof that its original source image/role is still installed and no OTA
+    is active. This is not acceptance and never authorizes reuse of the old
+    campaign workdir.
+    """
+    return _release_phase(path, token, ABANDONED_PHASE)
