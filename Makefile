@@ -88,6 +88,12 @@ PYTHON ?= $(shell command -v python >/dev/null 2>&1 && echo python || echo pytho
 bseed/pm-matrix:
 	$(PYTHON) helper_scripts/bseed_pm_variant_matrix.py
 
+# Source-only paired Router contract. Native compilation for both PM and non-PM
+# remains authoritative in GitHub-hosted telink-router-ci.yml; this target checks
+# release identities and shared recovery invariants without any live operation.
+bseed/router-pair:
+	$(PYTHON) helper_scripts/bseed_router_pair_contract.py
+
 # Offline OTA identity gate: every checked-in BSEED image must match the
 # released-identity registry (no relabels, monotonic versions, strings match).
 bseed/identity-gate:
@@ -117,4 +123,4 @@ setup: silabs/tools/all telink/tools/all setup_venv
 
 
 # Define available targets for help
-.PHONY: help setup setup_venv stub/% silabs/% telink/% tests tools/% board/% format
+.PHONY: help setup setup_venv stub/% silabs/% telink/% tests tools/% board/% format bseed/pm-matrix bseed/router-pair bseed/identity-gate bseed/suggest-next
