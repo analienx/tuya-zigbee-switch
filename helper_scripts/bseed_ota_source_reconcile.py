@@ -22,6 +22,11 @@ import yaml
 
 from bseed_ota_campaign import load_profile, network_lock_path
 from bseed_targeted_z2m_ota import archive_prior_check
+from bseed_live_source_identity import (
+    legacy_pm_router_file_version,
+    require_fresh_source,
+    require_inventory_source,
+)
 from bseed_network_campaign_lock import (
     read_lock,
     release_source_unchanged,
@@ -39,11 +44,10 @@ def inventory_match(devices, profile):
         raise ValueError('Target IEEE absent or ambiguous')
     d = matches[0]
     interview_ok = d.get('interview_state') == 'SUCCESSFUL' or d.get('interview_completed') is True
-    if (d.get('friendly_name'), d.get('manufacturer'), d.get('model_id'),
-        d.get('type'), d.get('software_build_id')) != (
-            profile['device'], profile['manufacturer'], profile['model'],
-            profile['preflash_role'], profile['preflash_build']):
+    if (d.get('friendly_name'), d.get('manufacturer'), d.get('model_id'), d.get('type')) != (
+            profile['device'], profile['manufacturer'], profile['model'], profile['preflash_role']):
         raise ValueError('Fresh inventory no longer matches exact preflash identity')
+    require_inventory_source(profile, d)
     if not interview_ok:
         raise ValueError('Preflash source interview is not complete')
     return d
@@ -51,14 +55,10 @@ def inventory_match(devices, profile):
 
 def fresh_source_identity(target, profile):
     """Inventory is corroborating only; identity MUST come from a new target message."""
-    device = (target or {}).get('device') or {}
-    expected = (profile['ieee'], profile['preflash_build'], profile['preflash_role'])
-    found = (device.get('ieeeAddr'), device.get('softwareBuildID'), device.get('type'))
-    if found != expected:
-        raise ValueError('Fresh source identity build/role/IEEE absent or mismatched: ' + repr(found))
+    proof = require_fresh_source(profile, target)
     if profile.get('relay_get_key', 'state') not in (target or {}):
         raise ValueError('Fresh target did not answer the requested relay property')
-    return device
+    return proof
 
 
 def atomic_json(path, value):
@@ -69,6 +69,9 @@ def atomic_json(path, value):
 
 def reconcile(profile_path, confirmation, observe_seconds=45, verify_candidate=True):
     profile = load_profile(profile_path)
+    legacy_source = legacy_pm_router_file_version(profile)
+    if legacy_source is not None and not verify_candidate:
+        raise ValueError('Legacy PM Router source reconciliation requires an exact OTA candidate check')
     if confirmation != profile['ieee']:
         raise ValueError('Confirm exact IEEE for source-unchanged reconciliation')
     work = Path(profile['workdir'])
@@ -102,7 +105,7 @@ def reconcile(profile_path, confirmation, observe_seconds=45, verify_candidate=T
     fresh = threading.Event()
     checked = threading.Event()
     state = dict(devices=None, info=None, bridge=None, target=None,
-                 update_seen=False, check=None)
+                 update_seen=False, check=None, check_target=None)
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
                          client_id='bseed-source-reconcile-' + uuid.uuid4().hex)
@@ -138,6 +141,8 @@ def reconcile(profile_path, confirmation, observe_seconds=45, verify_candidate=T
                 state['update_seen'] = True
             if not message.retain:
                 state['target'] = data
+                if state.get('check_token'):
+                    state['check_target'] = data
                 fresh.set()
         elif topic == base + '/bridge/response/device/ota_update/check' and isinstance(data, dict):
             transaction = data.get('transaction')
@@ -173,7 +178,7 @@ def reconcile(profile_path, confirmation, observe_seconds=45, verify_candidate=T
                        qos=1).wait_for_publish(5)
         if not fresh.wait(14):
             raise TimeoutError('Fresh target GET response missing')
-        fresh_source_identity(state['target'], profile)
+        source_proof = fresh_source_identity(state['target'], profile)
 
         quiet_until = time.monotonic() + observe_seconds
         while time.monotonic() < quiet_until:
@@ -192,6 +197,7 @@ def reconcile(profile_path, confirmation, observe_seconds=45, verify_candidate=T
         data = {}
         if verify_candidate:
             transaction = 'bseed-reconcile-' + uuid.uuid4().hex
+            state['check_target'] = None
             state['check_token'] = transaction
             payload = {'id': profile['ieee'], 'url': profile['index_url'],
                        'transaction': transaction}
@@ -207,6 +213,13 @@ def reconcile(profile_path, confirmation, observe_seconds=45, verify_candidate=T
                 raise ValueError('OTA check returned a different candidate source')
             if data.get('id') != profile['ieee']:
                 raise ValueError('Source reconcile check must target exact IEEE')
+            if legacy_pm_router_file_version(profile) is not None:
+                check_deadline = time.monotonic() + 10
+                while state['check_target'] is None and time.monotonic() < check_deadline:
+                    wake.wait(0.25); wake.clear()
+                if state['check_target'] is None:
+                    raise ValueError('Source reconcile check produced no fresh target source state')
+                source_proof = fresh_source_identity(state['check_target'], profile)
 
 
         inventory_match(state['devices'], profile)
@@ -219,6 +232,8 @@ def reconcile(profile_path, confirmation, observe_seconds=45, verify_candidate=T
             'device': profile['device'],
             'source_build': profile['preflash_build'],
             'source_role': profile['preflash_role'],
+            'source_identity_method': source_proof['method'],
+            'source_file_version': source_proof.get('file_version'),
             'candidate_sha256': profile['sha256'],
             'candidate_check_performed': bool(verify_candidate),
             'candidate_verification_deferred': not verify_candidate,
