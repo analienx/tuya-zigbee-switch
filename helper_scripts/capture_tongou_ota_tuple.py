@@ -73,6 +73,10 @@ def main() -> int:
     ap.add_argument("--target", required=True)
     ap.add_argument("--output", type=Path, required=True)
     ap.add_argument(
+        "--broker",
+        help="Optional MQTT broker host[:port] override for remote operators when the HA config uses an internal-only hostname.",
+    )
+    ap.add_argument(
         "--allow-live-network-changes", action="store_true",
         help="Explicitly authorize Zigbee2MQTT logging changes, possible restarts, and an OTA availability check (never an image transfer).",
     )
@@ -87,7 +91,7 @@ def main() -> int:
     cfg = yaml.safe_load(args.config.read_text(encoding="utf-8"))
     mc = cfg["mqtt"]
     base = mc.get("base_topic", "zigbee2mqtt")
-    host, port = endpoint(str(mc.get("server", "mqtt://localhost:1883")))
+    host, port = endpoint(args.broker or str(mc.get("server", "mqtt://localhost:1883")))
     advanced = cfg.get("advanced", {})
     original_level = advanced.get("log_level", "info")
     original_debug_mqtt = bool(advanced.get("log_debug_to_mqtt_frontend", False))
