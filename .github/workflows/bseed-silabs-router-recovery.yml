@@ -63,6 +63,9 @@ jobs:
           chmod +x "$SLC"
           echo "SLC_DIR=$(dirname "$SLC")" >> "$GITHUB_ENV"
           "$SLC" --version
+          # Exact pinned Silicon Labs SDK from its signed vendor release; SLC
+          # refuses generation unless the SDK is explicitly trusted.
+          "$SLC" signature trust --sdk "$GITHUB_WORKSPACE/silabs_tools/simplicity_sdk"
       - name: Generate EFR32MG21 Router project
         shell: bash
         run: |
