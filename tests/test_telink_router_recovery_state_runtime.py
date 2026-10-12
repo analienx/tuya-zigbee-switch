@@ -145,7 +145,7 @@ int main(void) {
 
 def test_telink_sdk_callback_route_recovery_and_rescue(tmp_path):
     source = NETWORK.read_text(encoding="utf-8")
-    section = source.split(
+    section = "/* A Router" + source.split(
         "#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE\n\n/* A Router", 1
     )[1].split("\n#endif\n\n// Telink ZDO callbacks", 1)[0]
     harness = tmp_path / "telink_router_recovery.c"
