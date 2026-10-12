@@ -111,7 +111,7 @@ def test_router_policy_executes_compiled_state_gates(tmp_path):
 def test_real_telink_driver_uses_verified_policy():
     assert POLICY.is_file()
     source = NETWORK.read_text(encoding="utf-8")
-    assert '#include "router_recovery_policy.h"' in source
+    assert '#include "hal/router_recovery_policy.h"' in source
     assert "bseed_router_timeout_evidence(" in source
     assert "bseed_router_queue_stall_evidence(" in source
     assert "bseed_router_joined_rescue_eligible(" in source
