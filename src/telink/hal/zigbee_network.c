@@ -317,7 +317,7 @@ static void router_coordinator_node_desc_response(void *arg) {
     if (ind->src_addr == 0x0000u &&
         rsp->seq_num == router_probe_sequence &&
         rsp->status == ZDO_SUCCESS && rsp->nwk_addr_interest == 0x0000u) {
-        router_last_positive_ms  = hal_millis();
+        router_last_positive_ms = hal_millis();
         bseed_router_rescue_budget_note_good_coordinator(router_last_positive_ms);
         router_last_inbound_ms   = router_last_positive_ms;
         router_probe_failures    = 0;
@@ -391,7 +391,7 @@ void telink_zigbee_hal_router_recovery_tick(void) {
         }
         if (!router_reboot_scheduled &&
             (uint32_t)(now - router_recovery_since_ms) >=
-                ROUTER_RECOVERY_STALL_MS + reboot_stagger_ms) {
+            ROUTER_RECOVERY_STALL_MS + reboot_stagger_ms) {
             router_reboot_scheduled = true;
             if (bseed_router_rescue_budget_consume()) {
                 printf("Router: stalled rejoin, budgeted checkpoint reboot\r\n");
@@ -407,8 +407,8 @@ void telink_zigbee_hal_router_recovery_tick(void) {
     if (network_recovery_state != TELINK_NETWORK_RECOVERY_IDLE ||
         telink_zigbee_hal_router_ota_in_progress()) {
         /* An OTA transfer or SDK backoff owns network operations. Do not
-         * overlap ZDO probes or active rejoin while it is working.
-         * Do not credit this interval toward 12h verified good health. */
+        * overlap ZDO probes or active rejoin while it is working.
+        * Do not credit this interval toward 12h verified good health. */
         bseed_router_rescue_budget_note_failure();
         router_probe_pending     = false;
         router_probe_failures    = 0;
