@@ -230,9 +230,27 @@ def release_source_unchanged(profile, evidence_path):
     try:
         bridge.start()
         device = target(bridge, profile)
-        if (device.get('software_build_id'), device.get('type')) != (
-                profile['preflash_build'], profile['preflash_role']):
-            raise ValueError('current source identity changed since reconciliation evidence')
+        build = device.get('software_build_id')
+        role = device.get('type')
+        if (build, role) != (profile['preflash_build'], profile['preflash_role']):
+            # Older PM Router firmware has no readable Basic softwareBuildID.
+            # Only the pinned, freshly checked legacy OTA fileVersion may
+            # substitute for MISSING Basic metadata; never for a wrong value.
+            from bseed_live_source_identity import legacy_pm_router_file_version
+            legacy = legacy_pm_router_file_version(profile)
+            legacy_verified = (
+                build is None
+                and role == profile['preflash_role']
+                and legacy is not None
+                and evidence.get('source_identity_method') == 'ota_file_version'
+                and evidence.get('source_file_version') == legacy
+                and evidence.get('fresh_get_ieee_verified') is True
+                and evidence.get('fresh_get_build_role_verified') is True
+                and evidence.get('candidate_check_performed') is True
+                and evidence.get('quiet_observe_seconds', 0) >= 15
+            )
+            if not legacy_verified:
+                raise ValueError('current source identity changed since reconciliation evidence')
         set_option(bridge, profile, False)
         record.update(
             phase='released_source_unchanged',
