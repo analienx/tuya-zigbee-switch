@@ -82,3 +82,10 @@ def test_live_probe_requires_explicit_network_change_opt_in(tmp_path):
     assert proc.returncode != 0
     assert "disabled by default" in proc.stderr
     assert not (tmp_path / "capture.json").exists()
+
+
+def test_endpoint_accepts_remote_broker_override_shape():
+    from helper_scripts.capture_tongou_ota_tuple import endpoint
+
+    assert endpoint("192.0.2.10") == ("192.0.2.10", 1883)
+    assert endpoint("mqtt://192.0.2.10:2883") == ("192.0.2.10", 2883)
