@@ -278,3 +278,77 @@ def test_uncertain_release_keeps_active_record(tmp_path, monkeypatch, failure):
     assert not list(active.parent.glob('PM_TELEMETRY_RELEASED_*'))
     assert len(bridge.requests) == (1 if failure == 'identity_changed' else 2)
     assert bridge.started == bridge.stopped == 2
+
+
+def legacy_router_source_fixture(tmp_path, monkeypatch):
+    """A pre-16-byte-era PM Router with fresh OTA fileVersion but no Basic ID."""
+    p, _, lock, bridge = lifecycle(tmp_path, monkeypatch)
+    p.update(
+        manufacturer='b28wrpvx', model='TS011F-BS-PM',
+        preflash_role='Router', postflash_role='Router',
+        preflash_build='1.2.5-bseedv8u5-rc1',
+        postflash_build='1.2.5-bseedr13',
+        preflash_file_version='0x1205300d',
+    )
+    bridge.inventory[0]['type'] = 'Router'
+    bridge.inventory[0]['software_build_id'] = None
+    guard.begin(p, lock['token'])
+    lock['phase'] = 'source_unchanged_reconciled'
+    evidence = dict(
+        ieee=p['ieee'],
+        source_build=p['preflash_build'],
+        source_role='Router',
+        source_identity_method='ota_file_version',
+        source_file_version=0x1205300d,
+        fresh_get_ieee_verified=True,
+        fresh_get_build_role_verified=True,
+        candidate_check_performed=True,
+        quiet_observe_seconds=45,
+        update_available=True,
+        ota_transport_success=False,
+        result='source_unchanged_reconciled',
+    )
+    path = release_evidence(p, evidence, lock)
+    return p, path, bridge
+
+
+def test_legacy_pm_router_release_accepts_only_verified_missing_basic(tmp_path, monkeypatch):
+    p, path, bridge = legacy_router_source_fixture(tmp_path, monkeypatch)
+    active = guard.guard_path(p)
+    guard.release_source_unchanged(p, path)
+    assert not active.exists()
+    released = list(active.parent.glob('PM_TELEMETRY_RELEASED_SOURCE_UNCHANGED_*.json'))
+    assert len(released) == 1
+    assert json.loads(released[0].read_text())['phase'] == 'released_source_unchanged'
+    assert json.loads((Path(p['workdir']) / 'ACTIVE_LOCK.json').read_text())['phase'] == 'source_unchanged_reconciled'
+    assert [r['options'][OPTION] for r in bridge.requests] == [True, False]
+
+
+@pytest.mark.parametrize('bad', [
+    'wrong_basic', 'wrong_role', 'wrong_file_version', 'wrong_method',
+    'no_fresh_get', 'no_fresh_identity', 'no_candidate_check', 'quiet_too_short',
+])
+def test_legacy_pm_router_release_fails_closed_on_weak_proof(tmp_path, monkeypatch, bad):
+    p, path, bridge = legacy_router_source_fixture(tmp_path, monkeypatch)
+    evidence = json.loads(path.read_text())
+    if bad == 'wrong_basic':
+        bridge.inventory[0]['software_build_id'] = 'wrong-build'
+    elif bad == 'wrong_role':
+        bridge.inventory[0]['type'] = 'EndDevice'
+    elif bad == 'wrong_file_version':
+        evidence['source_file_version'] += 1
+    elif bad == 'wrong_method':
+        evidence['source_identity_method'] = 'basic_build'
+    elif bad == 'no_fresh_get':
+        evidence['fresh_get_ieee_verified'] = False
+    elif bad == 'no_fresh_identity':
+        evidence['fresh_get_build_role_verified'] = False
+    elif bad == 'no_candidate_check':
+        evidence['candidate_check_performed'] = False
+    elif bad == 'quiet_too_short':
+        evidence['quiet_observe_seconds'] = 0
+    path.write_text(json.dumps(evidence))
+    with pytest.raises(ValueError, match='current source identity changed'):
+        guard.release_source_unchanged(p, path)
+    assert guard.guard_path(p).exists()
+    assert [r['options'][OPTION] for r in bridge.requests] == [True]
