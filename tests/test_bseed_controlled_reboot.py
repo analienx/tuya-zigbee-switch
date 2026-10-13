@@ -24,6 +24,11 @@ static uint32_t sample, clock_ms = 10000, delay_ms;
 static int fault, reboots, network_resets;
 static jmp_buf reboot_target;
 static hal_task_t ota_checkpoint_reboot_task;
+#ifdef BSEED_MAINS_CLIENT
+/* This harness starts with an initialized application/meter. Early startup
+ * blocking is covered separately by the role-startup runtime suite. */
+static bool client_app_initialized = true;
+#endif
 uint32_t hal_millis(void) { return clock_ms; }
 hal_nvm_status_t hal_nvm_write(uint8_t item, uint16_t size, uint8_t *data) {
     assert(item == NV_ITEM_ENERGY_ACCUMULATION(1) && size == 8);

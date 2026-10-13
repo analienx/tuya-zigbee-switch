@@ -206,6 +206,7 @@ void app_task() {
     if (!client_app_initialized)
         return;
 #endif
+
     /* Meter sampling/protection/persistence is intentionally independent of
      * network join state. */
     energy_monitoring_tick();

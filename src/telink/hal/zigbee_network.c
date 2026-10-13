@@ -32,7 +32,7 @@ void zdo_leave_confirmation_callback(nlme_leave_cnf_t *pLeaveCnf);
 #define KEEPALIVE_RETRY_MS                5000u
 #define OTA_POLL_VERIFY_MS                1000u
 static hal_task_t keepalive_verify_task;
-static bool       ota_fast_poll_active = false;
+static bool       ota_fast_poll_active       = false;
 static uint32_t   client_health_next_tick_ms = KEEPALIVE_VERIFY_TICK_MS;
 static void client_health_recovery_tick(void);
 
@@ -161,7 +161,7 @@ static void client_health_join_epoch(void) {
     client_health_last_confirm_ms           = now;
     client_health_last_keepalive_refresh_ms = now;
     client_poll_failure_streak              = 0;
-    client_health_initialized  = true;
+    client_health_initialized = true;
     /* Preserve last attempt across rejoin to avoid synchronized thrashing. */
 }
 
@@ -197,7 +197,7 @@ static void client_health_recovery_tick(void) {
     /* Hash the complete IEEE and preserve the stagger with a shorter final
      * timer interval instead of rounding every scan to a minute boundary. */
     uint32_t silence_limit = CLIENT_PARENT_SILENCE_MS + client_health_stagger_ms();
-    uint32_t elapsed = now - client_health_last_good_ms;
+    uint32_t elapsed       = now - client_health_last_good_ms;
     if (elapsed < silence_limit) {
         uint32_t remaining = silence_limit - elapsed;
         if (client_poll_failure_streak >= CLIENT_POLL_FAILURE_THRESHOLD &&
@@ -298,8 +298,9 @@ static bool request_rejoin_with_backoff(bool parent_stale) {
 
     network_start_attempt();
     firmware_health_increment(&firmware_health.rejoin_start);
+
     /* Claim before the SDK call: completion may be synchronous. Its native
-     * implementation clears JOINED and owns all subsequent retry timers. */
+    * implementation clears JOINED and owns all subsequent retry timers. */
     network_recovery_state = TELINK_NETWORK_RECOVERY_REJOIN;
 #ifdef BSEED_MAINS_CLIENT
     zb_rejoinSecModeSet(REJOIN_SECURITY);
