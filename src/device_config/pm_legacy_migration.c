@@ -5,6 +5,7 @@
 #include "hal/nvm.h"
 #include "hal/printf_selector.h"
 #include "base_components/overload_protection.h"
+#include "zigbee/metering_cluster.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -81,7 +82,7 @@ static bool copy_item_if_destination_absent(uint16_t legacy_item,
     if (strcmp(name, "energy") == 0 && size == sizeof(pm_energy_nv_t)) {
         pm_energy_nv_t legacy;
         memcpy(&legacy, expected, sizeof(legacy));
-        if (legacy.accumulated_energy_wh > 0xFFFFFFFFFFFFULL) {
+        if (legacy.accumulated_energy_wh >= 0xFFFFFFFFFFFFULL) {
             printf("PM NVM migration: invalid legacy energy; NVM preserved\r\n");
             return false;
         }
@@ -154,6 +155,10 @@ bool migrate_legacy_bseed_pm_nvm(void) {
         memcmp(device_config_str.data, PM_IDENTITY_PREFIX, prefix_len) != 0) {
         return true;
     }
+
+    /* Meter restoration still has to inspect preserved legacy energy when
+     * bounded migration retries are exhausted or the counter is unreadable. */
+    metering_cluster_allow_legacy_energy_restore();
 
     /* After bounded failed attempts, boot with available defaults without
      * destroying any legacy records that might still be recoverable. */

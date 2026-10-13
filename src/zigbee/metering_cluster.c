@@ -19,6 +19,15 @@ typedef struct {
 } metering_nv_data_t;
 
 static metering_cluster_t *g_metering_cluster = NULL;
+#ifdef BSEED_PM_B28WRPVX
+static bool legacy_energy_restore_allowed = false;
+
+void metering_cluster_allow_legacy_energy_restore(void) {
+    /* Only the raw identity classifier may enable the historical PM slot. */
+    legacy_energy_restore_allowed = true;
+}
+
+#endif
 
 void metering_cluster_init(metering_cluster_t *cluster,
                            energy_meter_t *meter) {
@@ -145,9 +154,24 @@ void metering_cluster_load_energy(metering_cluster_t *cluster) {
     cluster->last_baseline_retry_time = hal_millis();
 
     metering_nv_data_t nv_data;
-    hal_nvm_status_t   status = hal_nvm_read(
+    bool             legacy_baseline = false;
+    hal_nvm_status_t status          = hal_nvm_read(
         NV_ITEM_ENERGY_ACCUMULATION(cluster->endpoint), sizeof(nv_data),
         (uint8_t *)&nv_data);
+#ifdef BSEED_PM_B28WRPVX
+    if (status == HAL_NVM_NOT_FOUND && cluster->endpoint == 1 &&
+        legacy_energy_restore_allowed) {
+        /* Retry exhaustion must not turn recoverable old energy into a new
+         * zero baseline. Use the preserved record even if its copy failed;
+         * periodic/controlled checkpoints will persist the live total in 64.
+         * An existing unified zero still wins, preserving explicit resets. */
+        status          = hal_nvm_read(40, sizeof(nv_data), (uint8_t *)&nv_data);
+        legacy_baseline = status == HAL_NVM_SUCCESS;
+    }
+#endif
+    if (status == HAL_NVM_SUCCESS &&
+        nv_data.accumulated_energy_wh >= METERING_SUMMATION_UNTRUSTED)
+        status = HAL_NVM_ERROR;
     if (status == HAL_NVM_SUCCESS) {
         cluster->current_summation_delivered = nv_data.accumulated_energy_wh;
         cluster->last_reported_energy        = nv_data.accumulated_energy_wh;
@@ -171,7 +195,7 @@ void metering_cluster_load_energy(metering_cluster_t *cluster) {
     }
     if (cluster->energy_baseline_valid && cluster->meter) {
         cluster->last_persisted_energy     = cluster->current_summation_delivered;
-        cluster->persistence_retry_pending = 0;
+        cluster->persistence_retry_pending = legacy_baseline;
         energy_meter_data_t data;
         memset(&data, 0, sizeof(data));
         energy_meter_get_data(cluster->meter, &data);
@@ -191,9 +215,13 @@ bool metering_cluster_save_energy(metering_cluster_t *cluster) {
     metering_nv_data_t nv_data = {
         .accumulated_energy_wh = cluster->current_summation_delivered,
     };
+    metering_nv_data_t readback;
     cluster->last_nvm_attempt_time = hal_millis();
     if (hal_nvm_write(NV_ITEM_ENERGY_ACCUMULATION(cluster->endpoint),
-                      sizeof(nv_data), (uint8_t *)&nv_data) != HAL_NVM_SUCCESS) {
+                      sizeof(nv_data), (uint8_t *)&nv_data) != HAL_NVM_SUCCESS ||
+        hal_nvm_read(NV_ITEM_ENERGY_ACCUMULATION(cluster->endpoint),
+                     sizeof(readback), (uint8_t *)&readback) != HAL_NVM_SUCCESS ||
+        readback.accumulated_energy_wh != nv_data.accumulated_energy_wh) {
         cluster->persistence_retry_pending = 1;
         if (cluster->persistence_failures != UINT32_MAX)
             cluster->persistence_failures++;
