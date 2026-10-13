@@ -17,6 +17,8 @@
 #include "zigbee/poll_control_cluster.h"
 #endif
 #ifdef BSEED_MAINS_CLIENT
+#include "app.h"
+#include "hal/tasks.h"
 #include "zigbee/consts.h"
 #include "zigbee/switch_cluster.h"
 #endif
@@ -24,6 +26,13 @@
 #ifdef BSEED_MAINS_CLIENT
 extern zigbee_switch_cluster switch_clusters[];
 extern uint8_t switch_clusters_cnt;
+
+#define CLIENT_ROLE_RETRY_LIMIT    3u
+#define CLIENT_ROLE_RETRY_MS       5000u
+static bool       client_app_initialized;
+static uint8_t    client_role_retries;
+static hal_task_t client_role_retry_task;
+static bool defer_client_role_init(void);
 
 static void apply_mains_client_defaults(void) {
     zigbee_switch_cluster_config stored_config;
@@ -54,11 +63,20 @@ static bool process_device_type_change(void) {
         hal_nvm_read(NV_ITEM_DEVICE_TYPE, sizeof(stored_device_type),
                      (uint8_t *)&stored_device_type);
 
-    if (st != HAL_NVM_SUCCESS) {
+    if (st == HAL_NVM_ERROR) {
+        printf("Role marker unreadable; preserving Zigbee state\r\n");
+        return defer_client_role_init();
+    }
+    if (st == HAL_NVM_NOT_FOUND) {
         stored_device_type = CURRENT_DEVICE_TYPE;
-        hal_nvm_write(NV_ITEM_DEVICE_TYPE, sizeof(stored_device_type),
-                      (uint8_t *)&stored_device_type);
+        if (hal_nvm_write(NV_ITEM_DEVICE_TYPE, sizeof(stored_device_type),
+                          (uint8_t *)&stored_device_type) != HAL_NVM_SUCCESS) {
+            return defer_client_role_init();
+        }
         return false;
+    }
+    if (st != HAL_NVM_SUCCESS) {
+        return defer_client_role_init();
     }
     if (stored_device_type != CURRENT_DEVICE_TYPE) {
         printf("Device type change detected: %d -> %d\r\n", stored_device_type,
@@ -77,6 +95,25 @@ static bool process_device_type_change(void) {
         return true;
     }
     return false;
+}
+
+static void client_role_retry_handler(void *arg) {
+    (void)arg;
+    app_init();
+}
+
+static bool defer_client_role_init(void) {
+    if (client_role_retries < CLIENT_ROLE_RETRY_LIMIT) {
+        if (client_role_retries == 0) {
+            hal_tasks_init(&client_role_retry_task);
+            client_role_retry_task.handler = client_role_retry_handler;
+        }
+        client_role_retries++;
+        hal_tasks_schedule(&client_role_retry_task, CLIENT_ROLE_RETRY_MS);
+    } else {
+        printf("Role marker retry limit; Client startup remains blocked\r\n");
+    }
+    return true;
 }
 
 #else
@@ -105,6 +142,10 @@ void process_device_type_change() {
 #endif
 
 void app_init(void) {
+#ifdef BSEED_MAINS_CLIENT
+    if (client_app_initialized)
+        return;
+#endif
     handle_version_changes();
 
     /* The historical BSEED PM fork used NVM 40/44/51 for accepted runtime
@@ -138,6 +179,9 @@ void app_init(void) {
     hal_zigbee_init_ota();
     init_global_attr_write_callback();
 
+#ifdef BSEED_MAINS_CLIENT
+    client_app_initialized = true;
+#endif
 #ifndef BSEED_MAINS_CLIENT
     process_device_type_change();
 #endif
@@ -146,11 +190,22 @@ void app_init(void) {
 static bool boot_announce_sent = false;
 
 bool app_prepare_reboot(void) {
+#ifdef BSEED_MAINS_CLIENT
+    /* Failed role/migration startup has not initialized metering yet. */
+    if (!client_app_initialized)
+        return true;
+#endif
     energy_monitoring_tick();
     return metering_cluster_checkpoint();
 }
 
 void app_task() {
+#ifdef BSEED_MAINS_CLIENT
+    /* Do not operate an uninitialized Zigbee stack while role reads retry or
+     * a selective role reset is waiting for its deliberate reboot. */
+    if (!client_app_initialized)
+        return;
+#endif
     /* Meter sampling/protection/persistence is intentionally independent of
      * network join state. */
     energy_monitoring_tick();

@@ -9,9 +9,9 @@ def test_mains_client_refreshes_parent_on_initial_join_and_rejoin():
     assert re.search(r'^#define\s+MAINS_CLIENT_KEEPALIVE_POLL_MS\s+60000u\b', source, re.MULTILINE)
     assert 'zb_setPollRate(desired_mains_client_poll_ms())' in source
     # join + commissioning-success + OTA-restore (hal_zigbee_set_ota_poll_active)
-    assert source.count('configure_mains_client_keepalive();')==3
-    assert source.count('client_health_join_epoch();')==2
-    assert source.count('configure_mains_client_keepalive();')==3
+    # Includes recovery discovered through SDK state after a lost BDB success.
+    assert source.count('configure_mains_client_keepalive();')==4
+    assert source.count('client_health_join_epoch();')==3
     assert 'if (status != RET_OK)' in source
 
 

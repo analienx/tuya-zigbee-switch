@@ -54,6 +54,8 @@ COMMON_TESTS = ('tests/test_unified_pm_v8.py', 'tests/test_pm_cluster_layout_gua
 ROLE_TESTS = {'Router': ('tests/test_bseed_pm_v8_release.py',
                          'tests/test_bseed_golden_role_distribution.py'),
               'EndDevice': ('tests/test_bseed_mains_client.py',
+                            'tests/test_bseed_client_parent_recovery_runtime.py',
+                            'tests/test_bseed_client_role_startup_runtime.py',
                             'tests/test_bseed_mains_client_keepalive.py')}
 
 def run(command, *, env=None):
