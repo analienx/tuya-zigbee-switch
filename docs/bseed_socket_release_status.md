@@ -1,4 +1,26 @@
-# BSEED socket firmware: golden images and role rollout
+# BSEED socket firmware: published releases and candidates
+
+## Current release status — 2026-10-13
+
+The public BSEED OTA index contains the accepted Router releases and their
+matching stock-to-custom wrappers. It does not contain Client firmware or
+cross-role transitions.
+
+| Board | Published Router | Client candidate | Client status |
+|---|---|---|---|
+| TS011F-BS-PM (`b28wrpvx`) | `1.2.5-bseedv8u4` / `0x12053007` / type `43556` | `1.2.5-bseedcli19` / `0x1205301e` / type `65024` | Offline checks passed; hardware acceptance pending; not published |
+| TS011F-BS non-PM (`o1jzcxou`) | `1.1.3-bseedv8` / `0x11023001` / type `43555` | `1.1.3-bseedc13` / `0x1102301a` / type `65026` | Offline checks passed; hardware acceptance pending; not published |
+| TS0726-3-BS (`iedhxgyi`) | `1.1.8-bseedv8` / `0x1102300a` / type `45577` | — | No Client candidate listed |
+
+The PM/non-PM Client candidates include parent-recovery changes and passed
+exact-source tests and builds. CI does not establish on-device recovery,
+connectivity, relay, or metering acceptance. Keep candidates out of routine OTA
+rollout until the board-specific hardware gates pass. See the [Client recovery
+review](bseed_client_parent_recovery_20261013.md) for implementation and
+verification evidence.
+
+The dated sections below preserve rollout history. Use the table above for
+current published and candidate identities.
 
 
 ## OTA tooling finalization — 2026-10-10
@@ -14,7 +36,7 @@ Hifi experienced other failure modes. See
 Firmware binaries are still sealed offline candidates; individual physical
 role/relay/meter/routing acceptance must not be inferred from CI or OTA status.
 
-## Current status — 2026-10-04
+## Historical sealed-set status — 2026-10-04 (superseded)
 
 The September table below is retained as historical rollout context. The current sealed four-variant hardening set is newer:
 
