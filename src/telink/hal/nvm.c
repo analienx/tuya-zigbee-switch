@@ -38,10 +38,11 @@ hal_nvm_status_t hal_nvm_read(uint8_t item_id, uint16_t size, uint8_t *data) {
     /* A fixed-size application record must match exactly. The SDK otherwise
      * accepts multiples of size and copies the entire stored payload. */
     uint16_t stored_size = 0;
-    nv_sts_t status = nv_flashSingleItemSizeGet(NV_MODULE_APP, item_id,
-                                               &stored_size);
+    nv_sts_t status      = nv_flashSingleItemSizeGet(NV_MODULE_APP, item_id,
+                                                     &stored_size);
     if (status != NV_SUCC)
         return telink_to_hal_status(status);
+
     if (stored_size != size)
         return HAL_NVM_ERROR;
 

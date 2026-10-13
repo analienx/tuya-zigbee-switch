@@ -154,8 +154,8 @@ void metering_cluster_load_energy(metering_cluster_t *cluster) {
     cluster->last_baseline_retry_time = hal_millis();
 
     metering_nv_data_t nv_data;
-    bool              legacy_baseline = false;
-    hal_nvm_status_t   status = hal_nvm_read(
+    bool             legacy_baseline = false;
+    hal_nvm_status_t status          = hal_nvm_read(
         NV_ITEM_ENERGY_ACCUMULATION(cluster->endpoint), sizeof(nv_data),
         (uint8_t *)&nv_data);
 #ifdef BSEED_PM_B28WRPVX
@@ -165,7 +165,7 @@ void metering_cluster_load_energy(metering_cluster_t *cluster) {
          * zero baseline. Use the preserved record even if its copy failed;
          * periodic/controlled checkpoints will persist the live total in 64.
          * An existing unified zero still wins, preserving explicit resets. */
-        status = hal_nvm_read(40, sizeof(nv_data), (uint8_t *)&nv_data);
+        status          = hal_nvm_read(40, sizeof(nv_data), (uint8_t *)&nv_data);
         legacy_baseline = status == HAL_NVM_SUCCESS;
     }
 #endif
