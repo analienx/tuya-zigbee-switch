@@ -54,10 +54,17 @@ hal_nvm_status_t hal_nvm_read(uint8_t item_id, uint16_t size, uint8_t *data) {
     if (status != NV_SUCC)
         return HAL_NVM_ERROR; // metadata already established that it exists
 
+    if (info.opSect >= MODULE_SECTOR_NUM ||
+        info.opIndex >= MODULE_IDX_NUM(NV_MODULE_APP))
+        return HAL_NVM_ERROR;
+
     nv_info_idx_t index;
     flash_read(MODULE_IDX_START(NV_MODULE_APP, info.opSect) +
                info.opIndex * sizeof(index), sizeof(index), (uint8_t *)&index);
-    if (index.offset < MODULE_CONTEXT_START(NV_MODULE_APP, info.opSect, 0) ||
+    if (index.itemId != item_id ||
+        (index.usedState != ITEM_FIELD_VALID &&
+         index.usedState != ITEM_FIELD_VALID_SINGLE) ||
+        index.offset < MODULE_CONTEXT_START(NV_MODULE_APP, info.opSect, 0) ||
         index.offset > MODULE_SECT_END(NV_MODULE_APP, info.opSect) ||
         index.size != sizeof(itemHdr_t) + size ||
         index.size > MODULE_SECT_END(NV_MODULE_APP, info.opSect) - index.offset)
@@ -65,12 +72,34 @@ hal_nvm_status_t hal_nvm_read(uint8_t item_id, uint16_t size, uint8_t *data) {
 
     itemHdr_t header;
     flash_read(index.offset, sizeof(header), (uint8_t *)&header);
-    if (header.size != size || header.itemId != item_id)
+    if (header.size != size || header.itemId != item_id ||
+        (header.used != ITEM_HDR_FIELD_VALID_CHECKSUM &&
+         header.used != ITEM_HDR_FIELD_VALID_CHECKCRC))
         return HAL_NVM_ERROR;
 
-    status = nv_flashReadByIndex(NV_MODULE_APP, item_id, info.opSect,
-                                 info.opIndex, size, data);
-    return status == NV_SUCC ? HAL_NVM_SUCCESS : HAL_NVM_ERROR;
+    /* Read the full application record independently of the SDK's global,
+     * item-ID-only length table. Registrations in other NV modules can shorten
+     * nv_flashReadByIndex's copy without making its status an error. */
+    if (header.used == ITEM_HDR_FIELD_VALID_CHECKCRC) {
+        uint32_t index_crc = xcrc32((uint8_t *)&index, sizeof(index) - 1,
+                                    0xffffffff);
+        if ((index_crc & 0xffff) != (header.checkSum >> 16))
+            return HAL_NVM_ERROR;
+    }
+
+    flash_read(index.offset + sizeof(header), size, data);
+    if (header.used == ITEM_HDR_FIELD_VALID_CHECKSUM) {
+        uint32_t checksum = 0;
+        for (uint16_t i = 0; i < size; i++)
+            checksum += data[i];
+
+        return checksum == header.checkSum ? HAL_NVM_SUCCESS : HAL_NVM_ERROR;
+    }
+
+    uint32_t payload_crc = xcrc32(data, size, 0xffffffff);
+    payload_crc = xcrc32((uint8_t *)&header.size, 4, payload_crc);
+    return (payload_crc & 0xffff) == (header.checkSum & 0xffff) ?
+           HAL_NVM_SUCCESS : HAL_NVM_ERROR;
 }
 
 hal_nvm_status_t hal_nvm_delete(uint8_t item_id) {

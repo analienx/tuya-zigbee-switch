@@ -16,7 +16,9 @@ Two executable persistence paths can turn existing energy into a zero baseline:
   validate the fixed record size and bounds, and read/check it by index. An
   existing but unreadable record stays an error across retries. The SDK also
   accepts size multiples and copies the stored length; HAL rejects mismatched
-  lengths before reading into the application buffer.
+  lengths before reading into the application buffer. HAL validates complete
+  payload checksums plus modern index CRCs and bypasses the SDK's global length
+  table so another module's item-ID registration cannot silently shorten a read.
 - Bounded legacy PM migration preserves old records when it cannot finish, but
   previously skipped energy restoration after the retry cap. Metering now
   falls back to the historical endpoint-1 record only after the raw PM identity
@@ -43,8 +45,13 @@ Fresh identities preserve every prior sealed artifact:
 
 | Board | Router | Client | Native file version | Build date |
 | --- | --- | --- | --- | --- |
-| TS011F-BS-PM | `1.2.5-bseedr14` / 43556 | `1.2.5-bseedcli17` / 65024 | `0x1205301c` | `20261013` |
-| TS011F-BS | `1.1.3-bseedr13` / 43555 | `1.1.3-bseedc11` / 65026 | `0x11023018` | `20261013` |
+| TS011F-BS-PM | `1.2.5-bseedr15` / 43556 | `1.2.5-bseedcli18` / 65024 | `0x1205301d` | `20261013` |
+| TS011F-BS | `1.1.3-bseedr14` / 43555 | `1.1.3-bseedc12` / 65026 | `0x11023019` | `20261013` |
+
+The initial PM r14/cli17 and non-PM r13/c11 tuples are retired before
+deployment. Their immutable hashes/provenance come from the GitHub-hosted
+seal proposal for `3f12db580afcb68f2a85ee54e987be1f51edbd91`; review changed
+firmware bytes, so all four reviewed candidates have fresh identities.
 
 The shared application HAL affects both boards, so all four identities move.
 The pinned converter recognizes the new PM build IDs. Candidates remain
@@ -52,7 +59,8 @@ unsealed and hardware-unaccepted until their separate release gates pass.
 
 `test_telink_nvm_restore.py` executes the pinned SDK's real read functions with
 fault-injected storage. It checks repeated checksum faults without deletion,
-recovery, size/header disagreement, bounds, and true absence.
+recovery, full-length restoration despite SDK table truncation, modern index
+and payload CRCs, size/header disagreement, bounds, and true absence.
 `test_bseed_energy_ota_retention.py` executes boot classification and metering
 for both PM roles: capped migration, accumulation, failed checkpoint, reboot
 restoration, readback mismatch, explicit reset, corrupt/absent legacy data and
@@ -64,3 +72,25 @@ matrix, non-PM role matrix and paired Router TC32 validation. Green offline
 evidence does not confirm retained energy on hardware. A future authorized
 canary must independently compare fresh raw energy before/after OTA and a
 controlled reboot, alongside the existing device-specific hardware gates.
+
+## Author code review before merge
+
+Reviewed the complete PR diff, the pinned Telink record writer/reader format,
+HAL callers, migration fallback, explicit-reset precedence, checkpoint retry
+state, both role builds, converter recognition and identity allocation.
+
+Two additional findings required fixes before merging:
+
+1. `nv_flashReadByIndex` uses a global length table keyed only by numeric item
+   ID. It can return success after copying only a prefix of an application
+   record, even though it verifies the full payload. HAL now copies/checks the
+   full fixed-size record itself. A real SDK reference read in the regression
+   demonstrates the short-copy behavior before checking HAL's complete value.
+2. SDK reads verify the payload CRC but ignore the index CRC in the upper half
+   of the modern header checksum. HAL now checks both CRCs, plus index identity,
+   state and sector/index bounds. The regression proves the SDK accepts a bad
+   index CRC while HAL rejects it without deleting anything.
+
+The existing flash/NVM layout, stored record ABI, role-specific GPIO and reset
+policy remain intact. Final acceptance requires green exact-SHA CI and committed
+runner-produced seals; this author review does not establish hardware acceptance.

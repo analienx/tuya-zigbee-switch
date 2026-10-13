@@ -33,16 +33,22 @@ typedef struct __attribute__((packed)) { u16 opIndex; u8 opSect; } itemIfno_t;
 #define ITEM_VALID_FLAG_CHECK(v) ((v) == 0x7a)
 #define ITEM_HDR_VALID_CHECK(v) ((v) == 0x5a || (v) == 0x7a)
 #define ITEM_HDR_FIELD_VALID_CHECKSUM 0x5a
+#define ITEM_HDR_FIELD_VALID_CHECKCRC 0x7a
+#define ITEM_FIELD_VALID 0x5a
+#define ITEM_FIELD_VALID_SINGLE 0x7a
 #define NV_ITEMLEN_MATCH(len, unit) ((len) % (unit) == 0)
 static u8 memory[4096];
 static bool present;
 static unsigned deletes, writes;
 static u16 record_size;
+static u16 length_limit;
 static nv_sts_t size_status = NV_SUCC;
 static void flash_read(u32 addr, u32 len, u8 *data) {
     assert(addr + len <= sizeof(memory)); memcpy(data, memory + addr, len);
 }
-static u16 nv_itemLengthValidCheck(u8 id, u16 len) { return len; }
+static u16 nv_itemLengthValidCheck(u8 id, u16 len) {
+    return length_limit && length_limit < len ? length_limit : len;
+}
 static u32 xcrc32(u8 *data, u32 len, u32 crc) {
     for (u32 i = 0; i < len; i++) crc = crc * 33u ^ data[i]; return crc;
 }
@@ -80,6 +86,17 @@ static void seed(u16 size, bool corrupt) {
     memcpy(memory, &idx, sizeof(idx)); memcpy(memory + 64, &hdr, sizeof(hdr));
     memory[72] = 128;
 }
+static void seed_crc(uint64_t total) {
+    seed(8, false);
+    nv_info_idx_t *idx = (nv_info_idx_t *)memory;
+    itemHdr_t *hdr = (itemHdr_t *)(memory + 64);
+    hdr->used = ITEM_HDR_FIELD_VALID_CHECKCRC;
+    memcpy(memory + 72, &total, 8);
+    u32 payload = xcrc32(memory + 72, 8, 0xffffffff);
+    payload = xcrc32((u8 *)&hdr->size, 4, payload);
+    u32 index = xcrc32((u8 *)idx, sizeof(*idx) - 1, 0xffffffff);
+    hdr->checkSum = (index << 16) | (payload & 0xffff);
+}
 int main(void) {
     struct { uint64_t total, guard; } value = {.guard = 0x123456789abcdef0ULL};
     seed(8, false);
@@ -92,9 +109,33 @@ int main(void) {
     memory[64]--; /* recover a transient checksum fault without losing the record */
     assert(hal_nvm_read(64, 8, (u8 *)&value.total) == HAL_NVM_SUCCESS);
     assert(value.total == 128);
+    seed_crc(0x123456789aULL);
+    assert(hal_nvm_read(64, 8, (u8 *)&value.total) == HAL_NVM_SUCCESS);
+    assert(value.total == 0x123456789aULL);
+    length_limit = 4; value.total = 0;
+    /* Real SDK reports success but silently copies only the registered prefix. */
+    assert(nv_flashReadByIndex(NV_MODULE_APP, 64, 0, 0, 8, (u8 *)&value.total) == NV_SUCC);
+    assert(value.total == 0x3456789aULL);
+    assert(hal_nvm_read(64, 8, (u8 *)&value.total) == HAL_NVM_SUCCESS);
+    assert(value.total == 0x123456789aULL);
+    length_limit = 0;
+    ((itemHdr_t *)(memory + 64))->checkSum ^= 0x10000; /* index checksum */
+    assert(nv_flashReadByIndex(NV_MODULE_APP, 64, 0, 0, 8, (u8 *)&value.total) == NV_SUCC);
+    assert(hal_nvm_read(64, 8, (u8 *)&value.total) == HAL_NVM_ERROR);
+    seed_crc(128); memory[72] ^= 1; /* payload checksum */
+    assert(hal_nvm_read(64, 8, (u8 *)&value.total) == HAL_NVM_ERROR);
+    assert(present && deletes == 0 && writes == 0);
     seed(16, false); /* SDK accepts multiples, but HAL must reject before copying */
     assert(hal_nvm_read(64, 8, (u8 *)&value.total) == HAL_NVM_ERROR);
     assert(value.guard == 0x123456789abcdef0ULL);
+    seed(3, false); /* wrong size must stay an error, never become NOT_FOUND */
+    assert(hal_nvm_read(64, 8, (u8 *)&value.total) == HAL_NVM_ERROR);
+    seed(8, false);
+    ((nv_info_idx_t *)memory)->itemId = 63;
+    assert(hal_nvm_read(64, 8, (u8 *)&value.total) == HAL_NVM_ERROR);
+    seed(8, false);
+    ((itemHdr_t *)(memory + 64))->used = 0xff;
+    assert(hal_nvm_read(64, 8, (u8 *)&value.total) == HAL_NVM_ERROR);
     seed(8, false);
     ((itemHdr_t *)(memory + 64))->size = 16; /* header/index disagreement */
     assert(hal_nvm_read(64, 8, (u8 *)&value.total) == HAL_NVM_ERROR);
