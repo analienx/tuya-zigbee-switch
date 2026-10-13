@@ -16,10 +16,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           path: harness
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.REVIEWED_SHA }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           path: candidate
       - name: Install review dependencies
@@ -29,6 +30,7 @@ jobs:
       - name: Prove reviewed source and execute counterexamples
         working-directory: candidate
         run: |
+          git checkout --detach "$REVIEWED_SHA"
           test "$(git rev-parse HEAD)" = "$REVIEWED_SHA"
           python3 ../harness/review/client_parent_probes.py --output "$RUNNER_TEMP/client-parent-review"
       - uses: actions/cache@v4
