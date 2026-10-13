@@ -47,6 +47,11 @@ void metering_cluster_report(metering_cluster_t *cluster);
 void metering_cluster_load_energy(metering_cluster_t *cluster);
 bool metering_cluster_save_energy(metering_cluster_t *cluster);
 
+#ifdef BSEED_PM_B28WRPVX
+/* Called only after the boot migration classifies the raw stored PM identity. */
+void metering_cluster_allow_legacy_energy_restore(void);
+#endif
+
 /* Save and verify the active meter before controlled reboot; no meter is OK. */
 bool metering_cluster_checkpoint(void);
 void metering_cluster_reset_energy(metering_cluster_t *cluster);
