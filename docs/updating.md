@@ -113,9 +113,11 @@ For the exact BSEED TS011F-PM and TS0726 identities documented in [bseed_unified
 https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/ota/index_bseed.json
 ```
 
-It contains only the current normal and stock-conversion paths for those two BSEED families. This avoids accidentally selecting historical generic BSEED entries.
+It contains only the current normal and stock-conversion paths for the three BSEED families documented in [BSEED unified V8](./bseed_unified_v8.md). This avoids accidentally selecting historical generic BSEED entries.
 
-**BSEED PM Client exception (experimental):** The public BSEED index currently provides stock → custom **Router**, not stock → custom **Client**. HifiLeft's direct stock → PM Client migration was reported using a locally prepared stock-facing Client candidate; there is **no mandatory intermediate Router flash** when an exact validated stock-facing Client image exists. `from-router.ota` is only for already-custom Routers, while a direct stock-facing Client wrapper must use the stock OTA identity and Client firmware payload. Do not add experimental Client images to the normal OTA index or treat HifiLeft's manual test as a general conversion/recovery qualification. See [HifiLeft canary](./bseed_hifi_manual_canary_20260920.md) for evidence and limitations.
+**BSEED Client firmware is experimental and is not published in the BSEED index.** The current PM `1.2.5-bseedcli19` (`0x1205301e`) and non-PM `1.1.3-bseedc13` (`0x1102301a`) candidates have passed offline checks only; hardware acceptance is pending. Do not install these candidates as releases or add them to the normal index.
+
+The public index offers Router firmware and matching stock-to-Router conversion. A stock-to-Client image would need its own verified OTA identity, exact Client payload, and hardware acceptance; an intermediate Router install is not inherently required when a separately accepted direct stock-to-Client image exists. `from-router.ota` is only for an already-custom Router. The historical HifiLeft Client migration is not general conversion or recovery qualification; see [the canary record](./bseed_hifi_manual_canary_20260920.md) and [current Client recovery review](./bseed_client_parent_recovery_20261013.md).
 
 ### Choosing an index
 
