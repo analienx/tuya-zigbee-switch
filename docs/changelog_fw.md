@@ -31,6 +31,13 @@ Please describe what you are working on, under ## Upcoming
 
 ## Upcoming
 
+### BSEED TS011F mains Client parent recovery — 2026-10-13
+
+- PM and non-PM Clients use confirmed parent MAC-poll results to detect a stale joined state. Only successful poll confirmations refresh parent health; unrelated inbound ZCL traffic cannot hide repeated poll failures, and silence without poll failures cannot trigger recovery.
+- After four consecutive failed parent polls and at least 12 minutes without a successful poll, the Client requests the SDK-owned rejoin-with-backoff. Recovery ownership survives intermediate failures, failed starts are rolled back, and a successful join starts a new health epoch. A per-device stagger and 15-minute cooldown limit synchronized retries; OTA suppresses starting new health-triggered recovery.
+- Role-marker storage errors preserve the existing role/network state and block startup for bounded retries rather than risking a blind Router-to-Client reset. Persistent errors remain visible for diagnosis.
+- Exact-source CI passed for PM and non-PM role matrices, host regressions, and the paired Router TC32 gate. Candidate identities are PM Router r16 / Client cli19 (`0x1205301e`) and non-PM Router r15 / Client c13 (`0x1102301a`). These candidates are reserved and hardware acceptance is pending; they are not approved for deployment. See [review and verification evidence](bseed_client_parent_recovery_20261013.md).
+
 ### PM physical-unloaded preflash option — 2026-10-10
 
 - Custom PM TS011F-BS-PM Router and Client may skip **live preflash activePower**
