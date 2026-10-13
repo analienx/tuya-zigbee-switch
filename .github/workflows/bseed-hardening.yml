@@ -2,7 +2,7 @@ name: BSEED shared hardening
 
 on:
   push:
-    branches: ['codex/bseed-shared-hardening']
+    branches: ['codex/bseed-shared-hardening', 'fix/client-parent-recovery-20261013']
   pull_request:
 
 jobs:
@@ -14,6 +14,8 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Replay allocation while preserving sealed and retired identities
         run: |
+          python3 helper_scripts/bseed_ota_identity.py suggest-next --image-type 65024
+          python3 helper_scripts/bseed_ota_identity.py suggest-next --image-type 65026
           python3 - <<'PY'
           import runpy
           suite = runpy.run_path('tests/test_bseed_candidate_allocation.py')
