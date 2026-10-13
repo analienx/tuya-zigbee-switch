@@ -56,7 +56,7 @@ void bdb_commissioning_callback(u8 status,void *arg);
 #define REJOIN_SECURITY 1
 #define OTA_QUERY_INTERVAL 1u
 static uint32_t now, rate=60000, calls, retries, delay, af_calls;
-static bool joined=true, factory_new, sdk_owned, reject, sync_success;
+static bool joined=true, factory_new, sdk_owned, reject, reject_disconnected, sync_success;
 static struct {u8 scanDuration;} g_bdbAttrs;
 static struct {u8 extAddress[8];} g_zbMacPib;
 firmware_health_t firmware_health;
@@ -87,6 +87,7 @@ static u8 zb_rejoinReqWithBackOff(uint32_t mask,u8 duration) {
     calls++; assert(!sdk_owned); /* no overlapping application starts */
     assert(network_recovery_state==TELINK_NETWORK_RECOVERY_REJOIN);
     if(reject) return 0x80;
+    if(reject_disconnected) {joined=false;return 0x8a;} /* timer allocation failed */
     sdk_owned=true; joined=false; /* pinned native ZDO contract */
     if(sync_success) {
         sdk_owned=false;joined=true;
@@ -151,6 +152,27 @@ int main(int argc,char **argv) {
         keepalive_verify_handler(NULL);assert(calls==1);
         now++;reject=false;keepalive_verify_handler(NULL);assert(calls==2 && sdk_owned);
         assert(firmware_health.rejoin_start==2 && firmware_health.rejoin_failure==1);
+    } else if(!strcmp(argv[1],"rejected-after-disconnect")) {
+        reject_disconnected=true;stale_parent();assert(calls==1 && !joined && !sdk_owned);
+        uint32_t first=now;
+        assert(hal_zigbee_get_network_status()==HAL_ZIGBEE_NETWORK_NOT_JOINED);
+        now=first+4999;hal_zigbee_start_network_steering();assert(calls==1);
+        now++;reject_disconnected=false;hal_zigbee_start_network_steering();
+        assert(calls==2 && sdk_owned && firmware_health.rejoin_failure==1);
+    } else if(!strcmp(argv[1],"unrelated-terminal-status")) {
+        stale_parent();
+        bdb_commissioning_callback(BDB_COMMISSION_STA_NO_NETWORK,NULL);
+        bdb_commissioning_callback(BDB_COMMISSION_STA_NO_SCAN_RESPONSE,NULL);
+        bdb_commissioning_callback(BDB_COMMISSION_STA_IN_PROGRESS,NULL);
+        hal_zigbee_start_network_steering();assert(calls==1 && sdk_owned);
+        assert(hal_zigbee_get_network_status()==HAL_ZIGBEE_NETWORK_JOINING);
+    } else if(!strcmp(argv[1],"second-parent-loss")) {
+        stale_parent();sdk_owned=false;joined=true;
+        bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,NULL);
+        now+=CLIENT_HEALTH_REJOIN_COOLDOWN_MS;failed_polls(4);
+        keepalive_verify_handler(NULL);assert(calls==2 && sdk_owned);
+        sdk_owned=false;joined=true;hal_zigbee_get_network_status();
+        assert(firmware_health.rejoin_start==2 && firmware_health.rejoin_success==2);
     } else if(!strcmp(argv[1],"ota-entry-exit")) {
         hal_zigbee_set_ota_poll_active(true);assert(rate==250);
         stale_parent();assert(calls==0);
@@ -205,6 +227,7 @@ int main(int argc,char **argv) {
     'lost-completion', 'inbound-does-not-mask', 'healthy-quiet', 'callback-failures',
     'rejected-cooldown', 'ota-entry-exit', 'synchronous-success',
     'wrap-and-boundary', 'jitter', 'factory-new',
+    'rejected-after-disconnect', 'unrelated-terminal-status', 'second-parent-loss',
 ])
 def test_client_parent_recovery_contract(recovery_binary, case):
     subprocess.run([str(recovery_binary), case], check=True, timeout=10)

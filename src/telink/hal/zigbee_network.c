@@ -400,7 +400,11 @@ void bdb_commissioning_callback(u8 status, void *arg) {
         // normal steering rather than pretending there is an old network to
         // rejoin. The next application tick chooses steering vs rejoin from
         // zb_isDeviceFactoryNew().
-        network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
+        /* These commissioning outcomes do not terminate an SDK-owned backoff
+         * sequence. It remains responsible until joined state or success. */
+        if (network_recovery_state != TELINK_NETWORK_RECOVERY_REJOIN) {
+            network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
+        }
         break;
     case BDB_COMMISSION_STA_PARENT_LOST:
         firmware_health_increment(&firmware_health.parent_loss);
