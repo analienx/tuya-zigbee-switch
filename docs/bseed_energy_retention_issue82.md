@@ -54,8 +54,9 @@ seal proposal for `3f12db580afcb68f2a85ee54e987be1f51edbd91`; review changed
 firmware bytes, so all four reviewed candidates have fresh identities.
 
 The shared application HAL affects both boards, so all four identities move.
-The pinned converter recognizes the new PM build IDs. Candidates remain
-unsealed and hardware-unaccepted until their separate release gates pass.
+The pinned converter recognizes the new PM build IDs. The four reviewed
+candidates are sealed in the identity registry from the runner-produced
+proposal below. Hardware acceptance remains pending.
 
 `test_telink_nvm_restore.py` executes the pinned SDK's real read functions with
 fault-injected storage. It checks repeated checksum faults without deletion,
@@ -92,5 +93,36 @@ Two additional findings required fixes before merging:
    index CRC while HAL rejects it without deleting anything.
 
 The existing flash/NVM layout, stored record ABI, role-specific GPIO and reset
-policy remain intact. Final acceptance requires green exact-SHA CI and committed
-runner-produced seals; this author review does not establish hardware acceptance.
+policy remain intact. Both findings are addressed, with no remaining
+merge-blocking observations in this author review. This does not establish
+hardware acceptance.
+
+## Sealed reviewed candidate evidence
+
+Firmware source: `04445f4e7915f26d648832ca1d6215a48f34f0a9`.
+All verification ran on GitHub-hosted runners from this exact clean SHA:
+
+- [Full tests and lint](https://github.com/analienx/tuya-zigbee-switch/actions/runs/38355922881): 1,104 passed.
+- [PM matrix](https://github.com/analienx/tuya-zigbee-switch/actions/runs/38355922685): Router and Client built and independently reproduced.
+- [Non-PM matrix](https://github.com/analienx/tuya-zigbee-switch/actions/runs/38355922832): Router and Client built and independently reproduced.
+- [Paired Router TC32 gate](https://github.com/analienx/tuya-zigbee-switch/actions/runs/38355922872): both boards and aggregation passed.
+- [Candidate finalization](https://github.com/analienx/tuya-zigbee-switch/actions/runs/38355922848): authenticated prerequisites, native integrity and atomic four-tuple seal proposal passed.
+
+The committed seals copy that workflow's reviewed registry proposal. No local
+build, test, lint, sealing or repository verification was executed. Recheck
+the registry commit on public CI before merging: its rebuilds must match these
+same sealed bytes. Package artifact name:
+`bseed-flash-candidates-04445f4e7915f26d648832ca1d6215a48f34f0a9`.
+The matrix files are each role's `forward.ota`; the package renames them as
+listed below and records native `.bin` hashes in `CANDIDATE_PACKAGE.json`.
+
+| Package OTA filename | SHA-256 | SHA-512 |
+| --- | --- | --- |
+| `pm-router/firmware.ota` | `3617a4d732da99a89ceae10e4058c6b903c5fe5455dbbd0a2aa5467c8f1c22dc` | `ee53608b0afcdcbed08932d18c0286a8ecb82dcdce7a362feb33e4c7317035633460032abe1bf49d77c761d22f18279c7f231b22c61fb388a80223f6b77c9603` |
+| `pm-client/firmware.ota` | `0bb1fd9de5ae2ed9a1ad56bde439ccc5ed5249b95a8506b433501a21f46b1033` | `7be6201f19c00f5432f561919966948068c8c457a6d334cab28703905b6c9778840e702a33c3bd895e80d14b128fb1dee9b2134b14c2f56f3eafa6a6482358ca` |
+| `nonpm-router/firmware.ota` | `0e0fb734260620dc716485f86d95c8adf9e4705666ebb47325a407610584928d` | `078f68e9a3cdebadc2b89c2a029f201ee4402e7ce5459ef51f95887c70bf60872fa9b36748d72d57607b80c917ddb9251e20750089452d2aa0bd66b2a4a9f675` |
+| `nonpm-client/firmware.ota` | `ebae5432dc18b0b35d0fc1d8c143762ebb6dc29013611d5e1d227623dcb8c9a7` | `093aa04c55c06857dc6f4b7f81d05e84f46103915cefdd8746019e0d150d68ee29abbd1b9ab0d4da48f7a35ed159d4d34e7516c5d273beb3db1a4a0754e45dc8` |
+
+No device was flashed, reset or reconfigured during this review. The first
+deployment remains a target-specific canary with current network/campaign
+eligibility, actual boot identity and fresh before/after energy evidence.
