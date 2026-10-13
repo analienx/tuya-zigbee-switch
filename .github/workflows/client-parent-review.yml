@@ -1,0 +1,59 @@
+name: Client parent recovery review evidence
+
+on:
+  push:
+    branches: ['review/client-parent-recovery-20261013']
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      REVIEWED_SHA: d0d2e28a15e4f99efe81f2bd942265752681d987
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.REVIEWED_SHA }}
+          fetch-depth: 0
+          path: candidate
+      - name: Install review dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc make python3 python3-yaml curl wget unzip bzip2
+      - name: Prove reviewed source and execute counterexamples
+        working-directory: candidate
+        run: |
+          test "$(git rev-parse HEAD)" = "$REVIEWED_SHA"
+          python3 ../harness/review/client_parent_probes.py --output "$RUNNER_TEMP/client-parent-review"
+      - uses: actions/cache@v4
+        with:
+          path: candidate/telink_tools
+          key: telink-tools-client-review-v3.7.2.0
+      - name: Install pinned SDK and TC32 toolchain
+        working-directory: candidate
+        run: make -C src/telink -f tools.mk sdk toolchain
+      - name: Build exact reviewed Clients and inspect SDK functions
+        working-directory: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          for role in pm nonpm; do
+            bash make_scripts/build_bseed_mains_client.sh "$role" "build/client-parent-review-$role" > "$RUNNER_TEMP/client-parent-review/$role-build.log" 2>&1
+            telink_tools/toolchain/tc32/bin/tc32-elf-objdump -d build/telink/tlc_switch.elf > "$RUNNER_TEMP/client-parent-review/$role-disassembly.txt"
+            telink_tools/toolchain/tc32/bin/tc32-elf-nm -S build/telink/tlc_switch.elf > "$RUNNER_TEMP/client-parent-review/$role-symbols.txt"
+            cp "build/client-parent-review-$role/manifest.json" "$RUNNER_TEMP/client-parent-review/$role-manifest.json"
+          done
+          python3 ../harness/review/client_parent_probes.py --extract "$RUNNER_TEMP/client-parent-review"
+      - name: Upload exact-source review evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-parent-review-${{ env.REVIEWED_SHA }}
+          path: ${{ runner.temp }}/client-parent-review/
+          if-no-files-found: error
