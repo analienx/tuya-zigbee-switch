@@ -87,7 +87,7 @@ static u8 zb_rejoinReqWithBackOff(uint32_t mask,u8 duration) {
     calls++; assert(!sdk_owned); /* no overlapping application starts */
     assert(network_recovery_state==TELINK_NETWORK_RECOVERY_REJOIN);
     if(reject) return 0x80;
-    if(reject_disconnected) {joined=false;return 0x8a;} /* timer allocation failed */
+    if(reject_disconnected) {joined=false;return 0x8a;} /* injected post-mutation error */
     sdk_owned=true; joined=false; /* pinned native ZDO contract */
     if(sync_success) {
         sdk_owned=false;joined=true;

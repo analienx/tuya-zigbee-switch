@@ -60,7 +60,52 @@ Cases cover missing/delayed/synchronous completion, SDK retry ownership,
 failed starts, cooldown and clock-wrap boundaries, inbound traffic, healthy
 quiet operation, OTA transitions, jitter, storage errors, and role-reset failures.
 
-Exact-source CI and sealing evidence will be recorded after the candidate gates
-pass. These are offline code/build checks; physical parent removal and rejoin,
-fresh post-OTA boot identity, relay/load behavior, metering retention, and soak
-remain separate device-specific acceptance gates. No flashing is part of this change.
+## Exact-source evidence and review
+
+Reviewed firmware source SHA: `86dbb2640e7d7aee72682d0ec3c93410af61686b`.
+[PR #84](https://github.com/analienx/tuya-zigbee-switch/pull/84) fixes all six
+findings from the full review. The final source pass also guarded SDK backoff
+against unrelated commissioning outcomes and tested a second parent loss after
+successful recovery. This was the primary agent's source review, not an
+independent second reviewer sign-off.
+
+All required GitHub-hosted checks passed on this exact source:
+
+- [Test/lint](https://github.com/analienx/tuya-zigbee-switch/actions/runs/38372780240):
+  1,146 tests, including 42 PM/non-PM recovery and startup fault cases.
+- [PM native role matrix](https://github.com/analienx/tuya-zigbee-switch/actions/runs/38372780314):
+  Router and Client from the same clean source, with identical clean rebuilds.
+- [Non-PM native role matrix](https://github.com/analienx/tuya-zigbee-switch/actions/runs/38372780334):
+  both roles and reproducibility.
+- [Paired Router TC32 gate](https://github.com/analienx/tuya-zigbee-switch/actions/runs/38372780308):
+  both boards plus the shared contract aggregation.
+- [Experimental Client builds](https://github.com/analienx/tuya-zigbee-switch/actions/runs/38372780197).
+- [Candidate finalization](https://github.com/analienx/tuya-zigbee-switch/actions/runs/38372780208):
+  authenticated prerequisite conclusions, native identity/integrity checks,
+  runner-produced immutable registry proposal and four-variant package.
+
+The proposal SHA-256 was
+`06d8f8ebef702ebf32c3f176383c04f8bdc301a85f343d2ad4f3141770cdd761`.
+Its four entries were copied from the runner's proposal without running local
+sealing. Earlier registry entries and hashes are unchanged. A following registry
+commit reruns the gates against the already sealed firmware bytes before merge.
+
+| Native forward OTA | SHA-256 |
+| --- | --- |
+| PM Router r16 | `97f10eecee60831294adffc24288487aabab247e5738d254f4fc970da3ad7683` |
+| PM Client cli19 | `2a7b802be06a02386691c64f47002d29c8724fa67b2d5dad9925de3e79798806` |
+| Non-PM Router r15 | `a2f3b83523502e519fb23ed29b81ef0a8c72e34b092d7e7719a8193e031d5ffc` |
+| Non-PM Client c13 | `84d5750bffdcedd490c182dec880c0c4bab3e8e78f0ef96661af6fca69dbbd17` |
+
+Exact OTA SHA-512 values, native BIN hashes and filenames are preserved in the
+identity registry and finalization's `CANDIDATE_PACKAGE.json` artifact. Native
+SDK inspection from the original [review job](https://github.com/analienx/tuya-zigbee-switch/actions/runs/38368009099)
+established joined-bit clearing, SDK-owned backoff timers, and retry scheduling.
+The executable regressions use SDK fakes; they do not execute radio behavior or
+claim that the physical devices produced the injected faults. The post-mutation
+start-error case is defensive fault injection, not a claim about the pinned
+SDK's actual allocation-error return value.
+
+These are offline code/build checks; physical parent removal and rejoin, fresh
+post-OTA boot identity, relay/load behavior, metering retention, and soak remain
+separate device-specific acceptance gates. No flashing is part of this change.
