@@ -4,20 +4,22 @@
 
 The public BSEED OTA index contains the accepted Router releases and their
 matching stock-to-custom wrappers. It does not contain Client firmware or
-cross-role transitions.
+cross-role transitions. Client builds have nevertheless been deployed and
+exercised on individual PM and non-PM canaries; that evidence is version- and
+device-specific and does not qualify the newer parent-recovery candidates.
 
-| Board | Published Router | Client candidate | Client status |
+| Board | Published Router | Earlier Client canary evidence | Parent-recovery candidate |
 |---|---|---|---|
-| TS011F-BS-PM (`b28wrpvx`) | `1.2.5-bseedv8u4` / `0x12053007` / type `43556` | `1.2.5-bseedcli19` / `0x1205301e` / type `65024` | Offline checks passed; hardware acceptance pending; not published |
-| TS011F-BS non-PM (`o1jzcxou`) | `1.1.3-bseedv8` / `0x11023001` / type `43555` | `1.1.3-bseedc13` / `0x1102301a` / type `65026` | Offline checks passed; hardware acceptance pending; not published |
-| TS0726-3-BS (`iedhxgyi`) | `1.1.8-bseedv8` / `0x1102300a` / type `45577` | — | No Client candidate listed |
+| TS011F-BS-PM (`b28wrpvx`) | `1.2.5-bseedv8u4` / `0x12053007` / type `43556` | `cli6` reported running on HifiLeft; `cli12` exercised in live metering and role-transition tests on KitchenSocketLeft | `1.2.5-bseedcli19` / `0x1205301e` / type `65024`; offline checks passed, hardware acceptance pending, not published |
+| TS011F-BS non-PM (`o1jzcxou`) | `1.1.3-bseedv8` / `0x11023001` / type `43555` | `c9` OTA, reboot, and rejoin verified on BedroomSocketCabinetRight; broader release acceptance remains pending | `1.1.3-bseedc13` / `0x1102301a` / type `65026`; offline checks passed, hardware acceptance pending, not published |
+| TS0726-3-BS (`iedhxgyi`) | `1.1.8-bseedv8` / `0x1102300a` / type `45577` | No Client canary evidence listed here | No parent-recovery candidate listed |
 
 The PM/non-PM Client candidates include parent-recovery changes and passed
 exact-source tests and builds. CI does not establish on-device recovery,
-connectivity, relay, or metering acceptance. Keep candidates out of routine OTA
-rollout until the board-specific hardware gates pass. See the [Client recovery
-review](bseed_client_parent_recovery_20261013.md) for implementation and
-verification evidence.
+connectivity, relay, or metering acceptance. Keep those new candidates out of
+routine OTA rollout until their board-specific hardware gates pass. See the
+[Client recovery review](bseed_client_parent_recovery_20261013.md) for
+implementation and verification evidence.
 
 The dated sections below preserve rollout history. Use the table above for
 current published and candidate identities.

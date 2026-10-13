@@ -21,14 +21,14 @@ The public [BSEED OTA index](https://raw.githubusercontent.com/analienx/tuya-zig
 
 The index contains the matching stock conversion entries for these targets. Each device family has a distinct image; never cross-flash between them.
 
-**Mains Client (EndDevice) firmware is experimental and is not published in the BSEED index.** The PM `1.2.5-bseedcli19` (`0x1205301e`) and non-PM `1.1.3-bseedc13` (`0x1102301a`) parent-recovery candidates have passed offline source/build checks, but still need hardware acceptance. Do not install them as releases. See the [Client recovery review](docs/bseed_client_parent_recovery_20261013.md) and [current release status](docs/bseed_socket_release_status.md).
+**Mains Client firmware has already been deployed and exercised on PM and non-PM canaries, but no Client image is published in the BSEED index.** Earlier evidence includes PM `cli6`/`cli12` canaries and a non-PM `c9` OTA, reboot, and rejoin on BedroomSocketCabinetRight. Those results are specific to the tested devices and builds. They do not establish hardware acceptance for the newer parent-recovery candidates: PM `1.2.5-bseedcli19` (`0x1205301e`) and non-PM `1.1.3-bseedc13` (`0x1102301a`). The new candidates have passed offline source/build checks and still need their own hardware acceptance; do not install them as releases. See the [Client recovery review](docs/bseed_client_parent_recovery_20261013.md) and [current release status](docs/bseed_socket_release_status.md).
 
 ## What this fork adds
 
 - **PM metering:** validated BL0937 voltage, current, power, and cumulative energy reporting on the TS011F-BS-PM.
 - **Independent relay behavior:** physical output can follow logical Zigbee state or remain on/off, supporting smart-bulb and detached-control setups.
 - **Router reliability:** recovery uses the Telink SDK's rejoin/backoff path without colliding with fresh-device commissioning. The PM Router's sleepy-child parenting was hardware-tested with an IKEA RODRET E2201.
-- **Client recovery work:** PM and non-PM candidates detect repeated failed parent polls and request SDK-owned recovery with staggered retries. This remains a firmware candidate, not a hardware-accepted release.
+- **Client recovery work:** PM and non-PM candidates detect repeated failed parent polls and request SDK-owned recovery with staggered retries. Earlier Client builds have run on canaries; the new recovery candidates still need hardware acceptance.
 - **BSEED integration:** target-specific pinouts, migration safeguards, stock conversion packages, Zigbee2MQTT support, and read-only diagnostics.
 
 The reusable switch framework remains Romasku-derived. This fork keeps its BSEED-specific behavior and release tooling identifiable and preserves upstream attribution and licensing.
