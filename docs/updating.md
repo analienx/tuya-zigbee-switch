@@ -115,7 +115,7 @@ https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/o
 
 It contains only the current normal and stock-conversion paths for the three BSEED families documented in [BSEED unified V8](./bseed_unified_v8.md). This avoids accidentally selecting historical generic BSEED entries.
 
-**BSEED Client firmware is experimental and is not published in the BSEED index.** The current PM `1.2.5-bseedcli19` (`0x1205301e`) and non-PM `1.1.3-bseedc13` (`0x1102301a`) candidates have passed offline checks only; hardware acceptance is pending. Do not install these candidates as releases or add them to the normal index.
+**Client firmware has been deployed and exercised on individual PM and non-PM canaries, but no Client image is published in the BSEED index.** Earlier canary results apply only to their tested devices and builds. The newer PM `1.2.5-bseedcli19` (`0x1205301e`) and non-PM `1.1.3-bseedc13` (`0x1102301a`) parent-recovery candidates have passed offline checks only; hardware acceptance is pending. Do not install these candidates as releases or add them to the normal index.
 
 The public index offers Router firmware and matching stock-to-Router conversion. A stock-to-Client image would need its own verified OTA identity, exact Client payload, and hardware acceptance; an intermediate Router install is not inherently required when a separately accepted direct stock-to-Client image exists. `from-router.ota` is only for an already-custom Router. The historical HifiLeft Client migration is not general conversion or recovery qualification; see [the canary record](./bseed_hifi_manual_canary_20260920.md) and [current Client recovery review](./bseed_client_parent_recovery_20261013.md).
 
