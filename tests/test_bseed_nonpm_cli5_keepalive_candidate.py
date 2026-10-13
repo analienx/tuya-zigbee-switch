@@ -21,7 +21,8 @@ def test_client_uses_poll_keepalive_on_initial_join_and_rejoin():
     assert '-DZB_MAC_RX_ON_WHEN_IDLE=1' in CLIENT
     assert '-DBSEED_MAINS_CLIENT=1' in CLIENT
     assert re.search(r'^#define\s+MAINS_CLIENT_KEEPALIVE_POLL_MS\s+60000u\b', NET, re.MULTILINE)
-    assert NET.count('configure_mains_client_keepalive();') == 3
+    # Initial join, normal success, OTA restore, and lost-success fallback.
+    assert NET.count('configure_mains_client_keepalive();') == 4
     assert 'case BDB_COMMISSION_STA_PARENT_LOST:' in NET
     assert 'zb_rejoinReqWithBackOff(' in NET
     assert 'if (network_recovery_state != TELINK_NETWORK_RECOVERY_REJOIN)' in NET

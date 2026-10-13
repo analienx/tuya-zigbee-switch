@@ -56,5 +56,8 @@ def test_retired_pm_return_tuple_stays_reserved_without_being_a_candidate():
     ]
     assert len(retired) == 2 and all(entry.get('status') == 'retired' for entry in retired)
     registry = {int(line['image_type']): copy.deepcopy(line) for line in document['lines']}
-    next_router = emit_make_vars(registry, ROUTER['type'], '1.2.5-bseedr16')
-    assert int(next_router['FILE_VERSION'], 0) == CLIENT['version'] + 1
+    next_router = emit_make_vars(registry, ROUTER['type'], 'next-pm-test')
+    board_max = max(entry['file_version'] for line in registry.values()
+                    if line.get('board_key') == 'b28wrpvx'
+                    for entry in line['versions'])
+    assert int(next_router['FILE_VERSION'], 0) == board_max + 1

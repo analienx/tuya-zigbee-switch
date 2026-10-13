@@ -236,9 +236,6 @@ static void af_rx_callback(void *arg) {
         ev_buf_free(arg);
         return;
     }
-#ifdef BSEED_MAINS_CLIENT
-    telink_zigbee_hal_client_note_inbound();
-#endif
     zcl_rx_handler(arg);
 }
 

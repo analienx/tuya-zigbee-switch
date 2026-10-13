@@ -126,6 +126,8 @@ static struct {u8 scanDuration;} g_bdbAttrs;
 #ifdef BSEED_MAINS_CLIENT
 #define MAC_SUCCESS 0
 #define MAC_STA_NO_DATA 0xeb
+#define KEEPALIVE_VERIFY_TICK_MS 60000u
+static uint32_t client_health_next_tick_ms;
 static bool ota_fast_poll_active;
 static struct { unsigned char extAddress[8]; } g_zbMacPib;
 static u8 zb_setPollRate(uint32_t ms) {(void)ms; return RET_OK;}
