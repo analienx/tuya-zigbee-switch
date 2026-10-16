@@ -26,6 +26,8 @@ REQUIRED_PM_BUILDS = (
     "1.2.5-bseedr14",
     "1.2.5-bseedcli18",
     "1.2.5-bseedr15",
+    "1.2.5-bseedcli19",
+    "1.2.5-bseedr16",
 )
 
 
