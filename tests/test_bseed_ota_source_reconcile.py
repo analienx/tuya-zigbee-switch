@@ -159,6 +159,24 @@ def test_bad_deferred_check_cannot_release_network_lock(tmp_path,monkeypatch,fie
     assert read_lock(net)["phase"] == sup.PENDING_PHASE
 
 
+def test_legacy_pm_router_cannot_use_fast_reconcile_without_exact_ota_check(tmp_path, monkeypatch):
+    profile = {
+        "device": "KitchenSocketRight",
+        "ieee": "0xa4c138075cd16ed4",
+        "manufacturer": "b28wrpvx",
+        "model": "TS011F-BS-PM",
+        "preflash_role": "Router",
+        "preflash_build": "1.2.5-bseedv8u5-rc1",
+        "preflash_file_version": 302329869,
+        "require_pm": True,
+        "non_pm": False,
+    }
+    monkeypatch.setattr(sr, "load_profile", lambda _: dict(profile))
+    with pytest.raises(ValueError, match="requires an exact OTA candidate check"):
+        sr.reconcile(tmp_path / "profile.json", profile["ieee"],
+                     observe_seconds=0, verify_candidate=False)
+
+
 def test_cached_pm_power_cannot_pass_retry_gate():
     request=1_000_000
     assert runner.independently_fresh_pm_sample({

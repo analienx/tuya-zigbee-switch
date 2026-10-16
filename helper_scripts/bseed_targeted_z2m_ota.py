@@ -24,6 +24,13 @@ import uuid
 import paho.mqtt.client as mqtt
 import yaml
 
+from bseed_live_source_identity import (
+    legacy_pm_router_file_version,
+    require_check_record_source,
+    require_fresh_source,
+    require_inventory_source,
+)
+
 DEFAULT_CHECK_TIMEOUT_SECONDS = 90  # Z2M may take 60 seconds to report a device OTA-query failure.
 _LIVE_STATUS_LOCK = threading.Lock()
 _TERMINAL_LIVE_PHASES = frozenset((
@@ -354,7 +361,7 @@ def main():
     base = config.get('base_topic', 'zigbee2mqtt')
     token = 'bseed-ota-' + uuid.uuid4().hex
     state = {'inventory': None, 'info': None, 'bridge': None, 'relay': None,
-             'check': None, 'result': None, 'sent': False,
+             'check': None, 'result': None, 'sent': False, 'check_target': None,
              'network_updates': {}, 'pm_baseline_stamp': None, 'pm_fresh': None,
              'pm_request_started_ms': None}
     ready = threading.Event(); changed = threading.Event(); answered = threading.Event(); fresh_relay = threading.Event()
@@ -417,6 +424,8 @@ def main():
                         update=update_state,
                     )
                 if state['sent'] and not message.retain:
+                    if args.mode == 'check':
+                        state['check_target'] = data
                     log('device_state', {k: data.get(k) for k in ('state', 'state_relay', 'power', 'current', 'voltage', 'update')})
                 changed.set()
         elif topic == resp and state['sent']:
@@ -451,8 +460,8 @@ def main():
             raise AssertionError('Identity/role mismatch')
         if not (d.get('interview_state') == 'SUCCESSFUL'):
             raise AssertionError('Device interview incomplete')
-        if campaign and campaign.get('preflash_build') and d.get('software_build_id') != campaign['preflash_build']:
-            raise ValueError('Live source build differs from version-policy baseline')
+        needs_source_proof = bool(campaign and campaign.get('preflash_build'))
+        inventory_source = require_inventory_source(campaign, d) if needs_source_proof else None
         if not (state['info'].get('permit_join') is False):
             raise AssertionError('Permit join unexpectedly open')
         log('inventory_ok', {k: d.get(k) for k in ('friendly_name', 'ieee_address', 'manufacturer', 'model_id', 'type', 'software_build_id')})
@@ -469,11 +478,11 @@ def main():
                 raise AssertionError('Non-PM relay policy changed')
         if not ((relay.get('device') or {}).get('ieeeAddr') == args.ieee):
             raise AssertionError('Fresh MQTT response IEEE mismatch')
+        fresh_source = require_fresh_source(campaign, relay) if needs_source_proof else None
         if pending or (old.get('phase') == 'source_unchanged_reconciled' and args.mode == 'flash'):
-            fresh_id = relay.get('device') or {}
-            if campaign and (fresh_id.get('softwareBuildID'), fresh_id.get('type')) != (
-                    campaign['preflash_build'], campaign['preflash_role']):
-                raise AssertionError('Fresh target source firmware/role changed since source reconciliation')
+            # The same fresh source proof is mandatory after reconciliation;
+            # a present-but-wrong Basic build can never fall back to fileVersion.
+            require_fresh_source(campaign, relay)
 
         meter_input = relay
         if campaign and campaign.get('require_pm') is True and not getattr(args, 'pm_preflash_physical_unloaded', False):
@@ -507,7 +516,8 @@ def main():
             raise AssertionError('Device OTA already running')
         log('preflight_ok', {'relay': relay.get(args.relay_get_key), 'relay_get_key': args.relay_get_key,
                              'load_proof': load_proof, 'reported_power_w': power, 'fresh_pm_sample': state['pm_fresh'],
-                             'voltage_v': relay.get('voltage'), 'image_sha256': args.sha256, 'mode': args.mode})
+                             'voltage_v': relay.get('voltage'), 'image_sha256': args.sha256, 'mode': args.mode,
+                             'inventory_source': inventory_source, 'fresh_source': fresh_source})
         if args.mode == 'preflight': return
         if args.mode == 'check':
             payload = {'id': args.ieee, 'url': args.index_url, 'transaction': token}
@@ -523,8 +533,21 @@ def main():
             if pending and (result.get('transaction') != token or
                             (result.get('data') or {}).get('id') != args.ieee):
                 raise AssertionError('Deferred check must return exact transaction and IEEE')
+            check_source = None
+            if campaign and legacy_pm_router_file_version(campaign) is not None:
+                # The legacy PM Router has no Basic build string. Bind the
+                # check to a non-retained target state emitted after this exact
+                # OTA query, which carries the device-originated installed
+                # fileVersion that Zigbee2MQTT just queried.
+                check_deadline = time.monotonic() + 10
+                while state['check_target'] is None and time.monotonic() < check_deadline:
+                    changed.wait(0.25); changed.clear()
+                if state['check_target'] is None:
+                    raise AssertionError('Legacy PM Router OTA check produced no fresh target source state')
+                check_source = require_fresh_source(campaign, state['check_target'])
             record = {'device': args.device, 'ieee': args.ieee, 'sha256': args.sha256,
-                      'timestamp': time.time(), 'transaction': token, 'response': result}
+                      'timestamp': time.time(), 'transaction': token, 'response': result,
+                      'source_identity': check_source}
             (work / 'LAST_CHECK.json').write_text(json.dumps(record, indent=2), encoding='utf-8')
             log('check_passed_no_flash', {'status': result['status'], 'data': result.get('data')})
             return
@@ -535,6 +558,8 @@ def main():
             raise AssertionError('OTA check is older than 30 minutes')
         if not (record['response'].get('status') == 'ok'):
             raise AssertionError('Previous OTA check did not succeed')
+        if campaign:
+            require_check_record_source(campaign, record)
         if old.get('phase') == 'source_unchanged_reconciled':
             reconciled_at = old.get('reconciled_at')
             if (not reconciled_at or record['timestamp'] <=
