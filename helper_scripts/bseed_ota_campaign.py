@@ -90,6 +90,13 @@ def load_profile(path):
     if data.get('network_lock_dir') and Path(data['network_lock_dir']).is_relative_to(ROOT):
         raise ValueError('Network lock authority must not be inside repository')
     validate_pm_mode(data)
+    # Legacy custom PM Router sources can lack Basic softwareBuildID. If a
+    # profile opts into numeric preflash identity, prove here that the pinned
+    # fileVersion/build/board/role mapping exists in the sealed registry before
+    # any live runner is allowed to use the fallback.
+    if data.get('preflash_file_version') is not None:
+        from bseed_socket_version_policy import require_increasing
+        require_increasing(data)
     if (data.get('force_test_transition') is True and data.get('non_pm') is True and
             data.get('device') == 'BedroomSocketCabinetRight' and
             data.get('ieee') == '0xa4c13824a7005afb'):
