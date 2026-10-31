@@ -82,6 +82,7 @@ static bool process_device_type_change(void) {
     if (stored_device_type != CURRENT_DEVICE_TYPE) {
         printf("Device type change detected: %d -> %d\r\n", stored_device_type,
                CURRENT_DEVICE_TYPE);
+
         /* Retry failures in place. A reboot would repeat the same failing
          * reset (or, without the new marker, the same reset again) on every
          * boot with no bound; persistent failure leaves startup blocked. */

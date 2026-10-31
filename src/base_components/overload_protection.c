@@ -15,10 +15,10 @@ void overload_protection_init(overload_protection_t *op) {
     op->cfg.hard_power_w      = OVERLOAD_HARD_POWER_W;
     op->cfg.hard_current_ma   = OVERLOAD_HARD_CURRENT_MA;
 
-    op->alarm           = OVERLOAD_ALARM_NONE;
-    op->tripped         = 0;
-    op->locked_out      = 0;
-    op->retry_count     = 0;
+    op->alarm            = OVERLOAD_ALARM_NONE;
+    op->tripped          = 0;
+    op->locked_out       = 0;
+    op->retry_count      = 0;
     op->over_since_ms    = 0;
     op->reconnect_at_ms  = 0;
     op->healthy_since_ms = 0;

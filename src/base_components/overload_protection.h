@@ -8,6 +8,7 @@
 #define OVERLOAD_MAX_RETRIES          5u
 #define OVERLOAD_NOMINAL_VOLTAGE_V    230u
 #define OVERLOAD_VOLTAGE_FLOOR_CV     5000u
+
 /* Energized operation under every limit for this long forgives earlier
  * automatic reconnects, so unrelated overloads days apart cannot add up to a
  * lockout. Sustained or rapidly repeated overloads still lock out. */
