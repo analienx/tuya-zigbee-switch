@@ -5,6 +5,15 @@ description: Build, verify and seal BSEED firmware candidates and conduct single
 
 # BSEED Zigbee OTA maintenance
 
+## Same-role canary entry point (2026-10-31)
+
+For a same-role canary of a sealed candidate, use `helper_scripts/bseed_canary.py run`
+with a private site file (see "One-command same-role canary" in
+`docs/bseed_targeted_ota_runner.md`) instead of hand-writing a campaign profile.
+It only orders the existing gated modes; every rule below still applies, `--flash`
+still needs this session's exact-device authorization, and its checklist output
+is not hardware acceptance. Cross-role work stays on `--mode transition`.
+
 ## PM physically unloaded preflash route (2026-10-10)
 
 An offline PM sensor is **not itself a reason to block firmware OTA** if the
