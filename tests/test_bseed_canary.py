@@ -228,7 +228,7 @@ def test_discovery_fills_build_and_refuses_disagreement(tmp_path):
 
 def test_discovery_finds_locks_by_ieee_and_accepts_terminal_phases(tmp_path):
     scratch = tmp_path / 'scratch'
-    site = make_site(tmp_path, 'pm', 'EndDevice')
+    site = make_site(tmp_path, 'pm', 'EndDevice', preflash_build=None)
     site['lock_search_roots'] = [str(scratch)]
     other = scratch / 'other' / 'run'
     other.mkdir(parents=True)
