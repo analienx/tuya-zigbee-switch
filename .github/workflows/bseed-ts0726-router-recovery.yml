@@ -1,0 +1,83 @@
+name: BSEED TS0726 Router recovery candidate
+
+on:
+  pull_request:
+    paths:
+      - 'src/telink/**'
+      - 'src/app.c'
+      - 'src/hal/**'
+      - 'make_scripts/build_bseed_ts0726_v8.sh'
+      - '.github/workflows/bseed-ts0726-router-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tc32-router-recovery:
+    runs-on: ubuntu-latest
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      BSEED_TS0726_RELEASE_CHANNEL: router-recovery-candidate
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make python3 python3-yaml python3-pytest curl wget unzip bzip2
+      - name: Cache pinned Telink toolchain
+        uses: actions/cache@v4
+        with:
+          path: telink_tools
+          key: telink-tools-v3.7.2.0
+      - name: Install pinned SDK and compiler
+        run: make -C src/telink -f tools.mk sdk toolchain
+      - name: Compile isolated recovery candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          bash make_scripts/build_bseed_ts0726_v8.sh build/bseed-ts0726-router-recovery
+      - name: Verify canonical OTA identity and provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=build/bseed-ts0726-router-recovery
+          python3 helper_scripts/bseed_ota_identity.py gate \
+            --image "$OUT/forward.ota" \
+            --expect-version-str 1.1.9-bseedrv1 \
+            --expect-image-type 45577 \
+            --expect-file-version 0x11023010
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = Path('build/bseed-ts0726-router-recovery')
+          manifest = json.loads((p / 'manifest.json').read_text())
+          checks = {
+              'exact source': manifest['sourceCommit'] == os.environ['EXPECTED_HEAD'],
+              'clean source': manifest['sourceDirty'] is False,
+              'board': manifest['board'] == 'SWITCH_BSEED_TS0726_3GANG',
+              'role/version identity': manifest['swBuildId'] == '1.1.9-bseedrv1' and manifest['fileVersion'] == 0x11023010,
+              'image type': manifest['otaHeader']['imageType'] == 45577,
+              'stock wrapper payload': manifest['stockConversion']['payloadFromByte56Identical'] is True,
+          }
+          failures = [name for name, passed in checks.items() if not passed]
+          if failures:
+              raise SystemExit('TS0726 Router recovery identity refused: ' +
+                               ', '.join(failures))
+          print('Exact-head TS0726 Router recovery identity and payload verified')
+          PY
+      - name: Upload isolated evidence; do not publish or flash
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseed-ts0726-router-recovery-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            build/bseed-ts0726-router-recovery/forward.bin
+            build/bseed-ts0726-router-recovery/forward.ota
+            build/bseed-ts0726-router-recovery/manifest.json
+          if-no-files-found: warn

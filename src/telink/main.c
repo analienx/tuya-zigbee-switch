@@ -85,6 +85,9 @@ int real_main(startup_state_e state) {
         app_task();
         hal_firmware_health_update();
         hal_telink_routing_health_update();
+#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
+        telink_zigbee_hal_router_recovery_tick();
+#endif
         drv_wd_clear();
         report_handler();
         drv_wd_clear();
