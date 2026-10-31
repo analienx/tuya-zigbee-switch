@@ -123,11 +123,12 @@ int main(void) {
     now+=3600000; telink_zigbee_hal_router_recovery_tick();
     assert(rescue_calls==1 && budget_used==1);
 
-    /* Normal ZDO response on next boot is positive evidence and clears
-     * probe timeouts, without pretending an SDK-owned rejoin is terminal. */
+    /* The orphan marker survives rejoin until the coordinator path is
+     * proven again. A validated reply must release it, otherwise no later
+     * one-shot rejoin could ever start in this uptime. */
     joined=true;
     router_reboot_scheduled=false;
-    router_one_shot_stalled=false;
+    assert(router_one_shot_stalled);
     router_probe_initialized=false;
     router_probe_failures=0;
     now+=100; telink_zigbee_hal_router_recovery_tick();
@@ -138,7 +139,7 @@ int main(void) {
     __builtin_memcpy(ind.zpdu,&reply,sizeof(reply));
     zdo_callback(&ind);
     assert(!router_probe_pending && router_probe_failures==0 && positives==1);
-    assert(rejoin_calls==1);
+    assert(!router_one_shot_stalled && rejoin_calls==1);
     return 0;
 }
 """
