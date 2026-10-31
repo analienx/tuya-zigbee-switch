@@ -20,9 +20,11 @@ radio-report proof, fixture calibration or Router child-parenting verification.
 
 Published Router `1.2.5-bseedv8u4` (`0x12053007`) must remain byte-stable.
 Current candidates are defined in `helper_scripts/bseed_pm_release.py`:
-`BSEED_PM_CONSOLIDATED=1` builds `1.2.5-bseedr16` (`0x1205301e`, type 43556),
-and the PM Client build produces `1.2.5-bseedcli19` (same version, type 65024).
-See [Client parent recovery corrections](bseed_client_parent_recovery_20261013.md)
+`BSEED_PM_CONSOLIDATED=1` builds `1.2.5-bseedr17` (`0x1205301f`, type 43556),
+and the PM Client build produces `1.2.5-bseedcli20` (same version, type 65024).
+See [the four-variant review](bseed_four_variant_review_20261031.md) for this
+candidate's Router recovery merge and fixes, and
+[Client parent recovery corrections](bseed_client_parent_recovery_20261013.md)
 for the shared recovery lifecycle and executable fault regressions.
 See [the shared hardening pass](bseed_shared_hardening_20261002.md) for changes
 and [Router routing hardening](bseed_router_hardening_20261003.md) for the current
