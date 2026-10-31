@@ -82,15 +82,18 @@ static bool process_device_type_change(void) {
     if (stored_device_type != CURRENT_DEVICE_TYPE) {
         printf("Device type change detected: %d -> %d\r\n", stored_device_type,
                CURRENT_DEVICE_TYPE);
+        /* Retry failures in place. A reboot would repeat the same failing
+         * reset (or, without the new marker, the same reset again) on every
+         * boot with no bound; persistent failure leaves startup blocked. */
         if (!hal_role_change_reset()) {
-            printf("Role-change Zigbee reset failed; rebooting for retry\r\n");
-            schedule_reboot(2000);
-            return true;
+            printf("Role-change Zigbee reset failed; retrying\r\n");
+            return defer_client_role_init();
         }
         stored_device_type = CURRENT_DEVICE_TYPE;
         if (hal_nvm_write(NV_ITEM_DEVICE_TYPE, sizeof(stored_device_type),
                           (uint8_t *)&stored_device_type) != HAL_NVM_SUCCESS) {
-            printf("Role-change marker write failed; rebooting for retry\r\n");
+            printf("Role-change marker write failed; retrying\r\n");
+            return defer_client_role_init();
         }
         schedule_reboot(2000);
         return true;
@@ -124,10 +127,17 @@ void process_device_type_change() {
         hal_nvm_read(NV_ITEM_DEVICE_TYPE, sizeof(stored_device_type),
                      (uint8_t *)&stored_device_type);
 
-    if (st != HAL_NVM_SUCCESS) {
+    if (st == HAL_NVM_NOT_FOUND) {
         stored_device_type = CURRENT_DEVICE_TYPE;
         hal_nvm_write(NV_ITEM_DEVICE_TYPE, sizeof(stored_device_type),
                       (uint8_t *)&stored_device_type);
+        return;
+    }
+    if (st != HAL_NVM_SUCCESS) {
+        /* An unreadable marker is not an absent one. Overwriting it would
+         * erase a pending Client->Router transition and leave this Router on
+         * the Client's network state. Preserve it; the next boot retries. */
+        printf("Role marker unreadable; preserving marker and Zigbee state\r\n");
         return;
     }
     if (stored_device_type != CURRENT_DEVICE_TYPE) {
