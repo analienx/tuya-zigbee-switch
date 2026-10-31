@@ -303,13 +303,14 @@ def test_ha_publish_urls_upload_after_prepare_and_always_clean_up(tmp_path):
     assert flat[1].startswith('scp') and flat[1].endswith(remote + '/firmware.ota')
     assert flat[2].startswith('scp') and flat[2].endswith(remote + '/index.json')
     assert "rm -rf -- '%s'" % remote in flat[-1]
-    # A failing stage still unpublishes; nothing is uploaded before prepare passes.
-    published, calls = PublishRecorder(), Recorder(fail_mode='check')
-    assert canary.run(site, path, profile, call=calls, publish_run=published) == 1
-    assert "rm -rf" in ' '.join(published.commands[-1])
-    published, calls = PublishRecorder(), Recorder(fail_mode='prepare')
-    assert canary.run(site, path, profile, call=calls, publish_run=published) == 1
-    assert published.commands == []
+    # The image is served before prepare verifies it; the index only after.
+    assert published.commands.index(published.commands[1]) < 2
+    # A failing stage still unpublishes, including a failed prepare.
+    for stage in ('check', 'prepare'):
+        published, calls = PublishRecorder(), Recorder(fail_mode=stage)
+        assert canary.run(site, path, profile, call=calls, publish_run=published) == 1
+        assert "rm -rf" in ' '.join(published.commands[-1])
+    assert not any(c[-1].endswith('index.json') for c in published.commands)
 
 
 def test_publish_site_validation(tmp_path):

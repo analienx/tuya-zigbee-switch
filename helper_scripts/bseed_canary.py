@@ -385,16 +385,22 @@ class HaPublisher:
         if result.returncode != 0:
             raise CanaryError('HA publish command failed: %s' % command)
 
-    def upload(self):
+    def copy(self, local, remote):
+        result = self.run(['scp', '-q', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8',
+                           local, '%s:%s/%s' % (self.alias, self.folder, remote)],
+                          capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            raise CanaryError('HA publish upload failed: %s' % remote)
+
+    def upload_image(self):
+        """Before prepare: the campaign verifies the image at its served URL."""
         self.ssh("mkdir -p '%s'" % self.folder)
         self.created = True
-        for local, remote in ((self.profile['image'], 'firmware.ota'),
-                              (self.profile['index_output'], 'index.json')):
-            result = self.run(['scp', '-q', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8',
-                               local, '%s:%s/%s' % (self.alias, self.folder, remote)],
-                              capture_output=True, text=True, timeout=300)
-            if result.returncode != 0:
-                raise CanaryError('HA publish upload failed: %s' % remote)
+        self.copy(self.profile['image'], 'firmware.ota')
+
+    def upload_index(self):
+        """After prepare, which writes the verified single-target index."""
+        self.copy(self.profile['index_output'], 'index.json')
         print('CANARY_PUBLISHED', self.folder, flush=True)
 
     def __enter__(self):
@@ -407,7 +413,10 @@ class HaPublisher:
 
 
 class NoPublisher:
-    def upload(self):
+    def upload_image(self):
+        pass
+
+    def upload_index(self):
         pass
 
 
@@ -464,6 +473,7 @@ def run(site, profile_path, profile, *, flash=False, confirm_ieee=None,
                             site['serve_port'])
     with serving:
         publisher = serving if isinstance(serving, HaPublisher) else NoPublisher()
+        publisher.upload_image()
         for mode, extra in stages(profile, flash, confirm_ieee, confirm_unloaded):
             print('CANARY_STAGE', mode, profile['device'], flush=True)
             status = call(campaign + ['--mode', mode] + extra)
@@ -471,7 +481,7 @@ def run(site, profile_path, profile, *, flash=False, confirm_ieee=None,
                 print('CANARY_STOPPED', mode, 'exit', status, 'no retry', flush=True)
                 return status
             if mode == 'prepare':
-                publisher.upload()
+                publisher.upload_index()
     if not flash:
         print('CANARY_QUALIFIED_NO_FLASH', profile['device'], profile['postflash_build'], flush=True)
         return 0
