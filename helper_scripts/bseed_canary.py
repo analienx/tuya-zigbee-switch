@@ -140,9 +140,36 @@ def write_once(path, data):
     path.write_bytes(data)
 
 
+# Phases that do not block a new campaign for the same socket. Anything else
+# (update_error, ota_transfer_ok_postflash_unverified, update_timeout...) is an
+# unresolved campaign that a new per-build workdir must not silently bypass.
+CLEAN_LOCK_PHASES = ('postflash_candidate',)
+
+
+def prior_campaign_locks(site, name):
+    """Refuse while any earlier campaign for this socket is unresolved.
+
+    Each build gets its own workdir, so the new campaign cannot see an earlier
+    device lock by itself. Scan the roster's prior workdirs and the canary root.
+    """
+    device = device_entry(site, name)
+    roots = [Path(site['campaign_root']) / name]
+    roots += [outside_repo(p, 'prior_workdirs') for p in device.get('prior_workdirs', [])]
+    for root in roots:
+        if not root.exists():
+            continue
+        for lock in sorted(root.rglob('ACTIVE_LOCK.json')):
+            phase = json.loads(lock.read_text(encoding='utf8')).get('phase')
+            if phase not in CLEAN_LOCK_PHASES:
+                raise CanaryError('Unresolved campaign lock for %s at %s (phase %s); '
+                                  'reconcile or abandon it deliberately first'
+                                  % (name, lock, phase))
+
+
 def build_profile(site, name, artifacts, registry=None):
     registry = load_registry(DEFAULT_REGISTRY) if registry is None else registry
     device = device_entry(site, name)
+    prior_campaign_locks(site, name)
     board, role = device['board'], device['role']
     cand = candidate(board, role)
     data, entry = sealed_artifact(artifacts, board, role, cand, registry)

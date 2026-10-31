@@ -98,6 +98,26 @@ def test_unsealed_or_altered_bytes_are_refused(tmp_path):
         canary.build_profile(site, 'Canary', artifacts, registry)
 
 
+def write_lock(root, phase):
+    root.mkdir(parents=True, exist_ok=True)
+    (root / 'ACTIVE_LOCK.json').write_text(json.dumps({'phase': phase, 'ieee': IEEE}))
+
+
+def test_unresolved_prior_lock_blocks_new_build_in_another_workdir(tmp_path):
+    artifacts, registry = make_artifacts(tmp_path, 'pm')
+    site = make_site(tmp_path, 'pm', 'Router', prior_workdirs=[str(tmp_path / 'old')])
+    write_lock(tmp_path / 'old' / 'campaign', 'update_error')
+    with pytest.raises(canary.CanaryError, match='Unresolved campaign lock'):
+        canary.build_profile(site, 'Canary', artifacts, registry)
+
+
+def test_settled_prior_lock_does_not_block(tmp_path):
+    artifacts, registry = make_artifacts(tmp_path, 'pm')
+    site = make_site(tmp_path, 'pm', 'EndDevice', prior_workdirs=[str(tmp_path / 'old')])
+    write_lock(tmp_path / 'old' / 'campaign', 'postflash_candidate')
+    canary.build_profile(site, 'Canary', artifacts, registry)
+
+
 def test_site_and_identity_overrides_are_guarded(tmp_path):
     artifacts, registry = make_artifacts(tmp_path, 'pm')
     site = make_site(tmp_path, 'pm', 'EndDevice', overrides={'sha256': '0' * 64})
