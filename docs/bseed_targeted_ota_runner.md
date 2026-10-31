@@ -54,7 +54,39 @@ other boards or the non-PM recovery gate. This is a new software-side
 alternative for the preflash load-safety proof, **not a hardware acceptance
 waiver**.
 
-## Profile-driven campaign (preferred for future sessions)
+## One-command same-role canary (preferred)
+
+`helper_scripts/bseed_canary.py` wraps the gated campaign below so a canary
+needs one private site file and one command per socket. It derives the whole
+campaign profile from the sealed release candidate, refuses bytes that differ
+from the identity registry, serves the image and single-target index on the LAN
+only while it runs, and calls the campaign modes in the right order for the
+board: `prepare` → `preflight` → `check` (PM) or `qualify` (non-PM), then,
+only with `--flash` and the exact IEEE, `flash` (which re-interviews, provisions
+PM and runs the postflash checks) and `status`. It stops at the first failing
+stage and never retries; the network-wide OTA lock still applies.
+
+Copy `docs/bseed_canary_site.example.json` to a private path and list each
+socket once (IEEE, board `pm`/`nonpm`, current role and build, expected relay
+state; PM Routers need a settings baseline from `--mode audit-pm`, non-PM
+sockets their relay physical mode). Download the sealed candidate package from
+its finalization run, e.g. `gh run download RUN -n bseed-flash-candidates-SHA`.
+
+```bash
+# Read-only: write the private profile and run every gate short of OTA.
+python helper_scripts/bseed_canary.py run --site /private/site.json \
+    --device KitchenSocketLeft --artifacts /private/bseed-flash-candidates-SHA
+# After reviewing that output and the physical load: the same command, flashing.
+python helper_scripts/bseed_canary.py run --site /private/site.json \
+    --device KitchenSocketLeft --artifacts /private/bseed-flash-candidates-SHA \
+    --flash --confirm-ieee 0xEXACT_TARGET_IEEE   # non-PM also: --confirm-load-unplugged
+```
+
+`plan` writes the profile without contacting anything. Cross-role conversions
+still use `--mode transition` directly. A passing run prints the remaining
+physical acceptance checklist; it is a software gate, not hardware acceptance.
+
+## Profile-driven campaign (individual stages)
 
 Read `skills/bseed-zigbee-ota/SKILL.md` first. Copy `docs/bseed_ota_profile.example.json` to a **private location outside this repository**, replace every placeholder with independently verified values and use a unique `workdir` for each campaign. Ensure `index_output` is inside the private LAN image-server root, not in git. The image file and index must be reachable by Zigbee2MQTT at their exact HTTP URLs; a profile alone does not start the HTTP server or back up a device.
 
