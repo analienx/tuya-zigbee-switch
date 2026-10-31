@@ -8,6 +8,10 @@
 #define OVERLOAD_MAX_RETRIES          5u
 #define OVERLOAD_NOMINAL_VOLTAGE_V    230u
 #define OVERLOAD_VOLTAGE_FLOOR_CV     5000u
+/* Energized operation under every limit for this long forgives earlier
+ * automatic reconnects, so unrelated overloads days apart cannot add up to a
+ * lockout. Sustained or rapidly repeated overloads still lock out. */
+#define OVERLOAD_RETRY_FORGIVE_MS     (60u * 60u * 1000u)
 
 typedef enum {
     OVERLOAD_ALARM_NONE         = 0,
@@ -44,6 +48,7 @@ typedef struct {
     uint8_t           retry_count;
     uint32_t          over_since_ms;
     uint32_t          reconnect_at_ms;
+    uint32_t          healthy_since_ms;
 } overload_protection_t;
 
 void overload_protection_init(overload_protection_t *op);

@@ -19,8 +19,9 @@ void overload_protection_init(overload_protection_t *op) {
     op->tripped         = 0;
     op->locked_out      = 0;
     op->retry_count     = 0;
-    op->over_since_ms   = 0;
-    op->reconnect_at_ms = 0;
+    op->over_since_ms    = 0;
+    op->reconnect_at_ms  = 0;
+    op->healthy_since_ms = 0;
 }
 
 void overload_protection_set_current_limits(overload_protection_t *op,
@@ -53,8 +54,9 @@ static uint8_t reached(uint32_t now, uint32_t target) {
 
 static overload_action_t trip(overload_protection_t *op, uint32_t now,
                               overload_alarm_t reason, uint8_t startup_mode) {
-    op->tripped       = 1;
-    op->over_since_ms = 0;
+    op->tripped          = 1;
+    op->over_since_ms    = 0;
+    op->healthy_since_ms = 0;
 
     if (op->retry_count >= OVERLOAD_MAX_RETRIES) {
         op->locked_out      = 1;
@@ -105,8 +107,9 @@ overload_action_t overload_protection_check(overload_protection_t *op,
     }
 
     if (!relay_is_on) {
-        op->over_since_ms = 0;
-        op->alarm         = OVERLOAD_ALARM_NONE;
+        op->over_since_ms    = 0;
+        op->healthy_since_ms = 0;
+        op->alarm            = OVERLOAD_ALARM_NONE;
         return OVERLOAD_ACTION_NONE;
     }
 
@@ -123,6 +126,7 @@ overload_action_t overload_protection_check(overload_protection_t *op,
                            (current_ma >= op->cfg.current_limit_ma);
 
     if (soft_power || soft_current) {
+        op->healthy_since_ms = 0;
         if (op->over_since_ms == 0) {
             op->over_since_ms = stamp(now_ms);
         }
@@ -135,6 +139,15 @@ overload_action_t overload_protection_check(overload_protection_t *op,
     }
 
     op->over_since_ms = 0;
+    if (op->retry_count != 0) {
+        if (op->healthy_since_ms == 0) {
+            op->healthy_since_ms = stamp(now_ms);
+        } else if ((uint32_t)(now_ms - op->healthy_since_ms) >=
+                   OVERLOAD_RETRY_FORGIVE_MS) {
+            op->retry_count      = 0;
+            op->healthy_since_ms = 0;
+        }
+    }
     if (op->cfg.overvoltage_cv != 0 && voltage_cv > op->cfg.overvoltage_cv) {
         op->alarm = OVERLOAD_ALARM_VOLTAGE_HIGH;
     } else if (op->cfg.undervoltage_cv != 0 &&
