@@ -41,7 +41,9 @@ BOARDS = {
     'nonpm': {'manufacturer': 'o1jzcxou', 'model': 'TS011F-BS', 'release': 'bseed_nonpm_release'},
 }
 ROLE_KEYS = {'Router': 'router', 'EndDevice': 'client'}
-SITE_REQUIRED = ('mqtt_config', 'broker', 'serve_root', 'serve_host', 'serve_port',
+# Serving: either `publish` (upload to the HA www folder over SSH, removed
+# after the run) or serve_host/serve_port (temporary local LAN server).
+SITE_REQUIRED = ('mqtt_config', 'broker', 'serve_root',
                  'campaign_root', 'network_lock_dir', 'network_id', 'devices')
 # preflash_build may be omitted when live discovery supplies it.
 DEVICE_REQUIRED = ('ieee', 'board', 'role', 'expect_relay')
@@ -84,6 +86,15 @@ def load_site(path):
         raise CanaryError('Site file missing: ' + ', '.join(missing))
     for key in ('serve_root', 'campaign_root', 'network_lock_dir', 'mqtt_config'):
         site[key] = str(outside_repo(site[key], key))
+    publish = site.get('publish')
+    if publish is not None:
+        missing = [k for k in ('ssh_alias', 'remote_dir', 'url_base') if not publish.get(k)]
+        if missing:
+            raise CanaryError('Site publish missing: ' + ', '.join(missing))
+        if not str(publish['remote_dir']).startswith('/') or '..' in str(publish['remote_dir']):
+            raise CanaryError('Site publish remote_dir must be an absolute remote path')
+    elif site.get('serve_host') in (None, '') or site.get('serve_port') in (None, ''):
+        raise CanaryError('Site needs publish or serve_host/serve_port')
     return site
 
 
@@ -279,16 +290,23 @@ def build_profile(site, name, artifacts, registry=None, live=None):
     cand = candidate(board, role)
     data, entry = sealed_artifact(artifacts, board, role, cand, registry)
     spec = BOARDS[board]
-    base = 'http://%s:%d' % (site['serve_host'], int(site['serve_port']))
     image_name = '%s-%s.ota' % (name, cand['build'])
     index_name = 'index-%s-%s.json' % (name, cand['build'])
+    tag = hashlib.sha256(data).hexdigest()[:12]
+    if site.get('publish'):
+        folder = site['publish']['url_base'].rstrip('/') + '/' + publish_folder(name, cand['build'])
+        image_url = folder + '/firmware.ota?v=' + tag
+        index_url = folder + '/index.json?v=' + tag
+    else:
+        base = 'http://%s:%d' % (site['serve_host'], int(site['serve_port']))
+        image_url, index_url = base + '/' + image_name, base + '/' + index_name
     serve_root = Path(site['serve_root'])
     workdir = Path(site['campaign_root']) / name / cand['build']
     image = serve_root / image_name
     write_once(image, data)
     template = [{
         'fileName': image_name, 'fileVersion': cand['version'], 'fileSize': len(data),
-        'url': base + '/' + image_name, 'imageType': cand['type'], 'manufacturerCode': 4417,
+        'url': image_url, 'imageType': cand['type'], 'manufacturerCode': 4417,
         'sha512': hashlib.sha512(data).hexdigest(), 'manufacturerName': [spec['manufacturer']],
         'otaHeaderString': data[20:52].decode('latin1')}]
     template_path = workdir / 'template_index.json'
@@ -300,7 +318,7 @@ def build_profile(site, name, artifacts, registry=None, live=None):
         'preflash_role': role, 'postflash_role': role,
         'preflash_build': device['preflash_build'], 'postflash_build': cand['build'],
         'image': str(image), 'sha256': hashlib.sha256(data).hexdigest(),
-        'url': base + '/' + image_name, 'index_url': base + '/' + index_name,
+        'url': image_url, 'index_url': index_url,
         'index_output': str(serve_root / index_name), 'template_index': str(template_path),
         'mqtt_config': site['mqtt_config'], 'broker': site['broker'], 'workdir': str(workdir),
         'network_lock_dir': site['network_lock_dir'], 'network_id': site['network_id'],
@@ -344,6 +362,55 @@ def build_profile(site, name, artifacts, registry=None, live=None):
     return profile_path, profile
 
 
+def publish_folder(name, build):
+    return '%s-%s' % (name, build)
+
+
+class HaPublisher:
+    """Upload the image and single-target index to the HA www folder for one run.
+
+    Only this run's own folder is created and always removed again on exit,
+    so a canary leaves no served firmware behind.
+    """
+
+    def __init__(self, site, profile, run=subprocess.run):
+        self.alias = site['publish']['ssh_alias']
+        self.folder = (site['publish']['remote_dir'].rstrip('/') + '/' +
+                       publish_folder(profile['device'], profile['postflash_build']))
+        self.profile, self.run, self.created = profile, run, False
+
+    def ssh(self, command):
+        result = self.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8',
+                           self.alias, command], capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            raise CanaryError('HA publish command failed: %s' % command)
+
+    def upload(self):
+        self.ssh("mkdir -p '%s'" % self.folder)
+        self.created = True
+        for local, remote in ((self.profile['image'], 'firmware.ota'),
+                              (self.profile['index_output'], 'index.json')):
+            result = self.run(['scp', '-q', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8',
+                               local, '%s:%s/%s' % (self.alias, self.folder, remote)],
+                              capture_output=True, text=True, timeout=300)
+            if result.returncode != 0:
+                raise CanaryError('HA publish upload failed: %s' % remote)
+        print('CANARY_PUBLISHED', self.folder, flush=True)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        if self.created:
+            self.ssh("rm -rf -- '%s'" % self.folder)
+            print('CANARY_UNPUBLISHED', self.folder, flush=True)
+
+
+class NoPublisher:
+    def upload(self):
+        pass
+
+
 class LanServer:
     """Serve only the private serve_root for the duration of one canary."""
 
@@ -383,20 +450,28 @@ def require_flash_confirmation(profile, confirm_ieee, confirm_unloaded):
 
 
 def run(site, profile_path, profile, *, flash=False, confirm_ieee=None,
-        confirm_unloaded=False, call=subprocess.call):
+        confirm_unloaded=False, call=subprocess.call, publish_run=subprocess.run):
     if flash:
         require_flash_confirmation(profile, confirm_ieee, confirm_unloaded)
     elif confirm_ieee or confirm_unloaded:
         raise CanaryError('Confirmations are only accepted together with --flash')
     campaign = [sys.executable, '-u', str(ROOT / 'helper_scripts/bseed_ota_campaign.py'),
                 '--profile', str(profile_path)]
-    with LanServer(site['serve_root'], site.get('serve_bind', '0.0.0.0'), site['serve_port']):
+    if site.get('publish'):
+        serving = HaPublisher(site, profile, run=publish_run)
+    else:
+        serving = LanServer(site['serve_root'], site.get('serve_bind', '0.0.0.0'),
+                            site['serve_port'])
+    with serving:
+        publisher = serving if isinstance(serving, HaPublisher) else NoPublisher()
         for mode, extra in stages(profile, flash, confirm_ieee, confirm_unloaded):
             print('CANARY_STAGE', mode, profile['device'], flush=True)
             status = call(campaign + ['--mode', mode] + extra)
             if status:
                 print('CANARY_STOPPED', mode, 'exit', status, 'no retry', flush=True)
                 return status
+            if mode == 'prepare':
+                publisher.upload()
     if not flash:
         print('CANARY_QUALIFIED_NO_FLASH', profile['device'], profile['postflash_build'], flush=True)
         return 0

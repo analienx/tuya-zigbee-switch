@@ -267,3 +267,60 @@ def test_live_identity_uses_read_only_ssh_query(tmp_path):
 
     with pytest.raises(canary.CanaryError, match='unavailable'):
         canary.live_identity(site, IEEE, run=no_record)
+
+
+def publish_site(tmp_path, board='pm', role='EndDevice'):
+    site = make_site(tmp_path, board, role)
+    site['publish'] = {'ssh_alias': 'ha', 'remote_dir': '/config/www/bseed-canary',
+                       'url_base': 'http://192.0.2.58:8123/local/bseed-canary'}
+    return site
+
+
+class PublishRecorder:
+    def __init__(self):
+        self.commands = []
+
+    def __call__(self, command, **kwargs):
+        self.commands.append(command)
+        return type('R', (), {'returncode': 0, 'stdout': '', 'stderr': ''})()
+
+
+def test_ha_publish_urls_upload_after_prepare_and_always_clean_up(tmp_path):
+    artifacts, registry = make_artifacts(tmp_path, 'pm')
+    site = publish_site(tmp_path)
+    path, profile = canary.build_profile(site, 'Canary', artifacts, registry)
+    folder = 'http://192.0.2.58:8123/local/bseed-canary/Canary-' + profile['postflash_build']
+    assert profile['url'].startswith(folder + '/firmware.ota?v=')
+    assert profile['index_url'].startswith(folder + '/index.json?v=')
+    assert load_profile(path)['url'] == profile['url']
+    published = PublishRecorder()
+    calls = Recorder()
+    assert canary.run(site, path, profile, call=calls, publish_run=published) == 0
+    assert calls.modes == ['prepare', 'preflight', 'check']
+    flat = [' '.join(c) for c in published.commands]
+    remote = '/config/www/bseed-canary/Canary-' + profile['postflash_build']
+    assert "mkdir -p '%s'" % remote in flat[0]
+    assert flat[1].startswith('scp') and flat[1].endswith(remote + '/firmware.ota')
+    assert flat[2].startswith('scp') and flat[2].endswith(remote + '/index.json')
+    assert "rm -rf -- '%s'" % remote in flat[-1]
+    # A failing stage still unpublishes; nothing is uploaded before prepare passes.
+    published, calls = PublishRecorder(), Recorder(fail_mode='check')
+    assert canary.run(site, path, profile, call=calls, publish_run=published) == 1
+    assert "rm -rf" in ' '.join(published.commands[-1])
+    published, calls = PublishRecorder(), Recorder(fail_mode='prepare')
+    assert canary.run(site, path, profile, call=calls, publish_run=published) == 1
+    assert published.commands == []
+
+
+def test_publish_site_validation(tmp_path):
+    site = make_site(tmp_path, 'pm', 'EndDevice')
+    raw = json.loads((tmp_path / 'site.json').read_text())
+    raw.pop('serve_host'); raw.pop('serve_port')
+    (tmp_path / 'site.json').write_text(json.dumps(raw))
+    with pytest.raises(canary.CanaryError, match='publish or serve_host'):
+        canary.load_site(tmp_path / 'site.json')
+    raw['publish'] = {'ssh_alias': 'ha', 'remote_dir': 'relative', 'url_base': 'http://x'}
+    (tmp_path / 'site.json').write_text(json.dumps(raw))
+    with pytest.raises(canary.CanaryError, match='absolute remote path'):
+        canary.load_site(tmp_path / 'site.json')
+    assert site

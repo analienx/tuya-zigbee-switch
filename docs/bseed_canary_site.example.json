@@ -2,9 +2,11 @@
   "mqtt_config": "/private/zigbee2mqtt/configuration.yaml",
   "broker": "BROKER_LAN_ADDRESS",
   "serve_root": "/private/ota/serve",
-  "serve_host": "THIS_HOST_LAN_ADDRESS",
-  "serve_bind": "0.0.0.0",
-  "serve_port": 8099,
+  "publish": {
+    "ssh_alias": "ha",
+    "remote_dir": "/config/www/bseed-canary",
+    "url_base": "http://HA_LAN_ADDRESS:8123/local/bseed-canary"
+  },
   "campaign_root": "/private/ota/campaigns",
   "lock_search_roots": ["/private/ota/older-campaign-workdirs"],
   "ha_ssh_alias": "ha",

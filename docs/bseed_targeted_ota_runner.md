@@ -82,6 +82,12 @@ python helper_scripts/bseed_canary.py run --site /private/site.json \
     --flash --confirm-ieee 0xEXACT_TARGET_IEEE   # non-PM also: --confirm-load-unplugged
 ```
 
+Serving uses the site `publish` block when present: the image and index are
+uploaded to this run's own folder in the Home Assistant `www` directory over
+the SSH alias (served at `/local/...` with a hash cache-buster) and that folder
+is removed when the run ends, pass or fail. Without `publish`, a temporary
+local server on `serve_host:serve_port` is used instead.
+
 `discover` is read-only and needs no artifacts. For every roster socket (or
 `--device`) it prints the live Zigbee2MQTT identity (IEEE, role, installed
 Basic build, interview state) read over the site's `ha_ssh_alias`, the release
