@@ -1,9 +1,14 @@
 #include "hal/zigbee.h"
+#include "app.h"
+#include "hal/timer.h"
 
 #include "app/framework/include/af.h"
 #include "app/framework/plugin/ota-client/ota-client.h"
 #include "network-steering.h"
+#include "app/util/zigbee-framework/zigbee-device-common.h"
+#include "hal/router_recovery_policy.h"
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 #define MAX_CLUSTERS    32
@@ -16,6 +21,9 @@ sl_zigbee_af_attribute_metadata_t attributes_buffer[MAX_ATTRS];
 hal_zigbee_endpoint *hal_endpoints;
 uint8_t hal_endpoints_cnt;
 static hal_zcl_activity_callback_t zcl_activity_callback = NULL;
+/* Shared with early AF receive callbacks, before Router recovery functions. */
+static bool     silabs_router_ota_transfer_seen;
+static uint32_t silabs_router_last_inbound_ms;
 
 static void notify_zcl_activity(void) {
     if (zcl_activity_callback != NULL) {
@@ -73,7 +81,20 @@ static uint32_t on_command_callback(sl_service_opcode_t opcode,
 }
 
 bool sl_zigbee_af_pre_command_received_cb(sl_zigbee_af_cluster_command_t *cmd) {
-    (void)cmd;
+    if (cmd != NULL && cmd->apsFrame != NULL &&
+        cmd->apsFrame->clusterId == 0x0019u &&
+        (cmd->commandId == 0x05u ||
+         (cmd->commandId == 0x02u &&
+          cmd->buffer != NULL && cmd->bufLen > cmd->payloadStartIndex &&
+          cmd->buffer[cmd->payloadStartIndex] == 0x00u))) {
+        /* OTA Image Block Response, or a successful Query Next Image
+         * response indicating a transfer is about to start. Not a
+         * routine NO_IMAGE_AVAILABLE query: that would suppress all
+         * future Router healing on an otherwise idle OTA client.
+         * Retain OTA guard for this boot, including pauses/resumes. */
+        silabs_router_ota_transfer_seen = true;
+    }
+    silabs_router_last_inbound_ms = hal_millis();
     notify_zcl_activity();
     return false;
 }
@@ -211,14 +232,166 @@ sl_zigbee_af_status_t sl_zigbee_af_external_attribute_write_cb(
     return SL_ZIGBEE_ZCL_STATUS_SUCCESS;
 }
 
-static bool network_steering_in_progress = false;
+static bool     network_steering_in_progress = false;
+static bool     network_steering_retry_pending;
+static uint32_t network_steering_last_attempt_ms;
+#define NETWORK_STEERING_RETRY_MS        10000u
+
+/* A full Silicon Labs Router can remain JOINED while coordinator routing is
+ * broken. This probe is ZDO unicast with native NWK route discovery. Never
+ * trigger an active scan from a single route miss. */
+#define SILABS_ROUTER_ZDO_INTERVAL_MS    (6u * 60u * 1000u)
+#define SILABS_ROUTER_ZDO_TIMEOUT_MS     (30u * 1000u)
+#define SILABS_ROUTER_QUIET_MS           (20u * 60u * 1000u)
+#define SILABS_ROUTER_ACTIVE_HOLD_MS     (60u * 60u * 1000u)
+#define SILABS_ROUTER_NEIGHBOR_MS        (15u * 60u * 1000u)
+#define SILABS_ROUTER_REJOIN_GAP_MS      (30u * 60u * 1000u)
+#define SILABS_ROUTER_ORPHAN_MS          (10u * 60u * 1000u)
+static bool     silabs_router_probe_initialized;
+static bool     silabs_router_probe_pending;
+static bool     silabs_router_rejoin_pending;
+static bool     silabs_router_rejoin_orphaned;
+static bool     silabs_router_rejoin_attempted;
+static uint8_t  silabs_router_rejoin_down_events;
+static uint8_t  silabs_router_probe_sequence;
+static uint8_t  silabs_router_failed_probes;
+static uint32_t silabs_router_last_probe_ms;
+static uint32_t silabs_router_last_good_ms;
+static uint32_t silabs_router_last_rejoin_ms;
+
+void silabs_router_recovery_tick(void) {
+    uint32_t now = hal_millis();
+
+    if (silabs_router_rejoin_pending &&
+        (uint32_t)(now - silabs_router_last_rejoin_ms) >=
+        SILABS_ROUTER_ORPHAN_MS) {
+        silabs_router_rejoin_pending  = false;
+        silabs_router_rejoin_orphaned = true;
+        printf("Silabs Router: SDK rejoin completion missing; safe-hold\n");
+    }
+    sl_zigbee_node_type_t role;
+    if (sl_zigbee_af_get_node_type(&role) != SL_STATUS_OK ||
+        role != SL_ZIGBEE_ROUTER ||
+        sl_zigbee_af_network_state() != SL_ZIGBEE_JOINED_NETWORK ||
+        silabs_router_ota_transfer_seen || network_steering_in_progress) {
+        silabs_router_probe_initialized = false;
+        silabs_router_probe_pending     = false;
+        return;
+    }
+
+    /* Deterministically stagger scans; fixed, stable EUI avoids synchronized
+     * retries in a large Router mesh. */
+    uint8_t eui[8] = { 0 };
+    sl_zigbee_af_get_eui64(eui);
+    uint32_t seed = ((uint32_t)eui[1] << 16) |
+                    ((uint32_t)eui[4] << 8) | eui[7];
+    uint32_t probe_stagger  = seed % 120000u;
+    uint32_t rejoin_stagger = seed % (15u * 60u * 1000u);
+    if (!silabs_router_probe_initialized) {
+        silabs_router_probe_initialized = true;
+        silabs_router_last_probe_ms     = now;
+        silabs_router_last_good_ms      = now;
+        silabs_router_last_inbound_ms   = now;
+        return;
+    }
+    if (silabs_router_rejoin_pending) {
+        if ((uint32_t)(now - silabs_router_last_rejoin_ms) <
+            SILABS_ROUTER_ORPHAN_MS)
+            return;
+
+        silabs_router_rejoin_pending  = false;
+        silabs_router_rejoin_orphaned = true;
+        printf("Silabs Router: rejoin callback missing, refusing overlap\n");
+    }
+    if (silabs_router_probe_pending &&
+        (uint32_t)(now - silabs_router_last_probe_ms) >=
+        SILABS_ROUTER_ZDO_TIMEOUT_MS) {
+        silabs_router_probe_pending = false;
+        if (silabs_router_failed_probes < UINT8_MAX)
+            silabs_router_failed_probes++;
+    }
+    bool unreachable = bseed_router_timeout_evidence(
+        silabs_router_failed_probes, 4u, now,
+        silabs_router_last_good_ms, SILABS_ROUTER_QUIET_MS);
+    if (bseed_router_rejoin_eligible(
+            unreachable, silabs_router_rejoin_orphaned, now,
+            silabs_router_last_good_ms, silabs_router_last_inbound_ms,
+            SILABS_ROUTER_QUIET_MS, SILABS_ROUTER_ACTIVE_HOLD_MS,
+            SILABS_ROUTER_NEIGHBOR_MS, rejoin_stagger) &&
+        (!silabs_router_rejoin_attempted ||
+         (uint32_t)(now - silabs_router_last_rejoin_ms) >=
+         SILABS_ROUTER_REJOIN_GAP_MS)) {
+        silabs_router_rejoin_attempted = true;
+        silabs_router_last_rejoin_ms   = now;
+
+        /* ENCRYPTED, preserve network credentials, channel-mask=current.
+         * No insecure fallback, BDB steering, permit-join or factory reset. */
+        uint8_t channel = sl_zigbee_get_radio_channel();
+        if (channel < 11u || channel > 26u) {
+            printf("Silabs Router: invalid current channel, no rejoin\n");
+            return;
+        }
+
+        /* Scan only the saved operational channel on first recovery:
+         * no broad multi-channel scan disrupting neighboring children. */
+        sl_status_t st = sl_zigbee_find_and_rejoin_network(
+            true, (uint32_t)1u << channel,
+                SL_ZIGBEE_REJOIN_DUE_TO_APP_EVENT_1,
+                SL_ZIGBEE_DEVICE_TYPE_UNCHANGED);
+        if (st == SL_STATUS_OK) {
+            silabs_router_rejoin_pending     = true;
+            silabs_router_rejoin_down_events = 0;
+        } else {
+            printf("Silabs Router: encrypted rejoin rejected 0x%lx\n",
+                   (unsigned long)st);
+        }
+        return;
+    }
+    if (!silabs_router_probe_pending &&
+        (uint32_t)(now - silabs_router_last_probe_ms) >=
+        SILABS_ROUTER_ZDO_INTERVAL_MS + probe_stagger) {
+        silabs_router_last_probe_ms = now;
+        sl_status_t st = sl_zigbee_node_descriptor_request(
+            0x0000u, SL_ZIGBEE_APS_OPTION_RETRY |
+            SL_ZIGBEE_APS_OPTION_ENABLE_ROUTE_DISCOVERY);
+        if (st == SL_STATUS_OK) {
+            silabs_router_probe_sequence =
+                sl_zigbee_get_last_stack_zig_dev_request_sequence();
+            silabs_router_probe_pending = true;
+        } else {
+            /* Local queue congestion is not evidence that 0x0000 is down. */
+            printf("Silabs Router: ZDO enqueue rejected 0x%lx\n",
+                   (unsigned long)st);
+        }
+    }
+}
+
+/* SDK permits inspecting a ZDO response without consuming it; leave the
+ * normal framework response handling intact. */
+bool sl_zigbee_af_pre_zdo_message_received_cb(
+    sl_802154_short_addr_t source, sl_zigbee_aps_frame_t *aps,
+    int8u *message, int16u length) {
+    if (silabs_router_probe_pending && source == 0x0000u &&
+        aps != NULL && aps->clusterId == 0x8002u &&
+        message != NULL && length >= 4 &&
+        message[0] == silabs_router_probe_sequence &&
+        message[1] == 0u && message[2] == 0u && message[3] == 0u) {
+        uint32_t now = hal_millis();
+        silabs_router_probe_pending = false;
+        silabs_router_failed_probes = 0;
+        silabs_router_last_good_ms  = now;
+    }
+    return false;
+}
 
 hal_zigbee_network_status_t hal_zigbee_get_network_status() {
     sl_zigbee_network_status_t ns = sl_zigbee_af_network_state();
 
     if (ns == SL_ZIGBEE_JOINED_NETWORK) {
         return HAL_ZIGBEE_NETWORK_JOINED;
-    } else if (ns == SL_ZIGBEE_JOINING_NETWORK || network_steering_in_progress) {
+    } else if (ns == SL_ZIGBEE_JOINING_NETWORK ||
+               network_steering_in_progress || silabs_router_rejoin_pending ||
+               silabs_router_rejoin_orphaned) {
         return HAL_ZIGBEE_NETWORK_JOINING;
     } else {
         return HAL_ZIGBEE_NETWORK_NOT_JOINED;
@@ -240,7 +413,27 @@ void hal_register_on_network_status_change_callback(
 }
 
 void sl_zigbee_af_stack_status_cb(sl_status_t status) {
-    (void)status;
+    /* A successful secure rejoin can occur without the application seeing a
+     * NOT_JOINED interval; explicitly rearm the per-epoch Device Announce. */
+    if (status == SL_STATUS_NETWORK_UP) {
+        silabs_router_rejoin_pending     = false;
+        silabs_router_rejoin_orphaned    = false;
+        silabs_router_rejoin_down_events = 0;
+        silabs_router_failed_probes      = 0;
+        silabs_router_probe_initialized  = false;
+        app_rearm_network_announcement();
+    } else if (status == SL_STATUS_NETWORK_DOWN) {
+        /* SDK rejoin emits initial DOWN while scanning, then terminal DOWN
+         * on a failed attempt (or UP on success). Only the second DOWN
+         * releases ownership. Never race a new steering scan with the first. */
+        if (silabs_router_rejoin_pending &&
+            silabs_router_rejoin_down_events < 2u) {
+            silabs_router_rejoin_down_events++;
+            if (silabs_router_rejoin_down_events == 2u)
+                silabs_router_rejoin_pending = false;
+        }
+        silabs_router_probe_initialized = false;
+    }
     notify_network_status_change();
 }
 
@@ -249,9 +442,57 @@ void hal_zigbee_leave_network() {
 }
 
 void hal_zigbee_start_network_steering() {
-    if (!network_steering_in_progress) {
-        network_steering_in_progress = true;
-        sl_zigbee_af_network_steering_start();
+    /* Once this Router has attempted secure recovery, NEVER fall back to BDB
+     * fresh join simply because a rejoin temporarily made it NOT_JOINED. */
+    if (silabs_router_rejoin_attempted &&
+        sl_zigbee_af_network_state() != SL_ZIGBEE_JOINED_NETWORK) {
+        if (silabs_router_ota_transfer_seen ||
+            silabs_router_rejoin_pending || silabs_router_rejoin_orphaned ||
+            (uint32_t)(hal_millis() - silabs_router_last_rejoin_ms) <
+            SILABS_ROUTER_REJOIN_GAP_MS)
+            return;
+
+        uint8_t channel = sl_zigbee_get_radio_channel();
+        if (channel < 11u || channel > 26u)
+            return;
+
+        silabs_router_last_rejoin_ms = hal_millis();
+        sl_status_t st = sl_zigbee_find_and_rejoin_network(
+            true, (uint32_t)1u << channel,
+                SL_ZIGBEE_REJOIN_DUE_TO_APP_EVENT_1,
+                SL_ZIGBEE_DEVICE_TYPE_UNCHANGED);
+        if (st == SL_STATUS_OK) {
+            silabs_router_rejoin_pending     = true;
+            silabs_router_rejoin_down_events = 0;
+        }
+        return;
+    }
+
+    /* On a joined Router, network steering opens the network for joining;
+     * it is NOT a connectivity probe or route repair operation. */
+    if (sl_zigbee_af_network_state() == SL_ZIGBEE_JOINED_NETWORK ||
+        network_steering_in_progress || silabs_router_rejoin_pending ||
+        silabs_router_rejoin_orphaned) {
+        return;
+    }
+
+    uint32_t now = hal_millis();
+    if (network_steering_retry_pending &&
+        (uint32_t)(now - network_steering_last_attempt_ms) <
+        NETWORK_STEERING_RETRY_MS) {
+        return;
+    }
+
+    /* Silicon Labs explicitly documents synchronous rejection (e.g. scan
+     * queue full, invalid state). Never latch JOINING on a rejected start. */
+    network_steering_last_attempt_ms = now;
+    network_steering_retry_pending   = true;
+    network_steering_in_progress     = true;
+    sl_status_t status = sl_zigbee_af_network_steering_start();
+    if (status != SL_STATUS_OK) {
+        network_steering_in_progress = false;
+        printf("Silabs network steering start rejected: 0x%lx\n",
+               (unsigned long)status);
     }
 }
 
@@ -265,6 +506,13 @@ void sl_zigbee_af_network_steering_complete_cb(sl_status_t status,
     (void)joinAttempts;
     (void)finalState;
     network_steering_in_progress = false;
+
+    /* Even if steering reports success, don't immediately start it again
+     * when the stack has not yet transitioned to JOINED. */
+    network_steering_retry_pending =
+        (status != SL_STATUS_OK ||
+         sl_zigbee_af_network_state() != SL_ZIGBEE_JOINED_NETWORK);
+    network_steering_last_attempt_ms = hal_millis();
 
     notify_network_status_change();
 }

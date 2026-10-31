@@ -31,6 +31,20 @@ static uint32_t pulses_to_frequency(uint32_t pulse_count) {
     return pulse_count * (1000000u / HLW8012_SAMPLE_INTERVAL_MS);
 }
 
+/* Overload protection derives power and current from these multipliers, so
+ * an implausible calibration (for example "W1A1") would read a real overload
+ * as near zero and silently disable the hard trip. On the dedicated PM board
+ * accept only a generous band around its verified factors; other boards keep
+ * their unrestricted, config-driven calibration. */
+static uint8_t calibration_plausible(uint32_t value, uint32_t verified) {
+#ifdef BSEED_PM_B28WRPVX
+    return value >= verified / 4u && value / 4u <= verified;
+#else
+    (void)verified;
+    return value != 0;
+#endif
+}
+
 int hlw8012_init(hlw8012_t *dev, hal_gpio_pin_t cf_pin,
                  hal_gpio_pin_t cf1_pin, hal_gpio_pin_t sel_pin) {
     if (!dev || cf_pin == HAL_INVALID_PIN || cf1_pin == HAL_INVALID_PIN ||
@@ -104,12 +118,21 @@ void hlw8012_set_calibration(hlw8012_t *dev, uint32_t voltage_mult,
     if (!dev)
         return;
 
-    if (voltage_mult)
+    if (calibration_plausible(voltage_mult, HLW8012_VOLTAGE_MULTIPLIER))
         dev->cal.voltage_multiplier = voltage_mult;
-    if (current_mult)
+    else if (voltage_mult)
+        printf("HLW8012: rejecting implausible voltage calibration %u\r\n",
+               voltage_mult);
+    if (calibration_plausible(current_mult, HLW8012_CURRENT_MULTIPLIER))
         dev->cal.current_multiplier = current_mult;
-    if (power_mult)
+    else if (current_mult)
+        printf("HLW8012: rejecting implausible current calibration %u\r\n",
+               current_mult);
+    if (calibration_plausible(power_mult, HLW8012_POWER_MULTIPLIER))
         dev->cal.power_multiplier = power_mult;
+    else if (power_mult)
+        printf("HLW8012: rejecting implausible power calibration %u\r\n",
+               power_mult);
 
     printf("HLW8012: calibration V=%u A=%u W=%u\r\n",
            dev->cal.voltage_multiplier, dev->cal.current_multiplier,
@@ -122,18 +145,22 @@ int hlw8012_calibrate(hlw8012_t *dev, uint8_t channel, uint32_t reference) {
 
     uint32_t  pulses;
     uint32_t *target;
+    uint32_t  verified;
     switch (channel) {
     case ENERGY_METER_CHANNEL_VOLTAGE:
-        pulses = dev->data.cal_pulses_voltage;
-        target = &dev->cal.voltage_multiplier;
+        pulses   = dev->data.cal_pulses_voltage;
+        target   = &dev->cal.voltage_multiplier;
+        verified = HLW8012_VOLTAGE_MULTIPLIER;
         break;
     case ENERGY_METER_CHANNEL_CURRENT:
-        pulses = dev->data.cal_pulses_current;
-        target = &dev->cal.current_multiplier;
+        pulses   = dev->data.cal_pulses_current;
+        target   = &dev->cal.current_multiplier;
+        verified = HLW8012_CURRENT_MULTIPLIER;
         break;
     case ENERGY_METER_CHANNEL_POWER:
-        pulses = dev->data.cal_pulses_power;
-        target = &dev->cal.power_multiplier;
+        pulses   = dev->data.cal_pulses_power;
+        target   = &dev->cal.power_multiplier;
+        verified = HLW8012_POWER_MULTIPLIER;
         break;
     default:
         return -1;
@@ -142,8 +169,14 @@ int hlw8012_calibrate(hlw8012_t *dev, uint8_t channel, uint32_t reference) {
     if (pulses == 0)
         return -1;
 
-    *target = ((uint32_t)reference * (uint32_t)HLW8012_FIXED_POINT_SCALE) /
-              pulses;
+    uint32_t candidate =
+        ((uint32_t)reference * (uint32_t)HLW8012_FIXED_POINT_SCALE) / pulses;
+    if (!calibration_plausible(candidate, verified)) {
+        printf("HLW8012: rejecting implausible calibration %u for ch %u\r\n",
+               candidate, channel);
+        return -1;
+    }
+    *target = candidate;
     printf("HLW8012: calibrated ch %u to ref %u (%u pulses) => mult %u\r\n",
            channel, reference, pulses, *target);
     return 0;

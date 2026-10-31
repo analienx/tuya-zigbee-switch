@@ -72,6 +72,8 @@ static u8 bdb_networkSteerStart(void) {assert(factory_new);return RET_OK;}
 static void zb_rejoinSecModeSet(u8 mode) {assert(mode==REJOIN_SECURITY);}
 static void telink_zigbee_hal_request_ota_query(void) {}
 static void ota_queryStart(uint16_t seconds) {}
+/* Join-epoch announce re-arm from the Router-family merge; no-op here. */
+static void app_rearm_network_announcement(void) {}
 typedef struct {void *asdu; unsigned asduLen;
     struct {unsigned dst_ep,cluster_id,dst_addr_mode;} indInfo;} apsdeDataInd_t;
 static void (*zcl_activity_callback)(void);

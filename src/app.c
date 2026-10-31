@@ -8,6 +8,7 @@
 #include "hal/nvm.h"
 #include "hal/printf_selector.h"
 #include "hal/system.h"
+#include "hal/timer.h"
 #include "hal/zigbee.h"
 #include "hal/zigbee_ota.h"
 #include "zigbee/battery_cluster.h"
@@ -81,15 +82,19 @@ static bool process_device_type_change(void) {
     if (stored_device_type != CURRENT_DEVICE_TYPE) {
         printf("Device type change detected: %d -> %d\r\n", stored_device_type,
                CURRENT_DEVICE_TYPE);
+
+        /* Retry failures in place. A reboot would repeat the same failing
+         * reset (or, without the new marker, the same reset again) on every
+         * boot with no bound; persistent failure leaves startup blocked. */
         if (!hal_role_change_reset()) {
-            printf("Role-change Zigbee reset failed; rebooting for retry\r\n");
-            schedule_reboot(2000);
-            return true;
+            printf("Role-change Zigbee reset failed; retrying\r\n");
+            return defer_client_role_init();
         }
         stored_device_type = CURRENT_DEVICE_TYPE;
         if (hal_nvm_write(NV_ITEM_DEVICE_TYPE, sizeof(stored_device_type),
                           (uint8_t *)&stored_device_type) != HAL_NVM_SUCCESS) {
-            printf("Role-change marker write failed; rebooting for retry\r\n");
+            printf("Role-change marker write failed; retrying\r\n");
+            return defer_client_role_init();
         }
         schedule_reboot(2000);
         return true;
@@ -123,10 +128,17 @@ void process_device_type_change() {
         hal_nvm_read(NV_ITEM_DEVICE_TYPE, sizeof(stored_device_type),
                      (uint8_t *)&stored_device_type);
 
-    if (st != HAL_NVM_SUCCESS) {
+    if (st == HAL_NVM_NOT_FOUND) {
         stored_device_type = CURRENT_DEVICE_TYPE;
         hal_nvm_write(NV_ITEM_DEVICE_TYPE, sizeof(stored_device_type),
                       (uint8_t *)&stored_device_type);
+        return;
+    }
+    if (st != HAL_NVM_SUCCESS) {
+        /* An unreadable marker is not an absent one. Overwriting it would
+         * erase a pending Client->Router transition and leave this Router on
+         * the Client's network state. Preserve it; the next boot retries. */
+        printf("Role marker unreadable; preserving marker and Zigbee state\r\n");
         return;
     }
     if (stored_device_type != CURRENT_DEVICE_TYPE) {
@@ -187,7 +199,18 @@ void app_init(void) {
 #endif
 }
 
-static bool boot_announce_sent = false;
+/* Device announces are per join epoch, not per boot. Failed local enqueue
+ * must not be mistaken for successful delivery. Both Telink and Silicon
+ * Labs use the same application logic for this recovery boundary. */
+#define ANNOUNCE_RETRY_MS    5000u
+static bool     boot_announce_sent;
+static bool     announce_retry_pending;
+static uint32_t last_announce_attempt_ms;
+
+void app_rearm_network_announcement(void) {
+    boot_announce_sent     = false;
+    announce_retry_pending = false;
+}
 
 bool app_prepare_reboot(void) {
 #ifdef BSEED_MAINS_CLIENT
@@ -215,22 +238,27 @@ void app_task() {
     poll_control_cluster_update();
 #endif
 
-    if (hal_zigbee_get_network_status() != HAL_ZIGBEE_NETWORK_JOINED &&
-        hal_zigbee_get_network_status() != HAL_ZIGBEE_NETWORK_JOINING) {
+    hal_zigbee_network_status_t network_status = hal_zigbee_get_network_status();
+    if (network_status == HAL_ZIGBEE_NETWORK_NOT_JOINED) {
         hal_zigbee_start_network_steering();
     }
-#ifdef BSEED_MAINS_CLIENT
-    /* A successful SDK rejoin starts a new join epoch. Restore the announce
-     * without resetting relay/energy state or re-running device migration. */
-    if (hal_zigbee_get_network_status() == HAL_ZIGBEE_NETWORK_NOT_JOINED ||
-        hal_zigbee_get_network_status() == HAL_ZIGBEE_NETWORK_JOINING) {
-        boot_announce_sent = false;
-    }
-#endif
-    if (!boot_announce_sent &&
-        hal_zigbee_get_network_status() == HAL_ZIGBEE_NETWORK_JOINED) {
-        hal_zigbee_send_announce();
-        init_energy_reporting();
-        boot_announce_sent = true;
+
+    /* A Router or Client can regain network membership without rebooting.
+     * Re-announce once after the observed loss; only retry a rejected local
+     * transmit at a bounded rate. No NVM, role or relay state is changed. */
+    if (network_status != HAL_ZIGBEE_NETWORK_JOINED) {
+        boot_announce_sent     = false;
+        announce_retry_pending = false;
+    } else if (!boot_announce_sent &&
+               (!announce_retry_pending ||
+                (uint32_t)(hal_millis() - last_announce_attempt_ms) >=
+                ANNOUNCE_RETRY_MS)) {
+        last_announce_attempt_ms = hal_millis();
+        announce_retry_pending   = true;
+        if (hal_zigbee_send_announce() == HAL_ZIGBEE_OK) {
+            init_energy_reporting();
+            boot_announce_sent     = true;
+            announce_retry_pending = false;
+        }
     }
 }

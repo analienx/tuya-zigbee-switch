@@ -9,6 +9,8 @@
 static hal_task_t reset_task;
 static hal_task_t network_reset_task;
 static uint8_t    reset_tasks_initialized;
+static uint8_t    reboot_deferrals;
+static uint8_t    network_reset_deferrals;
 
 static void ensure_reset_tasks_initialized(void) {
     if (reset_tasks_initialized)
@@ -30,9 +32,27 @@ void reset_all_handler(void *arg) {
     reset_all();
 }
 
+/* A failed energy checkpoint defers a controlled reboot so the accumulated
+ * total can still be saved. A persistent storage fault must not block OTA
+ * apply, user resets or recovery reboots forever: after the bounded retry
+ * window, proceed and accept loss of the interval since the last save. */
+bool reboot_checkpoint_ready(uint8_t *deferrals) {
+    if (app_prepare_reboot()) {
+        *deferrals = 0;
+        return true;
+    }
+    if (*deferrals >= REBOOT_CHECKPOINT_MAX_DEFERRALS) {
+        printf("Checkpoint still failing; controlled reboot proceeds\r\n");
+        *deferrals = 0;
+        return true;
+    }
+    (*deferrals)++;
+    return false;
+}
+
 void reboot_handler(void *arg) {
     (void)arg;
-    if (!app_prepare_reboot()) {
+    if (!reboot_checkpoint_ready(&reboot_deferrals)) {
         hal_tasks_schedule(&reset_task, 5000);
         return;
     }
@@ -41,7 +61,7 @@ void reboot_handler(void *arg) {
 
 static void network_reset_handler(void *arg) {
     (void)arg;
-    if (!app_prepare_reboot()) {
+    if (!reboot_checkpoint_ready(&network_reset_deferrals)) {
         hal_tasks_schedule(&network_reset_task, 5000);
         return;
     }

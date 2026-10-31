@@ -1,0 +1,320 @@
+"""Contract checks for cross-role Router reconnection hardening.
+
+These are source-level guards, not substitutes for SDK state-machine and
+hardware power-isolation / route-failure canary evidence.
+"""
+
+from pathlib import Path
+import re
+
+APP = Path("src/app.c")
+TELINK = Path("src/telink/hal/zigbee_network.c")
+TELINK_MAIN = Path("src/telink/main.c")
+TELINK_HEADER = Path("src/telink/hal/telink_zigbee_hal.h")
+SILABS = Path("src/silabs/hal/zigbee.c")
+
+
+def test_announcement_rearmed_for_all_roles_and_retried_on_local_failure():
+    source = APP.read_text(encoding="utf-8")
+    body = source.split("void app_task()", 1)[1]
+    assert "if (network_status != HAL_ZIGBEE_NETWORK_JOINED)" in body
+    assert re.search(r"boot_announce_sent\s*=\s*false", body)
+    assert "ANNOUNCE_RETRY_MS" in body
+    assert "hal_millis() - last_announce_attempt_ms" in body
+    assert "hal_zigbee_send_announce() == HAL_ZIGBEE_OK" in body
+    assert body.index("hal_zigbee_send_announce() == HAL_ZIGBEE_OK") < (
+        re.search(r"boot_announce_sent\s*=\s*true", body).start()
+    )
+    assert "schedule_network_reset" not in body
+
+
+def test_silabs_rejected_start_does_not_fake_joining():
+    source = SILABS.read_text(encoding="utf-8")
+    method = source.split("void hal_zigbee_start_network_steering()", 1)[1].split(
+        "// Network steering complete callback", 1
+    )[0]
+    assert "SL_ZIGBEE_JOINED_NETWORK" in method
+    assert "network_steering_retry_pending" in method
+    assert "sl_zigbee_af_network_steering_start()" in method
+    assert "if (status != SL_STATUS_OK)" in method
+    assert "network_steering_in_progress = false" in method
+
+
+def test_telink_router_rescue_never_resets_factory_new_or_joined():
+    source = TELINK.read_text(encoding="utf-8")
+    body = source.split("void telink_zigbee_hal_router_recovery_tick(void)", 1)[
+        1
+    ].split("#endif", 1)[0]
+    assert "if (zb_isDeviceFactoryNew() || !zb_isDeviceJoinedNwk())" in body
+    assert "if (zb_isDeviceFactoryNew() ||" in body
+    assert "telink_zigbee_hal_router_ota_in_progress()" in body
+    assert "ROUTER_RECOVERY_STALL_MS" in body
+    assert "router_reboot_scheduled" in body
+    assert "schedule_reboot(2000)" in body
+    assert "schedule_network_reset" not in body
+    assert "zb_factoryReset" not in body
+    assert "zb_rejoinReqWithBackOff" not in body
+
+
+def test_telink_superloop_services_router_watchdog_without_clients():
+    main = TELINK_MAIN.read_text(encoding="utf-8")
+    header = TELINK_HEADER.read_text(encoding="utf-8")
+    assert "#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE\n        telink_zigbee_hal_router_recovery_tick();\n#endif" in main
+    assert "#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE" in header
+    assert "void telink_zigbee_hal_router_recovery_tick(void);" in header
+
+
+def test_routers_probe_real_coordinator_reachability_before_secure_rejoin():
+    source = TELINK.read_text(encoding="utf-8")
+    assert "zb_zdoNodeDescReq(0x0000u" in source
+    assert "router_coordinator_node_desc_response" in source
+    assert "rsp->status == ZDO_SUCCESS" in source
+    assert "rsp->nwk_addr_interest == 0x0000u" in source
+    assert "ind->src_addr == 0x0000u" in source
+    assert "ROUTER_PROBE_FAILURE_THRESHOLD" in source
+    assert "ROUTER_PROBE_REJECT_THRESHOLD" in source
+    assert "ROUTER_REJECT_QUIET_MS" in source
+    assert "router_probe_sequence" in source
+    assert "rsp->seq_num == router_probe_sequence" in source
+    assert "ROUTER_QUIET_MIN_MS" in source
+    assert "bseed_router_timeout_evidence(" in source
+    assert "ROUTER_REJOIN_COOLDOWN_MS" in source
+    assert "zb_rejoinSecModeSet(REJOIN_SECURITY)" in source
+    assert "zb_rejoinReq(zb_apsChannelMaskGet()" in source
+    assert "bdb_networkSteerStart" not in source.split(
+        "void telink_zigbee_hal_router_recovery_tick(void)", 1
+    )[1].split("#endif", 1)[0]
+
+
+def test_coordinator_heartbeat_separates_neighbor_evidence():
+    source = TELINK.read_text(encoding="utf-8")
+    assert "ROUTER_PROBE_INTERVAL_MS" in source
+    assert "ROUTER_PROBE_DEADLINE_MS" in source
+    assert "router_probe_pending" in source
+    assert re.search(r"router_probe_failures\s*=\s*0", source)
+    assert re.search(r"router_last_positive_ms\s*=\s*hal_millis\(\)", source)
+    assert "telink_zigbee_hal_router_note_inbound" in source
+    zcl = Path("src/telink/hal/zigbee_zcl.c").read_text(encoding="utf-8")
+    assert "telink_zigbee_hal_router_note_inbound();" in zcl
+
+
+def test_router_recovery_pauses_during_ota_and_expires_stale_ownership():
+    network = TELINK.read_text(encoding="utf-8")
+    ota = Path("src/telink/hal/zigbee_ota.c").read_text(encoding="utf-8")
+    assert "telink_zigbee_hal_router_ota_in_progress()" in network
+    assert "IMAGE_UPGRADE_STATUS_NORMAL" in ota
+    assert "zcl_attr_imageUpgradeStatus != IMAGE_UPGRADE_STATUS_NORMAL" in ota
+    assert "ROUTER_OTA_ACTIVITY_LEASE_MS" in ota
+    assert "router_ota_in_progress = true" in ota
+    assert "router_ota_in_progress = false" in ota
+    assert "evt == OTA_EVT_IMAGE_DONE || evt == OTA_EVT_COMPLETE" in ota
+    assert "schedule_network_reset(" not in network.split(
+        "void telink_zigbee_hal_router_recovery_tick(void)", 1
+    )[1].split("#endif", 1)[0]
+
+
+def test_ts0726_has_explicit_distinct_candidate_and_exact_sha_ci():
+    script = Path("make_scripts/build_bseed_ts0726_v8.sh").read_text(encoding="utf-8")
+    ci = Path(".github/workflows/bseed-ts0726-router-recovery.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "router-recovery-candidate" in script
+    assert "1.1.9-bseedrv1" in script
+    assert "0x11023010" in script
+    assert "BSEED_TS0726_RELEASE_CHANNEL: router-recovery-candidate" in ci
+    assert 'test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"' in ci
+    assert "bseed_ota_identity.py gate" in ci
+
+
+def test_inbound_neighbor_zcl_does_not_spoof_coordinator_reachability():
+    source = TELINK.read_text(encoding="utf-8")
+    inbound = source.split("void telink_zigbee_hal_router_note_inbound(void) {", 1)[1].split(
+        "static void router_coordinator_node_desc_response", 1
+    )[0]
+    assert "router_last_inbound_ms = hal_millis()" in inbound
+    assert "router_probe_failures = 0" not in inbound
+    assert "router_probe_pending = false" not in inbound
+    assert "router_last_positive_ms = hal_millis()" not in inbound
+    assert re.search(r"router_last_positive_ms\s*=\s*hal_millis\(\)", source.split(
+        "static void router_coordinator_node_desc_response", 1
+    )[1].split("/* Last resort", 1)[0])
+
+
+def test_isolation_rescue_requires_many_failed_probes_and_earlier_rejoins():
+    source = TELINK.read_text(encoding="utf-8")
+    method = source.split("void telink_zigbee_hal_router_recovery_tick(void) {", 1)[1].split(
+        "#endif", 1
+    )[0]
+    assert "ROUTER_ISOLATED_REBOOT_MS" in method
+    assert "ROUTER_INBOUND_GRACE_MS" in method
+    assert "bseed_router_joined_rescue_eligible(" in method
+    assert "ROUTER_MIN_REJOIN_ATTEMPTS" in method
+    assert "router_last_inbound_ms" in method
+    assert "router_reboot_scheduled = true" in method
+    assert "router_one_shot_active" in method
+    assert "repeated_response_timeouts || stuck_request_queue" in method
+
+
+def test_sdk_joins_rearm_device_announce_even_without_join_state_edge():
+    net = TELINK.read_text(encoding="utf-8")
+    app = APP.read_text(encoding="utf-8")
+    header = Path("src/app.h").read_text(encoding="utf-8")
+    callback = net.split("void bdb_commissioning_callback(u8 status, void *arg) {", 1)[1]
+    success = callback.split("case BDB_COMMISSION_STA_SUCCESS:", 1)[1].split("break;", 1)[0]
+    assert "app_rearm_network_announcement();" in success
+    assert "void app_rearm_network_announcement(void)" in app
+    assert "announce_retry_pending = false" in app.split(
+        "void app_rearm_network_announcement(void)", 1
+    )[1].split("}", 1)[0]
+    assert "void app_rearm_network_announcement(void);" in header
+
+
+def test_router_watchdog_never_instruments_coordinator_or_client_role():
+    for path in (TELINK, TELINK_HEADER, TELINK_MAIN,
+                 Path("src/telink/hal/zigbee_ota.c"),
+                 Path("src/telink/hal/zigbee_zcl.c")):
+        source = path.read_text(encoding="utf-8")
+        assert "#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE" in source
+    assert "#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE" in TELINK.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_silabs_stack_up_callback_rearms_join_epoch_and_completion_is_cooldown_bound():
+    silabs = SILABS.read_text(encoding="utf-8")
+    status = silabs.split("void sl_zigbee_af_stack_status_cb(sl_status_t status) {", 1)[1]
+    status = status.split("void hal_zigbee_leave_network", 1)[0]
+    assert "status == SL_STATUS_NETWORK_UP" in status
+    assert "app_rearm_network_announcement();" in status
+    complete = silabs.split(
+        "void sl_zigbee_af_network_steering_complete_cb(", 1
+    )[1].split("static uint8_t make_frame_control", 1)[0]
+    assert "sl_zigbee_af_network_state() != SL_ZIGBEE_JOINED_NETWORK" in complete
+    assert "network_steering_retry_pending" in complete
+
+
+def test_existing_coordinator_parent_and_rx_on_idle_contract_is_unchanged():
+    source = TELINK.read_text(encoding="utf-8")
+    init = source.split("void telink_zigbee_hal_network_init(void) {", 1)[1]
+    assert "#if ZB_ROUTER_ROLE\n" in init
+    assert "g_zbNIB.parentInfo = MAC_DATA_POLL_KEEPALIVE_BIT" in init
+    assert "#if ZB_ROUTER_ROLE || defined(BSEED_MAINS_CLIENT)" in init
+    assert "af_nodeDescRxOnWhenIdleUpdate(1)" in init
+
+
+def test_router_one_shot_retains_sdk_ownership_across_transient_not_joined():
+    source = TELINK.read_text(encoding="utf-8")
+    tick = source.split("void telink_zigbee_hal_router_recovery_tick(void) {", 1)[1].split(
+        "// Telink ZDO callbacks", 1
+    )[0]
+    lost = tick.split("if (zb_isDeviceFactoryNew() || !zb_isDeviceJoinedNwk())", 1)[1].split(
+        "router_recovery_timer_active = false;", 1
+    )[0]
+    assert "router_one_shot_stalled = true" in lost
+    assert "ROUTER_ONE_SHOT_DEADLINE_MS" in lost
+    status = source.split(
+        "hal_zigbee_network_status_t hal_zigbee_get_network_status(void)", 1
+    )[1].split("void hal_register_on_network_status_change_callback", 1)[0]
+    assert "router_one_shot_active || router_one_shot_stalled" in status
+    assert "return HAL_ZIGBEE_NETWORK_JOINING" in status
+    steering = source.split("void hal_zigbee_start_network_steering(void) {", 1)[1]
+    assert "if (router_one_shot_active || router_one_shot_stalled)" in steering
+    assert steering.index("router_one_shot_stalled") < steering.index(
+        "zb_rejoinReqWithBackOff" if "zb_rejoinReqWithBackOff" in steering else
+        "start_rejoin_with_backoff()"
+    )
+    callback = source.split("void bdb_commissioning_callback(u8 status, void *arg) {", 1)[1]
+    assert "status == BDB_COMMISSION_STA_SUCCESS" in callback
+    assert "status == BDB_COMMISSION_STA_REJOIN_FAILURE" in callback
+    assert "router_one_shot_stalled = false" in callback
+
+
+def test_orphaned_one_shot_cannot_launch_another_rejoin():
+    source = TELINK.read_text(encoding="utf-8")
+    method = source.split("void telink_zigbee_hal_router_recovery_tick(void) {", 1)[1].split(
+        "// Telink ZDO callbacks", 1
+    )[0]
+    assert "bseed_router_rejoin_eligible(" in method
+    assert "router_one_shot_stalled, now" in method
+    assert "router_one_shot_stalled ? ROUTER_MIN_REJOIN_ATTEMPTS" in method
+    assert "ROUTER_INBOUND_GRACE_MS" in method
+    assert "router_probe_initialized = false" in method
+
+
+def test_route_repair_precedes_disruptive_secure_rejoin():
+    source = TELINK.read_text(encoding="utf-8")
+    assert "ROUTER_ACTIVE_NEIGHBOR_HOLD_MS" in source
+    assert "ROUTER_NEIGHBOR_ACTIVITY_MS" in source
+    assert "rejoin_stagger_ms = reboot_stagger_ms;" in source
+    assert "bseed_router_rejoin_eligible(" in source
+    callback = source.split("void bdb_commissioning_callback(u8 status, void *arg) {", 1)[1]
+    parent = callback.split("case BDB_COMMISSION_STA_PARENT_LOST:", 1)[1].split(
+        "case BDB_COMMISSION_STA_REJOIN_FAILURE:", 1
+    )[0]
+    assert "if (router_one_shot_active || router_one_shot_stalled)" in parent
+    assert "break;" in parent
+    terminal = callback.split("switch (status)", 1)[0]
+    assert "status == BDB_COMMISSION_STA_SUCCESS" in terminal
+    assert "status == BDB_COMMISSION_STA_REJOIN_FAILURE" in terminal
+    assert "status != BDB_COMMISSION_STA_IN_PROGRESS" not in terminal.split(
+        "#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE", 1
+    )[1].split("#endif", 1)[0]
+
+
+def test_silabs_router_coordinator_probe_and_encrypted_rejoin_are_wired():
+    source = SILABS.read_text(encoding="utf-8")
+    app = Path("src/silabs/main.c").read_text(encoding="utf-8")
+    assert "silabs_router_recovery_tick();" in app
+    assert "sl_zigbee_af_get_node_type(&role)" in source
+    assert "role != SL_ZIGBEE_ROUTER" in source
+    assert "sl_zigbee_node_descriptor_request(" in source
+    assert "SL_ZIGBEE_APS_OPTION_ENABLE_ROUTE_DISCOVERY" in source
+    assert "sl_zigbee_get_last_stack_zig_dev_request_sequence()" in source
+    assert "sl_zigbee_af_pre_zdo_message_received_cb(" in source
+    assert "source == 0x0000u" in source
+    assert "aps->clusterId == 0x8002u" in source
+    assert "message[0] == silabs_router_probe_sequence" in source
+    assert "bseed_router_timeout_evidence(" in source
+    assert "bseed_router_rejoin_eligible(" in source
+    assert "sl_zigbee_find_and_rejoin_network(" in source
+    assert "true, (uint32_t)1u << channel" in source
+    assert "SL_ZIGBEE_DEVICE_TYPE_UNCHANGED" in source
+    assert "silabs_router_rejoin_orphaned" in source
+    assert "silabs_router_rejoin_pending" in source
+    assert "silabs_router_ota_transfer_seen" in source
+    assert "cmd->commandId == 0x05u" in source
+    assert "sl_zigbee_permit_joining(" not in source
+
+
+def test_persistent_router_budget_is_required_before_both_rescue_paths():
+    network = TELINK.read_text(encoding="utf-8")
+    budget = Path("src/telink/hal/router_recovery_budget.c").read_text(encoding="utf-8")
+    items = Path("src/device_config/nvm_items.h").read_text(encoding="utf-8")
+    make = Path("src/telink/Makefile").read_text(encoding="utf-8")
+    assert network.count("bseed_router_rescue_budget_consume()") == 2
+    assert "bseed_router_rescue_budget_note_good_coordinator(" in network
+    assert "bseed_router_rescue_budget_note_failure();" in network
+    assert re.search(r"#define\s+NV_ITEM_ROUTER_RESCUE_BUDGET\s+70\b", items)
+    assert "router_recovery_budget.c" in make
+    assert re.search(r"#define\s+BSEED_RESCUE_MAX\s+2u\b", budget)
+    assert re.search(r"#define\s+BSEED_RESCUE_GOOD_REPLIES\s+24u\b", budget)
+    assert "12u * 60u * 60u" in budget
+    assert "hal_nvm_read(" in budget and "hal_nvm_write(" in budget
+
+
+def test_silabs_secure_retry_never_falls_back_to_steering():
+    silabs = SILABS.read_text(encoding="utf-8")
+    callback = silabs.split("void sl_zigbee_af_stack_status_cb(sl_status_t status)", 1)[1]
+    callback = callback.split("void hal_zigbee_leave_network", 1)[0]
+    assert "silabs_router_rejoin_down_events" in callback
+    assert "silabs_router_rejoin_down_events == 2u" in callback
+    assert "silabs_router_rejoin_pending = false" in callback
+    steering = silabs.split("void hal_zigbee_start_network_steering()", 1)[1]
+    assert "silabs_router_rejoin_attempted" in steering
+    assert "sl_zigbee_find_and_rejoin_network(" in steering
+    assert steering.index("sl_zigbee_find_and_rejoin_network(") < steering.index(
+        "sl_zigbee_af_network_steering_start()"
+    )
+    assert "SILABS_ROUTER_REJOIN_GAP_MS" in steering
+    assert "silabs_router_ota_transfer_seen" in steering
+    assert "silabs_router_rejoin_orphaned" in steering

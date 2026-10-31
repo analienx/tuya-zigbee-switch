@@ -86,6 +86,23 @@ int main(void) {
     sample = 10;
     network_reset_handler(0);
     assert(network_resets == 1 && stored == 1025);
+
+    /* A persistent storage fault defers OTA apply only for a bounded window;
+     * the downloaded image must not wait forever behind a failing save. */
+    fault = 2;
+    int before = reboots;
+    for (unsigned i = 0; i < REBOOT_CHECKPOINT_MAX_DEFERRALS; i++) {
+        ota_reboot_after_checkpoint(0);
+        assert(reboots == before && delay_ms == 5000);
+    }
+    if (setjmp(reboot_target) == 0) ota_reboot_after_checkpoint(0);
+    assert(reboots == before + 1);
+    for (unsigned i = 0; i < REBOOT_CHECKPOINT_MAX_DEFERRALS; i++) {
+        network_reset_handler(0);
+        assert(network_resets == 1);
+    }
+    network_reset_handler(0);
+    assert(network_resets == 2);
     return 0;
 }
 '''

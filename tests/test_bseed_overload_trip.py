@@ -151,6 +151,40 @@ int main(void) {
     assert(gpio_level[RELAY_PIN] == 0 && cluster.protection_tripped == 1);
     assert(monitor(now_ms, 4000) == OVERLOAD_ACTION_NONE);
     assert(op.locked_out == 1 && op.retry_count == OVERLOAD_MAX_RETRIES);
+    /* Unrelated overloads separated by a healthy energized hour never add up
+     * to a lockout; each healthy window forgives the earlier reconnect. */
+    setup(ZCL_ONOFF_PHYSICAL_RELAY_MODE_ATTACHED, 1,
+          ZCL_START_UP_ONOFF_SET_ONOFF_TO_ON);
+    now_ms = 1000;
+    for (int cycle = 0; cycle < 2 * OVERLOAD_MAX_RETRIES; cycle++) {
+        assert(monitor(now_ms, 4000) == OVERLOAD_ACTION_TURN_OFF);
+        relay_cluster_protection_trip(&cluster);
+        now_ms += 61 * 1000;
+        assert(monitor(now_ms, 4000) == OVERLOAD_ACTION_TURN_ON);
+        relay_cluster_protection_rearm(&cluster);
+        assert(op.retry_count == 1 && gpio_level[RELAY_PIN] == 1);
+        now_ms += 1000;
+        assert(monitor(now_ms, 100) == OVERLOAD_ACTION_NONE);
+        now_ms += OVERLOAD_RETRY_FORGIVE_MS - 1;
+        assert(monitor(now_ms, 100) == OVERLOAD_ACTION_NONE && op.retry_count == 1);
+        now_ms += 1;
+        assert(monitor(now_ms, 100) == OVERLOAD_ACTION_NONE);
+        assert(op.retry_count == 0 && !op.locked_out);
+    }
+    /* A soft overload inside the window restarts it rather than forgiving. */
+    assert(monitor(now_ms, 4000) == OVERLOAD_ACTION_TURN_OFF);
+    relay_cluster_protection_trip(&cluster);
+    now_ms += 61 * 1000;
+    assert(monitor(now_ms, 4000) == OVERLOAD_ACTION_TURN_ON);
+    relay_cluster_protection_rearm(&cluster);
+    now_ms += 1000;
+    assert(monitor(now_ms, 100) == OVERLOAD_ACTION_NONE);
+    now_ms += OVERLOAD_RETRY_FORGIVE_MS / 2;
+    assert(monitor(now_ms, 2600) == OVERLOAD_ACTION_NONE && op.alarm == OVERLOAD_ALARM_POWER);
+    now_ms += 1000;
+    assert(monitor(now_ms, 100) == OVERLOAD_ACTION_NONE);
+    now_ms += OVERLOAD_RETRY_FORGIVE_MS / 2 + 1000;
+    assert(monitor(now_ms, 100) == OVERLOAD_ACTION_NONE && op.retry_count == 1);
     /* Untouched behavior: detached ON drives nothing new; toggle still flips. */
     setup(ZCL_ONOFF_PHYSICAL_RELAY_MODE_DETACHED_ON, 0,
           ZCL_START_UP_ONOFF_SET_ONOFF_TO_OFF);

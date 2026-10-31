@@ -150,9 +150,14 @@ static void elec_meas_apply_calibration_values(
         if (channel < 0)
             continue;
 
+        /* Saturate rather than wrap: an overlong number must not alias to an
+         * arbitrary small multiplier that the meter would then accept. */
         uint32_t value = 0;
-        for (i++; i < len && str[i] >= '0' && str[i] <= '9'; i++)
-            value = value * 10u + (uint32_t)(str[i] - '0');
+        for (i++; i < len && str[i] >= '0' && str[i] <= '9'; i++) {
+            uint32_t digit = (uint32_t)(str[i] - '0');
+            value = value > (UINT32_MAX - digit) / 10u ? UINT32_MAX :
+                    value * 10u + digit;
+        }
         i--;
         mults[channel] = value;
     }

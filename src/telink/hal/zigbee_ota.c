@@ -7,21 +7,52 @@
 #include "telink_size_t_hack.h"
 
 #include "hal/tasks.h"
+#include "hal/timer.h"
 #include "hal/zigbee.h"
 #include "hal/zigbee_ota.h"
 #include "telink_zigbee_hal.h"
 #include "version_cfg.h"
 #include "app.h"
+#include "device_config/reset.h"
 
 // Forward declarations
 
 void ota_process_msg_callback(u8 evt, u8 status);
 
 static hal_task_t ota_checkpoint_reboot_task;
+static uint8_t    ota_reboot_deferrals;
+
+#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
+
+/* Recovery probes and rejoin must not collide with Router OTA transfers.
+ * The callback lease may expire only when the SDK itself reports NORMAL.
+ * Slow or paused image download must NEVER be interrupted by the watchdog.
+ * If an SDK callback disappears but its transfer status remains active,
+ * safety wins: no forced OTA reset or network rejoin. */
+#define ROUTER_OTA_ACTIVITY_LEASE_MS    (2u * 60u * 60u * 1000u)
+static bool     router_ota_in_progress;
+static uint32_t router_ota_started_ms;
+
+bool telink_zigbee_hal_router_ota_in_progress(void) {
+    /* The SDK status is authoritative for transfer activity even if the
+     * BSEED callback was lost or an OTA resumed without a fresh START. */
+    if (zcl_attr_imageUpgradeStatus != IMAGE_UPGRADE_STATUS_NORMAL)
+        return true;
+
+    if (router_ota_in_progress &&
+        (uint32_t)(hal_millis() - router_ota_started_ms) >=
+        ROUTER_OTA_ACTIVITY_LEASE_MS) {
+        router_ota_in_progress = false;
+        printf("Router: stale, SDK-idle OTA ownership expired\r\n");
+    }
+    return router_ota_in_progress;
+}
+
+#endif
 
 static void ota_reboot_after_checkpoint(void *arg) {
     (void)arg;
-    if (!app_prepare_reboot()) {
+    if (!reboot_checkpoint_ready(&ota_reboot_deferrals)) {
         hal_tasks_schedule(&ota_checkpoint_reboot_task, 5000);
         return;
     }
@@ -91,6 +122,14 @@ void hal_ota_cluster_setup(hal_zigbee_cluster *cluster) {
 }
 
 void ota_process_msg_callback(u8 evt, u8 status) {
+#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
+    if (evt == OTA_EVT_START && status == ZCL_STA_SUCCESS) {
+        router_ota_in_progress = true;
+        router_ota_started_ms  = hal_millis();
+    } else if (evt == OTA_EVT_IMAGE_DONE || evt == OTA_EVT_COMPLETE) {
+        router_ota_in_progress = false;
+    }
+#endif
     if (evt == OTA_EVT_START) {
 #ifdef BSEED_OTA_DEFERRED_REQUERY
         hal_tasks_unschedule(&ota_abort_query_retry_task);
