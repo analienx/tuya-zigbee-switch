@@ -6,6 +6,9 @@
   "serve_bind": "0.0.0.0",
   "serve_port": 8099,
   "campaign_root": "/private/ota/campaigns",
+  "lock_search_roots": ["/private/ota/older-campaign-workdirs"],
+  "ha_ssh_alias": "ha",
+  "z2m_database": "/config/zigbee2mqtt/database.db",
   "network_lock_dir": "/private/shared-ota-authority",
   "network_id": "VERIFIED_COORDINATOR_IEEE",
   "pm_ssh_host": "PRIVATE_Z2M_HOST",
@@ -15,14 +18,12 @@
       "ieee": "0x0011223344556677",
       "board": "pm",
       "role": "EndDevice",
-      "preflash_build": "CURRENT_INSTALLED_BUILD",
       "expect_relay": "OFF"
     },
     "PM_ROUTER_FRIENDLY_NAME": {
       "ieee": "0x0011223344556678",
       "board": "pm",
       "role": "Router",
-      "preflash_build": "CURRENT_INSTALLED_BUILD",
       "expect_relay": "ON",
       "pm_settings_baseline": "/private/ota/baselines/pm_router_settings.json"
     },
@@ -30,7 +31,6 @@
       "ieee": "0x0011223344556679",
       "board": "nonpm",
       "role": "EndDevice",
-      "preflash_build": "CURRENT_INSTALLED_BUILD",
       "expect_relay": "OFF",
       "relay_physical_mode": "attached",
       "recovery_evidence": "/private/ota/recovery/nonpm_socket.json",

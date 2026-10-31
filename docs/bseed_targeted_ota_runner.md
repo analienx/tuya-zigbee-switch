@@ -82,7 +82,21 @@ python helper_scripts/bseed_canary.py run --site /private/site.json \
     --flash --confirm-ieee 0xEXACT_TARGET_IEEE   # non-PM also: --confirm-load-unplugged
 ```
 
-`plan` writes the profile without contacting anything. Cross-role conversions
+`discover` is read-only and needs no artifacts. For every roster socket (or
+`--device`) it prints the live Zigbee2MQTT identity (IEEE, role, installed
+Basic build, interview state) read over the site's `ha_ssh_alias`, the release
+candidate it would get, every earlier campaign lock found by IEEE under
+`campaign_root` and `lock_search_roots`, and whether it is eligible. `plan` and
+`run` use the same discovery: the installed build fills `preflash_build`, and a
+roster value, role or board that disagrees with the live socket refuses.
+Terminal lock phases (`postflash_accepted`, `installed_image_reconciled`,
+`source_unchanged_abandoned`, `postflash_candidate`) do not block; anything else
+needs a deliberate reconcile or abandon first.
+
+The canary contacts LAN devices, so it is the one repository tool that runs on
+the operator's Windows host as an authorized live-device action. Never run it,
+or any repository build/test, in WSL; all repository validation stays on
+GitHub-hosted runners. Cross-role conversions
 still use `--mode transition` directly. A passing run prints the remaining
 physical acceptance checklist; it is a software gate, not hardware acceptance.
 

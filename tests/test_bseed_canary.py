@@ -197,3 +197,73 @@ def test_lan_server_serves_only_the_private_root(tmp_path):
         port = server.httpd.server_address[1]
         with urllib.request.urlopen('http://127.0.0.1:%d/image.ota' % port, timeout=5) as rsp:
             assert rsp.read() == b'payload'
+
+
+def live_record(board='pm', role='EndDevice', build='1.2.5-bseedcli12', **extra):
+    spec = canary.BOARDS[board]
+    record = {'ieeeAddr': IEEE, 'type': role, 'swBuildId': build,
+              'manufName': spec['manufacturer'], 'modelId': spec['model'],
+              'interviewCompleted': True}
+    record.update(extra)
+    return record
+
+
+def test_discovery_fills_build_and_refuses_disagreement(tmp_path):
+    artifacts, registry = make_artifacts(tmp_path, 'pm')
+    site = make_site(tmp_path, 'pm', 'EndDevice', preflash_build=None)
+    with pytest.raises(canary.CanaryError, match='needs preflash_build'):
+        canary.build_profile(site, 'Canary', artifacts, registry)
+    _, profile = canary.build_profile(site, 'Canary', artifacts, registry, live=live_record())
+    assert profile['preflash_build'] == '1.2.5-bseedcli12'
+    for bad, match in ((live_record(role='Router'), 'use a transition'),
+                       (live_record(board='nonpm'), 'live board'),
+                       (live_record(interviewCompleted=False), 'interview')):
+        with pytest.raises(canary.CanaryError, match=match):
+            canary.discover(site, 'Canary', live=bad)
+    (tmp_path / 'b').mkdir()
+    site = make_site(tmp_path / 'b', 'pm', 'EndDevice', preflash_build='1.2.5-bseedcli9')
+    with pytest.raises(canary.CanaryError, match='differs from live'):
+        canary.discover(site, 'Canary', live=live_record())
+
+
+def test_discovery_finds_locks_by_ieee_and_accepts_terminal_phases(tmp_path):
+    scratch = tmp_path / 'scratch'
+    site = make_site(tmp_path, 'pm', 'EndDevice', preflash_build=None)
+    site['lock_search_roots'] = [str(scratch)]
+    other = scratch / 'other' / 'run'
+    other.mkdir(parents=True)
+    (other / 'ACTIVE_LOCK.json').write_text(json.dumps(
+        {'phase': 'update_error', 'ieee': '0xa4c1380000000099', 'device': 'Other'}))
+    for index, phase in enumerate(('postflash_accepted', 'source_unchanged_abandoned',
+                                   'installed_image_reconciled')):
+        write_lock(scratch / ('done%d' % index), phase)
+    report = canary.discover(site, 'Canary', live=live_record())
+    assert len(report['locks']) == 3 and all(lock['clean'] for lock in report['locks'])
+    assert report['eligible'] and report['preflash_build'] == '1.2.5-bseedcli12'
+    write_lock(scratch / 'stuck', 'update_timeout_or_unconfirmed')
+    report = canary.discover(site, 'Canary', live=live_record())
+    assert not report['eligible']
+    with pytest.raises(canary.CanaryError, match='update_timeout_or_unconfirmed'):
+        canary.prior_campaign_locks(site, 'Canary')
+
+
+def test_live_identity_uses_read_only_ssh_query(tmp_path):
+    site = make_site(tmp_path, 'pm', 'EndDevice')
+    site['ha_ssh_alias'] = 'ha'
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        seen['command'], seen['input'] = command, kwargs['input']
+        return type('R', (), {'returncode': 0,
+                              'stdout': json.dumps(live_record()) + '\n'})()
+
+    assert canary.live_identity(site, IEEE, run=fake_run)['swBuildId'] == '1.2.5-bseedcli12'
+    assert seen['command'][:5] == ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8']
+    assert seen['command'][-2:] == ['/config/zigbee2mqtt/database.db', IEEE]
+    assert 'write' not in seen['input'] and 'open(sys.argv[1]' in seen['input']
+
+    def no_record(command, **kwargs):
+        return type('R', (), {'returncode': 0, 'stdout': ''})()
+
+    with pytest.raises(canary.CanaryError, match='unavailable'):
+        canary.live_identity(site, IEEE, run=no_record)
