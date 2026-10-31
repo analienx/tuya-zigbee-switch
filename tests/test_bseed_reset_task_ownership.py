@@ -75,6 +75,19 @@ int main(void) {
     }
     assert(active_for(&reset_task) == 0);
 
+    /* A checkpoint that never succeeds defers a bounded number of times and
+     * then reboots, instead of blocking every controlled reboot forever. */
+    static int deferred;
+    prepare_ok = 0;
+    if (setjmp(reset_target) == 0) {
+        for (;;) {
+            reboot_handler(NULL);
+            deferred++;
+            assert(active_for(&reset_task) == 1);
+        }
+    }
+    assert(deferred == REBOOT_CHECKPOINT_MAX_DEFERRALS);
+
     return 0;
 }
 '''

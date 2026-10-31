@@ -13,12 +13,14 @@
 #include "telink_zigbee_hal.h"
 #include "version_cfg.h"
 #include "app.h"
+#include "device_config/reset.h"
 
 // Forward declarations
 
 void ota_process_msg_callback(u8 evt, u8 status);
 
 static hal_task_t ota_checkpoint_reboot_task;
+static uint8_t    ota_reboot_deferrals;
 
 #if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
 
@@ -50,7 +52,7 @@ bool telink_zigbee_hal_router_ota_in_progress(void) {
 
 static void ota_reboot_after_checkpoint(void *arg) {
     (void)arg;
-    if (!app_prepare_reboot()) {
+    if (!reboot_checkpoint_ready(&ota_reboot_deferrals)) {
         hal_tasks_schedule(&ota_checkpoint_reboot_task, 5000);
         return;
     }
