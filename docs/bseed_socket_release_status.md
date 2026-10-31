@@ -1,5 +1,31 @@
 # BSEED socket firmware: published releases and candidates
 
+## Current candidates and canary plan — 2026-10-31
+
+Sealed from exact-SHA public CI at `8636ee47` and merged on `main` (#89, #90).
+None is published in the public OTA index and none has hardware acceptance.
+
+| Board | Role | Candidate | Version | Status |
+|---|---|---|---|---|
+| TS011F-BS-PM (`b28wrpvx`) | Router | `1.2.5-bseedr17` | `0x1205301F` (type 43556) | sealed, canary pending |
+| TS011F-BS-PM | Client | `1.2.5-bseedcli20` | `0x1205301F` (type 65024) | sealed, canary pending |
+| TS011F-BS non-PM (`o1jzcxou`) | Router | `1.1.3-bseedr16` | `0x1102301B` (type 43555) | sealed, canary pending |
+| TS011F-BS non-PM | Client | `1.1.3-bseedc14` | `0x1102301B` (type 65026) | sealed, canary pending |
+
+Canary order: KitchenSocketRight as PM Router (`r17`), then KitchenSocketLeft as
+PM Client (`cli20`), each as a same-role single-device canary through
+`helper_scripts/bseed_canary.py` (see `docs/bseed_targeted_ota_runner.md`). The
+canary tool refuses while an earlier campaign for the same socket still holds an
+unresolved lock (for example `update_error`), so a lock from an older workdir
+cannot be bypassed by starting a new build workdir.
+
+Live identity observed read-only on 2026-10-31 (Zigbee2MQTT database and
+configuration, before any canary): KitchenSocketRight `0xa4c138075cd16ed4`
+interviewed as PM Router, date code `20261011`; KitchenSocketLeft
+`0xa4c138241e3de538` interviewed as PM EndDevice, date code `20260928`. The
+installed Basic build of each still has to be confirmed by the campaign's
+preflight before any flash; the database date codes are not build proof.
+
 ## Current release status — 2026-10-13
 
 The public BSEED OTA index contains the accepted Router releases and their
