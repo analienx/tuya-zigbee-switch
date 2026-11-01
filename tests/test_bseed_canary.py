@@ -118,6 +118,18 @@ def test_settled_prior_lock_does_not_block(tmp_path):
     canary.build_profile(site, 'Canary', artifacts, registry)
 
 
+def test_request_timeout_defaults_to_five_minutes_and_device_may_override(tmp_path):
+    artifacts, registry = make_artifacts(tmp_path, 'pm')
+    site = make_site(tmp_path / 'default', 'pm', 'EndDevice')
+    path, profile = canary.build_profile(site, 'Canary', artifacts, registry)
+    assert profile['request_timeout_ms'] == 300000
+    assert load_profile(path)['request_timeout_ms'] == 300000
+    site = make_site(tmp_path / 'long', 'pm', 'EndDevice',
+                     overrides={'request_timeout_ms': 1800000})
+    _, profile = canary.build_profile(site, 'Canary', artifacts, registry)
+    assert profile['request_timeout_ms'] == 1800000
+
+
 def test_site_and_identity_overrides_are_guarded(tmp_path):
     artifacts, registry = make_artifacts(tmp_path, 'pm')
     site = make_site(tmp_path, 'pm', 'EndDevice', overrides={'sha256': '0' * 64})

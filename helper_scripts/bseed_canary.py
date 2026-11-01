@@ -49,8 +49,13 @@ SITE_REQUIRED = ('mqtt_config', 'broker', 'serve_root',
 DEVICE_REQUIRED = ('ieee', 'board', 'role', 'expect_relay')
 # Conservative transfer pacing evidenced by the 2026-09-24 sleepy-client
 # recovery; a device entry may override these, never the identity fields.
+# request_timeout_ms is the per-block inactivity limit, not a whole-transfer
+# timeout. Default 5 min (operator decision 2026-11-01): a stalled client then
+# fails fast and the next campaign resumes from its retained partial image,
+# instead of idling 30 min per stall. Bedroom FORCE still enforces >=1800000
+# at profile load, so its site entry must override this explicitly.
 PACING = {'block_bytes': 32, 'response_delay_ms': 1200,
-          'request_timeout_ms': 1800000, 'monitor_seconds': 14400,
+          'request_timeout_ms': 300000, 'monitor_seconds': 14400,
           'check_timeout_seconds': 90}
 IDENTITY = {'device', 'ieee', 'manufacturer', 'model', 'preflash_role', 'postflash_role',
             'image', 'sha256', 'url', 'manufacturer_code', 'image_type', 'file_version',

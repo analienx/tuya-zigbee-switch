@@ -36,6 +36,12 @@ are not bypassed. Physical disconnection is independent of the relay state.
 5. Use the read-only helper bseed_ota_activity_report.py or supervisor status. It labels timeout_sufficiency as undetermined until real block-level evidence is independently reviewed. Neither authorizes a new OTA.
 6. Preserve generous distinct total transfer monitor time; do not confuse with per-block inactivity. Strictly increasing progress gates retries, and transport success with incomplete postflash must NEVER reflash automatically.
 
+### Canary default changed to 300,000 ms (operator decision, 2026-11-01)
+
+`helper_scripts/bseed_canary.py` now defaults `request_timeout_ms` to **300,000 ms (5 min)** instead of 1,800,000 ms. This is an explicit operator trade-off, not new block-level evidence: on 2026-11-01 KitchenSocketLeft (PM Client cli12 → cli20) stalled three times after parent rejoins (56.58%, 85.78%, 86.32%) and each stall idled the full 30 min before Zigbee2MQTT failed the session. The client retained its partial image every time, and each relaunch resumed from the stall offset (56.58% → 85.85%). A shorter inactivity limit therefore converts a dead stall into a fast fail-and-relaunch.
+
+Known cost: the 2026-09-24 Bedroom non-PM Client case shows 5 min can end a slow-but-alive transfer that a 30 min wait would have completed. That still loses no progress, because relaunch resumes from the retained offset, but every early failure requires the normal reconcile/abandon closeout and an explicitly authorized relaunch. Bedroom FORCE keeps its enforced 1,800,000 ms minimum and must set it as a device override; any other device may override the default in its site entry.
+
 ## Immutable four-variant release matrix
 
 | Board | Role | Sealed candidate | OTA native type | Version |
