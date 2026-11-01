@@ -120,6 +120,8 @@ def test_settled_prior_lock_does_not_block(tmp_path):
 
 def test_request_timeout_defaults_to_five_minutes_and_device_may_override(tmp_path):
     artifacts, registry = make_artifacts(tmp_path, 'pm')
+    (tmp_path / 'default').mkdir()
+    (tmp_path / 'long').mkdir()
     site = make_site(tmp_path / 'default', 'pm', 'EndDevice')
     path, profile = canary.build_profile(site, 'Canary', artifacts, registry)
     assert profile['request_timeout_ms'] == 300000
