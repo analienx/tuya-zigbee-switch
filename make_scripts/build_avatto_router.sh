@@ -4,7 +4,9 @@
 # Repository builds run on GitHub-hosted Actions only.
 set -euo pipefail
 
-VARIANT="${1:?usage: $0 {ts0001|ts0002} [output-dir]}"
+USAGE="usage: $0 ts0001|ts0002 [output-dir]"
+[[ $# -ge 1 ]] || { echo "$USAGE" >&2; exit 2; }
+VARIANT="$1"
 eval "$(python3 helper_scripts/avatto_release.py vars --variant "$VARIANT")"
 
 OUT_DIR="${2:-build/avatto-$VARIANT-router}"
