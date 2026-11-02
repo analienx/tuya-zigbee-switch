@@ -6,11 +6,11 @@ import struct
 
 from bseed_ota_identity import IdentityError, parse_ota_header, require_embedded_string
 
-CLIENT = {'role': 'EndDevice', 'build': '1.2.5-bseedcli21',
-          'version': 0x12053020, 'type': 65024, 'artifact': 'forward.ota',
+CLIENT = {'role': 'EndDevice', 'build': '1.2.5-bseedcli22',
+          'version': 0x12053021, 'type': 65024, 'artifact': 'forward.ota',
           'date': '20261102'}
-ROUTER = {'role': 'Router', 'build': '1.2.5-bseedr18',
-          'version': 0x12053020, 'type': 43556, 'artifact': 'forward.ota',
+ROUTER = {'role': 'Router', 'build': '1.2.5-bseedr19',
+          'version': 0x12053021, 'type': 43556, 'artifact': 'forward.ota',
           'date': '20261102'}
 CANDIDATES = {'client': CLIENT, 'router': ROUTER}
 RELEASE_DATE = '20261003'  # Immutable input for this candidate set, not wall-clock build time.

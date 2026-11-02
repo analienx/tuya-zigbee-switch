@@ -41,11 +41,25 @@ static inline uint8_t bseed_parent_losses_recent(
     return recent;
 }
 
+/* Six hours without a parent loss ends rescan mode. Evaluated BEFORE a new
+ * loss is recorded: recording first would reset the stable timer and keep a
+ * Client in rescan mode until reboot. */
+static inline void bseed_parent_policy_expire(bseed_parent_policy_t *p,
+                                              uint32_t now) {
+    if (p->rescan &&
+        (uint32_t)(now - p->last_loss_ms) >= BSEED_PARENT_STABLE_MS) {
+        p->rescan     = false;
+        p->loss_count = 0;
+        p->loss_next  = 0;
+    }
+}
+
 /* Record one parent loss. Entering rescan mode needs three losses within an
  * hour: a single blip (parent reboot, brief interference) keeps the fast
  * previous-parent rejoin. Returns true while in rescan mode. */
 static inline bool bseed_parent_policy_note_loss(bseed_parent_policy_t *p,
                                                  uint32_t now) {
+    bseed_parent_policy_expire(p, now);
     p->loss_ms[p->loss_next] = now;
     p->loss_next             = (uint8_t)((p->loss_next + 1u) % BSEED_PARENT_LOSS_TRIGGER);
     if (p->loss_count < BSEED_PARENT_LOSS_TRIGGER)
@@ -65,12 +79,7 @@ static inline bool bseed_parent_policy_note_loss(bseed_parent_policy_t *p,
  * starts. Six hours without a parent loss returns to sticky behaviour. */
 static inline bool bseed_parent_policy_prefer_previous(bseed_parent_policy_t *p,
                                                        uint32_t now) {
-    if (p->rescan &&
-        (uint32_t)(now - p->last_loss_ms) >= BSEED_PARENT_STABLE_MS) {
-        p->rescan     = false;
-        p->loss_count = 0;
-        p->loss_next  = 0;
-    }
+    bseed_parent_policy_expire(p, now);
     return !p->rescan;
 }
 

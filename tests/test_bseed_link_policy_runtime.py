@@ -53,6 +53,25 @@ static int client(uint32_t base) {
     CHECK(!bseed_parent_policy_note_loss(&p, t + 80u * min));
     CHECK(bseed_parent_policy_prefer_previous(&p, t + 81u * min));
     CHECK(bseed_parent_losses_recent(&p, t + 81u * min) == 2u);
+
+    /* The driver's real order: note the loss, THEN ask for the flag. A
+     * loss after 6 h of stability must return to sticky, not extend rescan. */
+    bseed_parent_policy_t q;
+    memset(&q, 0, sizeof(q));
+    CHECK(!bseed_parent_policy_note_loss(&q, base));
+    CHECK(!bseed_parent_policy_note_loss(&q, base + 1u * min));
+    CHECK(bseed_parent_policy_note_loss(&q, base + 2u * min));
+    CHECK(!bseed_parent_policy_prefer_previous(&q, base + 2u * min));
+    uint32_t later = base + 2u * min + 7u * 60u * min;
+    CHECK(!bseed_parent_policy_note_loss(&q, later));
+    CHECK(bseed_parent_policy_prefer_previous(&q, later));
+    CHECK(q.rescan_entries == 1u);
+    /* Still rescanning when the next loss comes inside the stable window. */
+    CHECK(!bseed_parent_policy_note_loss(&q, later + 1u * min));
+    CHECK(bseed_parent_policy_note_loss(&q, later + 2u * min));
+    CHECK(q.rescan_entries == 2u);
+    CHECK(bseed_parent_policy_note_loss(&q, later + 3u * 60u * min));
+    CHECK(!bseed_parent_policy_prefer_previous(&q, later + 3u * 60u * min));
     return 0;
 }
 
@@ -123,14 +142,29 @@ def test_driver_uses_policy_for_both_roles_and_never_broadcast_mode():
     init = source[source.index("void telink_zigbee_hal_network_init(void)"):]
     assert init.index("zb_init();") < init.index("PRE_PARENT_FIRST_WHEN_REJOIN = TRUE;")
     assert len(re.findall(r"PRE_PARENT_FIRST_WHEN_REJOIN\s*=\s*FALSE;", source)) == 1
-    begin = source.split("static void link_router_rejoin_begin(uint32_t now) {", 1)[1].split("}", 1)[0]
+    begin = source.split("static void link_router_rejoin_begin(void) {", 1)[1].split("}", 1)[0]
     assert "PRE_PARENT_FIRST_WHEN_REJOIN = FALSE;" in begin
     tick = source.split("void telink_zigbee_hal_router_recovery_tick(void) {", 1)[1]
-    assert tick.index("link_router_rejoin_begin(now);") < tick.index("zb_rejoinReq(")
-    assert tick.index("link_router_route_tick(now);") < tick.index("bseed_router_joined_rescue_eligible(")
+    body = tick.split("\n}\n", 1)[0]
+    assert body.index("link_router_rejoin_begin();") < body.index("zb_rejoinReq(")
+    # Count a rescan rejoin only once the SDK accepted it; restore sticky on
+    # rejection and on both orphaned one-shot paths.
+    assert body.index("zb_rejoinReq(") < body.index("link_router_rejoin_started(now);")
+    assert body.count("link_router_rejoin_end();") == 3
+    # No route discovery while an orphaned one-shot may own the radio, and no
+    # rejoin scan right after a route discovery.
+    assert "if (!router_one_shot_stalled)\n        link_router_route_tick(now);" in body
+    assert "!link_router_rejoin_held(now)" in body
+    assert body.index("link_router_route_tick(now);") < body.index("bseed_router_joined_rescue_eligible(")
+    # A coordinator in the neighbour table is the next hop before any route entry.
+    route = source.split("static void link_router_route_tick(uint32_t now) {", 1)[1].split("\n}\n", 1)[0]
+    assert route.index("nwk_neTblGetByShortAddr(0x0000u)") < route.index("g_routingTab[i]")
+    # A PARENT_LOST raised inside the SDK's own backoff is not a new loss.
+    lost = source.split("case BDB_COMMISSION_STA_PARENT_LOST:", 1)[1].split("break;", 1)[0]
+    assert "if (network_recovery_state != TELINK_NETWORK_RECOVERY_REJOIN)\n            link_note_parent_loss();" in lost
     # Recovery tick and Client keepalive block stay free of policy #ifdefs:
     # source-slicing harnesses cut these functions at their first #endif.
-    assert "#ifdef BSEED_LINK_POLICY" not in tick.split("\n}\n", 1)[0]
+    assert "#ifdef BSEED_LINK_POLICY" not in body
     keepalive = source.split("#ifdef BSEED_MAINS_CLIENT", 1)[1].split("#endif", 1)[0]
     assert "MAINS_CLIENT_KEEPALIVE_POLL_MS" in keepalive
 

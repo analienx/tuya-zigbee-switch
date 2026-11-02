@@ -33,19 +33,19 @@ while the in-house PM Router beside it did not list it at all. The Telink
 | State | Rule |
 |---|---|
 | Sticky (default) | `PRE_PARENT_FIRST_WHEN_REJOIN = TRUE` |
-| Enter rescan | 3 parent-loss signals within 60 min (BDB `PARENT_LOST` or silent MAC-poll recovery) |
+| Enter rescan | 3 parent-loss signals within 60 min: a BDB `PARENT_LOST` that starts a new recovery, or silent-parent recovery. `PARENT_LOST` raised inside the SDK's own ongoing backoff is the same outage and is not counted. |
 | Rescan | Flag set `FALSE` immediately before our `zb_rejoinReqWithBackOff()`; the SDK then scans and chooses the best parent |
-| Back to sticky | 6 h without a parent loss |
+| Back to sticky | 6 h without a parent loss, evaluated before a new loss is recorded (recording first would reset the timer and never leave rescan mode) |
 
 ## Routers
 
 | Step | Trigger | Action |
 |---|---|---|
-| Observe | every 60 s | next hop to 0x0000 from `g_routingTab` (or the coordinator as a direct neighbour), its neighbour-table cost, best other router neighbour cost |
+| Observe | every 60 s | next hop to 0x0000: the coordinator itself when it is in the neighbour table (NWK forwards to neighbours directly), else the active `g_routingTab` entry; its cost; best other router neighbour cost. Not while an orphaned one-shot may own the radio. |
 | Proactive refresh | next hop at cost 7 for 15 min and another router neighbour at cost <= 3 | `zb_routeDiscReq()` unicast (`ZB_ADDR_16BIT_DEV_OR_BROADCAST`) to 0x0000 |
 | Reactive refresh | 2 failed coordinator probes | same |
-| Refresh cooldown | 60 min after any request | |
-| Rejoin | existing threshold (4 probe failures, 20 min) | existing secure one-shot with `PRE_PARENT_FIRST_WHEN_REJOIN = FALSE`; restored to `TRUE` on its terminal callback |
+| Refresh cooldown | 60 min after any request; no rejoin scan for 2 min after a request | |
+| Rejoin | existing threshold (4 probe failures, 20 min) | existing secure one-shot with `PRE_PARENT_FIRST_WHEN_REJOIN = FALSE`; restored to `TRUE` on rejection, on its terminal callback and on both orphaned-callback paths. Counted only when the SDK accepted the request. |
 | Reboot | existing rules | unchanged |
 
 Address mode 0 (ZDP `SHORT_ADDR_MODE`) must never be used for route
@@ -81,12 +81,15 @@ a combined read of the 48-byte snapshots times out on a Client.
 
 | Line | Router | Client | Version |
 |---|---|---|---|
-| PM TS011F-BS-PM | 1.2.5-bseedr18 | 1.2.5-bseedcli21 | 0x12053020 |
-| Non-PM TS011F-BS | 1.1.3-bseedr17 | 1.1.3-bseedc15 | 0x1102301C |
+| PM TS011F-BS-PM | 1.2.5-bseedr19 | 1.2.5-bseedcli22 | 0x12053021 |
+| Non-PM TS011F-BS | 1.1.3-bseedr18 | 1.1.3-bseedc16 | 0x1102301D |
 | TS0726-3-BS | 1.1.9-bseedrv2 (`link-policy-candidate`) | 1.1.8-bseedcli4 | 0x11023011 |
 
-Non-BSEED boards (for example AVATTO TS0001/TS0002) build with the policy by
-default; their release identities are handled by their own build path.
+TS0726 rv2/cli4 are reserved in `bseed_identity.json` (no hash yet). Historical
+identity builds (TS0726 v8/lv3/rv1, PM v8u4 and its rc channels) pass
+`BSEED_LINK_POLICY=0` so their bytes do not drift further. Non-BSEED boards
+(for example AVATTO TS0001/TS0002) build with the policy by default; their
+release identities are handled by their own build path.
 
 ## Acceptance
 
@@ -95,7 +98,12 @@ it leaves the stock parent or parent losses fall from about 5/h to under
 1/day over a 24 h soak, read from 0xFF10 and 0xFF13. A green CI never
 authorizes flashing.
 
-### Sealed from exact-SHA public CI
+### Retired seal (superseded before deployment)
+
+The first seal below was superseded by the code-review fixes before any
+device received it; its four tuples are `retired` in the registry and must
+never be deployed. The candidates above replace them.
+
 
 Source `d06e130cf63fc4e85a2fd6c03648bbc08aef942b`. All required GitHub-hosted
 checks passed on it ([candidate finalization](https://github.com/analienx/tuya-zigbee-switch/actions/runs/41437647854),

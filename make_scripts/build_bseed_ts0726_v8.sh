@@ -14,6 +14,9 @@ MANUFACTURER_CODE=4417
 IMAGE_TYPE=45577
 STOCK_MANUFACTURER_NAME='_TZ3002_iedhxgyi'
 STOCK_IMAGE_TYPE=54179
+# Historical identities keep their published/reserved bytes: only the
+# current candidate channel compiles the link policy (link_policy.h).
+LINK_POLICY=0
 SW_BUILD='1.1.8-bseedv8'
 FILE_VERSION_HEX='0x1102300A'
 FILE_VERSION_DEC=285356042
@@ -34,6 +37,7 @@ elif [[ "${BSEED_TS0726_RELEASE_CHANNEL:-}" == 'link-policy-candidate' ]]; then
     # Router recovery plus parent/route link policy (src/hal/link_policy.h).
     # Fresh identity: shared Router bytes changed after rv1.
     SW_BUILD='1.1.9-bseedrv2'
+    LINK_POLICY=1
     FILE_VERSION_HEX='0x11023011'
     FILE_VERSION_DEC=285356049
 elif [[ -n "${BSEED_TS0726_RELEASE_CHANNEL:-}" ]]; then
@@ -115,6 +119,7 @@ OTA="$OUT_DIR/forward.ota"
 FROM_TUYA_OTA="$OUT_DIR/from_tuya.ota"
 
 COMMON_ARGS=(
+  BSEED_LINK_POLICY="$LINK_POLICY"
     VERSION_STR="$SW_BUILD"
     FILE_VERSION="$FILE_VERSION_HEX"
     NVM_MIGRATIONS_VERSION="$NVM_SCHEMA"
