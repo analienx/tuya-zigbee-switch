@@ -118,13 +118,21 @@ def test_driver_uses_policy_for_both_roles_and_never_broadcast_mode():
         assert call in source, call
     # Address mode 0 is a broadcast many-to-one discovery; only 16-bit unicast is allowed.
     assert "req.dstAddrMode  = ZB_ADDR_16BIT_DEV_OR_BROADCAST;" in source
-    assert "SHORT_ADDR_MODE" not in source
+    assert not re.search(r"dstAddrMode\s*=\s*SHORT_ADDR_MODE", source)
     # Sticky default after zb_init(); rescans only through policy or the Router one-shot.
     init = source[source.index("void telink_zigbee_hal_network_init(void)"):]
     assert init.index("zb_init();") < init.index("PRE_PARENT_FIRST_WHEN_REJOIN = TRUE;")
     assert len(re.findall(r"PRE_PARENT_FIRST_WHEN_REJOIN\s*=\s*FALSE;", source)) == 1
-    oneshot = source[source.index("zb_rejoinSecModeSet(REJOIN_SECURITY);\n#ifdef BSEED_LINK_POLICY"):]
-    assert oneshot.index("PRE_PARENT_FIRST_WHEN_REJOIN = FALSE;") < oneshot.index("zb_rejoinReq(")
+    begin = source.split("static void link_router_rejoin_begin(uint32_t now) {", 1)[1].split("}", 1)[0]
+    assert "PRE_PARENT_FIRST_WHEN_REJOIN = FALSE;" in begin
+    tick = source.split("void telink_zigbee_hal_router_recovery_tick(void) {", 1)[1]
+    assert tick.index("link_router_rejoin_begin(now);") < tick.index("zb_rejoinReq(")
+    assert tick.index("link_router_route_tick(now);") < tick.index("bseed_router_joined_rescue_eligible(")
+    # Recovery tick and Client keepalive block stay free of policy #ifdefs:
+    # source-slicing harnesses cut these functions at their first #endif.
+    assert "#ifdef BSEED_LINK_POLICY" not in tick.split("\n}\n", 1)[0]
+    keepalive = source.split("#ifdef BSEED_MAINS_CLIENT", 1)[1].split("#endif", 1)[0]
+    assert "MAINS_CLIENT_KEEPALIVE_POLL_MS" in keepalive
 
 
 def test_policy_is_enabled_for_every_telink_build():

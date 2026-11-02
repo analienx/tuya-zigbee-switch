@@ -16,9 +16,9 @@
 
 /* ---- Client: when to stop preferring the previous parent on rejoin ---- */
 
-#define BSEED_PARENT_LOSS_TRIGGER       3u
-#define BSEED_PARENT_LOSS_WINDOW_MS     (60u * 60u * 1000u)
-#define BSEED_PARENT_STABLE_MS          (6u * 60u * 60u * 1000u)
+#define BSEED_PARENT_LOSS_TRIGGER      3u
+#define BSEED_PARENT_LOSS_WINDOW_MS    (60u * 60u * 1000u)
+#define BSEED_PARENT_STABLE_MS         (6u * 60u * 60u * 1000u)
 
 typedef struct {
     uint32_t loss_ms[BSEED_PARENT_LOSS_TRIGGER]; /* ring of recent losses */
@@ -47,7 +47,7 @@ static inline uint8_t bseed_parent_losses_recent(
 static inline bool bseed_parent_policy_note_loss(bseed_parent_policy_t *p,
                                                  uint32_t now) {
     p->loss_ms[p->loss_next] = now;
-    p->loss_next = (uint8_t)((p->loss_next + 1u) % BSEED_PARENT_LOSS_TRIGGER);
+    p->loss_next             = (uint8_t)((p->loss_next + 1u) % BSEED_PARENT_LOSS_TRIGGER);
     if (p->loss_count < BSEED_PARENT_LOSS_TRIGGER)
         p->loss_count++;
     p->last_loss_ms = now;
@@ -76,11 +76,11 @@ static inline bool bseed_parent_policy_prefer_previous(bseed_parent_policy_t *p,
 
 /* ---- Router: when to request a non-disruptive route rediscovery ---- */
 
-#define BSEED_ROUTE_COST_WORST            7u
-#define BSEED_ROUTE_COST_GOOD             3u
-#define BSEED_ROUTE_POOR_HOLD_MS          (15u * 60u * 1000u)
-#define BSEED_ROUTE_REFRESH_COOLDOWN_MS   (60u * 60u * 1000u)
-#define BSEED_ROUTE_REACTIVE_FAILURES     2u
+#define BSEED_ROUTE_COST_WORST             7u
+#define BSEED_ROUTE_COST_GOOD              3u
+#define BSEED_ROUTE_POOR_HOLD_MS           (15u * 60u * 1000u)
+#define BSEED_ROUTE_REFRESH_COOLDOWN_MS    (60u * 60u * 1000u)
+#define BSEED_ROUTE_REACTIVE_FAILURES      2u
 
 /* Reactive: two failed coordinator probes. Proactive: the next hop toward
  * the coordinator has been at the worst cost for 15 minutes while another
@@ -94,8 +94,10 @@ static inline bool bseed_route_refresh_due(
     if (refreshed_before &&
         (uint32_t)(now - last_refresh_ms) < BSEED_ROUTE_REFRESH_COOLDOWN_MS)
         return false;
+
     if (probe_failures >= BSEED_ROUTE_REACTIVE_FAILURES)
         return true;
+
     return has_route && next_hop_cost >= BSEED_ROUTE_COST_WORST &&
            poor_tracked &&
            (uint32_t)(now - poor_since_ms) >= BSEED_ROUTE_POOR_HOLD_MS &&
