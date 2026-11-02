@@ -264,3 +264,20 @@ _Or your custom path if you changed it in `homed-zigbee.conf` file (`device/exte
 [zigbee-herdsman-converters]: https://github.com/Koenkk/zigbee-herdsman-converters
 [z2m_ota_speed]: https://www.zigbee2mqtt.io/guide/usage/ota_updates.html#advanced-configuration
 [homed-service-zigbee]: https://github.com/u236/homed-service-zigbee
+
+## Native Zigbee2MQTT fleet index (Analienx)
+
+For a household whose devices already run custom firmware, use
+`zigbee2mqtt/ota/index_fleet.json` as `ota.zigbee_ota_override_index_location`
+instead of `index_bseed.json`. `index_bseed.json` remains the public
+stock-to-custom conversion index and intentionally contains `from_tuya` and
+`0xFFFFFFFF` wrappers, which a converted fleet must not be offered.
+
+`index_fleet.json` lists only `released`, hash-sealed, same-role images on their
+own custom image types, restricted by `manufacturerName`, served from this
+repository, with no `force`/`minFileVersion`/`maxFileVersion` fields.
+`helper_scripts/ota_fleet_index.py` enforces this as an allowlist and
+`tests/test_ota_fleet_index.py` exercises every refused case. New firmware goes
+through the canary tooling first; after acceptance, its sealed image is added
+here and the rest of the fleet updates from the Zigbee2MQTT frontend, one
+device at a time, with `disable_automatic_update_check: true`.
