@@ -121,7 +121,10 @@ def test_ts0726_has_explicit_distinct_candidate_and_exact_sha_ci():
     assert "router-recovery-candidate" in script
     assert "1.1.9-bseedrv1" in script
     assert "0x11023010" in script
-    assert "BSEED_TS0726_RELEASE_CHANNEL: router-recovery-candidate" in ci
+    assert "link-policy-candidate" in script
+    assert "1.1.9-bseedrv2" in script
+    assert "0x11023011" in script
+    assert "BSEED_TS0726_RELEASE_CHANNEL: link-policy-candidate" in ci
     assert 'test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"' in ci
     assert "bseed_ota_identity.py gate" in ci
 

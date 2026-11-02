@@ -109,6 +109,14 @@ ifneq ($(strip $(DEVICE_CONFIG_GUARD)),)
 DEVICE_DEFS := $(DEVICE_DEFS) -DDEVICE_CONFIG_GUARD_$(DEVICE_CONFIG_GUARD)
 endif
 
+# Parent/route selection policy (src/hal/link_policy.h) for every Telink
+# Router and mains Client build. BSEED_LINK_POLICY=0 reproduces the earlier
+# byte-identical behaviour for archival rebuilds.
+BSEED_LINK_POLICY ?= 1
+ifeq ($(strip $(BSEED_LINK_POLICY)),1)
+DEVICE_DEFS += -DBSEED_LINK_POLICY
+endif
+
 # Unified PM target options. They are explicit build inputs rather than global
 # firmware behavior, so TS0726 and every existing board remain unchanged.
 BSEED_PM_B28WRPVX ?=

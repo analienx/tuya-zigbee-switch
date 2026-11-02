@@ -14,6 +14,9 @@ MANUFACTURER_CODE=4417
 IMAGE_TYPE=43556
 STOCK_MANUFACTURER_NAME='_TZ3000_b28wrpvx'
 STOCK_IMAGE_TYPE=54179
+# Historical identities keep their published/reserved bytes: only the
+# current candidate channel compiles the link policy (link_policy.h).
+LINK_POLICY=0
 SW_BUILD='1.2.5-bseedv8u4'
 # 0x12053004 is the accepted V8 PM fix1 canary. 0x12053005 is permanently
 # reserved for the sealed known-good rollback. 0x12053006 is the accepted
@@ -55,6 +58,7 @@ fi
 # Consolidated same-source Router companion to PM Client cli11.
 RELEASE_DATE_OVERRIDE=''
 if [[ "${BSEED_PM_CONSOLIDATED:-0}" == "1" ]]; then
+    LINK_POLICY=1
     readarray -t release_vars < <(python3 helper_scripts/bseed_pm_release.py vars --role router)
     [[ ${#release_vars[@]} == 4 ]] || exit 2
     SW_BUILD="${release_vars[0]}"
@@ -143,6 +147,7 @@ OTA="$OUT_DIR/forward.ota"
 FROM_TUYA_OTA="$OUT_DIR/from_tuya.ota"
 
 COMMON_ARGS=(
+  BSEED_LINK_POLICY="$LINK_POLICY"
     BSEED_BUILD_DATE="$RELEASE_DATE_OVERRIDE"
     VERSION_STR="$SW_BUILD"
     FILE_VERSION="$FILE_VERSION_HEX"

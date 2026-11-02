@@ -39,9 +39,16 @@ def test_candidates_follow_canonical_board_allocator():
         assert int(allocation['FILE_VERSION'], 0) == candidate['version']
         assert allocation['VERSION_STR'] == candidate['build']
 
-    # The independently versioned TS0726 targets remain unchanged.
-    for role, ver in ((45577, 0x1102300F), (65025, 0x1102300F)):
-        assert ver > max(v['file_version'] for v in registry[role]['versions'])
+    # The independently versioned TS0726 candidates are reserved exactly once
+    # and sit above every other identity on their lines, so no later
+    # allocation can reuse the version for different bytes.
+    for role, ver, build in ((45577, 0x11023011, '1.1.9-bseedrv2'),
+                             (65025, 0x11023011, '1.1.8-bseedcli4')):
+        own = [v for v in registry[role]['versions'] if v['file_version'] == ver]
+        assert [v['version_str'] for v in own] == [build]
+        assert own[0]['status'] == 'reserved'
+        others = [v['file_version'] for v in registry[role]['versions'] if v['file_version'] != ver]
+        assert ver > max(others)
 
 
 def test_retired_pm_return_tuple_stays_reserved_without_being_a_candidate():
