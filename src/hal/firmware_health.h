@@ -16,6 +16,10 @@ extern uint8_t           firmware_runtime_snapshot[49];
 #ifdef ROUTER
 extern uint8_t firmware_router_snapshot[49];
 #endif
+#ifdef BSEED_LINK_POLICY
+/* Basic 0xFF13 parent/route link snapshot; layout in zigbee_network.c. */
+extern uint8_t firmware_link_snapshot[17];
+#endif
 void hal_telink_stack_service_sample(void);
 void hal_telink_routing_health_update(void);
 void hal_telink_nwk_status(uint16_t address, uint8_t status);

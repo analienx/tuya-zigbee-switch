@@ -254,6 +254,12 @@ void basic_cluster_add_to_endpoint(zigbee_basic_cluster *cluster,
                firmware_router_snapshot);
     endpoint->clusters[endpoint->cluster_count].attribute_count++;
 #endif
+#ifdef BSEED_LINK_POLICY
+    SETUP_ATTR(endpoint->clusters[endpoint->cluster_count].attribute_count,
+               0xFF13, ZCL_DATA_TYPE_OCTET_STR, ATTR_DIAGNOSTIC,
+               firmware_link_snapshot);
+    endpoint->clusters[endpoint->cluster_count].attribute_count++;
+#endif
 #endif
     endpoint->clusters[endpoint->cluster_count].is_server    = 1;
     endpoint->clusters[endpoint->cluster_count].cmd_callback =

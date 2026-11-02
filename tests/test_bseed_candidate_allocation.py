@@ -40,7 +40,7 @@ def test_candidates_follow_canonical_board_allocator():
         assert allocation['VERSION_STR'] == candidate['build']
 
     # The independently versioned TS0726 targets remain unchanged.
-    for role, ver in ((45577, 0x1102300F), (65025, 0x1102300F)):
+    for role, ver in ((45577, 0x11023011), (65025, 0x11023011)):
         assert ver > max(v['file_version'] for v in registry[role]['versions'])
 
 

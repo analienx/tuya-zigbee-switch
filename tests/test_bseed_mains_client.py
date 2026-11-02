@@ -111,7 +111,7 @@ def test_client_artifacts_are_separate_and_never_stock_or_auto_indexed():
     assert "ROUTER_IMAGE_TYPE=43555" in script
     assert "ROUTER_IMAGE_TYPE=45577" in script
     assert 'bseed_pm_release.py vars --role client' in script
-    assert "FILE_VERSION_HEX='0x1102300F'" in script
+    assert "FILE_VERSION_HEX='0x11023011'" in script
     assert "from-router.ota" in script
     assert "from_tuya" not in script.lower()
     assert "make_z2m_ota_index" not in script
@@ -164,16 +164,3 @@ def test_production_router_build_scripts_stay_router_only():
     assert "IMAGE_TYPE=45577" in dimmer
     assert "FILE_VERSION_HEX='0x1102300A'" in dimmer
 
-
-def test_pm_client_rescans_for_best_parent_on_rejoin():
-    """cli21: a PM mains Client must not return to its previous weak parent first."""
-    source = (ROOT / 'src/telink/hal/zigbee_network.c').read_text()
-    block = re.search(
-        r'#if defined\(BSEED_MAINS_CLIENT\) && defined\(BSEED_PM_B28WRPVX\)\n(.*?)#endif',
-        source, re.S)
-    assert block, 'PM Client rejoin-parent block missing'
-    assert 'PRE_PARENT_FIRST_WHEN_REJOIN = FALSE;' in block.group(1)
-    # Only that scoped block may change the SDK default; non-PM images keep their bytes.
-    assert source.count('PRE_PARENT_FIRST_WHEN_REJOIN =') == 1
-    init = source[source.index('void telink_zigbee_hal_network_init(void)'):]
-    assert init.index('zb_init();') < init.index('PRE_PARENT_FIRST_WHEN_REJOIN = FALSE;')

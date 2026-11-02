@@ -88,6 +88,9 @@ int real_main(startup_state_e state) {
 #if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
         telink_zigbee_hal_router_recovery_tick();
 #endif
+#ifdef BSEED_LINK_POLICY
+        telink_zigbee_hal_link_snapshot_update();
+#endif
         drv_wd_clear();
         report_handler();
         drv_wd_clear();

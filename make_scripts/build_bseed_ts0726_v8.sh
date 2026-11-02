@@ -30,6 +30,12 @@ elif [[ "${BSEED_TS0726_RELEASE_CHANNEL:-}" == 'router-recovery-candidate' ]]; t
     SW_BUILD='1.1.9-bseedrv1'
     FILE_VERSION_HEX='0x11023010'
     FILE_VERSION_DEC=285356048
+elif [[ "${BSEED_TS0726_RELEASE_CHANNEL:-}" == 'link-policy-candidate' ]]; then
+    # Router recovery plus parent/route link policy (src/hal/link_policy.h).
+    # Fresh identity: shared Router bytes changed after rv1.
+    SW_BUILD='1.1.9-bseedrv2'
+    FILE_VERSION_HEX='0x11023011'
+    FILE_VERSION_DEC=285356049
 elif [[ -n "${BSEED_TS0726_RELEASE_CHANNEL:-}" ]]; then
     echo 'ERROR: unknown BSEED TS0726 release channel' >&2
     exit 2

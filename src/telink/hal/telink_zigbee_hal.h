@@ -25,6 +25,10 @@ void telink_zigbee_hal_router_note_inbound(void);
 bool telink_zigbee_hal_router_ota_in_progress(void);
 
 #endif
+#ifdef BSEED_LINK_POLICY
+/* Refreshes the Basic 0xFF13 link snapshot (rate-limited internally). */
+void telink_zigbee_hal_link_snapshot_update(void);
+#endif
 void telink_zigbee_hal_bdb_init(af_simple_descriptor_t *endpoint_descriptor);
 
 /* Safe before or after ota_init(): a pre-init join is remembered and starts

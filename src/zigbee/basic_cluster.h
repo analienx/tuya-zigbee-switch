@@ -9,7 +9,11 @@ typedef struct {
     uint8_t              deviceEnable;
     char                 manuName[32];
     char                 modelId[32];
+#ifdef BSEED_LINK_POLICY
+    hal_zigbee_attribute attr_infos[18]; /* + Basic 0xFF13 link snapshot */
+#else
     hal_zigbee_attribute attr_infos[17];
+#endif
 } zigbee_basic_cluster;
 
 void basic_cluster_add_to_endpoint(zigbee_basic_cluster *cluster,

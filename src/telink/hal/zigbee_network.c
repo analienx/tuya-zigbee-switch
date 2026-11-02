@@ -13,6 +13,7 @@
 #include "hal/firmware_health.h"
 #include "hal/router_recovery_policy.h"
 #include "router_recovery_budget.h"
+#include "hal/link_policy.h"
 #include "device_config/reset.h"
 #include "app.h"
 #include "hal/zigbee.h"
@@ -26,6 +27,65 @@ void bdb_identify_callback(u8 endpoint, u16 srcAddr, u16 identifyTime);
 
 void zdo_leave_indication_callback(nlme_leave_ind_t *pLeaveInd);
 void zdo_leave_confirmation_callback(nlme_leave_cnf_t *pLeaveCnf);
+
+#ifdef BSEED_LINK_POLICY
+/* Basic 0xFF13 link snapshot: ZCL octet string, length byte then 16 bytes.
+ * 0 schema | 1 flags (bit0 Router, bit1 Client rescan mode, bit2 link known)
+ * 2-3 Client parent / Router next hop to 0x0000 | 4 its LQI | 5 its cost
+ * 6 Client parent losses in the last hour / Router failed coordinator probes
+ * 7 Client rescan-mode entries / Router route refreshes (saturating)
+ * 8 Router rescan rejoins (saturating) | 9-12 ms since last action, or
+ * 0xFFFFFFFF if none | 13 Router best other neighbour cost | 14-15 reserved */
+uint8_t         firmware_link_snapshot[17] = { 16, 1 };
+static uint32_t link_last_action_ms;
+static bool     link_action_seen;
+
+/* Unused in sleepy End Device builds, which have no rescan/refresh action. */
+static __attribute__((unused)) void link_note_action(uint32_t now) {
+    link_last_action_ms = now;
+    link_action_seen    = true;
+}
+
+static void link_snapshot_fill(uint8_t flags, uint16_t addr, uint8_t lqi,
+                               uint8_t cost, uint8_t recent, uint8_t actions,
+                               uint8_t rescans, uint8_t best, uint32_t now) {
+    uint8_t *p   = firmware_link_snapshot + 1;
+    uint32_t age = link_action_seen ? (uint32_t)(now - link_last_action_ms) :
+                   0xFFFFFFFFu;
+
+    p[0]  = 1;
+    p[1]  = flags;
+    p[2]  = (uint8_t)addr;
+    p[3]  = (uint8_t)(addr >> 8);
+    p[4]  = lqi;
+    p[5]  = cost;
+    p[6]  = recent;
+    p[7]  = actions;
+    p[8]  = rescans;
+    p[9]  = (uint8_t)age;
+    p[10] = (uint8_t)(age >> 8);
+    p[11] = (uint8_t)(age >> 16);
+    p[12] = (uint8_t)(age >> 24);
+    p[13] = best;
+    p[14] = 0;
+    p[15] = 0;
+}
+
+#ifdef BSEED_MAINS_CLIENT
+static bseed_parent_policy_t parent_policy;
+
+/* Every Client parent-loss signal feeds the rescan policy. */
+static void link_note_parent_loss(void) {
+    uint32_t now      = hal_millis();
+    bool     rescan_0 = parent_policy.rescan;
+
+    if (bseed_parent_policy_note_loss(&parent_policy, now) && !rescan_0) {
+        link_note_action(now);
+        printf("Client: repeated parent loss; next rejoins rescan\r\n");
+    }
+}
+#endif
+#endif
 
 #ifdef BSEED_MAINS_CLIENT
 
@@ -229,6 +289,9 @@ static void client_health_recovery_tick(void) {
 
     client_health_last_recovery_ms   = now;
     client_health_recovery_attempted = true;
+#ifdef BSEED_LINK_POLICY
+    link_note_parent_loss();
+#endif
     printf("Mains client: parent MAC poll silent; rejoin/backoff\r\n");
     (void)request_rejoin_with_backoff(true);
 }
@@ -322,6 +385,96 @@ static void router_coordinator_node_desc_response(void *arg) {
  * delay by the stable IEEE bytes to avoid simultaneous mesh-wide restarts.
  * One rescue maximum per boot; a genuine prolonged coordinator outage can
  * never cause a rapid reset loop. */
+#ifdef BSEED_LINK_POLICY
+/* Route-first escalation: before any rejoin, ask the stack to rediscover the
+ * route to the coordinator. Sampled once a minute from the SDK's own tables. */
+static bool     route_poor_tracked, route_refreshed, route_sampled, route_known;
+static uint32_t route_poor_since_ms, route_last_refresh_ms, route_last_sample_ms;
+static uint16_t route_next_hop = 0xFFFFu;
+static uint8_t  route_lqi, route_cost, route_best_other;
+static uint8_t  route_refreshes, router_rescan_rejoins;
+
+static uint8_t link_neighbor_cost(const tl_zb_normal_neighbor_entry_t *e) {
+    /* Link-status outgoing cost when the neighbour reported one, else the
+     * SDK's own LQI-to-cost mapping for the last frame heard from it. */
+    return e->outgoingCost ? e->outgoingCost : rf_lqi2cost(e->lqi);
+}
+
+static void link_router_route_tick(uint32_t now) {
+    if (route_sampled && (uint32_t)(now - route_last_sample_ms) < 60000u)
+        return;
+    route_sampled        = true;
+    route_last_sample_ms = now;
+
+    uint16_t hop = 0xFFFFu;
+    for (u16 i = 0; i < ROUTING_TABLE_SIZE; i++) {
+        const nwk_routingTabEntry_t *r = &g_routingTab[i];
+        if (r->dstAddr == 0x0000u && r->status == NWK_ROUTE_STATE_ACTIVE) {
+            hop = r->nextHopAddr;
+            break;
+        }
+    }
+    /* A direct neighbour of the coordinator may route without a table entry. */
+    tl_zb_normal_neighbor_entry_t *e = nwk_neTblGetByShortAddr(
+        hop != 0xFFFFu ? hop : 0x0000u);
+    if (e != NULL && hop == 0xFFFFu)
+        hop = 0x0000u;
+
+    uint8_t best = 0;
+    for (u8 i = 0; i < TL_ZB_NEIGHBOR_TABLE_SIZE; i++) {
+        tl_zb_normal_neighbor_entry_t *n = &g_zb_neighborTbl.neighborTbl[i];
+        if (!n->used || n == e || n->relationship == NEIGHBOR_IS_CHILD ||
+            (n->deviceType != NWK_DEVICE_TYPE_ROUTER &&
+             n->deviceType != NWK_DEVICE_TYPE_COORDINATOR))
+            continue;
+        uint8_t c = link_neighbor_cost(n);
+        if (c != 0u && (best == 0u || c < best))
+            best = c;
+    }
+
+    route_known      = (e != NULL);
+    route_next_hop   = route_known ? hop : 0xFFFFu;
+    route_lqi        = route_known ? e->lqi : 0u;
+    route_cost       = route_known ? link_neighbor_cost(e) : 0u;
+    route_best_other = best;
+    if (route_known && route_cost >= BSEED_ROUTE_COST_WORST) {
+        if (!route_poor_tracked) {
+            route_poor_tracked  = true;
+            route_poor_since_ms = now;
+        }
+    } else {
+        route_poor_tracked = false;
+    }
+
+    if (!bseed_route_refresh_due(route_known, route_cost, route_poor_tracked,
+                                 route_poor_since_ms, best,
+                                 router_probe_failures, route_refreshed,
+                                 route_last_refresh_ms, now))
+        return;
+
+    nlme_routeDisc_req_t req;
+    TL_SETSTRUCTCONTENT(req, 0);
+    req.dstAddr      = 0x0000u;
+    /* zb_addr_mode_t 2 = 16-bit unicast. Never 0 (ZDP SHORT_ADDR_MODE):
+     * mode 0 is a broadcast many-to-one discovery that would turn this
+     * Router into a concentrator. */
+    req.dstAddrMode  = ZB_ADDR_16BIT_DEV_OR_BROADCAST;
+    req.radius       = 0;     /* SDK default radius */
+    req.noRouteCache = FALSE;
+    route_refreshed       = true;  /* cooldown also after a rejected request */
+    route_last_refresh_ms = now;
+    if (zb_routeDiscReq(&req) == RET_OK) {
+        if (route_refreshes < UINT8_MAX)
+            route_refreshes++;
+        route_poor_tracked = false;
+        link_note_action(now);
+        printf("Router: coordinator route rediscovery requested\r\n");
+    } else {
+        printf("Router: route rediscovery request rejected\r\n");
+    }
+}
+#endif
+
 #define ROUTER_RECOVERY_STALL_MS    (45u * 60u * 1000u)
 static uint32_t router_recovery_since_ms;
 static bool     router_recovery_timer_active;
@@ -431,6 +584,10 @@ void telink_zigbee_hal_router_recovery_tick(void) {
             router_probe_failures++;
     }
 
+#ifdef BSEED_LINK_POLICY
+    link_router_route_tick(now);
+#endif
+
     bool repeated_response_timeouts = bseed_router_timeout_evidence(
         router_probe_failures, ROUTER_PROBE_FAILURE_THRESHOLD, now,
         router_last_positive_ms, ROUTER_QUIET_MIN_MS);
@@ -485,8 +642,20 @@ void telink_zigbee_hal_router_recovery_tick(void) {
         router_probe_pending = false;
         firmware_health_increment(&firmware_health.rejoin_start);
         zb_rejoinSecModeSet(REJOIN_SECURITY);
+#ifdef BSEED_LINK_POLICY
+        /* The coordinator stayed unreachable through this association for
+         * at least 20 min after route refresh: let this rejoin choose the
+         * best parent instead of the previous one. */
+        PRE_PARENT_FIRST_WHEN_REJOIN = FALSE;
+        if (router_rescan_rejoins < UINT8_MAX)
+            router_rescan_rejoins++;
+        link_note_action(now);
+#endif
         u8 status = zb_rejoinReq(zb_apsChannelMaskGet(), g_bdbAttrs.scanDuration);
         if (status != RET_OK) {
+#ifdef BSEED_LINK_POLICY
+            PRE_PARENT_FIRST_WHEN_REJOIN = TRUE;
+#endif
             router_one_shot_active = false;
             firmware_health_increment(&firmware_health.rejoin_failure);
             printf("Router: secure one-shot rejoin rejected: %u\r\n", status);
@@ -518,6 +687,36 @@ void telink_zigbee_hal_router_recovery_tick(void) {
     }
 }
 
+#endif
+
+#ifdef BSEED_LINK_POLICY
+/* Refresh Basic 0xFF13 once per second. Read-only towards the SDK. */
+void telink_zigbee_hal_link_snapshot_update(void) {
+    static uint32_t last_ms;
+    static bool     started;
+    uint32_t        now = hal_millis();
+
+    if (started && (uint32_t)(now - last_ms) < 1000u)
+        return;
+    started = true;
+    last_ms = now;
+#if defined(BSEED_MAINS_CLIENT)
+    uint16_t parent = zb_isDeviceJoinedNwk() ? zb_getParentShortAddr() : 0xFFFFu;
+    tl_zb_normal_neighbor_entry_t *e =
+        parent != 0xFFFFu ? nwk_neTblGetByShortAddr(parent) : NULL;
+    link_snapshot_fill((uint8_t)((parent_policy.rescan ? 2u : 0u) | (e ? 4u : 0u)),
+                       parent, e ? e->lqi : 0u, e ? rf_lqi2cost(e->lqi) : 0u,
+                       bseed_parent_losses_recent(&parent_policy, now),
+                       parent_policy.rescan_entries, 0u, 0u, now);
+#elif ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
+    link_snapshot_fill((uint8_t)(1u | (route_known ? 4u : 0u)), route_next_hop,
+                       route_lqi, route_cost, router_probe_failures,
+                       route_refreshes, router_rescan_rejoins, route_best_other,
+                       now);
+#else
+    link_snapshot_fill(0u, 0xFFFFu, 0u, 0u, 0u, 0u, 0u, 0u, now);
+#endif
+}
 #endif
 
 // Telink ZDO callbacks
@@ -594,6 +793,18 @@ static bool request_rejoin_with_backoff(bool parent_stale) {
 #ifdef BSEED_MAINS_CLIENT
     zb_rejoinSecModeSet(REJOIN_SECURITY);
 #endif
+#ifdef BSEED_LINK_POLICY
+#ifdef BSEED_MAINS_CLIENT
+    /* Read by the SDK on every attempt of this backoff sequence. */
+    PRE_PARENT_FIRST_WHEN_REJOIN =
+        bseed_parent_policy_prefer_previous(&parent_policy, hal_millis()) ?
+        TRUE : FALSE;
+#else
+    /* Not-joined recovery stays sticky; only the verified-failure Router
+     * one-shot below rescans. */
+    PRE_PARENT_FIRST_WHEN_REJOIN = TRUE;
+#endif
+#endif
     u8 res =
         zb_rejoinReqWithBackOff(zb_apsChannelMaskGet(), g_bdbAttrs.scanDuration);
     if (res != RET_OK) {
@@ -658,6 +869,9 @@ void bdb_commissioning_callback(u8 status, void *arg) {
         status == BDB_COMMISSION_STA_REJOIN_FAILURE) {
         router_one_shot_active  = false;
         router_one_shot_stalled = false;
+#ifdef BSEED_LINK_POLICY
+        PRE_PARENT_FIRST_WHEN_REJOIN = TRUE;
+#endif
     }
 #endif
     switch (status) {
@@ -711,6 +925,9 @@ void bdb_commissioning_callback(u8 status, void *arg) {
         break;
     case BDB_COMMISSION_STA_PARENT_LOST:
         firmware_health_increment(&firmware_health.parent_loss);
+#if defined(BSEED_LINK_POLICY) && defined(BSEED_MAINS_CLIENT)
+        link_note_parent_loss();
+#endif
 #if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
         /* Never start SDK-owned backoff atop an ongoing/orphaned one-shot.
          * A Router can receive this nonterminal indication mid-rejoin. */
@@ -861,16 +1078,9 @@ void telink_zigbee_hal_network_init(void) {
     g_zbNIB.parentInfo = MAC_DATA_POLL_KEEPALIVE_BIT;
 #endif
 
-#if defined(BSEED_MAINS_CLIENT) && defined(BSEED_PM_B28WRPVX)
-    /* Telink 3.7.2.0 defaults PRE_PARENT_FIRST_WHEN_REJOIN to TRUE: every
-     * rejoin first tries the previous parent. A mains Client that lost a weak
-     * parent therefore kept returning to it. KitchenSocketLeft (cli20,
-     * 2026-11-02) logged 40 parent losses and 95 rejoins in 8 h while
-     * attached to a stock Tuya plug, with an in-house PM Router beside it.
-     * Rescan instead so the SDK selects the best available parent. The
-     * libzb_ed nwk_join object reads this global; zb_init() does not reset it.
-     * Scoped to the PM Client so non-PM images keep their sealed bytes. */
-    PRE_PARENT_FIRST_WHEN_REJOIN = FALSE;
+#ifdef BSEED_LINK_POLICY
+    /* Sticky by default; link_policy.h decides per rejoin when to rescan. */
+    PRE_PARENT_FIRST_WHEN_REJOIN = TRUE;
 #endif
 
     zb_zdoCbRegister(&zdo_callbacks);
