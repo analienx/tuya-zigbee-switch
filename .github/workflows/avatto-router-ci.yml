@@ -1,0 +1,85 @@
+name: AVATTO Router release candidates
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'device_db.yaml'
+      - 'NVM_MIGRATIONS_VERSION'
+      - 'helper_scripts/avatto_release.py'
+      - 'make_scripts/build_avatto_router.sh'
+      - '.github/workflows/avatto-router-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  avatto-router:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [ts0001, ts0002]
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make python3 python3-yaml curl wget unzip bzip2
+
+      - name: Cache Telink SDK and TC32 toolchain
+        uses: actions/cache@v4
+        with:
+          path: telink_tools
+          key: telink-tools-v3.7.2.0
+
+      - name: Install pinned Telink build dependencies
+        run: make -C src/telink -f tools.mk sdk toolchain
+
+      - name: Build and verify AVATTO ${{ matrix.variant }} Router
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          OUT="build/avatto-${{ matrix.variant }}-router"
+          rm -rf "$OUT"
+          bash make_scripts/build_avatto_router.sh "${{ matrix.variant }}" "$OUT" \
+            2>&1 | tee "$RUNNER_TEMP/avatto-${{ matrix.variant }}-build.log"
+          python3 - "$OUT/manifest.json" <<'PY'
+          import json, os, sys
+          from pathlib import Path
+          m = json.loads(Path(sys.argv[1]).read_text())
+          checks = {
+              'source': m['sourceCommit'] == os.environ['EXPECTED_HEAD'],
+              'manufacturer': m['manufacturerCode'] == 4417,
+              'above installed upstream': m['fileVersion'] > 0x11023000,
+              'link policy': m['linkPolicy'] is True,
+              'not accepted': m['hardwareAcceptance'] is False,
+          }
+          failed = [k for k, ok in checks.items() if not ok]
+          if failed:
+              raise SystemExit('AVATTO manifest rejected: ' + ', '.join(failed))
+          print('AVATTO exact-head manifest guards: PASS')
+          PY
+
+      - name: Upload AVATTO candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: avatto-${{ matrix.variant }}-router-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/avatto-${{ matrix.variant }}-build.log
+            build/avatto-${{ matrix.variant }}-router/forward.bin
+            build/avatto-${{ matrix.variant }}-router/forward.ota
+            build/avatto-${{ matrix.variant }}-router/manifest.json
+          if-no-files-found: error
