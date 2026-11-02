@@ -94,3 +94,26 @@ Same-role canary on one device per line. KitchenSocketLeft first: pass when
 it leaves the stock parent or parent losses fall from about 5/h to under
 1/day over a 24 h soak, read from 0xFF10 and 0xFF13. A green CI never
 authorizes flashing.
+
+### Sealed from exact-SHA public CI
+
+Source `d06e130cf63fc4e85a2fd6c03648bbc08aef942b`. All required GitHub-hosted
+checks passed on it ([candidate finalization](https://github.com/analienx/tuya-zigbee-switch/actions/runs/41437647854),
+[test](https://github.com/analienx/tuya-zigbee-switch/actions/runs/41437647874),
+[PM matrix](https://github.com/analienx/tuya-zigbee-switch/actions/runs/41437647734),
+[non-PM matrix](https://github.com/analienx/tuya-zigbee-switch/actions/runs/41437647867),
+[TC32 Router](https://github.com/analienx/tuya-zigbee-switch/actions/runs/41437647817)).
+The runner's registry proposal (SHA-256
+`a616b5dba0fa2c94ef51faf046ad26a946b35bb9106fc82070cebc8e4a724deb`) was
+committed unchanged. It adds these four entries and alters no earlier one.
+Native integrity and embedded Basic build IDs were verified by the runner.
+
+| Native forward OTA | SHA-256 |
+| --- | --- |
+| PM Router r18 | `ce4ec3f1fcd9e610058cc8f5b4a00b5f6673b367a6d2e36b095d847ccc0df8cc` |
+| PM Client cli21 | `5f0389c62629285c368f0b69a9c745d83d914a3e52df5261d0c325451aee1b48` |
+| Non-PM Router r17 | `0643ad1193ad9d9efa08a8f604fc7ad39e5d935a49acd1350c2515b00d6e9ab8` |
+| Non-PM Client c15 | `1b844266a17b098c9c6e3dd0984c3813eefd65f5d45727f8c3e25aee639bade7` |
+
+TS0726 rv2/cli4 are built and checked by their own workflows and are not part
+of this registry proposal. Hardware acceptance pending for all lines.
