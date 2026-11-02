@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from bseed_ota_identity import IdentityError, require_embedded_string  # noqa: E402
+from bseed_ota_identity import IdentityError  # noqa: E402
 from bseed_pm_release import verify_native_image  # noqa: E402
 
 MANUFACTURER_CODE = 4417
@@ -45,7 +45,11 @@ def verify(path, key):
     c = CANDIDATES[key]
     data = Path(path).read_bytes()
     verify_native_image(data, c)
-    require_embedded_string(data, c['build'])
+    # bseed_ota_identity.embedded_version_strings() only recognises BSEED
+    # build IDs; check the exact NUL-terminated Basic build ID directly.
+    if c['build'].encode('ascii') + b'\0' not in data:
+        raise IdentityError('%s: Basic build ID %r not embedded'
+                            % (key, c['build']))
     return c
 
 
