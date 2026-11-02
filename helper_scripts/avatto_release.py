@@ -44,12 +44,9 @@ def verify(path, key):
     validate_candidates()
     c = CANDIDATES[key]
     data = Path(path).read_bytes()
-    verify_native_image(data, c)
-    # bseed_ota_identity.embedded_version_strings() only recognises BSEED
-    # build IDs; check the exact NUL-terminated Basic build ID directly.
-    if c['build'].encode('ascii') + b'\0' not in data:
-        raise IdentityError('%s: Basic build ID %r not embedded'
-                            % (key, c['build']))
+    # Header, firmware subelement, startup marker, embedded version, CRC and
+    # the length-prefixed Basic build ID; skips only the BSEED string scan.
+    verify_native_image(data, c, bseed_build_strings=False)
     return c
 
 
