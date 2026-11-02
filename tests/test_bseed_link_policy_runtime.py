@@ -117,7 +117,7 @@ def test_driver_uses_policy_for_both_roles_and_never_broadcast_mode():
                  "bseed_route_refresh_due(", "zb_routeDiscReq(&req)"):
         assert call in source, call
     # Address mode 0 is a broadcast many-to-one discovery; only 16-bit unicast is allowed.
-    assert "req.dstAddrMode  = ZB_ADDR_16BIT_DEV_OR_BROADCAST;" in source
+    assert re.search(r"req\.dstAddrMode\s*=\s*ZB_ADDR_16BIT_DEV_OR_BROADCAST;", source)
     assert not re.search(r"dstAddrMode\s*=\s*SHORT_ADDR_MODE", source)
     # Sticky default after zb_init(); rescans only through policy or the Router one-shot.
     init = source[source.index("void telink_zigbee_hal_network_init(void)"):]
