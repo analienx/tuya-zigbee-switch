@@ -32,6 +32,28 @@ _TERMINAL_LIVE_PHASES = frozenset((
 ))
 
 
+
+def unexpected_active_updates(active_names, inventory, allowed_ieees, target_ieee):
+    """Return the active OTA identities that must still block a new flash.
+
+    Only devices named by the campaign profile's explicit concurrent_ota_ieees
+    allowlist may update in parallel. The target itself is never exempt, and a
+    name that cannot be resolved to an allowed IEEE always blocks.
+    """
+    allowed = {str(ieee).lower() for ieee in allowed_ieees}
+    if str(target_ieee).lower() in allowed:
+        raise ValueError('The OTA target cannot be listed as a concurrent device')
+    by_name = {}
+    for item in inventory or []:
+        if isinstance(item, dict) and item.get('friendly_name'):
+            by_name[item['friendly_name']] = str(item.get('ieee_address', '')).lower()
+    blocking = []
+    for name in active_names:
+        ieee = by_name.get(name, str(name).lower())
+        if not (ieee in allowed and ieee in {str(i).lower() for i in allowed_ieees}):
+            blocking.append(name)
+    return blocking
+
 def timestamp():
     return dt.datetime.now().astimezone().isoformat()
 
@@ -555,6 +577,9 @@ def main():
         ]
         active_updates = sorted(set(
             list(state['network_updates']) + inventory_updating))
+        active_updates = unexpected_active_updates(
+            active_updates, state['inventory'],
+            source_profile.get('concurrent_ota_ieees') or [], args.ieee)
         if active_updates:
             raise RuntimeError(
                 'Another Zigbee OTA is active on this network: ' +

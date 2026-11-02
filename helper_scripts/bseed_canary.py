@@ -24,6 +24,7 @@ import functools
 import hashlib
 import http.server
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -332,6 +333,14 @@ def build_profile(site, name, artifacts, registry=None, live=None):
         'expect_relay': device['expect_relay'], 'force_test_transition': False,
         'require_pm': board == 'pm', 'non_pm': board == 'nonpm',
     })
+    concurrent = site.get('concurrent_ota_ieees') or []
+    if concurrent:
+        # Explicit, reviewed opt-in: only these exact IEEEs may update in parallel.
+        if not all(isinstance(i, str) and re.fullmatch(r'0x[0-9a-fA-F]{16}', i) for i in concurrent):
+            raise CanaryError('concurrent_ota_ieees must be full 0x IEEE addresses')
+        if device['ieee'].lower() in {i.lower() for i in concurrent}:
+            raise CanaryError('The target cannot be listed in concurrent_ota_ieees')
+        profile['concurrent_ota_ieees'] = list(concurrent)
     if board == 'pm':
         for key in ('pm_ssh_host', 'pm_ssh_key'):
             if not site.get(key):
