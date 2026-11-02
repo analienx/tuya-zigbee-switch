@@ -861,6 +861,18 @@ void telink_zigbee_hal_network_init(void) {
     g_zbNIB.parentInfo = MAC_DATA_POLL_KEEPALIVE_BIT;
 #endif
 
+#if defined(BSEED_MAINS_CLIENT) && defined(BSEED_PM_B28WRPVX)
+    /* Telink 3.7.2.0 defaults PRE_PARENT_FIRST_WHEN_REJOIN to TRUE: every
+     * rejoin first tries the previous parent. A mains Client that lost a weak
+     * parent therefore kept returning to it. KitchenSocketLeft (cli20,
+     * 2026-11-02) logged 40 parent losses and 95 rejoins in 8 h while
+     * attached to a stock Tuya plug, with an in-house PM Router beside it.
+     * Rescan instead so the SDK selects the best available parent. The
+     * libzb_ed nwk_join object reads this global; zb_init() does not reset it.
+     * Scoped to the PM Client so non-PM images keep their sealed bytes. */
+    PRE_PARENT_FIRST_WHEN_REJOIN = FALSE;
+#endif
+
     zb_zdoCbRegister(&zdo_callbacks);
 #if ZB_ROUTER_ROLE || defined(BSEED_MAINS_CLIENT)
     // A mains client is a Zigbee End Device only in the topology sense. Keep
