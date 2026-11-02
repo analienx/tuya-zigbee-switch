@@ -72,3 +72,16 @@ def test_fresh_target_interview_and_inventory_are_both_mandatory():
     for events,fresh in [([],True),([{'status':'started'}],True),
                          ([{'status':'failed'}],True),([{'status':'successful'}],False)]:
         with pytest.raises(RuntimeError):require_fresh_interview(events,fresh)
+
+
+def test_only_zigbee2mqtt_in_progress_refusal_allows_one_retry():
+    from bseed_z2m_postota_reinterview import interview_in_progress
+    clash = {'status':'error','data':{},
+             'error':"Interview of 'KitchenSocketLeft' (0xa4c138241e3de538) failed: "
+                     "Error: Interview - interview already in progress for '0xa4c138241e3de538'"}
+    assert interview_in_progress(clash)
+    for response in (None, {'status':'ok'}, {'status':'error','error':'Timeout after 10000ms'},
+                     {'status':'error'}, 'interview already in progress'):
+        assert not interview_in_progress(response)
+    # The refusal itself is never evidence of a successful post-OTA interview.
+    assert evaluate(target(),target(software_build_id='new'),clash,'new')=='interview_failed'

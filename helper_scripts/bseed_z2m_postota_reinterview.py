@@ -45,6 +45,17 @@ def validate_campaign(lock, ieee, name, image_sha256):
     return True
 
 
+PUBLISH_ACK_SECONDS = 20
+IN_PROGRESS = 'interview already in progress'
+
+
+def interview_in_progress(response):
+    """Zigbee2MQTT refused only because its own interview of the target is
+    already running (typically started by the post-OTA reboot announce)."""
+    return (isinstance(response, dict) and response.get('status') == 'error'
+            and IN_PROGRESS in str(response.get('error', '')))
+
+
 def require_fresh_interview(events, fresh_inventory):
     if not fresh_inventory:
         raise RuntimeError('No fresh nonretained bridge inventory after interview request')
@@ -72,7 +83,7 @@ def main():
     config=yaml.safe_load(Path(a.mqtt_config).read_text(encoding='utf8'))['mqtt']
     base=config.get('base_topic','zigbee2mqtt');token='bseed-postota-interview-'+uuid.uuid4().hex
     values={'inventory':None,'bridge':None,'response':None,'events':[],
-            'requested':False,'fresh_inventory':False}
+            'requested':False,'fresh_inventory':False,'token':token}
     ready=threading.Event(); changed=threading.Event();sent=False
     client=mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,client_id=token)
     client.username_pw_set(config.get('user',''),config.get('password',''))
@@ -91,7 +102,7 @@ def main():
         elif msg.topic==base+'/bridge/state':
             values['bridge']=data.get('state') if isinstance(data,dict) else data;changed.set()
         elif (msg.topic==base+'/bridge/response/device/interview' and isinstance(data,dict)
-              and values['requested'] and data.get('transaction')==token):
+              and values['requested'] and data.get('transaction')==values['token']):
             values['response']=data;changed.set()
         elif (msg.topic==base+'/bridge/event' and isinstance(data,dict) and values['requested']
               and data.get('type')=='device_interview' and isinstance(data.get('data'),dict)
@@ -116,15 +127,32 @@ def main():
             raise ValueError('Target not ready for post-OTA re-interview')
         time.sleep(a.settle_seconds)
         if values['bridge']!='online':raise ValueError('Bridge became offline')
-        request={'id':a.ieee,'transaction':token}
         values['requested']=True
-        published=client.publish(base+'/bridge/request/device/interview',json.dumps(request),qos=1)
-        published.wait_for_publish(5)
-        if not published.is_published():raise TimeoutError('Interview MQTT publish not confirmed')
-        evidence['requested']=True;print('TARGET_INTERVIEW_SENT',a.ieee,flush=True)
-        deadline=time.monotonic()+a.timeout_seconds
-        while time.monotonic()<deadline and values['response'] is None:
-            changed.wait(.3);changed.clear()
+        # At most two interview requests. The second is sent only when
+        # Zigbee2MQTT refused the first because its own interview of this
+        # target (started by the post-OTA reboot announce) was still running.
+        for attempt in (1,2):
+            request={'id':a.ieee,'transaction':values['token']}
+            # One publish only: re-publishing could duplicate the interview.
+            published=client.publish(base+'/bridge/request/device/interview',json.dumps(request),qos=1)
+            published.wait_for_publish(PUBLISH_ACK_SECONDS)
+            if not published.is_published():raise TimeoutError('Interview MQTT publish not confirmed')
+            evidence['requested']=True;print('TARGET_INTERVIEW_SENT',a.ieee,flush=True)
+            deadline=time.monotonic()+a.timeout_seconds
+            while time.monotonic()<deadline and values['response'] is None:
+                changed.wait(.3);changed.clear()
+            if attempt==1 and interview_in_progress(values['response']):
+                evidence['in_progress_response']=values['response']
+                print('TARGET_INTERVIEW_ALREADY_RUNNING_WAIT',a.ieee,flush=True)
+                deadline=time.monotonic()+a.timeout_seconds
+                while time.monotonic()<deadline and not any(
+                        e['status'] in ('successful','failed') for e in values['events']):
+                    changed.wait(.3);changed.clear()
+                # Evidence must come from our own request, not the in-flight one.
+                values.update(response=None,events=[],fresh_inventory=False,
+                              token=token+'-retry')
+                continue
+            break
         evidence['response']=values['response']
         if not values['response'] or values['response'].get('status')!='ok':
             raise RuntimeError('One target interview failed or timed out')
