@@ -98,6 +98,23 @@ it leaves the stock parent or parent losses fall from about 5/h to under
 1/day over a 24 h soak, read from 0xFF10 and 0xFF13. A green CI never
 authorizes flashing.
 
+### Sealed from exact-SHA public CI (current candidates)
+
+Source `1cc08a92d4dd68ff3607dc224f707c3e757d4ec8`. All required GitHub-hosted checks passed on it
+([candidate finalization](https://github.com/analienx/tuya-zigbee-switch/actions/runs/41449369099),
+[test](https://github.com/analienx/tuya-zigbee-switch/actions/runs/41449368782), [PM matrix](https://github.com/analienx/tuya-zigbee-switch/actions/runs/41449368902),
+[non-PM matrix](https://github.com/analienx/tuya-zigbee-switch/actions/runs/41449368974),
+[TC32 Router](https://github.com/analienx/tuya-zigbee-switch/actions/runs/41449368806)). The runner's registry
+proposal (SHA-256 `258c8171f4c0357da44dddbf3717624191256df91bc703e8a49b41531b384edc`) was committed unchanged. It
+adds these four entries and alters no earlier one.
+
+| Native forward OTA | SHA-256 |
+| --- | --- |
+| PM Router r19 | `d17571a1d996ff798f1b6334cac1d799fbc1c6125a0212741aca89446053fc95` |
+| PM Client cli22 | `a8d2e38f53c63a4f0561076c1c561a1917f25ece602b16d256ff1b1c36a7bbf8` |
+| Non-PM Router r18 | `4fcc69b1113cbe405ea0aef9ed9ae81b8f13d61147b227671f00b8764cf063e9` |
+| Non-PM Client c16 | `d4057825661eb4a6c943ca4f8a5b02d7c709acdb960e4102fd5a185e4f87e321` |
+
 ### Retired seal (superseded before deployment)
 
 The first seal below was superseded by the code-review fixes before any
