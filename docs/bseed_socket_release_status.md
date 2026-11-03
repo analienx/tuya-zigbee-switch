@@ -1,6 +1,70 @@
-# BSEED socket firmware: published releases and candidates
+# BSEED firmware availability
 
-## Current candidates and canary plan — 2026-10-31
+**Latest reviewed source: 2026-11-03** · [Project README](../README.md) · [Candidate release notes](releases/2026-11-02-link-policy-candidates.md) · [Release process](contribute/release.md)
+
+> [!IMPORTANT]
+> **Only firmware explicitly listed in the [public BSEED OTA index](../zigbee2mqtt/ota/index_bseed.json) is published for normal Zigbee2MQTT discovery.** A newer candidate may be sealed and independently reproducible without being hardware-accepted or offered as a public update. Do not infer a fleet release from one successful canary.
+
+## What the states mean
+
+| State | Evidence required | Suitable for |
+| --- | --- | --- |
+| **Published Router** | Accepted identity, reviewed OTA index and hardware release history | Exact supported board/role following the [update guide](updating.md) |
+| **Sealed candidate** | Immutable native bytes and identity, exact-source GitHub-hosted CI | Separate authorized **one-device** canary only |
+| **OTA transferred** | Transaction-matched Zigbee2MQTT outcome | Not yet sufficient to claim the firmware is running |
+| **Postflash verified** | Fresh Zigbee build/role/interview and targeted functionality | Single-device evidence, not automatically a release |
+| **Hardware accepted** | Full relay, metering (where fitted), persistence, recovery and mesh/soak gates | Review for promotion; publication is still a separate action |
+
+## Published BSEED Router images
+
+These are the **unchanged public** custom Router builds. Exact stock-to-custom wrappers are also present in the index; they are not general-purpose rollback images.
+
+| Board | Exact custom Zigbee identity | Published Router build | Native FILEVER | Image type |
+| --- | --- | --- | --- | ---: |
+| TS011F-BS-PM (PM) | `b28wrpvx / TS011F-BS-PM` | `1.2.5-bseedv8u4` | `0x12053007` | 43556 |
+| TS011F-BS (non-PM) | `o1jzcxou / TS011F-BS` | `1.1.3-bseedv8` | `0x11023001` | 43555 |
+| TS0726-3-BS | `iedhxgyi / TS0726-3-BS` | `1.1.8-bseedv8` | `0x1102300a` | 45577 |
+
+The six index entries consist of **three accepted custom Router images and their three exact stock-conversion wrappers**. No TS011F Client image or Router↔Client role transition is published there. A GitHub *draft* release is not a public OTA image.
+
+## Latest sealed TS011F candidate train — 2026-11-02
+
+These identities are defined in `helper_scripts/bseed_pm_release.py` and `helper_scripts/bseed_nonpm_release.py`, sealed using the [exact-source CI evidence](bseed_link_policy.md#sealed-from-exact-sha-public-ci-current-candidates), and documented in the [dated release notes](releases/2026-11-02-link-policy-candidates.md).
+
+<!-- current-candidate-matrix:start -->
+| Board | Role | Current candidate | Native FILEVER | OTA image type | Publication / acceptance |
+| --- | --- | --- | --- | ---: | --- |
+| PM TS011F-BS-PM | Router | `1.2.5-bseedr19` | `0x12053021` | 43556 | **Sealed** · not public · full hardware acceptance pending |
+| PM TS011F-BS-PM | mains Client | `1.2.5-bseedcli22` | `0x12053021` | 65024 | **Sealed** · not public · full hardware acceptance pending |
+| non-PM TS011F-BS | Router | `1.1.3-bseedr18` | `0x1102301D` | 43555 | **Sealed** · not public · full hardware acceptance pending |
+| non-PM TS011F-BS | mains Client | `1.1.3-bseedc16` | `0x1102301D` | 65026 | **Sealed** · not public · full hardware acceptance pending |
+<!-- current-candidate-matrix:end -->
+
+The PM Router and Client deliberately share one board-wide version counter but have distinct OTA image types. The same principle applies to the non-PM pair. **Never cross-flash**, change Zigbee roles using the ordinary index, rebuild under a previously sealed identity or use a GitHub build alone as deployment approval.
+
+### What is new in this train
+
+- **Mains Clients:** parent rescan after a measured parent-loss pattern; retain a stable parent when healthy.
+- **Routers:** measured coordinator route quality and bounded route refresh, with existing recovery protections.
+- **Diagnostics:** Basic `0xFF13` live policy snapshot alongside earlier `0xFF10`/`0xFF12`.
+- **Safety:** reject new link-policy actions while OTA or SDK-owned network recovery is active. Keep PM sampling and relay controls board-specific.
+
+[Read the policy thresholds and evidence](bseed_link_policy.md) · [Release notes and hashes](releases/2026-11-02-link-policy-candidates.md)
+
+### Remaining release gates
+
+Only the exact source and sealed package have been accepted offline. Each candidate needs a fresh single-device preflight, correct installed build and role after OTA, relay and configuration retention, PM power/energy validation on PM boards, relevant parent/child routing behavior and sustained soak. Coordinate firmware or Zigbee2MQTT maintenance separately: do not run overlapping hardware operations.
+
+For the full historical gate sequence, see [promotion gates](#promotion-gates-in-order), [PM E2E acceptance](bseed_pm_e2e_acceptance.md) and [the targeted OTA guide](bseed_targeted_ota_runner.md).
+
+---
+
+## Historical status snapshots (superseded, preserved as evidence)
+
+Everything below records **what was believed or verified on the date shown**. Older sections may say “current”, “golden candidate” or “unreleased” in their original context. They are not the November 2026 candidate matrix and must not be used to select a new image.
+
+
+### Candidate snapshot — 2026-10-31 (superseded)
 
 Sealed from exact-SHA public CI at `8636ee47` and merged on `main` (#89, #90).
 None is published in the public OTA index and none has hardware acceptance.
@@ -26,7 +90,7 @@ interviewed as PM Router, date code `20261011`; KitchenSocketLeft
 installed Basic build of each still has to be confirmed by the campaign's
 preflight before any flash; the database date codes are not build proof.
 
-## Current release status — 2026-10-13
+### Public-index and Client snapshot — 2026-10-13 (historical)
 
 The public BSEED OTA index contains the accepted Router releases and their
 matching stock-to-custom wrappers. It does not contain Client firmware or
@@ -47,11 +111,10 @@ routine OTA rollout until their board-specific hardware gates pass. See the
 [Client recovery review](bseed_client_parent_recovery_20261013.md) for
 implementation and verification evidence.
 
-The dated sections below preserve rollout history. Use the table above for
-current published and candidate identities.
+The dated sections below preserve earlier evidence. The November 2026 summary at the top of this page supersedes their candidate recommendations.
 
 
-## OTA tooling finalization — 2026-10-10
+### OTA tooling finalization — 2026-10-10
 
 The four sealed candidate identities below are unchanged. PM/non-PM Router
 and mains-Client OTA recovery now share exact-source and candidate authority,
@@ -64,7 +127,7 @@ Hifi experienced other failure modes. See
 Firmware binaries are still sealed offline candidates; individual physical
 role/relay/meter/routing acceptance must not be inferred from CI or OTA status.
 
-## Historical sealed-set status — 2026-10-04 (superseded)
+### Historical sealed-set status — 2026-10-04 (superseded)
 
 The September table below is retained as historical rollout context. The current sealed four-variant hardening set is newer:
 
@@ -79,7 +142,7 @@ The c9 canary also showed that interrupted OTA state is retained across retries:
 
 After the successful c9 transfer, the socket reported `1.1.3-bseedc9`, live `EndDevice` ZDO role, fresh MQTT state and healthy connectivity without a power cycle. The earlier power-cycle requirement occurred while recovering the old c7 firmware from interrupted/stuck OTA/network state.
 
-### Fleet rollout policy from this point
+#### Fleet rollout policy from this point
 
 Custom BSEED sockets may be advanced serially to the latest sealed firmware for their **existing board and role**, one OTA at a time. Each device must preserve exact IEEE/board/role/image identity, pass fresh link and relay/load preflight, own the network OTA lock exclusively, and complete post-flash build/role/connectivity checks before the next socket starts. Stock TS011F devices are not part of this same-role custom-firmware rollout. Cross-role Router↔Client conversion remains a separate operation with rejoin/binding implications.
 
@@ -93,11 +156,11 @@ Status updated on 2026-09-25. **Router goldens are released; Mains Client remain
 
 The PM Router `v8u4` hardware canary passed a real IKEA RODRET child join/interview, sleepy-wake action and topology test; see [router reliability](router_reliability.md). The non-PM Router release was hardware accepted and merged in PR #27. PR #31 (Client OTA-abort recovery) and PR #28 (byte-identical non-PM Client→golden-Router recovery image) were merged on 2026-09-19. Their merge does **not** constitute a passing Client hardware acceptance test.
 
-## Current non-PM Client canary evidence
+### Non-PM Client canary evidence (historical)
 
 `BedroomSocketCabinetRight` has reported `1.1.2-bseedcli4`, role `EndDevice`, the canonical non-PM configuration, and relay `OFF` after the Router→Client OTA. A read-only Zigbee2MQTT/MQTT probe on 2026-09-19 succeeded on 19 of 20 relay reads: one seven-second timeout, then one approximately 2.94-second read; other successful replies were generally under 160 ms. This **fails the repeatability gate** despite successful installation and ON/OFF checks in the earlier transition campaign. Keep the existing canary under observation and do not convert additional sockets based on this run.
 
-## Promotion gates, in order
+### Promotion gates, in order
 
 1. Keep both exact Router goldens and their stock→Router wrappers available in `index_bseed.json`; verify file hashes and OTA headers against the checked-in binary artifacts. Never substitute a freshly rebuilt rollback payload for the hardware-proven Router image.
 2. Diagnose the non-PM Client timeout with simultaneous Zigbee2MQTT/coordinator logs and a device-specific read probe. Separate MQTT-message loss, route failure, commissioning/rejoin activity and device application stalls; do not assign a cause from one timeout alone.
@@ -106,13 +169,13 @@ The PM Router `v8u4` hardware canary passed a real IKEA RODRET child join/interv
 5. Publish native Client images in the normal index **only after both board-specific canaries pass**, with distinct Client image types and same-role updates. Publish Router→Client and Client→Router transitions in separate temporary indexes. The standard index must not advertise cross-role transitions.
 6. Convert only a documented subset of sockets after confirming that the remaining Routers still provide adequate mesh coverage, sleepy-child parenting and redundancy. Record IEEE, board variant, intended role, installed build, rollback artifact hash and post-transition interview/bindings for each selected socket.
 
-## Rollout safeguards
+### Rollout safeguards
 
 The Mains Client is an always-awake, mains-powered EndDevice; it is **not** a sleepy battery profile. Zigbee role is a compile-time stack choice, not a Zigbee2MQTT toggle. A role change resets Zigbee network state and bindings; reopen permit-join for the selected device, verify the rejoin and restore any direct bindings. Never leave a temporary cross-role OTA index active for routine updates. Keep a Router device in each area needed for coverage, and avoid concurrent OTAs, coordinator changes and Zigbee2MQTT restarts during a hardware canary. See [role-change procedure](bseed_roles.md).
 
 `tests/test_bseed_golden_role_distribution.py` enforces the current fail-closed release index and checks that the published Router OTA files match their SHA-512, header identities and stock-conversion payloads. Revise this gate only alongside documented hardware acceptance evidence when Clients are promoted.
 
-## Zigbee2MQTT reconnect relay read correction (integration candidate)
+### Zigbee2MQTT reconnect relay read correction (integration candidate)
 
 Zigbee2MQTT 2.14.0 `lib/extension/availability.ts` invokes the `state` converter on `device.endpoint()` after an announce; for BSEED TS011F sockets this defaults to switch endpoint 1, which exposes an **output** `genOnOff` cluster, not the relay's readable `onOff` attribute. The relay's input `genOnOff` lives on endpoint 2. The resulting `UNSUPPORTED_ATTRIBUTE` is not evidence that the relay failed to switch.
 
