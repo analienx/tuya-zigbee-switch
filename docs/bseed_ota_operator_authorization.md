@@ -2,15 +2,17 @@
 
 **Updated 2026-11-03.** A user's explicit acceptance of unrecoverable-device risk is an **operator risk authorization**, not hardware recovery evidence or permission to weaken firmware integrity.
 
-## No repeated irreversible-loss prompts
+## Repository-wide, device-wide no-repeat risk policy
 
-When an operator has already granted risk acceptance for an identified socket, **do not keep asking them to repeat the same permanent-loss sentence**. Record the authorization once, with the device IEEE, installed version, proposed version, candidate SHA-256 and scope. A subsequent invocation of the **same** exact authorized operation should consume the recorded approval without asking again.
+This policy applies to **all BSEED devices managed by this operator**, not just CabinetRight, and to **all subsequent BSEED firmware updates**. The operator explicitly acknowledged that experimental OTA can permanently render a socket unusable. Treat that acknowledgement as a **standing risk preference** and **do not ask the operator to repeat any permanent-loss consent sentence again for each socket, version or retry**.
 
-For future images on the same socket, check the existing operator's standing preference first. A new candidate must still undergo independent candidate/digest review and the code's explicit admission; this review must not be represented as a request to re-utter the permanent-loss wording. Do not turn the preference into a fleet-wide unsafe fallback.
+Keep the repository warning plainly visible so other maintainers and operators understand the risk. **Do not assume that a different person installing this repository has consented**; this is the current owner's authorization, not blanket consent on behalf of third parties.
 
-**Physical load disconnected confirmation remains per campaign**, because it is an actual state that can change between OTA attempts. The 2026-11-03 user confirmation applies to the bedroom pair while they remain unchanged/unloaded. The OTA command still requires the `--confirm-load-unplugged` flag; this is a physical precondition, **not** a repeated irreversible-loss consent dialog.
+The standing acknowledgement eliminates repeated *dialog prompts*, **not** technical safety checks. Each specific OTA still requires exact verified device and role identity, cryptographically verified sealed firmware, an available Zigbee route, bounded coordinator health, exclusive network lock, and fail-closed update reconciliation. Never disable those checks, and do not imply the device can be recovered without a physical programming backup.
 
-## Pinned authorization: BedroomSocketCabinetRight
+**Electrical load state is a separate physical check**, not a repeat of risk consent. The operator confirmed both bedroom sockets unloaded on 2026-11-03. Preserve a physical load check when circumstances have changed or before a later campaign.
+
+## Current exact-image admission: BedroomSocketCabinetRight
 
 | Field | Recorded scope |
 | --- | --- |
@@ -31,7 +33,7 @@ The admission is implemented in `helper_scripts/bseed_nonpm_recovery_gate.py` us
 
 The authorization is **not** a waiver for corrupt or unsealed images, cross-role conversion, missing IEEE/board confirmation, shared OTA lock conflicts, unreachable devices, permit-join problems, stale preflight or uncontrolled retries. Do not skip the two-stage image/hash verification, exact-size 32-byte non-PM packet constraints, bounded coordinator checks, postflash Basic/ZDO validation, or device-specific telemetry and soak.
 
-**One device at a time** is the user's current operating preference. CabinetRight is first; Balcony is next and requires its own firmware and recovery-policy review. Do not automatically infer the CabinetRight SHA-specific admission authorizes a different socket.
+**One device at a time** is the user's current operating preference. CabinetRight is first; Balcony is next. The standing risk preference covers the operator's entire BSEED fleet; the *technical image admission* remains exact and candidate-specific, without new risk-wording prompts.
 
 Hardware acceptance remains separate from a successful transfer and postflash software candidate.
 
