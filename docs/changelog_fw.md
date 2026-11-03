@@ -1,16 +1,57 @@
-## Unreleased - PM Client cli16: preserve legacy energy on migration failure
+# Firmware changelog
+
+**Newest BSEED changes first.** This file contains firmware and tooling history; it is **not** an OTA publication list.
+
+[Published vs candidate status](bseed_socket_release_status.md) · [Release notes](releases/README.md) · [Documentation](README.md) · [Release procedure](contribute/release.md)
+
+> [!IMPORTANT]
+> New firmware identities appearing in the changelog are **not** automatically safe to install. Only the checked-in [public BSEED OTA index](../zigbee2mqtt/ota/index_bseed.json) defines normal public availability. A clean build, sealed image or completed OTA is not a complete hardware acceptance.
+
+## 2026-11-02 · Sealed link-policy candidate set (not publicly released)
+
+**Four distinct native images, all from one exact candidate source:** [`1cc08a92d4dd68ff3607dc224f707c3e757d4ec8`](https://github.com/analienx/tuya-zigbee-switch/commit/1cc08a92d4dd68ff3607dc224f707c3e757d4ec8).
+
+| Variant | Sealed candidate | Native version |
+| --- | --- | --- |
+| PM Router | `1.2.5-bseedr19` | `0x12053021` |
+| PM mains Client | `1.2.5-bseedcli22` | `0x12053021` |
+| Non-PM Router | `1.1.3-bseedr18` | `0x1102301D` |
+| Non-PM mains Client | `1.1.3-bseedc16` | `0x1102301D` |
+
+**Changed**
+- Clients keep their healthy parent by default; repeated parent loss switches subsequent SDK-owned rejoins to rescan mode, with a bounded return to sticky behavior.
+- Routers measure coordinator-route cost and nearby alternatives before asking for rate-limited route refresh or existing secure recovery.
+- Basic `0xFF13` exposes a compact on-device policy snapshot. OTA and SDK-owned rejoin sequences retain network-action ownership.
+
+**Unchanged**
+- Public BSEED index, previously sealed image bytes, board-specific PM/relay logic and exact Router-versus-Client OTA types.
+- Hardware acceptance requirement for each board and role.
+
+**Evidence:** [release notes, firmware digests and CI runs](releases/2026-11-02-link-policy-candidates.md) · [policy implementation](bseed_link_policy.md).
+
+## 2026-10-31 · Previous four-variant hardening (superseded candidate set)
+
+The earlier PM `r17/cli20` and non-PM `r16/c14` build set added bounded Router recovery and source-level fixes to reboot deferral, role markers, overload lockout and PM calibration. It was sealed and tested, but was **superseded before public release** by the November 2 link-policy set. Previous exact bytes remain immutable; see [independent source review](bseed_four_variant_review_20261031.md).
+
+## Earlier change history
+
+The following sections are retained for traceability. Their “unreleased”, “upcoming” and “latest” labels describe the dates of those historical investigations—not the latest candidate or current public OTA status.
+
+---
+
+### Unreleased - PM Client cli16: preserve legacy energy on migration failure
 
 - Never delete historical PM energy NVM slot 40, calibration slot 44, overload slot 51 or the retry marker on repeated migration failures. Respect the retry cap while preserving forensic/recovery data.
 - Detect and log a higher old energy counter conflicting with the unified destination but never silently overwrite an intentional reset. Reject out-of-range uint64 energy before copying into Zigbee UINT48.
 - Reserve new PM Router 1.2.5-bseedr13 type 43556 and Client 1.2.5-bseedcli16 type 65024 at the shared native version 0x1205301B. Different image types and embedded Basic identities preserve role isolation; sealed r12/cli15 identities remain immutable. Neither new candidate is sealed, flashed or hardware accepted.
 - HifiLeft's old 0.75 kWh may have been a cached value. Its cli14 live counter first became 0 at 10:37:42 after upgrade; root cause cannot be proven without internal NVM records, so this source change is prospective and no loss is silently backfilled or global OTA lock cleared.
 
-## Unreleased - new candidate PM cli15 / non-PM c10 (NOT flashed)
+### Unreleased - new candidate PM cli15 / non-PM c10 (NOT flashed)
 
 - Allocated distinct Client-only OTA versions without relabeling prior PM/non-PM Router or Client release bytes: PM cli15 type 65024 version 0x1205301A, non-PM c10 type 65026 version 0x11023017. Both are still reserved/unsealed; the network remains on the previous binaries.
 - Same-source rebuilds of old cli14/c9 identities are correctly blocked by the historical identity registry.
 
-## Unreleased - mains Client passive-connectivity recovery (source only, NOT flashed)
+### Unreleased - mains Client passive-connectivity recovery (source only, NOT flashed)
 
 - Both PM and non-PM mains Clients now observe actual parent MAC poll confirmations, counting acknowledged no-data polls as healthy, and inbound Zigbee ZCL activity. Detect a stale internal JOINED state after at least 12 minutes of absent activity, four consecutive MAC poll failures (ordinary silence or missing callbacks only refreshes the keepalive, never triggers a rejoin), with up to 2 minutes of per-IEEE scan stagger.
 - Only after verified parent-poll failures submit one SDK one-shot rejoin, at most once per 15 minutes, without factory reset, network credential erase, relay manipulation, reboot, or overlap with OTA. Keep the original SDK-owned rejoin-with-backoff for ordinary parent-loss indications. Callback closes ownership and a verified successful join starts a new health epoch.
@@ -18,27 +59,18 @@
 - This is a source change requiring clean GitHub-hosted PM/non-PM matrices and hardware validation. It does not alter sealed c9/cli14 images or retroactively repair sockets already running them. Exact next version allocation remains a separate release gate.
 - SDK 3.7.2.0 release notes explicitly describe zb_rejoinReqWithBackOff as continuing until success. Never start a second backoff operation merely because BDB reported an intermediate failure.
 
-_Open the **Outline** (table of contents) from the top right._
-
-# Firmware Changelog
-
-<!------------------------------------------------------
-
-Please describe what you are working on, under ## Upcoming
+### Earlier firmware history (original content retained)
 
 
-------------------------------------------------------->
-
-## Upcoming
-
-### BSEED TS011F mains Client parent recovery — 2026-10-13
+### Prior upcoming notes (historical context)
+#### BSEED TS011F mains Client parent recovery — 2026-10-13
 
 - PM and non-PM Clients use confirmed parent MAC-poll results to detect a stale joined state. Only successful poll confirmations refresh parent health; unrelated inbound ZCL traffic cannot hide repeated poll failures, and silence without poll failures cannot trigger recovery.
 - After four consecutive failed parent polls and at least 12 minutes without a successful poll, the Client requests the SDK-owned rejoin-with-backoff. Recovery ownership survives intermediate failures, failed starts are rolled back, and a successful join starts a new health epoch. A per-device stagger and 15-minute cooldown limit synchronized retries; OTA suppresses starting new health-triggered recovery.
 - Role-marker storage errors preserve the existing role/network state and block startup for bounded retries rather than risking a blind Router-to-Client reset. Persistent errors remain visible for diagnosis.
 - Exact-source CI passed for PM and non-PM role matrices, host regressions, and the paired Router TC32 gate. Candidate identities are PM Router r16 / Client cli19 (`0x1205301e`) and non-PM Router r15 / Client c13 (`0x1102301a`). These candidates are reserved and hardware acceptance is pending; they are not approved for deployment. See [review and verification evidence](bseed_client_parent_recovery_20261013.md).
 
-### PM physical-unloaded preflash option — 2026-10-10
+#### PM physical-unloaded preflash option — 2026-10-10
 
 - Custom PM TS011F-BS-PM Router and Client may skip **live preflash activePower**
   only with an explicit private-profile physical-unloaded policy and exact
@@ -48,7 +80,7 @@ Please describe what you are working on, under ## Upcoming
 - Live state, firmware identity, OTA network lock, image hash and single-target
   isolation continue to gate every flash. No firmware image bytes changed.
 
-### OTA orchestration and four-variant release documentation — 2026-10-10
+#### OTA orchestration and four-variant release documentation — 2026-10-10
 
 - PM Router/Client and non-PM Router/Client retain their sealed October 4 firmware identities; **no firmware bytes, versions or payloads changed in this tooling pass**.
 - Same-role reconciliation holds network ownership until fresh candidate verification. PM readiness requires new device-originated ZCL power, while non-PM retains separate unloaded/link gates.
@@ -56,7 +88,7 @@ Please describe what you are working on, under ## Upcoming
 - Historical five-minute Bedroom non-PM failures and Hifi's other failed timeout configurations invalidate a blanket three-minute OTA policy. Hifi's experimental 180-second setting was reverted to 1,800 seconds pending raw block-level evidence. See [timing evidence](bseed_ota_timeout_evidence_policy_20261010.md).
 - Offline CI never substitutes for separate PM/non-PM Router/Client hardware acceptance and soak.
 
-### BSEED socket hardening (2026-10-04)
+#### BSEED socket hardening (2026-10-04)
 
 - **Latest sealed BSEED socket candidates**
   - PM Router: `1.2.5-bseedr12` / `0x12053019` / image type `43556`.
@@ -83,13 +115,13 @@ Please describe what you are working on, under ## Upcoming
   - Earlier c7 attempts exposed parent/downlink loss and an OTA `ABORT`; power cycling was needed only to recover the old c7 state during failed/interrupted transfer, not to apply c9 after successful OTA.
 - **Scope note:** c9 does **not** introduce a new direct OTA-abort/requery algorithm relative to c7; the relevant `zigbee_ota.c` deferred-requery logic was already present. Its OTA resilience improvements are indirect consequences of the shared timer, scheduler, polling-ownership and network-recovery fixes. Broad fleet acceptance remains a per-board/per-role hardware exercise.
 
-### Devices
+#### Devices
 
 - **Hommyn 2-gang L-only relay module** (`_TZ3000_0e6uvexf`, `MODULE_HOMMYN_TS0012`)
   - Pinout: L1 `RB5`, L2 `RB4`, switches `SC2f`/`SC3f`
   - Defaults to momentary switch mode (`M;` in config)
 
-### Features
+#### Features
 
 - **Router-aware Telink network recovery** for TLSR8258 Router builds.
   - Factory-new devices use BDB network steering.
@@ -111,7 +143,7 @@ Please describe what you are working on, under ## Upcoming
 - **Battery measurement & reporting** (Zigbee `genPowerCfg` cluster) for Telink devices
 - **Deep retention sleep** for Telink end devices
 
-### Changes
+#### Changes
 
 - Add `D<N>` config option to customize button debounce delay in milliseconds
 - **Bi-stable (latching) relays** have been reworked
@@ -125,7 +157,7 @@ Please describe what you are working on, under ## Upcoming
   - PollCtrl cluster to allow settings poll rate via ZCL
   - Add `BT<pin>` config option to enable battery mode
 
-### Bugs
+#### Bugs
 
 - **Fixed**
   - Telink Router recovery could mix SDK rejoin/backoff with fresh BDB network steering after connectivity loss. Recovery paths are now explicitly separated and duplicate recovery starts are suppressed. Factory-new `NO_SCAN_RESPONSE` no longer enters old-network rejoin recovery. Hardware canary validation remains required before broad Router rollout.
@@ -141,11 +173,11 @@ Please describe what you are working on, under ## Upcoming
 - **New**
   - SONOFF ZBMINIL2 version updates broken?
 
-## v1.1.2
+### v1.1.2
 
 _Bug-fix update_
 
-### Bugs
+#### Bugs
 
 - **Fixed**
   - Setting 'long press duration' to 0ms crashes device
@@ -153,23 +185,23 @@ _Bug-fix update_
   - Option 'Relay indicator - manual on' is not kept after reboot
   - Relay indicators sometimes go out-of-sync ([#38](https://github.com/romasku/tuya-zigbee-switch/issues/38))
 
-## v1.1.1
+### v1.1.1
 
 _Critical bug-fix update for previous version_
 
-### Changes
+#### Changes
 
 - Added a **hardware watchdog** on Telink devices that automatically reboots the device when it's stuck
 
-### Bugs
+#### Bugs
 
 - **Fixed:** Floating pin (or other device conditions) freezes the device
 
-## v1.1.0
+### v1.1.0
 
 _Contains **substantial restructuring** of the firmware architecture, but doesn't bring new features_
 
-### Changes
+#### Changes
 
 - Updated **Telink SDK** to v3.7.2.0 for **stability**
 - Added support for **Silabs chips** by introducing **HAL middleware**
@@ -177,7 +209,7 @@ _Contains **substantial restructuring** of the firmware architecture, but doesn'
 - Improve **versioning** to include commit hash
 - Many more technical improvements
 
-### Bugs
+#### Bugs
 
 - **Fixed**
   - Old SDK freezes device in some network conditions
@@ -194,13 +226,13 @@ _Contains **substantial restructuring** of the firmware architecture, but doesn'
   - _momentary_nc_ not working after power loss.  
     (Apply the setting again)
 
-## v1.0.21
+### v1.0.21
 
-### Changes
+#### Changes
 
 - Keep device configuration (user settings) when it is removed from the network
 
-### New features
+#### New features
 
 - Add support for Zigbee commands:
   - **off_with_effect** (0x40)
@@ -208,65 +240,65 @@ _Contains **substantial restructuring** of the firmware architecture, but doesn'
 - Add support for **normally-closed momentary buttons**
 - Add **action states for toggle buttons**: position_on and position_off
 
-## v1.0.20
+### v1.0.20
 
-### Changes
+#### Changes
 
 - (technical) Updated memory map: moved NV items from ZCL to APP.  
   **Due to this change, device configuration (user settings) may reset after OTA update.**
 
-### Bugs
+#### Bugs
 
 - **Fixed**
   - Canging config string crashed 3-4 gang devices
   - Detached mode didn't work for Toggle switches
 
-## v1.0.19
+### v1.0.19
 
-### New features
+#### New features
 
 - Add support of the levelCtrl cluster
   - This enables brightness control of compatible Zigbee bulbs via Zigbee binding.
   - The feature works only for momentary (doorbell-like) switches using long press: once a long press is detected, brightness will begin to slowly change. Each subsequent long press reverses the direction (increase/decrease).
   - Requires manual update of converters and reconfiguration.
 
-### Changes
+#### Changes
 
 - Increase the number of **presses required to reset the device to 10.**
 - Update manufacturer names to match the stock firmware.  
   (requires interview; but it's not mandatory, as backwards compatibility is kept)
 
-### Bugs
+#### Bugs
 
 - New bug: detached mode doesn't work for Toggle switches
 
-## v1.0.18
+### v1.0.18
 
 - Partly fix an issue where setting the config string could brick the device.
 - Technical: introduce a method to update data stored in NVRAM in new releases.
 
-## v1.0.17
+### v1.0.17
 
 - Fix once again power on behavior = OFF not working if toggle in pressed state during boot.
 
-## v1.0.16
+### v1.0.16
 
 - Add new toggle modes: TOGGLE_SMART_SYNC/TOGGLE_SMART_OPPOSITE (requires re-download of `switch_custom.js`).
 
-## v1.0.15
+### v1.0.15
 
 - Add support for Zigbee groups. Read [doc](/docs/usage/endpoints.md) for details about endpoints.
 
-## v1.0.14
+### v1.0.14
 
 - Improve code logic for Indicator LED on for switches.
 
-## v1.0.13
+### v1.0.13
 
 - Fix power on behavior = OFF not working if toggle in pressed state during boot.
 - Add way to control network state led state (requires re-download of `switch_custom.js`).
 
-## v1.0.12
+### v1.0.12
 
 - Fix led indicator state in manual mode not preserved after reboot.
 - Add forced device announcement after boot to make sure device is seen as "available" as soon as it boots.
@@ -274,50 +306,50 @@ _Contains **substantial restructuring** of the firmware architecture, but doesn'
 - Cleaned-up z2m converter (fix typos, inconsistent names, etc.). **Warning!** This may break your automations as it changes .
   property names (requires re-download of `switch_custom.js`).
 
-## v1.0.11
+### v1.0.11
 
 - Improve join behaviour by decreasing timeout between tries to join.
 - Fix leave network: now device will send LeaveNetwork command properly.
 - Display firmware version in a human-readable form.
 
-## v1.0.10
+### v1.0.10
 
 - Add support for bi-stable relays controlled by 2 pins.
 - Fix Led indicator mode not preserved after reboot.
 
-## v1.0.9
+### v1.0.9
 
 - Fix reporting of indicator led status.
 
-## v1.0.8
+### v1.0.8
 
 - Add support of indicator leds.
 - Add way to force momentary mode as default via config.
 
-## v1.0.7
+### v1.0.7
 
 - Add SUSPEND-based sleep to EndDevice firmware to decrease power usage ~10x.
 
-## v1.0.6
+### v1.0.6
 
 - Add way to change device pinout on the fly, to allow easier porting of firmware .
 
-## v1.0.5
+### v1.0.5
 
 - Keep status LED on when device is connected.
 - Add separate firmwares for End Device/Router.
 - Improve device boot time significantly by removing unnecessary logs .
 
-## v1.0.4
+### v1.0.4
 
 - Fix bug that caused report to be sent every second.
 
-## v1.0.3
+### v1.0.3
 
 - Add support of startup behaviour: ON, OFF, TOGGLE, PREVIOUS.
 - Add support of button actions: 'released', 'press', 'long_press'. This is only useful for momentary (doorbell-like) switches.
 
-## v1.0.2
+### v1.0.2
 
 - Add way to reset the device by pressing any switch button 5 times in a row .
 - Fix support for ON_OFF, OFF_ON actions.

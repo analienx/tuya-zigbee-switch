@@ -1,43 +1,57 @@
 # BSEED Zigbee Firmware
 
-Custom Zigbee firmware and release tooling for three exact BSEED device families, maintained as a hardware-focused fork of [Romasku's Tuya Zigbee Switch](https://github.com/romasku/tuya-zigbee-switch).
+**Reliable, hardware-specific firmware for BSEED sockets and switches—built on [Romasku's Tuya Zigbee Switch](https://github.com/romasku/tuya-zigbee-switch).**
+
+Exact device identity. Independent relay control. PM telemetry. Router and mains-Client recovery. Reproducible firmware releases, with hardware acceptance kept distinct from a successful build or OTA transfer.
+
+[**Get started**](#getting-started) · [**Firmware availability**](docs/bseed_socket_release_status.md) · [**Release notes**](docs/releases/README.md) · [**Documentation**](docs/README.md) · [**Contribute**](CONTRIBUTING.md)
 
 [![Tests](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/test.yml/badge.svg)](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/test.yml)
 [![PM role matrix](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/pm-reproducibility.yml/badge.svg)](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/pm-reproducibility.yml)
-[![Telink Router build](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/telink-router-ci.yml/badge.svg)](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/telink-router-ci.yml)
+[![Telink Router TC32](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/telink-router-ci.yml/badge.svg)](https://github.com/analienx/tuya-zigbee-switch/actions/workflows/telink-router-ci.yml)
 
 > [!CAUTION]
-> Firmware support depends on the exact Zigbee manufacturer and model identifiers below, not the enclosure or retail name. Custom firmware can make a mains-powered device unusable, and stock firmware recovery may not be possible. Confirm the identity and read the [installation guidance](docs/updating.md) before updating.
+> **Mains-powered hardware and potentially irreversible firmware changes.** Never identify a device by its enclosure or generic `TS011F` label. Check the exact manufacturer/model, board and OTA image type. An image that compiles—or even transfers successfully—can still leave a device unusable. Read [update and recovery guidance](docs/updating.md) before attempting an OTA.
 
-## Supported BSEED hardware
+## Start with the right guide
 
-The public [BSEED OTA index](https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/ota/index_bseed.json) currently offers Router firmware and stock-to-custom conversion for these targets:
+| I want to… | Open |
+| --- | --- |
+| Check whether my firmware is published or experimental | [Firmware availability](docs/bseed_socket_release_status.md) |
+| Install an accepted public Router image | [Zigbee2MQTT update guide](docs/updating.md) |
+| Understand the latest stability improvements | [2026-11-02 candidate release notes](docs/releases/2026-11-02-link-policy-candidates.md) |
+| Run a controlled canary | [Single-device OTA runner](docs/bseed_targeted_ota_runner.md) |
+| Understand the firmware and release architecture | [Documentation hub](docs/README.md) |
 
-| Device | Exact Zigbee identity | Published Router firmware | Custom image type |
-|---|---|---|---:|
-| TS011F-BS-PM power-monitoring socket | `b28wrpvx / TS011F-BS-PM` | `1.2.5-bseedv8u4` · `0x12053007` | `43556` |
-| TS011F-BS non-PM socket | `o1jzcxou / TS011F-BS` | `1.1.3-bseedv8` · `0x11023001` | `43555` |
-| TS0726 3-gang switch/dimmer | `iedhxgyi / TS0726-3-BS` | `1.1.8-bseedv8` · `0x1102300a` | `45577` |
+## Firmware availability
 
-The index contains the matching stock conversion entries for these targets. Each device family has a distinct image; never cross-flash between them.
+**Snapshot: 2026-11-03.** The public BSEED OTA index contains accepted **Router** images and matching stock-conversion wrappers. Newer **sealed candidates are not published**. Each device family has its own native OTA identity.
 
-**Mains Client firmware has already been deployed and exercised on PM and non-PM canaries, but no Client image is published in the BSEED index.** Earlier evidence includes PM `cli6`/`cli12` canaries and a non-PM `c9` OTA, reboot, and rejoin on BedroomSocketCabinetRight. Those results are specific to the tested devices and builds. They do not establish hardware acceptance for the newer parent-recovery candidates: PM `1.2.5-bseedcli19` (`0x1205301e`) and non-PM `1.1.3-bseedc13` (`0x1102301a`). The new candidates have passed offline source/build checks and still need their own hardware acceptance; do not install them as releases. See the [Client recovery review](docs/bseed_client_parent_recovery_20261013.md) and [current release status](docs/bseed_socket_release_status.md).
+| Hardware family | Zigbee manufacturer / model | Published Router | Current sealed Router / mains Client |
+| --- | --- | --- | --- |
+| TS011F-BS-PM · power monitoring | `b28wrpvx` / `TS011F-BS-PM` | `1.2.5-bseedv8u4` | `1.2.5-bseedr19` / `1.2.5-bseedcli22` |
+| TS011F-BS · no metering | `o1jzcxou` / `TS011F-BS` | `1.1.3-bseedv8` | `1.1.3-bseedr18` / `1.1.3-bseedc16` |
+| TS0726 · three-gang switch/dimmer | `iedhxgyi` / `TS0726-3-BS` | `1.1.8-bseedv8` | Separately controlled TS0726 candidate train |
+
+**Do not mistake the rightmost column for an upgrade offer.** The four TS011F candidates are sealed from exact-source GitHub Actions, but their complete board-specific hardware acceptance is still pending. Client images and role-transition wrappers are not in the public index. [See full identities, hex versions and acceptance status](docs/bseed_socket_release_status.md).
 
 ## What this fork adds
 
-- **PM metering:** validated BL0937 voltage, current, power, and cumulative energy reporting on the TS011F-BS-PM.
-- **Independent relay behavior:** physical output can follow logical Zigbee state or remain on/off, supporting smart-bulb and detached-control setups.
-- **Router reliability:** recovery uses the Telink SDK's rejoin/backoff path without colliding with fresh-device commissioning. The PM Router's sleepy-child parenting was hardware-tested with an IKEA RODRET E2201.
-- **Client recovery work:** PM and non-PM candidates detect repeated failed parent polls and request SDK-owned recovery with staggered retries. Earlier Client builds have run on canaries; the new recovery candidates still need hardware acceptance.
-- **BSEED integration:** target-specific pinouts, migration safeguards, stock conversion packages, Zigbee2MQTT support, and read-only diagnostics.
+| Area | What it provides |
+| --- | --- |
+| **Power monitoring** | BSEED PM hardware integration for voltage, current, active power and cumulative energy, with device-specific scaling and reporting gates |
+| **Relay and button independence** | Configure logical Zigbee behavior separately from the physical relay, supporting smart-bulb and detached-switch use cases |
+| **Router resilience** | Telink recovery and child-parenting hardening, including a historically tested IKEA RODRET sleepy-child canary |
+| **Mains-Client recovery** | Failure-driven parent rejoin and rescan logic; no generic factory reset or forced reboot on every lost message |
+| **Safe maintenance** | Unique OTA image types, immutable firmware identity, GitHub-hosted builds and gated single-target update tools |
 
-The reusable switch framework remains Romasku-derived. This fork keeps its BSEED-specific behavior and release tooling identifiable and preserves upstream attribution and licensing.
+The newest parent/route policy uses measured failure and cooldowns rather than changing parents at every weak signal. [Read the design](docs/bseed_link_policy.md). A green CI run never substitutes for on-device testing.
 
-## Get started
+## Getting started
 
-1. Match the device's exact manufacturer/model identity and release status in the [BSEED target table](docs/bseed_socket_release_status.md).
-2. Read [OTA conversion and update guidance](docs/updating.md) and the [known issues](docs/known_issues.md).
-3. Configure Zigbee2MQTT to use the BSEED index and restart it:
+1. **Identify your exact device.** Match its Zigbee manufacturer, model, board and intended Router/Client role in the [firmware status table](docs/bseed_socket_release_status.md).
+2. **Review the risks.** Stock-to-custom conversion may not be reversible without an exact-board firmware backup and tested recovery method. Read [updating](docs/updating.md) and [known issues](docs/known_issues.md).
+3. **For an explicitly supported public image**, configure Zigbee2MQTT with the BSEED override index:
 
    ```yaml
    ota:
@@ -45,39 +59,21 @@ The reusable switch framework remains Romasku-derived. This fork keeps its BSEED
        https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/ota/index_bseed.json
    ```
 
-4. Confirm the offered image matches the exact device and intended role before starting an update.
+4. **Check the offered image before transfer.** The normal index contains accepted Router/stock-conversion entries only; do not use it to infer Client availability. Apply configuration changes and restart Zigbee2MQTT only when no OTA or coordinator maintenance is in progress.
+5. **Verify after updating.** Reinterview and confirm the actual build, role, relay policy, metering, bindings and mesh behavior. OTA `status: ok` is not final hardware acceptance.
 
-The index publishes Router images and stock conversion paths only. It does not publish Client images or cross-role transitions. Stock-to-custom conversion should be treated as potentially one-way unless you have an exact-device backup and a tested restore path.
+[Full installation instructions](docs/updating.md) · [Targeted canary runbook](docs/bseed_targeted_ota_runner.md)
 
-## Smart-bulb setup
+## Firmware release discipline
 
-Logical Zigbee state, physical relay output, button behavior, and indicator LEDs can be configured independently. For example, a channel can keep a smart bulb powered while its wall button sends Zigbee commands:
+**Source → exact-SHA GitHub-hosted CI → sealed artifact → one-device canary → hardware acceptance → public OTA publication.**
 
-```text
-physical relay output = always_on
-logical Zigbee state  = independently controlled
-button action         = bound to the smart bulb
-indicator LED         = manually controlled
-```
+A native PM Router image cannot be substituted for the Client image, even when both share the same numerical version. Identical-looking TS011F enclosures may contain different boards. Every promotion must preserve the firmware identity registry and use verified artifact bytes; historical seals are immutable.
 
-`detached` only controls whether a local button press operates the relay; it does not pin the electrical output on or off.
+[Release-process guide](docs/contribute/release.md) · [Evidence-led release notes](docs/releases/README.md) · [PM role matrix](docs/bseed_pm_variant_matrix.md)
 
-## Release quality
+## Project documentation
 
-Deployable firmware is built by GitHub Actions from a clean source revision. Release workflows check host tests, firmware identities and OTA headers, the pinned Telink toolchain, and reproducibility where required. A passing CI run is offline evidence; it does not replace device-specific hardware acceptance.
+The [documentation hub](docs/README.md) groups setup, OTA operations, hardware validation, architecture and contributing guides. For broader upstream devices, use the [supported-device database](docs/supported_devices.md) and [porting guide](docs/contribute/porting.md); entries there are not blanket authorization for BSEED-specific images.
 
-## Documentation
-
-| Topic | Guide |
-|---|---|
-| Exact targets, identities, and architecture | [BSEED unified V8](docs/bseed_unified_v8.md) |
-| Installation and OTA updates | [Updating OTA](docs/updating.md) |
-| Published and candidate firmware status | [BSEED socket release status](docs/bseed_socket_release_status.md) |
-| Client parent recovery review | [Recovery implementation and evidence](docs/bseed_client_parent_recovery_20261013.md) |
-| Supported device database | [Supported devices](docs/supported_devices.md) |
-| Firmware changes | [Firmware changelog](docs/changelog_fw.md) |
-| Known limitations | [Known issues](docs/known_issues.md) |
-| Contributing and hardware porting | [Contributing](CONTRIBUTING.md) · [Porting guide](docs/contribute/porting.md) |
-| Support | [Support guidance](SUPPORT.md) · [Security policy](SECURITY.md) |
-
-See [LICENSE](LICENSE) for licensing terms and the [upstream project](https://github.com/romasku/tuya-zigbee-switch) for the generic firmware framework.
+This fork preserves [upstream attribution](https://github.com/romasku/tuya-zigbee-switch), architecture and licensing. See [LICENSE](LICENSE), [SECURITY.md](SECURITY.md) and [SUPPORT.md](SUPPORT.md).
