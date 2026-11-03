@@ -171,18 +171,28 @@ def write_once(path, data):
 # candidate. Anything else (update_error, ota_transfer_ok_postflash_unverified,
 # update_timeout_or_unconfirmed, ...) is unresolved and blocks a new campaign.
 CLEAN_LOCK_PHASES = ('postflash_candidate', ACCEPTED_PHASE, RECONCILED_PHASE,
+                     'source_unchanged_reconciled',
                      'postflash_software_verified_network_released',
                      ABANDONED_PHASE)
 
 
-def find_campaign_locks(site, name):
-    """Every earlier campaign lock for this socket, found by IEEE or name.
+def find_campaign_locks(site, name, live=None):
+    """Every earlier campaign lock, with optional verified later-acceptance proof.
 
     Each build gets its own workdir, so the new campaign cannot see an earlier
     device lock by itself. Search the canary root, the site's lock roots and
     any roster prior workdirs.
     """
     device = device_entry(site, name)
+    successor = None
+    if device.get('historical_successor') and live is not None:
+        from bseed_historical_lock_supersession import accepted_successor
+        try:
+            successor = accepted_successor(
+                device['historical_successor'], device=name,
+                ieee=device['ieee'], live=live)
+        except (ValueError, KeyError, TypeError) as exc:
+            raise CanaryError('Historical successor verification failed: %s' % exc) from exc
     shared = [Path(site['campaign_root'])]
     shared += [outside_repo(p, 'lock_search_roots') for p in site.get('lock_search_roots', [])]
     own = [outside_repo(p, 'prior_workdirs') for p in device.get('prior_workdirs', [])]
@@ -201,15 +211,21 @@ def find_campaign_locks(site, name):
             mine = (str(record.get('ieee', '')).lower() == device['ieee'].lower() or
                     record.get('device') == name)
             if owned or mine:
+                clean = record.get('phase') in CLEAN_LOCK_PHASES
+                superseded = False
+                if not clean and successor is not None:
+                    from bseed_historical_lock_supersession import historical_lock_superseded
+                    superseded = historical_lock_superseded(record, successor)
                 seen.add(key)
                 found.append({'path': str(lock), 'phase': record.get('phase'),
-                              'clean': record.get('phase') in CLEAN_LOCK_PHASES})
+                              'clean': clean or superseded,
+                              'superseded_by': (successor['build'] if superseded else None)})
     return found
 
 
-def prior_campaign_locks(site, name):
-    """Refuse while any earlier campaign for this socket is unresolved."""
-    for lock in find_campaign_locks(site, name):
+def prior_campaign_locks(site, name, live=None):
+    """Refuse unresolved attempts unless proven superseded by later acceptance."""
+    for lock in find_campaign_locks(site, name, live=live):
         if not lock['clean']:
             raise CanaryError('Unresolved campaign lock for %s at %s (phase %s); '
                               'reconcile or abandon it deliberately first'
@@ -268,10 +284,10 @@ def discover(site, name, live=None):
     """Read-only facts for one socket: live identity, candidate and locks."""
     device = device_entry(site, name)
     report = {'device': name, 'ieee': device['ieee'], 'board': device['board'],
-              'role': device['role'], 'candidate': candidate(device['board'], device['role'])['build'],
-              'locks': find_campaign_locks(site, name)}
+              'role': device['role'], 'candidate': candidate(device['board'], device['role'])['build']}
     if live is None and site.get('ha_ssh_alias'):
         live = live_identity(site, device['ieee'])
+    report['locks'] = find_campaign_locks(site, name, live=live)
     if live is not None:
         report['live'] = live
         report['preflash_build'] = reconcile_live(site, name, device, live)
@@ -286,11 +302,11 @@ def discover(site, name, live=None):
 def build_profile(site, name, artifacts, registry=None, live=None):
     registry = load_registry(DEFAULT_REGISTRY) if registry is None else registry
     device = dict(device_entry(site, name))
-    prior_campaign_locks(site, name)
     if live is None and site.get('ha_ssh_alias'):
         live = live_identity(site, device['ieee'])
     if live is not None:
         device['preflash_build'] = reconcile_live(site, name, device, live)
+    prior_campaign_locks(site, name, live=live)
     if not device.get('preflash_build'):
         raise CanaryError('%s needs preflash_build or ha_ssh_alias discovery' % name)
     board, role = device['board'], device['role']
