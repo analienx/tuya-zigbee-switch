@@ -37,7 +37,7 @@ def verify_recovery(profile, *, confirm_unloaded=False):
     """
     roles = (profile.get('preflash_role'), profile.get('postflash_role'))
     if roles not in (('EndDevice', 'EndDevice'), ('Router', 'Router')):
-        raise ValueError('Same-role non-PM flash requires an unchanged Router or EndDevice role')
+        raise ValueError('Same-role non-PM flash role mismatch: requires unchanged Router or EndDevice role')
     return _verify_recovery(profile, confirm_unloaded=confirm_unloaded, roles=roles)
 
 
