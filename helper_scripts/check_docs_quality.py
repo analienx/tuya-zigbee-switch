@@ -43,6 +43,26 @@ class DocsError(ValueError):
 def source_candidate(repo: Path, file: str, role: str) -> dict:
     """Read literal source definitions without importing (or executing) firmware code."""
     tree = ast.parse((repo / file).read_text(encoding="utf-8"))
+    constants: dict[str, object] = {}
+    # Resolve only explicit, top-level static assignments. Never import release
+    # modules, execute functions, expand attributes or follow arbitrary names.
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        if not isinstance(node.targets[0], ast.Name) or node.targets[0].id == role:
+            continue
+        try:
+            literal = ast.literal_eval(node.value)
+        except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+            continue
+        if isinstance(literal, (str, int, bool, type(None))):
+            constants[node.targets[0].id] = literal
+
+    def static_value(node: ast.AST) -> object:
+        if isinstance(node, ast.Name) and node.id in constants:
+            return constants[node.id]
+        return ast.literal_eval(node)
+
     for node in tree.body:
         if not isinstance(node, ast.Assign):
             continue
@@ -56,7 +76,7 @@ def source_candidate(repo: Path, file: str, role: str) -> dict:
         elif isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id == "dict":
             if value.args or any(x.arg is None for x in value.keywords):
                 raise DocsError(f"{file}: dynamic role constructor not supported")
-            result = {x.arg: ast.literal_eval(x.value) for x in value.keywords}
+            result = {x.arg: static_value(x.value) for x in value.keywords}
         else:
             raise DocsError(f"{file}: {role} must have a literal definition")
         if any(k not in result for k in ("build", "version", "type")):
