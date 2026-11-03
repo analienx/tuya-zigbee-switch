@@ -29,7 +29,16 @@ def _private_file(value, label):
 
 
 def verify_recovery(profile, *, confirm_unloaded=False):
-    return _verify_recovery(profile, confirm_unloaded=confirm_unloaded)
+    """Verify a same-role non-PM Client or Router without relaxing recovery proof.
+
+    The previously hard-coded EndDevice→EndDevice default unintentionally
+    rejected genuine Router→Router upgrades before their device-specific
+    readback and physical safety evidence could be validated.
+    """
+    roles = (profile.get('preflash_role'), profile.get('postflash_role'))
+    if roles not in (('EndDevice', 'EndDevice'), ('Router', 'Router')):
+        raise ValueError('Same-role non-PM flash requires an unchanged Router or EndDevice role')
+    return _verify_recovery(profile, confirm_unloaded=confirm_unloaded, roles=roles)
 
 
 def verify_transition_recovery(profile, *, confirm_unloaded=False):
