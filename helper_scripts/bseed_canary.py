@@ -171,6 +171,7 @@ def write_once(path, data):
 # candidate. Anything else (update_error, ota_transfer_ok_postflash_unverified,
 # update_timeout_or_unconfirmed, ...) is unresolved and blocks a new campaign.
 CLEAN_LOCK_PHASES = ('postflash_candidate', ACCEPTED_PHASE, RECONCILED_PHASE,
+                     'postflash_software_verified_network_released',
                      ABANDONED_PHASE)
 
 
