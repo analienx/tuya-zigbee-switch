@@ -190,3 +190,31 @@ def test_same_role_gate_rejects_cross_role_before_any_recovery(tmp_path):
     with pytest.raises(ValueError, match='Same-role'):
         verify_recovery(profile,confirm_unloaded=True)
 
+
+
+def test_user_authorized_cabinetright_c9_to_c16_exact_image_no_repeat_prompt():
+    """Standing approval for this exact, unloaded candidate, not a generic bypass."""
+    profile = dict(non_pm=True, manufacturer='o1jzcxou', model='TS011F-BS',
+        preflash_role='EndDevice', postflash_role='EndDevice', block_bytes=32,
+        device='BedroomSocketCabinetRight', ieee='0xa4c13824a7005afb',
+        sha256='d4057825661eb4a6c943ca4f8a5b02d7c709acdb960e4102fd5a185e4f87e321',
+        preflash_build='1.1.3-bseedc9', postflash_build='1.1.3-bseedc16',
+        require_pm=False, relay_get_key='state_relay', expect_relay='OFF',
+        preflash_relay_physical_mode='follow_state')
+    result = verify_recovery(profile, confirm_unloaded=True)
+    assert result['recovery_available'] is False
+    assert result['ieee'] == profile['ieee']
+    for changed in (
+        {'sha256': '0' * 64},
+        {'ieee': '0xa4c138ac993cc245'},
+        {'postflash_build': '1.1.3-bseedc17'},
+        {'preflash_build': '1.1.3-bseedc8'},
+        {'preflash_role': 'Router', 'postflash_role': 'Router'},
+        {'block_bytes': 48},
+        {'preflash_relay_physical_mode': 'toggle'},
+        {'require_pm': True},
+    ):
+        with pytest.raises(ValueError):
+            verify_recovery(dict(profile, **changed), confirm_unloaded=True)
+    with pytest.raises(ValueError, match='Physical load'):
+        verify_recovery(profile, confirm_unloaded=False)
