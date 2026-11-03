@@ -339,3 +339,86 @@ def test_publish_site_validation(tmp_path):
     with pytest.raises(canary.CanaryError, match='absolute remote path'):
         canary.load_site(tmp_path / 'site.json')
     assert site
+
+
+def test_historical_failed_locks_are_superseded_only_by_hashed_later_acceptance(tmp_path):
+    scratch = tmp_path / 'history'
+    scratch.mkdir()
+    accepted_dir = scratch / 'accepted'
+    accepted_dir.mkdir()
+    old = scratch / 'old' / 'ACTIVE_LOCK.json'
+    old.parent.mkdir()
+    old_record = {'device': 'Canary', 'ieee': IEEE, 'phase': 'ota_running',
+                  'token': 'earlier', 'started': '2026-09-21T18:33:09+02:00'}
+    old.write_text(json.dumps(old_record))
+    before = old.read_bytes()
+
+    build = '1.2.5-bseedcli12'
+    image_sha = 'a' * 64
+    accepted_at = '2026-10-04T19:30:24+02:00'
+    accepted = accepted_dir / 'ACTIVE_LOCK.json'
+    accepted.write_text(json.dumps({
+        'device': 'Canary', 'ieee': IEEE, 'phase': 'postflash_accepted',
+        'hardware_acceptance': True, 'token': 'later',
+        'sha256': image_sha,
+        'completed': '2026-10-04T16:50:34+02:00',
+        'accepted_at': accepted_at,
+        'response': {'status': 'ok', 'transaction': 'later',
+                     'data': {'id': IEEE, 'to': {'software_build_id': build}}},
+    }))
+    artifacts = []
+    for title in ('postflash', 'soak'):
+        p = accepted_dir / (title + '.json')
+        p.write_text('{"record":"verified"}')
+        artifacts.append((title, p, hashlib.sha256(p.read_bytes()).hexdigest()))
+    accepted_evidence = accepted_dir / 'acceptance.json'
+    ev = {'result': 'postflash_accepted', 'accepted_at': accepted_at,
+          'device': 'Canary', 'ieee': IEEE, 'build': build,
+          'image_sha256': image_sha, 'token': 'later', 'soak_seconds': 9000}
+    for title, p, digest in artifacts:
+        ev[title + '_evidence'] = str(p)
+        ev[title + '_evidence_sha256'] = digest
+    accepted_evidence.write_text(json.dumps(ev))
+
+    site = make_site(tmp_path, 'pm', 'EndDevice', preflash_build=None,
+                     historical_successor={'lock': str(accepted),
+                                           'acceptance': str(accepted_evidence)})
+    site['lock_search_roots'] = [str(scratch)]
+    live = live_record(lastSeen=1793732547413)
+    candidate = canary.discover(site, 'Canary', live=live)
+    assert candidate['eligible']
+    superseded = [x for x in candidate['locks'] if x['path'] == str(old)]
+    assert len(superseded) == 1
+    assert superseded[0]['clean'] and superseded[0]['superseded_by'] == build
+    assert old.read_bytes() == before
+
+    firmware, registry = make_artifacts(tmp_path, 'pm')
+    canary.build_profile(site, 'Canary', firmware, registry, live=live)
+    assert old.read_bytes() == before
+
+    # The same stale worklock is NOT disregarded without independent proof.
+    unpinned = dict(site)
+    unpinned['devices'] = {'Canary': dict(site['devices']['Canary'])}
+    unpinned['devices']['Canary'].pop('historical_successor')
+    assert not canary.discover(unpinned, 'Canary', live=live)['eligible']
+
+    # An older acceptance cannot supersede a newer unresolved campaign.
+    old_record['started'] = '2026-11-04T18:33:09+01:00'
+    old.write_text(json.dumps(old_record))
+    assert not canary.discover(site, 'Canary', live=live)['eligible']
+    old.write_bytes(before)
+
+    # Tampered independently-hashed acceptance evidence fails closed.
+    artifacts[0][1].write_text('{"record":"TAMPERED"}')
+    with pytest.raises(canary.CanaryError, match='Historical successor'):
+        canary.discover(site, 'Canary', live=live)
+
+
+def test_historical_successor_requires_fresh_live_identity(tmp_path):
+    scratch = tmp_path / 'history'
+    site = make_site(tmp_path, 'pm', 'EndDevice', preflash_build=None,
+                     historical_successor={'lock': str(scratch / 'missing.json'),
+                                           'acceptance': str(scratch / 'missing-acceptance.json')})
+    site['lock_search_roots'] = [str(scratch)]
+    write_lock(scratch / 'old', 'update_error')
+    assert not canary.discover(site, 'Canary', live=None)['eligible']
