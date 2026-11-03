@@ -31,9 +31,15 @@ def validate_candidate_set():
         raise IdentityError('unexpected PM role image type')
 
 
-def verify_native_image(data, expected, transport_type=None):
-    """Check the downloaded bytes, not just manifest claims or OTA headers."""
-    validate_candidate_set()
+def verify_native_image(data, expected, transport_type=None, bseed_build_strings=True):
+    """Check the downloaded bytes, not just manifest claims or OTA headers.
+
+    bseed_build_strings=False skips only the BSEED-specific '1.x.y-bseed*'
+    stray-string scan, for other boards; the length-prefixed Basic build ID
+    check below always runs.
+    """
+    if bseed_build_strings:
+        validate_candidate_set()
     if not expected['build'].isascii() or not 1 <= len(expected['build']) <= 16:
         raise IdentityError('native verifier: expected Basic build ID exceeds 16 ASCII bytes')
     header = parse_ota_header(data)
@@ -58,7 +64,8 @@ def verify_native_image(data, expected, transport_type=None):
         raise IdentityError('native verifier: firmware length mismatch')
     if struct.unpack_from('<I', fw, len(fw)-4)[0] != (binascii.crc32(fw[:-4]) ^ 0xffffffff):
         raise IdentityError('native verifier: CRC mismatch')
-    require_embedded_string(fw, expected['build'])
+    if bseed_build_strings:
+        require_embedded_string(fw, expected['build'])
     build = expected['build'].encode('ascii')
     if bytes([len(build)]) + build not in fw:
         raise IdentityError('native verifier: missing length-prefixed Basic build ID')
