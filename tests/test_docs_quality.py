@@ -50,7 +50,8 @@ class DocsQualityTests(unittest.TestCase):
             root = Path(d)
             (root / "roles.py").write_text(
                 "ROUTER = {'build': 'x', 'version': 12, 'type': 345}\n"
-                "CLIENT = dict(build='y', version=12, type=678)\n", encoding="utf-8"
+                "BOARD = 'example'\n"
+                "CLIENT = dict(build='y', version=12, type=678, board=BOARD)\n", encoding="utf-8"
             )
             self.assertEqual(dq.source_candidate(root, "roles.py", "ROUTER")["build"], "x")
             self.assertEqual(dq.source_candidate(root, "roles.py", "CLIENT")["type"], 678)
