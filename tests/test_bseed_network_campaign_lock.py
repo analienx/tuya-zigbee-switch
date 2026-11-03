@@ -15,6 +15,7 @@ from bseed_network_campaign_lock import (
     read_lock,
     ownership_diagnosis,
     release_accepted,
+    release_software_verified,
     release_preflight_abort,
     release_reconciled,
     release_source_unchanged,
@@ -167,3 +168,25 @@ def test_diagnosis_never_releases_or_authorizes_unknown_states(tmp_path):
         assert d['release_authorized'] is False
         assert d['phase'] == phase
         assert path.read_bytes() == baseline
+
+
+def test_software_verified_lease_uses_separate_no_hardware_acceptance_phase(tmp_path):
+    p = profile(tmp_path, 'work-a')
+    path = require_profile_authority(p)
+    acquire(path, network_id=p['network_id'], token='one',
+            device='SocketA', ieee='0x00124b0000000001', image_sha256='a' * 64)
+    update(path, 'one', 'ota_transfer_ok_postflash_unverified')
+    with pytest.raises(RuntimeError, match='may not release'):
+        release_software_verified(path, 'one')
+    update(path, 'one', 'postflash_candidate')
+    with pytest.raises(RuntimeError, match='may not release'):
+        release_software_verified(path, 'one')
+    update(path, 'one', 'postflash_software_verified_network_released',
+           hardware_acceptance=False, physical_acceptance=False)
+    diagnosis = ownership_diagnosis(read_lock(path))
+    assert diagnosis['hardware_acceptance'] == 'not_hardware_accepted'
+    assert diagnosis['release_authorized'] is False
+    with pytest.raises(RuntimeError):
+        release_accepted(path, 'one')
+    assert release_software_verified(path, 'one')
+    assert not path.exists()

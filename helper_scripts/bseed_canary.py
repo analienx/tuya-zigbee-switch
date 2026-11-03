@@ -172,6 +172,7 @@ def write_once(path, data):
 # update_timeout_or_unconfirmed, ...) is unresolved and blocks a new campaign.
 CLEAN_LOCK_PHASES = ('postflash_candidate', ACCEPTED_PHASE, RECONCILED_PHASE,
                      'source_unchanged_reconciled',
+                     'postflash_software_verified_network_released',
                      ABANDONED_PHASE)
 
 

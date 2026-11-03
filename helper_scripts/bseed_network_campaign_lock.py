@@ -19,6 +19,7 @@ import tempfile
 SCHEMA = 1
 ACCEPTED_PHASE = 'postflash_accepted'
 RECONCILED_PHASE = 'installed_image_reconciled'
+SOFTWARE_VERIFIED_PHASE = 'postflash_software_verified_network_released'
 SOURCE_UNCHANGED_PHASE = 'source_unchanged_reconciled'
 ABANDONED_PHASE = 'source_unchanged_abandoned'
 
@@ -86,6 +87,10 @@ def ownership_diagnosis(record):
         transport = 'completed'
         acceptance = 'accepted_recorded'
         next_step = 'existing_explicit_accepted_release'
+    elif phase == SOFTWARE_VERIFIED_PHASE:
+        transport = 'completed'
+        acceptance = 'not_hardware_accepted'
+        next_step = 'software_verified_network_ownership_can_be_released'
     elif phase in (RECONCILED_PHASE, SOURCE_UNCHANGED_PHASE):
         transport = 'reconciled'
         acceptance = 'unverified'
@@ -228,3 +233,11 @@ def release_abandoned(path, token):
     campaign workdir.
     """
     return _release_phase(path, token, ABANDONED_PHASE)
+
+
+def release_software_verified(path, token):
+    """Release the shared lease ONLY after dedicated exact-device software
+    evidence validation has set SOFTWARE_VERIFIED_PHASE. This is NOT hardware
+    acceptance and cannot be invoked from a mere OTA transport-success phase.
+    """
+    return _release_phase(path, token, SOFTWARE_VERIFIED_PHASE)
