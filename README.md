@@ -13,6 +13,8 @@ Exact device identity. Independent relay control. PM telemetry. Router and mains
 > [!CAUTION]
 > **Mains-powered hardware and potentially irreversible firmware changes.** Never identify a device by its enclosure or generic `TS011F` label. Check the exact manufacturer/model, board and OTA image type. An image that compiles—or even transfers successfully—can still leave a device unusable. Read [update and recovery guidance](docs/updating.md) before attempting an OTA.
 
+> **BSEED operator automation:** Device-loss risk is warned about here and is covered by the current operator's [standing, device-wide acknowledgement](docs/bseed_ota_operator_authorization.md). Automation must **not repeatedly demand the same risk sentence** before each OTA. This does not waive firmware integrity, electrical safety, Zigbee health or exact hardware checks, and it does not mean other repository users have consented.
+
 ## Start with the right guide
 
 | I want to… | Open |
