@@ -167,3 +167,26 @@ def test_noninvasive_waiver_covers_signed_off_rc2_canary():
     pm = dict(profile, require_pm=True)
     with pytest.raises(ValueError, match='refuses PM'):
         verify_recovery(pm, confirm_unloaded=True)
+
+
+def test_same_role_router_requires_full_recovery_attestation(tmp_path):
+    """Router→Router does not inherit the CabinetRight Client-only exemption."""
+    profile,record,file,_ = fixture(tmp_path,preflash_build='1.1.3-bseedv8')
+    profile.update(preflash_role='Router',postflash_role='Router',
+                   device='BedroomSocketBalcony',ieee='0xa4c138ac993cc245')
+    record['target_ieee'] = profile['ieee']
+    file.write_text(json.dumps(record))
+    with pytest.raises(ValueError, match='Physical load'):
+        verify_recovery(profile)
+    assert verify_recovery(profile, confirm_unloaded=True)['readback_sha256'] == record['backup_sha256']
+    profile.pop('recovery_evidence')
+    with pytest.raises(ValueError, match='Recovery evidence'):
+        verify_recovery(profile,confirm_unloaded=True)
+
+
+def test_same_role_gate_rejects_cross_role_before_any_recovery(tmp_path):
+    profile,_,_,_ = fixture(tmp_path)
+    profile.update(preflash_role='EndDevice',postflash_role='Router')
+    with pytest.raises(ValueError, match='Same-role'):
+        verify_recovery(profile,confirm_unloaded=True)
+
