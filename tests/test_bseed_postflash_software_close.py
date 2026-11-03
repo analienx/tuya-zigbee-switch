@@ -57,18 +57,18 @@ def verified_set():
         "pm_readiness": {"issues": []},
     }
     settings = {"2/genOnOff": {"startUpOnOff": 255}}
-    base = {"ieee": profile["ieee"], "role": "Router", "settings_snapshot": settings}
+    base = {"ieee": profile["ieee"], "role": "Router", "settings_snapshot": copy.deepcopy(settings)}
     before = {"at": "2026-11-01T09:41:46+01:00",
               "device": profile["device"], "ieee": profile["ieee"],
               "expected_role": "Router", "expected_build": profile["preflash_build"],
               "result": "read_only_audit_candidate",
-              "settings_snapshot": settings, "issues": [], "writes": 0,
+              "settings_snapshot": copy.deepcopy(settings), "issues": [], "writes": 0,
               "missing_reporting": []}
     after = {"at": "2026-11-03T20:22:08+01:00",
              "device": profile["device"], "ieee": profile["ieee"],
              "expected_role": "Router", "expected_build": profile["postflash_build"],
              "result": "read_only_audit_candidate",
-             "settings_snapshot": settings, "settings_drift": {},
+             "settings_snapshot": copy.deepcopy(settings), "settings_drift": {},
              "issues": [], "writes": 0, "missing_reporting": [],
              "mqtt": {"messages": 5, "span_seconds": 50,
                       "latest_metrics": {"energy": 11.17, "voltage": 246.9}}}
