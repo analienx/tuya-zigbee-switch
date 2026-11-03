@@ -2,7 +2,7 @@
 
 > Copy to a new, dated file. **Do not** edit older release notes to make historical candidates look current; update [firmware availability](../bseed_socket_release_status.md) instead.
 
-# <Candidate or published release name> · YYYY-MM-DD
+# Candidate or published release name · YYYY-MM-DD
 
 **Channel:** Proposed / CI-passed / sealed candidate / device canary / hardware accepted / published OTA
 
