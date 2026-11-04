@@ -6,6 +6,29 @@ legacy PM Router to r13 update whose raw delivered-energy total regressed from
 unverified. A cached Home Assistant value or OTA transport success cannot
 establish energy retention.
 
+## Published v8u4 source and cached measurements
+
+The source used by the v8u4 publication workflow (`0d5efa6c^`) initializes
+`seMetering` with multiplier 1 and divisor 1000, stores its accumulation in
+unified endpoint-1 NVM item 64, and treats that accumulation as Wh. The
+legacy-item-40 migration in that source copies data to item 64 only if the
+destination does not exist. These source facts do not prove what was stored on
+an individual device or that a cached Z2M value came from this firmware.
+
+The same v8u4 source lacks Telink registration for the metering and electrical
+measurement clusters, so cached scale and energy values can survive from an
+earlier device identity or configuration. In particular, a cached divisor of
+100 is not proof that the v8u4 firmware used divisor 100, nor is a non-retained
+MQTT message proof that its energy field is a new meter sample. Do not convert
+an old cached value into an NVM restoration value on that basis.
+
+The v8u4 OTA completion callback invokes reboot without an explicit final
+metering checkpoint; its periodic persistence interval is five minutes. Newer
+code schedules a checkpoint before its own OTA reboot, but the image being
+replaced controls the reboot that installs it. The missing old checkpoint can
+lose recent unpersisted energy; it does not by itself establish the cause or
+amount of a particular device's observed drop.
+
 ## Source defects and change
 
 Two executable persistence paths can turn existing energy into a zero baseline:
