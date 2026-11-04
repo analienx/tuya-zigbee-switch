@@ -102,6 +102,19 @@ def _verify_recovery(profile, *, confirm_unloaded=False,
             raise ValueError('Consolidated non-PM canary requires an explicit relay baseline')
         return {'ieee': profile['ieee'], 'method': ('non-invasive single OTA canary' if legacy else 'non-invasive exact Bedroom canary'),
                 'recovery_available': False}
+    from bseed_nonpm_relay_policy import is_exact_balcony_router_candidate
+    if (not profile.get('recovery_evidence')
+            and is_exact_balcony_router_candidate(profile)):
+        from bseed_nonpm_relay_policy import (
+            BALCONY_LEGACY_POLICY, verify_relay_policy_profile,
+        )
+        if not (roles == ('Router', 'Router') and not transition and
+                profile.get('preflash_relay_physical_mode') == BALCONY_LEGACY_POLICY):
+            raise ValueError('Balcony non-invasive authorization is exact Router v8 to r18 only')
+        verify_relay_policy_profile(profile)
+        return {'ieee': profile['ieee'],
+                'method': 'non-invasive exact Balcony Router v8-to-r18 canary',
+                'recovery_available': False}
     evidence = _private_file(profile.get('recovery_evidence'), 'Recovery evidence')
     record = json.loads(evidence.read_text(encoding='utf8'))
     if record.get('schema') != 1 or record.get('target_ieee') != profile['ieee']:

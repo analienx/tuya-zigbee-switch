@@ -170,11 +170,13 @@ def run(profile, *, count=SAMPLES, spacing=30):
     if not (profile.get('non_pm') is True and profile.get('require_pm') is False):
         raise AssertionError()
     allowed_role = profile['preflash_role'] == 'EndDevice' or (
-        profile['preflash_role'] == 'Router' and profile.get('postflash_role') == 'EndDevice')
+        profile['preflash_role'] == 'Router' and profile.get('postflash_role') in ('EndDevice', 'Router'))
     if not (allowed_role and (profile['model'], profile['manufacturer']) == ('TS011F-BS', 'o1jzcxou')):
-        raise AssertionError('Only pinned non-PM Client is supported')
+        raise AssertionError('Only pinned non-PM Client or same-role Router is supported')
     if profile.get('relay_get_key') != 'state_relay':
         raise ValueError('Link gate requires pinned state_relay read key')
+    from bseed_nonpm_relay_policy import verify_relay_policy_profile
+    verify_relay_policy_profile(profile)  # Legacy null-policy admission requires exact r18 identity.
     _probe_command(profile)  # Mandatory independent downlink proof, before any I/O.
     work = Path(profile['workdir'])
     work.mkdir(parents=True, exist_ok=True)
@@ -256,10 +258,11 @@ def run(profile, *, count=SAMPLES, spacing=30):
                                       timeout=remaining))
                 value = state['response'] if got else None
 
+            from bseed_nonpm_relay_policy import relay_policy_matches
             mqtt_consistent = bool(isinstance(value, dict)
                 and (value.get('device') or {}).get('ieeeAddr') == profile['ieee']
                 and value.get('state_relay') == profile['expect_relay']
-                and value.get('relay_physical_mode') == profile['preflash_relay_physical_mode']
+                and relay_policy_matches(value, profile)
                 and value.get('device', {}).get('softwareBuildID') == profile['preflash_build']
                 and 'power' not in value)
             latency = probe['response_at'] - probe['requested_at']
