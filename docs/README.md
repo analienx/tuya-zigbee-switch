@@ -44,6 +44,8 @@ flowchart LR
 
 ### Install and operate
 
+- [Standing BSEED OTA risk acknowledgement](bseed_ota_operator_authorization.md) — one operator-level acknowledgement for the whole device fleet, no repeat consent prompts; technical checks remain per-device
+
 - [Updating over Zigbee2MQTT](updating.md) — exact model check, index and recovery limits
 - [Targeted OTA runner](bseed_targeted_ota_runner.md) — a bounded, one-device campaign
 - [Published vs candidate firmware](bseed_socket_release_status.md) — the authoritative human-readable status page
