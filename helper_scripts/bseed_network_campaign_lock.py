@@ -22,6 +22,7 @@ RECONCILED_PHASE = 'installed_image_reconciled'
 SOFTWARE_VERIFIED_PHASE = 'postflash_software_verified_network_released'
 SOURCE_UNCHANGED_PHASE = 'source_unchanged_reconciled'
 ABANDONED_PHASE = 'source_unchanged_abandoned'
+DEFERRED_RECOVERY_PHASE = 'ota_transfer_complete_recovery_deferred'
 
 
 def now_iso():
@@ -95,6 +96,10 @@ def ownership_diagnosis(record):
         transport = 'reconciled'
         acceptance = 'unverified'
         next_step = 'existing_evidence_backed_reconciled_release'
+    elif phase == DEFERRED_RECOVERY_PHASE:
+        transport = 'completed'
+        acceptance = 'unverified'
+        next_step = 'offline_target_recovery_deferred; no new OTA for this IEEE'
     elif phase == ABANDONED_PHASE:
         transport = 'abandoned_source_unchanged'
         acceptance = 'unverified'
@@ -241,3 +246,12 @@ def release_software_verified(path, token):
     acceptance and cannot be invoked from a mere OTA transport-success phase.
     """
     return _release_phase(path, token, SOFTWARE_VERIFIED_PHASE)
+
+
+def release_deferred_recovery(path, token):
+    """Release a completed-transfer lease after separately verified deferred recovery.
+
+    This never accepts the target image or clears its per-device campaign lock.
+    Only the exact dedicated terminalization validator may set the phase.
+    """
+    return _release_phase(path, token, DEFERRED_RECOVERY_PHASE)
