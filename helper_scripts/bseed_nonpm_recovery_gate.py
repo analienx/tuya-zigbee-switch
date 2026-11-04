@@ -96,7 +96,7 @@ def _verify_recovery(profile, *, confirm_unloaded=False,
         return {'ieee': profile['ieee'], 'method': ('non-invasive single OTA canary' if legacy else 'non-invasive exact Bedroom canary'),
                 'recovery_available': False}
     if (profile.get('device'), profile.get('ieee')) == (
-            'BedroomSocketBalcony', '0xa4c138ac993cc245'):
+            'BedroomSocketBalcony', '0xa4c138ac993cc245') and not profile.get('recovery_evidence'):
         from bseed_nonpm_relay_policy import (
             BALCONY_LEGACY_POLICY, is_exact_balcony_router_candidate,
             verify_relay_policy_profile,
