@@ -474,8 +474,12 @@ def main():
             raise AssertionError('Identity/role mismatch')
         if not (d.get('interview_state') == 'SUCCESSFUL'):
             raise AssertionError('Device interview incomplete')
+        historical_stale_basic = False
         if campaign and campaign.get('preflash_build') and d.get('software_build_id') != campaign['preflash_build']:
-            raise ValueError('Live source build differs from version-policy baseline')
+            from bseed_pm_historical_workroom_source import is_expected_stale_inventory
+            if not is_expected_stale_inventory(campaign, d):
+                raise ValueError('Live source build differs from version-policy baseline')
+            historical_stale_basic = True  # Still must pass fresh ZDO and OTA source checks.
         if not (state['info'].get('permit_join') is False):
             raise AssertionError('Permit join unexpectedly open')
         log('inventory_ok', {k: d.get(k) for k in ('friendly_name', 'ieee_address', 'manufacturer', 'model_id', 'type', 'software_build_id')})
@@ -496,6 +500,13 @@ def main():
                 raise AssertionError('Non-PM relay policy changed')
         if not ((relay.get('device') or {}).get('ieeeAddr') == args.ieee):
             raise AssertionError('Fresh MQTT response IEEE mismatch')
+        if historical_stale_basic:
+            from bseed_zdo_live import read_node_descriptor
+            from bseed_pm_historical_workroom_source import require_fresh_historical_source
+            zdo = read_node_descriptor(args.mqtt_config, args.broker, args.ieee,
+                                       d['network_address'], timeout=20)
+            source = require_fresh_historical_source(campaign, d, relay, zdo)
+            log('historical_stale_basic_wire_verified', source)
         if pending or (old.get('phase') == 'source_unchanged_reconciled' and args.mode == 'flash'):
             fresh_id = relay.get('device') or {}
             if campaign and (fresh_id.get('softwareBuildID'), fresh_id.get('type')) != (
