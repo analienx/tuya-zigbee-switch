@@ -53,7 +53,7 @@ def pm_readiness(device, fresh_state):
 
 
 def assess_retained_state(before,after,relay_key,require_pm):
-    """Same-role OTA state gate; not proof of physical relay or metrology accuracy."""
+    """Same-role OTA state gate; MQTT cache cannot prove PM energy retention."""
     import math
     issues=[]
     if not isinstance(before,dict) or not isinstance(after,dict):
@@ -66,6 +66,11 @@ def assess_retained_state(before,after,relay_key,require_pm):
             after.get('relay_physical_mode')!=before['relay_physical_mode']):
         issues.append('Physical relay policy changed across same-role OTA')
     if require_pm:
+        # Non-retained MQTT messages can contain merged, cached energy from
+        # before OTA. The preflash lock has the same provenance gap. Matching
+        # decoded numbers cannot prove continuity without device-originated raw
+        # energy and verified scales on both sides of the update.
+        issues.append('PM energy continuity unverified: device-originated pre/post readings and scales required')
         old=before.get('energy');new=after.get('energy')
         if (type(old) not in (int,float) or type(new) not in (int,float) or
                 not math.isfinite(old) or not math.isfinite(new) or old<0 or new<0):

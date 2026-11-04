@@ -177,6 +177,14 @@ later state, rerun OTA or clear the lock. Independent physical load, retained
 bindings, device-originated metering and network-parent acceptance are still
 required before deploying the image elsewhere.
 
+The same-role PM energy continuity check currently **fails closed** even when
+the MQTT numbers match. A non-retained message can carry cached energy, and the
+preflash lock does not prove device-originated raw energy or its scale. A
+separately implemented and validated evidence path must capture fresh raw meter
+values and verified scales on both sides of OTA before a PM same-role campaign
+can reach `postflash_candidate`. This does not re-quarantine an already released
+guard or authorize another OTA.
+
 ## Non-PM Client live reachability (2026-09-21)
 
 For the explicit non-PM `TS011F-BS` EndDevice profile only, pin `preflash_build`, `preflash_relay_physical_mode`, `non_pm=true` and `require_pm=false`. The profile runner now supports `--mode link-gate`: three spaced read-only target GETs, requiring fresh matching client build/relay/policy/IEEE. The gate records private immutable evidence and invalidates any earlier pass on initiation or failure. The normal `--mode check` requires a recent passing gate; it archives the old `LAST_CHECK.json` before a new attempt so a failed check cannot leave an older flash permission. The subsequent `--mode flash --confirm-ieee EXACT` requires **another** fresh passing gate begun after the successful check. Evidence expires after 10 minutes; the underlying OTA check still expires after 30 minutes. All PM Router/Client power and role gates remain mandatory and unchanged.

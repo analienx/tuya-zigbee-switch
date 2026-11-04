@@ -13,7 +13,17 @@ def test_router_reports_divergent_logical_and_physical_relay_state():
     issues=assess_retained_state(before,after,'state_relay',True)
     assert any('Relay state changed' in x for x in issues)
     assert any('energy dropped' in x for x in issues)
-    assert not assess_retained_state(before,dict(before,energy=11.74),'state_relay',True)
+    issues=assess_retained_state(before,dict(before,energy=11.74),'state_relay',True)
+    assert any('energy continuity unverified' in x for x in issues)
+
+
+def test_matching_cached_energy_cannot_prove_retention():
+    # A fresh relay message can carry the old energy after the meter resets.
+    before={'state_relay':'ON','energy':2.95,'relay_physical_mode':'follow_state'}
+    after=dict(before)
+    assert assess_retained_state(before,after,'state_relay',True) == [
+        'PM energy continuity unverified: device-originated pre/post readings and scales required']
+    assert not assess_retained_state(before,after,'state_relay',False)
 
 
 def test_absent_baseline_meter_and_policy_drift_fail_closed():
