@@ -25,6 +25,37 @@ def is_exact_balcony_router_candidate(profile):
     return all(profile.get(key) == value for key, value in BALCONY_IDENTITY.items())
 
 
+ENTRANCE_IDENTITY = {
+    "device": "WRSocketEntrance",
+    "ieee": "0xa4c1387b13e9436d",
+    "manufacturer": "o1jzcxou",
+    "model": "TS011F-BS",
+    "preflash_role": "Router",
+    "postflash_role": "Router",
+    "preflash_build": "1.1.3-bseedv8",
+    "postflash_build": "1.1.3-bseedr18",
+    "sha256": "4fcc69b1113cbe405ea0aef9ed9ae81b8f13d61147b227671f00b8764cf063e9",
+}
+
+
+def is_exact_entrance_router_candidate(profile):
+    return all(profile.get(key) == value for key, value in ENTRANCE_IDENTITY.items())
+
+
+def exact_same_role_nonpm_router_admission(profile):
+    """Meterless Router is admitted only for pinned devices/images, never by role alone."""
+    if not isinstance(profile, dict):
+        return False
+    return (profile.get("non_pm") is True and
+            profile.get("require_pm") is False and
+            profile.get("expect_relay") == "OFF" and
+            profile.get("relay_get_key") == "state_relay" and
+            profile.get("block_bytes") == 32 and
+            profile.get("force_test_transition") is False and
+            (is_exact_entrance_router_candidate(profile) or
+             is_exact_balcony_router_candidate(profile)))
+
+
 def verify_relay_policy_profile(profile):
     """Fail closed for any foreign attempt to use the null-policy exception."""
     expected = profile.get("preflash_relay_physical_mode")

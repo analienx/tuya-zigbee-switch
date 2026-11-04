@@ -115,6 +115,17 @@ def _verify_recovery(profile, *, confirm_unloaded=False,
         return {'ieee': profile['ieee'],
                 'method': 'non-invasive exact Balcony Router v8-to-r18 canary',
                 'recovery_available': False}
+    from bseed_nonpm_relay_policy import (
+        is_exact_entrance_router_candidate, exact_same_role_nonpm_router_admission,
+    )
+    if not profile.get('recovery_evidence') and is_exact_entrance_router_candidate(profile):
+        if not (roles == ('Router', 'Router') and not transition and
+                exact_same_role_nonpm_router_admission(profile) and
+                profile.get('preflash_relay_physical_mode') == 'follow_state'):
+            raise ValueError('Entrance non-invasive authorization requires exact Router v8 to r18')
+        return {'ieee': profile['ieee'],
+                'method': 'non-invasive exact Entrance Router v8-to-r18 canary',
+                'recovery_available': False}
     evidence = _private_file(profile.get('recovery_evidence'), 'Recovery evidence')
     record = json.loads(evidence.read_text(encoding='utf8'))
     if record.get('schema') != 1 or record.get('target_ieee') != profile['ieee']:
