@@ -182,8 +182,9 @@ the MQTT numbers match. A non-retained message can carry cached energy, and the
 preflash lock does not prove device-originated raw energy or its scale. A
 separately implemented and validated evidence path must capture fresh raw meter
 values and verified scales on both sides of OTA before a PM same-role campaign
-can reach `postflash_candidate`. This does not re-quarantine an already released
-guard or authorize another OTA.
+can reach `postflash_candidate`. Accordingly the profile-driven same-role PM
+`flash` action is blocked before it submits an OTA. This does not re-quarantine
+an already released guard or authorize another OTA.
 
 ## Non-PM Client live reachability (2026-09-21)
 

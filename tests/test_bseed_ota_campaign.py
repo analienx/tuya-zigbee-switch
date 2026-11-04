@@ -281,6 +281,7 @@ def test_pm_transition_orders_provision_before_postflash(tmp_path,monkeypatch):
 
 
 def test_same_role_pm_flash_runs_provision_and_postflash(tmp_path,monkeypatch):
+    monkeypatch.setattr(campaign, 'require_pm_energy_retention_evidence', lambda: None)
     cfg=profile(tmp_path);cfg.update(require_pm=True,preflash_role='EndDevice',
         pm_ssh_host='127.0.0.1',pm_ssh_key=str(tmp_path/'key'))
     _seed_transfer_locks(cfg)
@@ -296,6 +297,7 @@ def test_same_role_pm_flash_runs_provision_and_postflash(tmp_path,monkeypatch):
 
 
 def test_same_role_pm_flash_transport_failure_never_provisions(tmp_path,monkeypatch):
+    monkeypatch.setattr(campaign, 'require_pm_energy_retention_evidence', lambda: None)
     cfg=profile(tmp_path);cfg.update(require_pm=True,preflash_role='EndDevice',
         pm_ssh_host='127.0.0.1',pm_ssh_key=str(tmp_path/'key'))
     path=tmp_path/'pm.json';path.write_text(json.dumps(cfg))
@@ -359,6 +361,7 @@ def test_router_candidate_requires_exact_matrix_and_relay_proof(tmp_path):
 
 
 def test_same_role_router_interview_precedes_audit_and_postflash(tmp_path,monkeypatch):
+    monkeypatch.setattr(campaign, 'require_pm_energy_retention_evidence', lambda: None)
     cfg=_router_candidate_profile(tmp_path)
     _seed_transfer_locks(cfg)
     src=tmp_path/'router.json';src.write_text(json.dumps(cfg))
@@ -373,6 +376,7 @@ def test_same_role_router_interview_precedes_audit_and_postflash(tmp_path,monkey
 
 
 def test_same_role_interview_failure_blocks_provision_and_postflash(tmp_path,monkeypatch):
+    monkeypatch.setattr(campaign, 'require_pm_energy_retention_evidence', lambda: None)
     cfg=profile(tmp_path);cfg.update(preflash_role='EndDevice',require_pm=True,
         pm_ssh_host='test.invalid',pm_ssh_key=str(tmp_path/'private.key'))
     src=tmp_path/'pm.json';src.write_text(json.dumps(cfg))

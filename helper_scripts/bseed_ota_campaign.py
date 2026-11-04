@@ -18,6 +18,15 @@ REQUIRED = ('device', 'ieee', 'manufacturer', 'model', 'preflash_role',
             'index_url', 'index_output', 'template_index', 'postflash_role', 'postflash_build')
 
 
+def require_pm_energy_retention_evidence():
+    """Block same-role PM flash until raw before/after evidence exists.
+
+    A PM flash cannot satisfy the retention gate with the current cached MQTT
+    baseline. Refuse before OTA so it cannot strand the shared network lock.
+    """
+    raise SystemExit('Same-role PM flash blocked: device-originated energy retention evidence is not implemented')
+
+
 def validate_pm_mode(data):
     """Fail-closed hardware-class/mode check; runs inside load_profile.
 
@@ -542,6 +551,8 @@ def main():
             raise SystemExit('Flash refused: supply --confirm-ieee with the exact target IEEE')
         if profile['preflash_role'] != profile['postflash_role']:
             raise SystemExit('Cross-role flash refused: use --mode transition for scoped rejoin')
+        if profile.get('require_pm'):
+            require_pm_energy_retention_evidence()
         if profile.get('non_pm') is True:
             from bseed_nonpm_recovery_gate import verify_recovery
             verify_recovery(profile, confirm_unloaded=args.confirm_load_unplugged)

@@ -68,6 +68,7 @@ def runner_side_effect(profile, *, skip_begin):
 
 
 def run_flash(cfg, path, monkeypatch, *, skip_begin=False):
+    monkeypatch.setattr(campaign, 'require_pm_energy_retention_evidence', lambda: None)
     cfg.update(network_lock_dir=str(Path(cfg['workdir']).parent / 'authority'),
                network_id='test-network', network_lock_shared=True)
     path.write_text(json.dumps(cfg))
@@ -100,6 +101,7 @@ def test_validated_router_flash_never_runs_client_provision(tmp_path,monkeypatch
 
 
 def test_router_release_without_valid_guard_fails_before_audit(tmp_path,monkeypatch):
+    monkeypatch.setattr(campaign, 'require_pm_energy_retention_evidence', lambda: None)
     cfg=_router_candidate_profile(tmp_path)
     path=tmp_path/'router_profile.json';path.write_text(json.dumps(cfg))
     monkeypatch.setattr(sys,'argv',['campaign','--profile',str(path),'--mode','flash',
@@ -116,6 +118,7 @@ def test_router_release_without_valid_guard_fails_before_audit(tmp_path,monkeypa
 
 
 def test_router_flash_never_retries_or_provisions_after_failed_transport(tmp_path,monkeypatch):
+    monkeypatch.setattr(campaign, 'require_pm_energy_retention_evidence', lambda: None)
     cfg=_router_candidate_profile(tmp_path)
     path=tmp_path/'router_profile.json';path.write_text(json.dumps(cfg))
     monkeypatch.setattr(sys,'argv',['campaign','--profile',str(path),'--mode','flash',
@@ -123,3 +126,15 @@ def test_router_flash_never_retries_or_provisions_after_failed_transport(tmp_pat
     with patch('bseed_ota_campaign.subprocess.call',return_value=2) as call:
         with pytest.raises(SystemExit) as done:campaign.main()
     assert done.value.code==2 and len(call.call_args_list)==1
+
+
+def test_pm_flash_stops_before_ota_without_energy_retention_evidence(tmp_path, monkeypatch):
+    cfg = _router_candidate_profile(tmp_path)
+    path = tmp_path / 'router_profile.json'
+    path.write_text(json.dumps(cfg))
+    monkeypatch.setattr(sys, 'argv', ['campaign', '--profile', str(path), '--mode', 'flash',
+                                     '--confirm-ieee', cfg['ieee']])
+    with patch('bseed_ota_campaign.subprocess.call') as call:
+        with pytest.raises(SystemExit, match='device-originated energy retention'):
+            campaign.main()
+    call.assert_not_called()
