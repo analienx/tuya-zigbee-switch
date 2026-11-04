@@ -123,3 +123,10 @@ def test_cross_role_nonpm_still_fails_before_ota():
     p = dict(candidate(), postflash_role='EndDevice')
     with pytest.raises(ValueError, match='restricted'):
         verify_relay_policy_profile(p)
+
+
+def test_explicit_swire_record_takes_priority_over_no_backup_exception(tmp_path):
+    p = candidate()
+    p['recovery_evidence'] = str(tmp_path / 'missing_swire_backup.json')
+    with pytest.raises(ValueError, match='Recovery evidence'):
+        verify_recovery(p, confirm_unloaded=True)
