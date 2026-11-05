@@ -41,6 +41,7 @@ def recovery_binary(request, tmp_path_factory):
 #include <stdio.h>
 #include <string.h>
 #include "hal/firmware_health.h"
+#include "hal/bseed_recovery_core.h"
 typedef uint8_t u8;
 typedef struct {void (*handler)(void *); void *arg;} hal_task_t;
 typedef enum {HAL_ZIGBEE_NETWORK_NOT_JOINED, HAL_ZIGBEE_NETWORK_JOINED,
