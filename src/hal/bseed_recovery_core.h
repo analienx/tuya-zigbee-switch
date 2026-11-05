@@ -27,7 +27,7 @@ typedef enum {
     BSEED_RECOVERY_SECURE_ALL_CHANNELS,
 } bseed_recovery_rung_t;
 
-#define BSEED_RECOVERY_WEDGE_MS    (10u * 60u * 1000u)
+#define BSEED_RECOVERY_WEDGE_MS            (10u * 60u * 1000u)
 #define BSEED_RECOVERY_PROBE_SPACING_MS    (60u * 1000u)
 
 /* Detect missing SDK completion without releasing radio ownership. The role
@@ -76,22 +76,22 @@ static inline uint32_t bseed_recovery_delay_ms(uint8_t failures,
 static inline void bseed_recovery_init(bseed_recovery_core_t *core,
                                        const uint8_t ieee[8], uint32_t now,
                                        bool immediate) {
-    core->scheduled_at_ms   = now;
-    core->stagger_ms        = bseed_recovery_stagger_ms(ieee);
-    core->delay_ms          = immediate ? 0u : bseed_recovery_delay_ms(0u, core->stagger_ms);
-    core->pending_since_ms  = 0u;
+    core->scheduled_at_ms       = now;
+    core->stagger_ms            = bseed_recovery_stagger_ms(ieee);
+    core->delay_ms              = immediate ? 0u : bseed_recovery_delay_ms(0u, core->stagger_ms);
+    core->pending_since_ms      = 0u;
     core->last_probe_failure_ms = 0u;
-    core->failures          = 0u;
-    core->probe_failures    = 0u;
-    core->last_probe_sequence = 0u;
+    core->failures              = 0u;
+    core->probe_failures        = 0u;
+    core->last_probe_sequence   = 0u;
     core->pending           = false;
     core->all_channels_next = false;
 }
 
 /* A local parent acknowledgement is deliberately not an input: only a
- * transaction-matched coordinator reply can reset coordinator failure
- * evidence. The adapter must call failure only for a genuinely timed-out
- * probe, not for a rejected local request or an unrelated response. */
+* transaction-matched coordinator reply can reset coordinator failure
+* evidence. The adapter must call failure only for a genuinely timed-out
+* probe, not for a rejected local request or an unrelated response. */
 static inline void bseed_recovery_probe_result(bseed_recovery_core_t *core,
                                                uint32_t now, uint8_t sequence,
                                                bool coordinator_answered) {
@@ -103,8 +103,9 @@ static inline void bseed_recovery_probe_result(bseed_recovery_core_t *core,
         (sequence == core->last_probe_sequence ||
          (uint32_t)(now - core->last_probe_failure_ms) < BSEED_RECOVERY_PROBE_SPACING_MS))
         return;
+
     core->last_probe_failure_ms = now;
-    core->last_probe_sequence = sequence;
+    core->last_probe_sequence   = sequence;
     if (core->probe_failures < 2u)
         core->probe_failures++;
 }
