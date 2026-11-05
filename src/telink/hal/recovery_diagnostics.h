@@ -16,7 +16,7 @@ typedef enum {
     BSEED_RESCUE_REASON_CLIENT_BACKOFF     = 5,
     BSEED_RESCUE_REASON_CLIENT_QUEUE_STALL = 6,
     BSEED_RESCUE_REASON_FACTORY_STEERING   = 7,
-    BSEED_RESCUE_REASON_CLIENT_ZDO_DRAIN = 8,
+    BSEED_RESCUE_REASON_CLIENT_ZDO_DRAIN   = 8,
 } bseed_rescue_reason_t;
 
 bool bseed_recovery_diag_record(bseed_rescue_reason_t reason,
