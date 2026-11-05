@@ -1225,10 +1225,13 @@ void hal_zigbee_start_network_steering(void) {
 
     printf("Starting network steering\r\n");
     network_start_attempt();
+    /* Steering can report completion synchronously. Claim ownership before
+     * entering the SDK, then do not overwrite a terminal callback's state. */
+    network_recovery_state = TELINK_NETWORK_RECOVERY_STEERING;
     u8 res = bdb_networkSteerStart();
-    if (res == 0) {
-        network_recovery_state = TELINK_NETWORK_RECOVERY_STEERING;
-    } else {
+    if (res != RET_OK) {
+        if (network_recovery_state == TELINK_NETWORK_RECOVERY_STEERING)
+            network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
         printf("Failed to start network steering, status: %d\r\n", res);
     }
 }
