@@ -49,6 +49,13 @@ int main(void) {
     assert(writes == 0);
     assert(!bseed_wedge_credit_tick(now + six, true)); /* clock wrap */
     assert(writes == 1);
+    /* Coordinated counter/inverse corruption must not preserve the CRC. */
+    record[1] = 4u; record[2] = (uint8_t)(4u ^ 0xffu);
+    restart();
+    assert(!bseed_wedge_credit_tick(0u, true));
+    assert(!bseed_wedge_credit_tick(4u * six, true));
+    assert(!bseed_wedge_credit_consume());
+    record[1] = 1u; record[2] = (uint8_t)(1u ^ 0xffu);
     restart(); /* checkpoint survives; partial time does not */
     now = 123u;
     assert(!bseed_wedge_credit_tick(now, true));
