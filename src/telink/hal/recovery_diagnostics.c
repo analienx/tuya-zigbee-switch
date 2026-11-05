@@ -43,7 +43,7 @@ static void diag_load(void) {
     }
     if (status == HAL_NVM_SUCCESS &&
         record.magic == BSEED_RECOVERY_DIAG_MAGIC &&
-        record.reason <= BSEED_RESCUE_REASON_CLIENT_QUEUE_STALL &&
+        record.reason <= BSEED_RESCUE_REASON_CLIENT_ZDO_DRAIN &&
         record.crc == diag_crc(&record)) {
         diag_storage_ok = true;
         diag_present    = true;
@@ -55,7 +55,7 @@ static void diag_load(void) {
 bool bseed_recovery_diag_record(bseed_rescue_reason_t reason, uint8_t sdk_state) {
     diag_load();
     if (!diag_storage_ok || reason == BSEED_RESCUE_REASON_NONE ||
-        reason > BSEED_RESCUE_REASON_CLIENT_QUEUE_STALL)
+        reason > BSEED_RESCUE_REASON_CLIENT_ZDO_DRAIN)
         return false;
 
     if (diag_present && diag_reason == (uint8_t)reason &&

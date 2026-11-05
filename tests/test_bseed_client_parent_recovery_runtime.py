@@ -42,6 +42,8 @@ def recovery_binary(request, tmp_path_factory):
 #include <string.h>
 #include "hal/firmware_health.h"
 #include "hal/bseed_recovery_core.h"
+#include "telink/hal/router_recovery_budget.h"
+#include "telink/hal/recovery_diagnostics.h"
 typedef uint8_t u8;
 typedef uint8_t zdo_status_t;
 typedef struct {void (*handler)(void *); void *arg;} hal_task_t;
@@ -64,6 +66,14 @@ static struct {u8 extAddress[8];} g_zbMacPib;
 /* The extracted Client coordinator-probe section is owned by a separate
  * linked native harness; model only its pending transaction here. */
 static bseed_recovery_core_t client_coord_core;
+static unsigned checkpoint_reboots;
+bseed_budget_result_t bseed_router_rescue_budget_try_consume(void) {
+    return BSEED_BUDGET_EXHAUSTED;
+}
+bool bseed_recovery_diag_record(bseed_rescue_reason_t reason,uint8_t state) {
+    (void)reason; (void)state; return true;
+}
+static void schedule_reboot(uint16_t ms) { assert(ms==2000u); checkpoint_reboots++; }
 firmware_health_t firmware_health;
 uint32_t hal_millis(void) {return now;}
 static bool zb_isDeviceJoinedNwk(void) {return joined;}

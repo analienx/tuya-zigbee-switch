@@ -192,6 +192,24 @@ static uint32_t network_last_start_attempt;
  * A persistent, budgeted checkpoint is the only safe new ownership epoch. */
 static bool network_sdk_backoff_started_once;
 static bool network_sdk_steering_started_once;
+#ifdef BSEED_MAINS_CLIENT
+/* An accepted ZDO transaction is still SDK-owned even if the application
+ * clears a timeout flag. If PARENT_LOST arrives during that transaction,
+ * refuse rejoin ownership until a trustworthy terminal result or a bounded
+ * processor checkpoint. Do not infer SDK cancellation from a local flag. */
+static bool     client_zdo_rejoin_deferred;
+static uint32_t client_zdo_rejoin_deferred_since_ms;
+#endif
+
+/* Factory-new steering uses untagged BDB terminal callbacks as well. After
+ * one accepted steering operation, a second SDK owner cannot be safely
+ * assigned within the same boot. A prolonged failed or orphaned commission
+ * may instead use the existing fail-closed rescue budget for a clean boot. */
+#define FACTORY_STEERING_TERMINAL_HOLD_MS    (45u * 60u * 1000u)
+#define FACTORY_STEERING_OWNER_HOLD_MS       (90u * 60u * 1000u)
+static bool     network_steering_terminal_seen;
+static bool     network_steering_checkpoint_scheduled;
+static uint32_t network_steering_terminal_ms;
 
 static bool network_start_ready(void) {
     return !network_start_retry_pending ||
@@ -955,8 +973,11 @@ static void client_coordinator_node_desc_response(void *arg) {
                                     ind->src_addr, rsp->nwk_addr_interest,
                                     rsp->status == ZDO_SUCCESS)) {
         client_outage_since_ms    = hal_millis();
-        client_probe_rejections   = 0u;
-        client_rejections_started = false;
+        client_probe_rejections    = 0u;
+        client_rejections_started  = false;
+        /* A real matched coordinator reply completes the old ZDO request
+         * and cancels the need to start an overlapping SDK rejoin. */
+        client_zdo_rejoin_deferred = false;
         bseed_router_rescue_budget_note_good_coordinator(client_outage_since_ms);
     }
 }
@@ -982,8 +1003,8 @@ void telink_zigbee_hal_client_recovery_tick(void) {
         client_not_joined_since_ms = now;
     }
     if (zb_isDeviceFactoryNew() || ota_fast_poll_active) {
-        client_not_joined_started = false;
-
+        if (zb_isDeviceFactoryNew())
+            client_zdo_rejoin_deferred = false;
         /* OTA/commissioning suspends both radio actions and qualification:
          * time spent waiting for the image cannot fabricate a queue stall. */
         client_coord_core.probe_pending = false;
@@ -1006,6 +1027,7 @@ void telink_zigbee_hal_client_recovery_tick(void) {
         client_coord_core.probe_pending = false;
 
     if (network_recovery_state == TELINK_NETWORK_RECOVERY_IDLE &&
+        !client_zdo_rejoin_deferred &&
         zb_isDeviceJoinedNwk() && !client_coord_core.probe_pending &&
         (uint32_t)(now - client_last_probe_ms) >=
         (client_coord_core.probe_failures ? BSEED_RECOVERY_PROBE_SPACING_MS :
@@ -1087,8 +1109,14 @@ void telink_zigbee_hal_client_recovery_tick(void) {
         network_recovery_state == TELINK_NETWORK_RECOVERY_IDLE &&
         (uint32_t)(now - client_first_rejection_ms) >=
         CLIENT_COORD_CHECKPOINT_MS + stagger;
+    bool checkpoint_deferred_zdo =
+        client_zdo_rejoin_deferred && !client_coord_core.probe_pending &&
+        network_recovery_state == TELINK_NETWORK_RECOVERY_IDLE &&
+        (uint32_t)(now - client_zdo_rejoin_deferred_since_ms) >=
+            CLIENT_COORD_CHECKPOINT_MS + stagger;
     bool slow_ready = bseed_wedge_credit_tick(
-        now, wedged || checkpoint_after_previous_owner || checkpoint_local_queue);
+        now, wedged || checkpoint_after_previous_owner ||
+             checkpoint_local_queue || checkpoint_deferred_zdo);
     if (wedged && !client_reboot_scheduled &&
         (uint32_t)(now - network_last_start_attempt) >=
         owner_limit + stagger) {
@@ -1107,7 +1135,8 @@ void telink_zigbee_hal_client_recovery_tick(void) {
     /* An uncorrelated BDB callback cannot release a new radio owner. An
      * earlier accepted backoff can only be superseded after a checkpoint. */
     if (!client_reboot_scheduled &&
-        (checkpoint_after_previous_owner || checkpoint_local_queue)) {
+        (checkpoint_after_previous_owner || checkpoint_local_queue ||
+         checkpoint_deferred_zdo)) {
         bseed_budget_result_t result = bseed_router_rescue_budget_try_consume();
         if (result == BSEED_BUDGET_CONSUMED ||
             (result == BSEED_BUDGET_EXHAUSTED && slow_ready &&
@@ -1115,7 +1144,8 @@ void telink_zigbee_hal_client_recovery_tick(void) {
             client_reboot_scheduled = true;
             (void)bseed_recovery_diag_record(
                 queue_stalled ? BSEED_RESCUE_REASON_CLIENT_QUEUE_STALL :
-                BSEED_RESCUE_REASON_CLIENT_BACKOFF,
+                checkpoint_deferred_zdo ? BSEED_RESCUE_REASON_CLIENT_ZDO_DRAIN :
+                                          BSEED_RESCUE_REASON_CLIENT_BACKOFF,
                 (uint8_t)network_recovery_state);
             schedule_reboot(2000);
             return;
@@ -1187,6 +1217,19 @@ static bool request_rejoin_with_backoff_impl(bool allow_joined,
         network_sdk_backoff_started_once || !network_start_ready()) {
         return false;
     }
+#ifdef BSEED_MAINS_CLIENT
+    if (client_coord_core.probe_pending || client_zdo_rejoin_deferred) {
+        if (!client_zdo_rejoin_deferred) {
+            client_zdo_rejoin_deferred = true;
+            client_zdo_rejoin_deferred_since_ms = hal_millis();
+        }
+        return false;  /* no SDK-owned rejoin atop an accepted ZDO */
+    }
+#endif
+#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
+    if (router_probe_pending)
+        return false;  /* wait for the accepted coordinator ZDO transaction */
+#endif
 
     network_start_attempt();
     firmware_health_increment(&firmware_health.rejoin_start);
@@ -1353,6 +1396,12 @@ void bdb_commissioning_callback(u8 status, void *arg) {
     case BDB_COMMISSION_STA_BINDING_TABLE_FULL:
     case BDB_COMMISSION_STA_NOT_PERMITTED:
     case BDB_COMMISSION_STA_NO_SCAN_RESPONSE:
+        if (network_recovery_state == TELINK_NETWORK_RECOVERY_STEERING &&
+            network_sdk_steering_started_once &&
+            zb_isDeviceFactoryNew()) {
+            network_steering_terminal_seen = true;
+            network_steering_terminal_ms   = hal_millis();
+        }
         // These are terminal outcomes for the current BDB attempt. In
         // particular, NO_SCAN_RESPONSE on a factory-new device must return to
         // normal steering rather than pretending there is an old network to
@@ -1461,6 +1510,45 @@ void hal_zigbee_start_network_steering(void) {
     // "ensure connectivity": factory-new devices perform BDB steering, while
     // devices that already own network state use the SDK's rejoin/backoff
     // recovery. Never let the two operations overlap.
+    if (zb_isDeviceFactoryNew() && network_sdk_steering_started_once) {
+        if (network_steering_checkpoint_scheduled)
+            return;
+
+        bool ota_busy = false;
+#ifdef BSEED_MAINS_CLIENT
+        ota_busy = ota_fast_poll_active;
+#endif
+#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
+        ota_busy = telink_zigbee_hal_router_ota_in_progress();
+#endif
+        uint32_t now = hal_millis();
+        uint32_t from_ms = network_steering_terminal_seen ?
+                           network_steering_terminal_ms :
+                           network_last_start_attempt;
+        uint32_t hold_ms = network_steering_terminal_seen ?
+                           FACTORY_STEERING_TERMINAL_HOLD_MS :
+                           FACTORY_STEERING_OWNER_HOLD_MS;
+        uint32_t stagger = bseed_recovery_action_stagger_ms(
+            g_zbMacPib.extAddress, 0x46535452u, 15u * 60u * 1000u);
+
+        /* Terminal callbacks cannot be correlated with separate attempts.
+         * No second steering operation within this boot. A budgeted reboot
+         * after the long hold gives factory-new commissioning a fresh SDK
+         * owner without leaving/erasing a network or switching the relay.
+         * Once the capped rescue budget is validly exhausted, a supervised
+         * power intervention is required; never force an unbounded loop. */
+        if (!ota_busy &&
+            (uint32_t)(now - from_ms) >= hold_ms + stagger &&
+            bseed_router_rescue_budget_try_consume() ==
+                BSEED_BUDGET_CONSUMED) {
+            network_steering_checkpoint_scheduled = true;
+            (void)bseed_recovery_diag_record(
+                BSEED_RESCUE_REASON_FACTORY_STEERING,
+                (uint8_t)network_recovery_state);
+            schedule_reboot(2000);
+        }
+        return;
+    }
     if (network_recovery_state != TELINK_NETWORK_RECOVERY_IDLE ||
         !network_start_ready()) {
         return;
@@ -1478,6 +1566,7 @@ void hal_zigbee_start_network_steering(void) {
      * entering the SDK, then do not overwrite a terminal callback's state. */
     network_recovery_state            = TELINK_NETWORK_RECOVERY_STEERING;
     network_sdk_steering_started_once = true;
+    network_steering_terminal_seen    = false;
     u8 res = bdb_networkSteerStart();
     if (res != RET_OK) {
         if (network_recovery_state == TELINK_NETWORK_RECOVERY_STEERING) {

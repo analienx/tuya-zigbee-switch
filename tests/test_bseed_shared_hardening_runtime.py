@@ -113,6 +113,8 @@ def test_rejected_recovery_is_paced_and_sdk_backoff_keeps_ownership(tmp_path, fl
 #include <stddef.h>
 #include "hal/firmware_health.h"
 #include "hal/bseed_recovery_core.h"
+#include "telink/hal/router_recovery_budget.h"
+#include "telink/hal/recovery_diagnostics.h"
 typedef uint8_t u8;
 #define RET_OK 0
 #define BSEED_PM_B28WRPVX 1
@@ -125,6 +127,9 @@ static bool joined, factory_new;
 static void app_rearm_network_announcement(void) {announce_rearms++;}
 static u8 fail_start;
 static struct {u8 scanDuration;} g_bdbAttrs;
+static struct { unsigned char extAddress[8]; } g_zbMacPib;
+static unsigned checkpoint_reboots, budget_consumed;
+bseed_budget_result_t bseed_router_rescue_budget_try_consume(void);
 #ifdef BSEED_MAINS_CLIENT
 #define MAC_SUCCESS 0
 #define MAC_STA_NO_DATA 0xeb
@@ -132,7 +137,6 @@ static struct {u8 scanDuration;} g_bdbAttrs;
 static uint32_t client_health_next_tick_ms;
 static bool ota_fast_poll_active;
 static bseed_recovery_core_t client_coord_core;
-static struct { unsigned char extAddress[8]; } g_zbMacPib;
 static u8 zb_setPollRate(uint32_t ms) {(void)ms; return RET_OK;}
 static u8 zb_rejoinReq(uint32_t channel,u8 duration)
     {(void)channel;(void)duration; return RET_OK;}
@@ -146,6 +150,17 @@ static bool zb_isDeviceFactoryNew(void) {return factory_new;}
 static uint32_t zb_apsChannelMaskGet(void) {return 0;}
 static u8 zb_rejoinReqWithBackOff(uint32_t mask,u8 duration) {rejoin_calls++;return fail_start;}
 static u8 bdb_networkSteerStart(void) {steer_calls++;return fail_start;}
+bseed_budget_result_t bseed_router_rescue_budget_try_consume(void) {
+    if(budget_consumed>=2u) return BSEED_BUDGET_EXHAUSTED;
+    budget_consumed++;
+    return BSEED_BUDGET_CONSUMED;
+}
+bool bseed_recovery_diag_record(bseed_rescue_reason_t reason,uint8_t state) {
+    (void)reason;(void)state;return true;
+}
+static void schedule_reboot(uint16_t ms) {
+    assert(ms==2000u);checkpoint_reboots++;
+}
 static void configure_mains_client_keepalive(void) {}
 static void telink_zigbee_hal_request_ota_query(void) {}
 '''
@@ -172,6 +187,23 @@ int main(void) {
     network_sdk_backoff_started_once=false;
     hal_zigbee_start_network_steering(); assert(rejoin_calls==3);
     joined=true; bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,0); joined=false;
+#ifdef BSEED_MAINS_CLIENT
+    /* An accepted in-flight NodeDesc is still owned by the SDK. A late
+     * parent-loss callback may not claim a competing SDK rejoin. Local
+     * probe timeout does not prove vendor transaction quiescence either. */
+    network_sdk_backoff_started_once=false; /* simulated processor epoch */
+    network_recovery_state=TELINK_NETWORK_RECOVERY_IDLE;
+    network_start_retry_pending=false;
+    client_coord_core.probe_pending=true;
+    unsigned before_parent_loss=rejoin_calls;
+    bdb_commissioning_callback(BDB_COMMISSION_STA_PARENT_LOST,0);
+    assert(rejoin_calls==before_parent_loss && client_zdo_rejoin_deferred);
+    assert(client_coord_core.probe_pending);
+    client_coord_core.probe_pending=false; /* app-side timeout only */
+    bdb_commissioning_callback(BDB_COMMISSION_STA_PARENT_LOST,0);
+    assert(rejoin_calls==before_parent_loss && client_zdo_rejoin_deferred);
+    client_zdo_rejoin_deferred=false; /* new processor epoch */
+#endif
     factory_new=true; fail_start=1; now=UINT32_MAX-1000;
     hal_zigbee_start_network_steering(); assert(steer_calls==1);
     now+=4999; hal_zigbee_start_network_steering(); assert(steer_calls==1);

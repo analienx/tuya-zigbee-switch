@@ -41,6 +41,8 @@ static struct { uint8_t extAddress[8]; } g_zbMacPib;
 static uint32_t now, network_last_start_attempt;
 static int network_recovery_state;
 static bool network_sdk_backoff_started_once;
+static bool client_zdo_rejoin_deferred;
+static uint32_t client_zdo_rejoin_deferred_since_ms;
 static bool joined=true, factory_new, ota_fast_poll_active, reject_probe, synchronous;
 static bool reject_rejoin;
 static uint8_t next_sequence;
@@ -302,3 +304,70 @@ int main(void) {
                    check=True, capture_output=True, text=True)
     subprocess.run([str(second_binary)], check=True,
                    capture_output=True, text=True)
+
+    # A parent's loss while NodeDesc is accepted cannot cancel the SDK
+    # transaction merely by clearing an application pending flag. Without a
+    # genuine terminal ZDO response, preserve the quarantine until a budgeted
+    # three-hour checkpoint; never launch another coordinator probe.
+    deferred = r"""
+int main(void) {
+    telink_zigbee_hal_client_recovery_tick();
+    now=631000u;
+    telink_zigbee_hal_client_recovery_tick();
+    assert(probes==1u && client_coord_core.probe_pending);
+    client_zdo_rejoin_deferred=true; client_zdo_rejoin_deferred_since_ms=now;
+    now+=CLIENT_COORD_TIMEOUT_MS+1000u;
+    telink_zigbee_hal_client_recovery_tick();
+    assert(!client_coord_core.probe_pending);
+    assert(client_coord_core.probe_failures==1u && probes==1u);
+    now+=BSEED_RECOVERY_PROBE_SPACING_MS+1000u;
+    telink_zigbee_hal_client_recovery_tick();
+    assert(probes==1u && rejoin_starts==0u);
+    ota_fast_poll_active=true;
+    now=client_zdo_rejoin_deferred_since_ms+
+        CLIENT_COORD_CHECKPOINT_MS+CLIENT_COORD_REJOIN_JITTER_MS+100u;
+    telink_zigbee_hal_client_recovery_tick();
+    assert(probes==1u && reboots==0u);
+    ota_fast_poll_active=false;
+    telink_zigbee_hal_client_recovery_tick();
+    assert(probes==1u && reboots==1u && used_reboots==1u);
+    return 0;
+}
+"""
+    deferred_file=tmp_path/"client_zdo_deferred.c"
+    deferred_bin=tmp_path/"client_zdo_deferred"
+    deferred_file.write_text(prelude+section+deferred,encoding="utf8")
+    build=subprocess.run(["cc","-std=c11","-Wall","-Wextra","-Werror",
+                          "-I",str(ROOT/"src"),str(deferred_file),"-o",str(deferred_bin)],
+                         capture_output=True,text=True,timeout=30)
+    assert build.returncode==0,build.stdout+build.stderr
+    run=subprocess.run([str(deferred_bin)],capture_output=True,text=True,timeout=15)
+    assert run.returncode==0,run.stdout+run.stderr
+
+    # A matched real coordinator reply is a genuine terminal ZDO response:
+    # it cancels deferred rejoin and resets negative probe evidence.
+    completed = r"""
+int main(void) {
+    telink_zigbee_hal_client_recovery_tick();
+    now=631000u;
+    telink_zigbee_hal_client_recovery_tick();
+    assert(client_coord_core.probe_pending);
+    client_zdo_rejoin_deferred=true; client_zdo_rejoin_deferred_since_ms=now;
+    zdo_zdpDataInd_t ind={0};
+    zdo_node_descript_resp_t rsp={next_sequence,ZDO_SUCCESS,0};
+    ind.src_addr=0u; ind.length=sizeof(rsp); ind.zpdu=(uint8_t *)&rsp;
+    probe_callback(&ind);
+    assert(!client_coord_core.probe_pending && !client_zdo_rejoin_deferred);
+    assert(client_coord_core.probe_failures==0u && reboots==0u);
+    return 0;
+}
+"""
+    completed_file=tmp_path/"client_zdo_completed.c"
+    completed_bin=tmp_path/"client_zdo_completed"
+    completed_file.write_text(prelude+section+completed,encoding="utf8")
+    build=subprocess.run(["cc","-std=c11","-Wall","-Wextra","-Werror",
+                          "-I",str(ROOT/"src"),str(completed_file),"-o",str(completed_bin)],
+                         capture_output=True,text=True,timeout=30)
+    assert build.returncode==0,build.stdout+build.stderr
+    run=subprocess.run([str(completed_bin)],capture_output=True,text=True,timeout=15)
+    assert run.returncode==0,run.stdout+run.stderr
