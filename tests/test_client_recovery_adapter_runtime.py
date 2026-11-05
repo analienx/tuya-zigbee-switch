@@ -24,6 +24,7 @@ bool bseed_recovery_diag_record(bseed_rescue_reason_t reason, uint8_t sdk_state)
     (void)reason; (void)sdk_state; return true;
 }
 #define ZDO_SUCCESS 0
+typedef uint8_t zdo_status_t;
 #define TELINK_NETWORK_RECOVERY_IDLE 0
 #define TELINK_NETWORK_RECOVERY_REJOIN 1
 #define CLIENT_HEALTH_REJOIN_COOLDOWN_MS (15u * 60u * 1000u)
@@ -41,11 +42,17 @@ static uint32_t now, network_last_start_attempt;
 static int network_recovery_state;
 static bool network_sdk_backoff_started_once;
 static bool joined=true, factory_new, ota_fast_poll_active, reject_probe, synchronous;
+static bool reject_rejoin;
 static uint8_t next_sequence;
 static unsigned probes, reboots, rejoin_starts;
 static bool request_rejoin_for_isolated_coordinator(void) {
     assert(network_recovery_state==TELINK_NETWORK_RECOVERY_IDLE);
-    rejoin_starts++; network_recovery_state=TELINK_NETWORK_RECOVERY_REJOIN;
+    if (network_sdk_backoff_started_once) return false;
+    rejoin_starts++;
+    if (reject_rejoin) return false;
+    network_recovery_state=TELINK_NETWORK_RECOVERY_REJOIN;
+    network_sdk_backoff_started_once=true;
+    network_last_start_attempt=now;
     return true;
 }
 static void (*probe_callback)(void *);
@@ -162,3 +169,103 @@ int main(void) {
                    check=True, capture_output=True, text=True)
     subprocess.run([str(isolation_binary)], check=True,
                    capture_output=True, text=True)
+
+    # Persistent rejection is different from an accepted, unanswered ZDO:
+    # it must never trigger on one BUSY return, but must qualify after
+    # enough independent attempts and sufficient no-proof time.
+    reject_always = r'''
+int main(void) {
+    telink_zigbee_hal_client_recovery_tick();
+    reject_probe=true;
+    for (unsigned i=0;i<8;i++) {
+        now = 631000u + i * 660000u;
+        telink_zigbee_hal_client_recovery_tick();
+        assert(client_coord_core.probe_failures==0);
+        if (i<6) assert(rejoin_starts==0 && reboots==0);
+    }
+    assert(client_probe_rejections>=CLIENT_COORD_REJECT_THRESHOLD);
+    assert(client_rejections_started && rejoin_starts==1);
+    assert(network_recovery_state==TELINK_NETWORK_RECOVERY_REJOIN);
+    unsigned prior=probes;
+    joined=true; /* SDK may falsely report JOINED during its backoff. */
+    now+=CLIENT_COORD_PROBE_MS+CLIENT_BACKOFF_WEDGE_MS;
+    telink_zigbee_hal_client_recovery_tick();
+    assert(probes==prior); /* no ZDO on top of SDK-owned scan */
+    ota_fast_poll_active=true;
+    now=network_last_start_attempt+CLIENT_BACKOFF_UNPROVEN_MS+
+        CLIENT_COORD_REJOIN_JITTER_MS+100000u;
+    telink_zigbee_hal_client_recovery_tick();
+    assert(reboots==0 && probes==prior);
+    ota_fast_poll_active=false;
+    telink_zigbee_hal_client_recovery_tick();
+    assert(reboots==1 && probes==prior);
+    return 0;
+}
+'''
+    reject_file = tmp_path / "client_rejected_forever.c"
+    reject_binary = tmp_path / "client_rejected_forever"
+    reject_file.write_text(prelude + section + reject_always, encoding="utf8")
+    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
+                    "-I", str(ROOT / "src"), str(reject_file),
+                    "-o", str(reject_binary)],
+                   check=True, capture_output=True, text=True)
+    subprocess.run([str(reject_binary)], check=True, capture_output=True, text=True)
+
+    # An accepted SDK rejoin cannot be started when the local queue remains
+    # wedged; repeated synchronous rejection must still earn one checkpoint
+    # rather than requiring an SDK owner that never existed.
+    reject_rejoin = r'''
+int main(void) {
+    telink_zigbee_hal_client_recovery_tick();
+    reject_probe=true; reject_rejoin=true;
+    for(unsigned i=0;i<23u;i++) {
+        now=631000u+i*660000u;
+        telink_zigbee_hal_client_recovery_tick();
+    }
+    assert(rejoin_starts>0 && network_recovery_state==TELINK_NETWORK_RECOVERY_IDLE);
+    assert(client_coord_core.probe_failures==0);
+    assert(reboots==1 && client_reboot_scheduled);
+    assert(budget_used==1u);
+    return 0;
+}
+'''
+    recovery_file = tmp_path / "client_queue_stall.c"
+    recovery_binary = tmp_path / "client_queue_stall"
+    recovery_file.write_text(prelude + section + reject_rejoin, encoding="utf8")
+    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
+                    "-I", str(ROOT / "src"), str(recovery_file),
+                    "-o", str(recovery_binary)],
+                   check=True, capture_output=True, text=True)
+    subprocess.run([str(recovery_binary)], check=True, capture_output=True, text=True)
+
+    # Stale JOINED with SDK-owned backoff: not one probe may be transmitted.
+    # Eventually the independent tenure watchdog must qualify a checkpoint.
+    no_concurrent_probe = r'''
+int main(void) {
+    telink_zigbee_hal_client_recovery_tick();
+    network_recovery_state=TELINK_NETWORK_RECOVERY_REJOIN;
+    network_last_start_attempt=now;
+    network_sdk_backoff_started_once=true;
+    joined=true;
+    now=CLIENT_COORD_PROBE_MS+10000u;
+    telink_zigbee_hal_client_recovery_tick();
+    assert(probes==0 && reboots==0);
+    ota_fast_poll_active=true;
+    now=CLIENT_BACKOFF_UNPROVEN_MS+CLIENT_COORD_REJOIN_JITTER_MS+90000u;
+    telink_zigbee_hal_client_recovery_tick();
+    assert(probes==0 && reboots==0);
+    ota_fast_poll_active=false;
+    telink_zigbee_hal_client_recovery_tick();
+    assert(probes==0 && reboots==1 && client_reboot_scheduled);
+    return 0;
+}
+'''
+    owner_file = tmp_path / "client_sdk_owner.c"
+    owner_binary = tmp_path / "client_sdk_owner"
+    owner_file.write_text(prelude + section + no_concurrent_probe,
+                          encoding="utf8")
+    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
+                    "-I", str(ROOT / "src"), str(owner_file),
+                    "-o", str(owner_binary)],
+                   check=True, capture_output=True, text=True)
+    subprocess.run([str(owner_binary)], check=True, capture_output=True, text=True)
