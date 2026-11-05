@@ -370,6 +370,10 @@ static uint32_t router_observation_epoch_ms;
 static uint32_t router_recovery_since_ms;
 static bool     router_observation_started, router_positive_seen, router_inbound_seen;
 static uint32_t router_one_shot_ms;
+/* Unlike SDK JOINED, only a verified coordinator reply ends an observed
+ * NOT_JOINED outage. Short false-JOINED flaps must not restart this clock. */
+static bool     router_not_joined_observed;
+static uint32_t router_not_joined_since_ms;
 
 void telink_zigbee_hal_router_note_inbound(void) {
     /* Neighbors can reach this Router even when coordinator 0x0000 cannot.
@@ -404,6 +408,7 @@ static void router_coordinator_node_desc_response(void *arg) {
         router_probe_failures    = 0;
         router_probe_rejections  = 0;
         router_one_shot_attempts = 0;
+        router_not_joined_observed = false;
 
         /* Reachability cannot prove that an orphaned SDK operation has
          * stopped. Keep its guard until a terminal boundary or reboot. */
@@ -585,6 +590,16 @@ void telink_zigbee_hal_router_recovery_tick(void) {
      * communicates again. A checkpointed restart clears SDK state; when the
      * ordinary budget is exhausted, accumulate the separate slow-lane credit.
      * Never interrupt OTA or a factory-new commissioning session. */
+    bool joined = zb_isDeviceJoinedNwk();
+    bool factory_new = zb_isDeviceFactoryNew();
+    bool ota_active = telink_zigbee_hal_router_ota_in_progress();
+    if (factory_new) {
+        router_not_joined_observed = false;
+    } else if (!joined && !router_not_joined_observed) {
+        router_not_joined_observed = true;
+        router_not_joined_since_ms = now;
+    }
+
     bool backoff_wedged =
         network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN &&
         (uint32_t)(now - network_last_start_attempt) >=
@@ -611,23 +626,65 @@ void telink_zigbee_hal_router_recovery_tick(void) {
         router_probe_failures >= ROUTER_PROBE_FAILURE_THRESHOLD ||
         backoff_unproven_join;
     bool wedge_eligible = (router_one_shot_stalled || backoff_wedged) &&
-                          link_unreachable && !zb_isDeviceFactoryNew() &&
-                          !telink_zigbee_hal_router_ota_in_progress();
+                          link_unreachable && !factory_new && !ota_active;
     uint32_t wedge_started_ms = router_one_shot_stalled ? router_one_shot_ms :
                                 network_last_start_attempt;
-    bool slow_ready = bseed_wedge_credit_tick(now, wedge_eligible);
 
-    if (wedge_eligible && !router_reboot_scheduled &&
+    /* A terminal callback does not supply an operation token. Once an SDK
+     * operation was accepted, any second operation is quarantined until a
+     * checkpoint. Qualify that *separate* state using observed network
+     * failure, never by pretending two rejoin attempts actually happened. */
+    bool quarantined_no_owner =
+        network_recovery_state == TELINK_NETWORK_RECOVERY_IDLE &&
+        !router_one_shot_active && !router_one_shot_stalled &&
+        (router_one_shot_attempted || network_sdk_backoff_started_once ||
+         network_sdk_steering_started_once);
+    bool coordinator_delivery_failed =
+        bseed_router_timeout_evidence(
+            router_probe_failures, ROUTER_PROBE_FAILURE_THRESHOLD, now,
+            router_positive_seen ? router_last_positive_ms :
+                                   router_observation_epoch_ms,
+            ROUTER_QUIET_MIN_MS) ||
+        bseed_router_queue_stall_evidence(
+            router_probe_rejections, ROUTER_PROBE_REJECT_THRESHOLD, now,
+            router_positive_seen ? router_last_positive_ms :
+                                   router_observation_epoch_ms,
+            ROUTER_REJECT_QUIET_MS);
+    bool quarantine_eligible =
+        !factory_new && !ota_active && router_not_joined_observed == !joined &&
+        bseed_router_quarantine_checkpoint_eligible(
+            quarantined_no_owner, joined, coordinator_delivery_failed,
+            router_reboot_scheduled, now,
+            router_positive_seen ? router_last_positive_ms :
+                                   router_observation_epoch_ms,
+            router_inbound_seen ? router_last_inbound_ms :
+                                  router_observation_epoch_ms,
+            router_not_joined_since_ms,
+            ROUTER_ISOLATED_REBOOT_MS + reboot_stagger_ms,
+            ROUTER_INBOUND_GRACE_MS,
+            ROUTER_RECOVERY_STALL_MS + reboot_stagger_ms);
+
+    /* Exactly one persistent-credit policy update per tick, including when
+     * item 70 is exhausted. Healthy coordinator proofs suspend credit. */
+    bool slow_ready = bseed_wedge_credit_tick(
+        now, wedge_eligible || quarantine_eligible);
+    bool stalled_sdk_checkpoint =
+        wedge_eligible && !router_reboot_scheduled &&
         (uint32_t)(now - wedge_started_ms) >=
-        ROUTER_ONE_SHOT_DEADLINE_MS + reboot_stagger_ms) {
+            ROUTER_ONE_SHOT_DEADLINE_MS + reboot_stagger_ms;
+
+    if (stalled_sdk_checkpoint || quarantine_eligible) {
         bseed_budget_result_t result = bseed_router_rescue_budget_try_consume();
         if (result == BSEED_BUDGET_CONSUMED ||
             (result == BSEED_BUDGET_EXHAUSTED && slow_ready &&
              bseed_wedge_credit_consume())) {
             router_reboot_scheduled = true;
             (void)bseed_recovery_diag_record(
-                router_one_shot_stalled ? BSEED_RESCUE_REASON_ROUTER_ORPHAN :
-                BSEED_RESCUE_REASON_ROUTER_BACKOFF,
+                quarantine_eligible ?
+                (joined ? BSEED_RESCUE_REASON_ROUTER_ISOLATED :
+                          BSEED_RESCUE_REASON_ROUTER_NOT_JOINED) :
+                (router_one_shot_stalled ? BSEED_RESCUE_REASON_ROUTER_ORPHAN :
+                                           BSEED_RESCUE_REASON_ROUTER_BACKOFF),
                 (uint8_t)network_recovery_state);
             schedule_reboot(2000);
             return;
@@ -733,10 +790,7 @@ void telink_zigbee_hal_router_recovery_tick(void) {
      * incoming application traffic before one checkpointed rescue reboot. */
     if (bseed_router_joined_rescue_eligible(
             router_reboot_scheduled, router_one_shot_active,
-            (router_one_shot_stalled || router_one_shot_attempted ||
-             network_sdk_backoff_started_once ||
-             network_sdk_steering_started_once) ?
-            ROUTER_MIN_REJOIN_ATTEMPTS : router_one_shot_attempts,
+            router_one_shot_attempts,
             ROUTER_MIN_REJOIN_ATTEMPTS, now,
             router_positive_seen ? router_last_positive_ms : router_observation_epoch_ms,
             router_inbound_seen ? router_last_inbound_ms : router_observation_epoch_ms,
