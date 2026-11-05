@@ -164,7 +164,12 @@ int main(void) {
     assert(firmware_health.rejoin_success==0);
     bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,0);
     assert(firmware_health.rejoin_success==1);
-    joined=false; hal_zigbee_start_network_steering(); assert(rejoin_calls==3);
+    /* The previous accepted backoff A cannot hand off ownership to B in
+     * this boot: a duplicate/late terminal A callback is uncorrelated. */
+    joined=false; hal_zigbee_start_network_steering(); assert(rejoin_calls==2);
+    /* Only a controlled processor checkpoint begins a new SDK epoch. */
+    network_sdk_backoff_started_once=false;
+    hal_zigbee_start_network_steering(); assert(rejoin_calls==3);
     joined=true; bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,0); joined=false;
     factory_new=true; fail_start=1; now=UINT32_MAX-1000;
     hal_zigbee_start_network_steering(); assert(steer_calls==1);
