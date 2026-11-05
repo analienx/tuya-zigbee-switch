@@ -59,6 +59,8 @@
 #define NV_ITEM_ROUTER_RESCUE_BUDGET     70
 /* Separate slow-lane credit: do not change item 70's four-byte ABI. */
 #define NV_ITEM_RECOVERY_WEDGE_CREDIT    71
+/* Last controlled recovery reason (versioned 4-byte record; no secrets). */
+#define NV_ITEM_RECOVERY_DIAGNOSTIC      72
 
 /* PM legacy-migration attempt counter. IDs 52..63 are free (51 is a legacy
  * fork record, 40..50 belong to dimmer state). The counter bounds migration
