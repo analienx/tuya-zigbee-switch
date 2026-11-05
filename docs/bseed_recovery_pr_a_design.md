@@ -23,13 +23,28 @@ terminal callbacks retain their watchdog/checkpoint path. Router one-shots
 retain their 30-minute cooldown. Client rejoin deferred by an outstanding
 coordinator probe resumes two minutes after the probe deadline, outside OTA.
 
-**Remaining SDK limitation:** BDB completions have no operation token. These
-quiet/grace periods are operational mitigations, not proof that every old SDK
-callback or transaction has drained. A sufficiently late duplicate callback
-could still terminate a newer HAL owner. Do not describe this as proven
-correlation, or restore permanent quarantine and recreate the liveness trap.
-Resolution requires an established SDK boundary or further adapter work, plus
-the real-radio repeated-outage acceptance. Host tests alone cannot close it.
+**Pinned-SDK callback contract and source guard:** Telink V3.7.2.0
+`bdb_zdoStartDevCnf()` posts an untagged `BDB_STATE_REJOIN_DONE` through the
+BDB task, and `bdb_topLevelCommissiongConfirm()` calls our callback with
+`NULL` operation context. `ZDO_NETWORK_LOST` maps to `PARENT_LOST` even though
+that result ends an underlying device-start attempt. A delayed SDK init result
+must not clear a live rejoin or one-shot owner. When BDB emits `SUCCESS` during
+REJOIN but `zb_isDeviceJoinedNwk()` remains false, the HAL now refuses to
+release that owner, avoiding the provable stale-success-before-join case.
+Production-region hosted native regressions and a pinned SDK source-contract
+test cover these guards.
+
+**Remaining SDK limitation:** Neither a 5-minute quiet period nor JOINED=true
+proves which SDK operation produced an old BDB SUCCESS callback. The SDK still
+provides no operation ID and `zb_isDeviceJoinedNwk()` cannot disambiguate an
+old completion arriving after a newer, genuinely joined attempt. The Client
+NodeDesc local deadline + 2-minute drain grace is likewise not a proven SDK
+transaction-cancellation boundary. These mitigations **do not close full
+SDK ownership/quiescence** or demonstrate a safe five-minute secure-scan
+ladder. Do not restore permanent one-operation-per-boot quarantine: it creates
+an hours-long liveness trap. Require the pinned-SDK on-radio repeated-outage
+trials and an SDK attribution/quiescence proof before certifying that claim.
+See [the unexecuted physical acceptance protocol](RECOVERY_PR114_PHYSICAL_ACCEPTANCE.md).
 
 ## Client parent selection
 

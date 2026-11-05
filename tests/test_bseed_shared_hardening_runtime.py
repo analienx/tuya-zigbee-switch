@@ -95,6 +95,9 @@ def test_rejected_recovery_is_paced_and_sdk_backoff_keeps_ownership(tmp_path, fl
     rejoin = "static bool start_rejoin_with_backoff(void)" + source.split(
         "static bool start_rejoin_with_backoff(void)", 1)[1].split(
         "void zdo_leave_indication_callback", 1)[0]
+    init = "void bdb_init_callback(u8 status, u8 joinedNetwork) {" + source.split(
+        "void bdb_init_callback(u8 status, u8 joinedNetwork) {", 1)[1].split(
+        "void bdb_commissioning_callback", 1)[0]
     callback = "void bdb_commissioning_callback(u8 status, void *arg) {" + source.split(
         "void bdb_commissioning_callback(u8 status, void *arg) {", 1)[1].split(
         "void bdb_identify_callback", 1)[0]
@@ -117,6 +120,7 @@ def test_rejected_recovery_is_paced_and_sdk_backoff_keeps_ownership(tmp_path, fl
 #include "telink/hal/recovery_diagnostics.h"
 typedef uint8_t u8;
 #define RET_OK 0
+#define BDB_INIT_STATUS_SUCCESS 0
 #define BSEED_PM_B28WRPVX 1
 firmware_health_t firmware_health;
 typedef enum {HAL_ZIGBEE_NETWORK_NOT_JOINED,HAL_ZIGBEE_NETWORK_JOINED,HAL_ZIGBEE_NETWORK_JOINING} hal_zigbee_network_status_t;
@@ -162,6 +166,9 @@ static void schedule_reboot(uint16_t ms) {
     assert(ms==2000u);checkpoint_reboots++;
 }
 static void configure_mains_client_keepalive(void) {}
+#ifdef BSEED_MAINS_CLIENT
+static void client_health_join_epoch(void) {}
+#endif
 static void telink_zigbee_hal_request_ota_query(void) {}
 '''
     checks = r'''
@@ -186,7 +193,20 @@ int main(void) {
     /* Only a controlled processor checkpoint begins a new SDK epoch. */
     network_sdk_backoff_started_once=false;
     hal_zigbee_start_network_steering(); assert(rejoin_calls==3);
-    joined=true; bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,0); joined=false;
+    /* A late SUCCESS from A is not trustworthy while B's SDK state is
+     * still unjoined. The active owner must remain engaged; do not rearm. */
+    joined=false;
+    bdb_init_callback(BDB_INIT_STATUS_SUCCESS,1);
+    assert(network_recovery_state==TELINK_NETWORK_RECOVERY_REJOIN);
+    bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,0);
+    assert(network_recovery_state==TELINK_NETWORK_RECOVERY_REJOIN);
+    assert(firmware_health.rejoin_success==1);
+    assert(network_sdk_backoff_started_once);
+    joined=true;
+    bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,0);
+    assert(network_recovery_state==TELINK_NETWORK_RECOVERY_IDLE);
+    assert(firmware_health.rejoin_success==2);
+    joined=false;
 #ifdef BSEED_MAINS_CLIENT
     /* An accepted in-flight NodeDesc is still owned by the SDK. A late
      * parent-loss callback may not claim a competing SDK rejoin. Local
@@ -215,7 +235,7 @@ int main(void) {
 }
 '''
     run_c(tmp_path, harness + defines + "\n" + state + rejoin +
-          callback + status + ensure + checks, flags)
+          init + callback + status + ensure + checks, flags)
 
 
 def test_poll_diagnostics_count_empty_ack_as_success_and_saturate(tmp_path):

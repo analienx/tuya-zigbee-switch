@@ -1380,6 +1380,18 @@ void zdo_leave_confirmation_callback(nlme_leave_cnf_t *pLeaveCnf) {
 }
 
 void bdb_init_callback(u8 status, u8 joinedNetwork) {
+    /* Boot initialization is not a terminal completion for a separately
+     * accepted rejoin/one-shot. A delayed init callback cannot release an
+     * SDK owner or license an overlapping radio request. */
+    bool sdk_owner_live = network_recovery_state != TELINK_NETWORK_RECOVERY_IDLE;
+#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
+    sdk_owner_live = sdk_owner_live || router_one_shot_active ||
+                     router_one_shot_stalled;
+#endif
+    if (sdk_owner_live) {
+        printf("BDB init callback during SDK recovery; retain radio owner\r\n");
+        return;
+    }
     if (status == BDB_INIT_STATUS_SUCCESS) {
         network_recovery_state      = TELINK_NETWORK_RECOVERY_IDLE;
         network_start_retry_pending = false;
@@ -1419,7 +1431,8 @@ void bdb_commissioning_callback(u8 status, void *arg) {
      * Only explicit success or one-shot failure is a terminal boundary.
      * Other BDB indications must not give a second SDK operation ownership. */
     if (router_one_shot_active &&
-        (status == BDB_COMMISSION_STA_SUCCESS ||
+        ((status == BDB_COMMISSION_STA_SUCCESS &&
+          zb_isDeviceJoinedNwk()) ||
          status == BDB_COMMISSION_STA_REJOIN_FAILURE)) {
         /* Only an active one-shot may terminate here. A late uncorrelated
          * callback must not release an orphaned SDK radio operation. */
@@ -1432,6 +1445,22 @@ void bdb_commissioning_callback(u8 status, void *arg) {
 #endif
     switch (status) {
     case BDB_COMMISSION_STA_SUCCESS:
+        /* The pinned SDK marks its joined state before notifying the BDB
+         * application on a successful network start. An old untagged SUCCESS
+         * arriving during a newer REJOIN must not end that radio owner while
+         * this device is still unjoined. Joined=true alone cannot correlate
+         * two overlapping SDK epochs; real-radio testing remains required. */
+#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
+        if ((network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN ||
+             router_one_shot_active || router_one_shot_stalled) &&
+            !zb_isDeviceJoinedNwk()) {
+#else
+        if (network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN &&
+            !zb_isDeviceJoinedNwk()) {
+#endif
+            printf("Unverified BDB SUCCESS; retaining SDK radio owner\r\n");
+            break;
+        }
         /* A Router can complete a secure rejoin while zb_isDeviceJoinedNwk()
          * never became false in the main loop. Do not miss this join epoch. */
         app_rearm_network_announcement();
