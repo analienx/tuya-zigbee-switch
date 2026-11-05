@@ -25,7 +25,7 @@ static uint8_t credit_checksum(const wedge_credit_record_t *r) {
     for (unsigned i = 0; i < sizeof(bytes); i++) {
         crc ^= bytes[i];
         for (unsigned bit = 0; bit < 8u; bit++)
-            crc = (uint8_t)((crc & 0x80u) ? (crc << 1) ^ 0x07u : crc << 1);
+            crc = (uint8_t)((crc & 0x80u) ? ((uint32_t)crc << 1) ^ 0x07u : (uint32_t)crc << 1);
     }
     return crc;
 }
