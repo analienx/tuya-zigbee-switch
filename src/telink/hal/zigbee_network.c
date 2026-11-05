@@ -684,14 +684,12 @@ void telink_zigbee_hal_router_recovery_tick(void) {
             ROUTER_ISOLATED_REBOOT_MS + reboot_stagger_ms,
             ROUTER_INBOUND_GRACE_MS,
             repeated_response_timeouts || stuck_request_queue)) {
-        router_reboot_scheduled = true;
         if (bseed_router_rescue_budget_consume()) {
+            router_reboot_scheduled = true;
             printf("Router: joined isolated, budgeted checkpoint reboot\r\n");
             schedule_reboot(2000);
-        } else {
-            printf("Router: isolated rescue denied by persistent NVM budget\r\n");
+            return;
         }
-        return;
     }
 
     if (bseed_router_rejoin_eligible(
