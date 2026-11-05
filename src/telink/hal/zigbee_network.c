@@ -840,10 +840,10 @@ void telink_zigbee_hal_router_recovery_tick(void) {
         !link_router_rejoin_held(now) &&
 
         /* BDB callbacks cannot identify their SDK operation. A previous
-        * backoff or one-shot can deliver a late duplicate after success, so
-        * no new owner starts until telink_zigbee_hal_sdk_owner_rearm_tick()
-        * has seen it terminate and stay quiet. A later one-shot also keeps
-        * the 30-minute cooldown after the previous one. */
+         * backoff or one-shot can deliver a late duplicate after success, so
+         * no new owner starts until telink_zigbee_hal_sdk_owner_rearm_tick()
+         * has seen it terminate and stay quiet. A later one-shot also keeps
+         * the 30-minute cooldown after the previous one. */
         !router_one_shot_attempted &&
         !network_sdk_backoff_started_once &&
         !network_sdk_steering_started_once &&
@@ -1628,7 +1628,7 @@ hal_zigbee_status_t hal_zigbee_send_announce(void) {
 void telink_zigbee_hal_sdk_owner_rearm_tick(void) {
     static bool     idle_seen;
     static uint32_t idle_since_ms;
-    uint32_t        now = hal_millis();
+    uint32_t        now        = hal_millis();
     bool            owner_live =
         network_recovery_state != TELINK_NETWORK_RECOVERY_IDLE ||
         network_steering_checkpoint_scheduled;
