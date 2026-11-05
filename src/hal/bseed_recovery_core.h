@@ -24,6 +24,16 @@ typedef enum {
     BSEED_RECOVERY_SECURE_ALL_CHANNELS,
 } bseed_recovery_rung_t;
 
+#define BSEED_RECOVERY_WEDGE_MS    (10u * 60u * 1000u)
+
+/* Detect missing SDK completion without releasing radio ownership. The role
+ * adapter decides whether a separately budgeted rescue reboot is permitted. */
+static inline bool bseed_recovery_wedged(const bseed_recovery_core_t *core,
+                                         uint32_t now) {
+    return core->pending &&
+           (uint32_t)(now - core->pending_since_ms) >= BSEED_RECOVERY_WEDGE_MS;
+}
+
 static inline uint32_t bseed_recovery_stagger_ms(const uint8_t ieee[8]) {
     uint32_t hash = 2166136261u;
 

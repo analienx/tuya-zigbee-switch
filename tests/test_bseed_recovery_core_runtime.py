@@ -22,10 +22,13 @@ int main(void) {
     assert(!bseed_recovery_claim(&core, now, false)); /* OTA/factory-new */
     assert(bseed_recovery_claim(&core, now, true));
     assert(core.pending_since_ms == now);
+    assert(!bseed_recovery_wedged(&core, now + BSEED_RECOVERY_WEDGE_MS - 1u));
+    assert(bseed_recovery_wedged(&core, now + BSEED_RECOVERY_WEDGE_MS));
     assert(!bseed_recovery_claim(&core, now + 900000u, true)); /* SDK owns it */
     assert(core.pending_since_ms == now); /* failed claim cannot mask a wedge */
     bseed_recovery_finish(&core, now, false);
     assert(!core.pending && core.pending_since_ms == 0u);
+    assert(!bseed_recovery_wedged(&core, now + BSEED_RECOVERY_WEDGE_MS));
     assert(bseed_recovery_rung(&core) == BSEED_RECOVERY_SECURE_ALL_CHANNELS);
     const uint32_t expected[] = {30000u, 60000u, 120000u, 300000u, 300000u};
     for (unsigned i = 0; i < 5u; i++) {
