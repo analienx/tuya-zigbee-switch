@@ -46,7 +46,7 @@ static inline bool bseed_recovery_wedged(const bseed_recovery_core_t *core,
  * checkpoint reboots into a few milliseconds. Use separate domain salts for
  * distinct radio operations. Never base a fleet stagger on raw IEEE bytes. */
 static inline uint32_t bseed_recovery_hash_ieee(const uint8_t ieee[8],
-                                                 uint32_t domain) {
+                                                uint32_t domain) {
     uint32_t hash = 2166136261u ^ domain;
 
     for (unsigned i = 0; i < 8u; i++)

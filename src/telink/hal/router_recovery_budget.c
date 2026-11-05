@@ -31,7 +31,8 @@ static uint8_t  good_replies;
  * deployed four-byte records, but is migrated with readback on first load. */
 static uint8_t budget_crc(const bseed_rescue_record_t *r) {
     const uint8_t fields[] = { r->magic, r->used, r->used_inverse };
-    uint8_t crc = 0u;
+    uint8_t       crc      = 0u;
+
     for (unsigned i = 0; i < sizeof(fields); i++) {
         crc ^= fields[i];
         for (unsigned bit = 0; bit < 8u; bit++) {
@@ -66,6 +67,7 @@ static void budget_load(void) {
                                     r.used_inverse ^ 0x5au)))) {
         used_reboots = r.used;
         budget_valid = true;
+
         /* No in-place struct growth or credit reset; migrate same count.
          * Failure to persist/verify the upgrade is fail-closed. */
         if (r.magic == BSEED_RESCUE_LEGACY_MAGIC &&
