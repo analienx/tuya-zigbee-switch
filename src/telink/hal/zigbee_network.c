@@ -200,8 +200,10 @@ static hal_network_status_change_callback_t network_status_change_callback =
     NULL;
 
 static bool request_rejoin_with_backoff(bool parent_stale);
+
 #ifdef BSEED_MAINS_CLIENT
 static bool request_rejoin_for_isolated_coordinator(void);
+
 #endif
 
 #ifdef BSEED_MAINS_CLIENT
@@ -990,7 +992,7 @@ static bool start_rejoin_with_backoff(void) {
 }
 
 static bool request_rejoin_with_backoff_impl(bool allow_joined,
-                                           bool parent_stale) {
+                                             bool parent_stale) {
 #if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
     /* Every caller, not only steering and PARENT_LOST, must respect a
      * pending/orphaned one-shot. BDB callbacks are not operation-tagged. */
@@ -1019,6 +1021,7 @@ static bool request_rejoin_with_backoff_impl(bool allow_joined,
     if (parent_stale)
         link_note_parent_loss();
     /* Read by the SDK on every attempt of this backoff sequence. */
+
     /* An isolated coordinator with a responsive parent is NOT a parent
      * loss. Permit this secure rejoin to search for an alternate path
      * without polluting the parent-loss telemetry/policy. */
@@ -1053,6 +1056,7 @@ static bool request_rejoin_with_backoff(bool parent_stale) {
 static bool request_rejoin_for_isolated_coordinator(void) {
     return request_rejoin_with_backoff_impl(true, false);
 }
+
 #endif
 
 static void notify_about_network_status_change() {
