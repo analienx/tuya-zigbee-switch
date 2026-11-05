@@ -269,3 +269,32 @@ int main(void) {
                     "-o", str(owner_binary)],
                    check=True, capture_output=True, text=True)
     subprocess.run([str(owner_binary)], check=True, capture_output=True, text=True)
+
+    # After SDK backoff A terminates, accepting B would let a delayed A
+    # callback release B. Once the SDK operation has been quarantined, a
+    # separate later NOT_JOINED episode must still reach a bounded checkpoint.
+    second_outage = r'''
+int main(void) {
+    telink_zigbee_hal_client_recovery_tick();
+    network_sdk_backoff_started_once=true; /* prior accepted backoff A */
+    network_recovery_state=TELINK_NETWORK_RECOVERY_IDLE;
+    joined=false;
+    now=60000u;
+    telink_zigbee_hal_client_recovery_tick();
+    assert(client_not_joined_started && client_not_joined_since_ms==now);
+    assert(probes==0 && reboots==0);
+    now+=CLIENT_COORD_CHECKPOINT_MS+CLIENT_COORD_REJOIN_JITTER_MS+100000u;
+    telink_zigbee_hal_client_recovery_tick();
+    assert(probes==0 && reboots==1 && used_reboots==1u);
+    return 0;
+}
+'''
+    second_file = tmp_path / "client_second_outage.c"
+    second_binary = tmp_path / "client_second_outage"
+    second_file.write_text(prelude + section + second_outage, encoding="utf8")
+    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
+                    "-I", str(ROOT / "src"), str(second_file),
+                    "-o", str(second_binary)],
+                   check=True, capture_output=True, text=True)
+    subprocess.run([str(second_binary)], check=True,
+                   capture_output=True, text=True)
