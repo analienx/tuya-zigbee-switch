@@ -25,6 +25,9 @@ void telink_zigbee_hal_router_note_inbound(void);
 bool telink_zigbee_hal_router_ota_in_progress(void);
 
 #endif
+#ifdef BSEED_MAINS_CLIENT
+void telink_zigbee_hal_client_recovery_tick(void);
+#endif
 #ifdef BSEED_LINK_POLICY
 /* Refreshes the Basic 0xFF13 link snapshot (rate-limited internally). */
 void telink_zigbee_hal_link_snapshot_update(void);
