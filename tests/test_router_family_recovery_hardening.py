@@ -241,7 +241,9 @@ def test_orphaned_one_shot_cannot_launch_another_rejoin():
     )[0]
     assert "bseed_router_rejoin_eligible(" in method
     assert "router_one_shot_stalled, now" in method
-    assert "router_one_shot_stalled ? ROUTER_MIN_REJOIN_ATTEMPTS" in method
+    assert "router_one_shot_stalled || router_one_shot_attempted" in method
+    assert "network_sdk_backoff_started_once" in method
+    assert "!router_one_shot_attempted" in method
     assert "ROUTER_INBOUND_GRACE_MS" in method
     assert "router_probe_initialized = false" in method
 
