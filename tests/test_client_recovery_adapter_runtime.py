@@ -39,6 +39,7 @@ typedef struct { uint16_t src_addr, length; uint8_t *zpdu; } zdo_zdpDataInd_t;
 static struct { uint8_t extAddress[8]; } g_zbMacPib;
 static uint32_t now, network_last_start_attempt;
 static int network_recovery_state;
+static bool network_sdk_backoff_started_once;
 static bool joined=true, factory_new, ota_fast_poll_active, reject_probe, synchronous;
 static uint8_t next_sequence;
 static unsigned probes, reboots, rejoin_starts;
