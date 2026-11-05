@@ -651,7 +651,8 @@ void telink_zigbee_hal_router_recovery_tick(void) {
                                    router_observation_epoch_ms,
             ROUTER_REJECT_QUIET_MS);
     bool quarantine_eligible =
-        !factory_new && !ota_active && router_not_joined_observed == !joined &&
+        !factory_new && !ota_active &&
+        (joined || router_not_joined_observed) &&
         bseed_router_quarantine_checkpoint_eligible(
             quarantined_no_owner, joined, coordinator_delivery_failed,
             router_reboot_scheduled, now,
@@ -713,7 +714,7 @@ void telink_zigbee_hal_router_recovery_tick(void) {
             telink_zigbee_hal_router_ota_in_progress()) {
             return;
         }
-        if (!router_reboot_scheduled &&
+        if (!quarantined_no_owner && !router_reboot_scheduled &&
             (uint32_t)(now - router_recovery_since_ms) >=
             ROUTER_RECOVERY_STALL_MS + reboot_stagger_ms) {
             if (bseed_router_rescue_budget_consume()) {
