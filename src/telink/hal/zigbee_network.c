@@ -342,15 +342,15 @@ static uint8_t  router_probe_sequence;
 static uint32_t router_last_probe_ms;
 static uint32_t router_last_positive_ms; /* only coordinator ZDO replies */
 static uint32_t router_last_inbound_ms;  /* any authenticated application ZCL */
+static uint32_t router_observation_epoch_ms;
+static bool router_observation_started, router_positive_seen, router_inbound_seen;
 static uint32_t router_one_shot_ms;
 
 void telink_zigbee_hal_router_note_inbound(void) {
-    if (!router_probe_initialized)
-        return;
-
     /* Neighbors can reach this Router even when coordinator 0x0000 cannot.
      * Do not discard a pending coordinator timeout or its failure history. */
     router_last_inbound_ms = hal_millis();
+    router_inbound_seen = true;
 }
 
 static void router_coordinator_node_desc_response(void *arg) {
@@ -367,8 +367,8 @@ static void router_coordinator_node_desc_response(void *arg) {
         rsp->seq_num == router_probe_sequence &&
         rsp->status == ZDO_SUCCESS && rsp->nwk_addr_interest == 0x0000u) {
         router_last_positive_ms = hal_millis();
+        router_positive_seen = true;
         bseed_router_rescue_budget_note_good_coordinator(router_last_positive_ms);
-        router_last_inbound_ms   = router_last_positive_ms;
         router_probe_failures    = 0;
         router_probe_rejections  = 0;
         router_one_shot_attempts = 0;
@@ -536,6 +536,11 @@ static bool     router_reboot_scheduled;
 void telink_zigbee_hal_router_recovery_tick(void) {
     uint32_t now = hal_millis();
 
+    if (!router_observation_started) {
+        router_observation_started = true;
+        router_observation_epoch_ms = now;
+    }
+
     /* Three IEEE bytes spread even a >60-Router mesh across the full
      * jitter windows. A 16-bit suffix can only stagger by ~65 seconds. */
     uint32_t ieee_stagger_seed =
@@ -619,8 +624,6 @@ void telink_zigbee_hal_router_recovery_tick(void) {
         * Do not credit this interval toward 12h verified good health. */
         bseed_router_rescue_budget_note_failure();
         router_probe_pending     = false;
-        router_probe_failures    = 0;
-        router_probe_rejections  = 0;
         router_probe_initialized = false;
         return;
     }
@@ -628,11 +631,6 @@ void telink_zigbee_hal_router_recovery_tick(void) {
     if (!router_probe_initialized) {
         router_probe_initialized = true;
         router_last_probe_ms     = now;
-        if (!router_one_shot_stalled) {
-            router_last_positive_ms  = now;
-            router_last_inbound_ms   = now;
-            router_one_shot_attempts = 0;
-        }
         return;
     }
 
@@ -664,14 +662,16 @@ void telink_zigbee_hal_router_recovery_tick(void) {
 
     bool repeated_response_timeouts = bseed_router_timeout_evidence(
         router_probe_failures, ROUTER_PROBE_FAILURE_THRESHOLD, now,
-        router_last_positive_ms, ROUTER_QUIET_MIN_MS);
+        router_positive_seen ? router_last_positive_ms : router_observation_epoch_ms,
+        ROUTER_QUIET_MIN_MS);
 
     /* Queue pressure is not lost routing. Only a much longer series of
      * synchronous request rejections with NO inbound evidence can count as
      * a stuck vendor ZDO subsystem, never as a single missing ACK. */
     bool stuck_request_queue = bseed_router_queue_stall_evidence(
         router_probe_rejections, ROUTER_PROBE_REJECT_THRESHOLD, now,
-        router_last_positive_ms, ROUTER_REJECT_QUIET_MS);
+        router_positive_seen ? router_last_positive_ms : router_observation_epoch_ms,
+        ROUTER_REJECT_QUIET_MS);
 
     /* The BSEED last-resort reset addresses a truly wedged but nominally
      * JOINED Router. A long coordinator outage by itself is insufficient:
@@ -682,7 +682,8 @@ void telink_zigbee_hal_router_recovery_tick(void) {
             router_one_shot_stalled ? ROUTER_MIN_REJOIN_ATTEMPTS :
             router_one_shot_attempts,
             ROUTER_MIN_REJOIN_ATTEMPTS, now,
-            router_last_positive_ms, router_last_inbound_ms,
+            router_positive_seen ? router_last_positive_ms : router_observation_epoch_ms,
+            router_inbound_seen ? router_last_inbound_ms : router_observation_epoch_ms,
             ROUTER_ISOLATED_REBOOT_MS + reboot_stagger_ms,
             ROUTER_INBOUND_GRACE_MS,
             repeated_response_timeouts || stuck_request_queue)) {
@@ -697,7 +698,8 @@ void telink_zigbee_hal_router_recovery_tick(void) {
     if (bseed_router_rejoin_eligible(
             repeated_response_timeouts || stuck_request_queue,
             router_one_shot_stalled, now,
-            router_last_positive_ms, router_last_inbound_ms,
+            router_positive_seen ? router_last_positive_ms : router_observation_epoch_ms,
+            router_inbound_seen ? router_last_inbound_ms : router_observation_epoch_ms,
             ROUTER_QUIET_MIN_MS, ROUTER_ACTIVE_NEIGHBOR_HOLD_MS,
             ROUTER_NEIGHBOR_ACTIVITY_MS, rejoin_stagger_ms) &&
         !link_router_rejoin_held(now) &&

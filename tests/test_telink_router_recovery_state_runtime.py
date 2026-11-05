@@ -85,6 +85,8 @@ int main(void) {
     /* First healthy Router period must not scan, rejoin or reboot. */
     telink_zigbee_hal_router_recovery_tick();
     assert(probes==0 && rejoin_calls==0 && rescue_calls==0);
+    assert(!router_positive_seen && !router_inbound_seen);
+    assert(router_last_positive_ms==0 && router_last_inbound_ms==0);
     now=600000; telink_zigbee_hal_router_recovery_tick();
     assert(probes==1 && router_probe_pending);
     /* Wrong source NWK / stale sequence cannot reset this timeout. */
@@ -102,6 +104,12 @@ int main(void) {
     /* Timed-out ZDO requests count but must not cause an immediate rejoin. */
     now+=31000; telink_zigbee_hal_router_recovery_tick();
     assert(router_probe_failures==1 && rejoin_calls==0);
+    network_recovery_state=1; now+=1;
+    telink_zigbee_hal_router_recovery_tick();
+    assert(router_probe_failures==1 && !router_positive_seen);
+    network_recovery_state=TELINK_NETWORK_RECOVERY_IDLE;
+    telink_zigbee_hal_router_recovery_tick();
+    assert(router_probe_failures==1 && !router_positive_seen);
     for(unsigned i=0;i<2;i++) {
         now+=600000; telink_zigbee_hal_router_recovery_tick();
         assert(router_probe_pending);
