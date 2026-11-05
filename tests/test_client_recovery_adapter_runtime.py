@@ -15,6 +15,7 @@ def test_client_probe_and_backoff_with_persistent_budget(tmp_path):
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdio.h>
 #include "hal/bseed_recovery_core.h"
 #include "hal/nvm.h"
 #include "device_config/nvm_items.h"
