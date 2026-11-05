@@ -13,6 +13,7 @@
 #include "hal/firmware_health.h"
 #include "hal/router_recovery_policy.h"
 #include "router_recovery_budget.h"
+#include "recovery_wedge_credit.h"
 #include "hal/link_policy.h"
 #include "device_config/reset.h"
 #include "app.h"
@@ -548,6 +549,25 @@ void telink_zigbee_hal_router_recovery_tick(void) {
     * over 15m, not merely the first 2m of low-impact ZDO health probes. */
     uint32_t rejoin_stagger_ms = reboot_stagger_ms;
 
+    /* A lost completion remains an SDK ownership barrier even if the device
+     * communicates again. A checkpointed restart clears SDK state; when the
+     * ordinary budget is exhausted, accumulate the separate slow-lane credit.
+     * Never interrupt OTA or a factory-new commissioning session. */
+    bool wedge_eligible = router_one_shot_stalled &&
+                          !zb_isDeviceFactoryNew() &&
+                          !telink_zigbee_hal_router_ota_in_progress();
+    bool slow_ready = bseed_wedge_credit_tick(now, wedge_eligible);
+    if (wedge_eligible && !router_reboot_scheduled &&
+        (uint32_t)(now - router_one_shot_ms) >=
+        ROUTER_ONE_SHOT_DEADLINE_MS + reboot_stagger_ms) {
+        if (bseed_router_rescue_budget_consume() ||
+            (slow_ready && bseed_wedge_credit_consume())) {
+            router_reboot_scheduled = true;
+            schedule_reboot(2000);
+            return;
+        }
+    }
+
     if (zb_isDeviceFactoryNew() || !zb_isDeviceJoinedNwk()) {
         bseed_router_rescue_budget_note_failure();
         router_probe_initialized = false;
@@ -579,12 +599,10 @@ void telink_zigbee_hal_router_recovery_tick(void) {
         if (!router_reboot_scheduled &&
             (uint32_t)(now - router_recovery_since_ms) >=
             ROUTER_RECOVERY_STALL_MS + reboot_stagger_ms) {
-            router_reboot_scheduled = true;
             if (bseed_router_rescue_budget_consume()) {
+                router_reboot_scheduled = true;
                 printf("Router: stalled rejoin, budgeted checkpoint reboot\r\n");
                 schedule_reboot(2000);
-            } else {
-                printf("Router: rescue reboot denied by persistent NVM budget\r\n");
             }
         }
         return;

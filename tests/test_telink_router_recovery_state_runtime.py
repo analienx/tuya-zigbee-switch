@@ -45,6 +45,7 @@ static struct { uint8_t extAddress[8]; } g_zbMacPib;
 static struct {uint8_t scanDuration;} g_bdbAttrs;
 static uint32_t now, probes, rejoin_calls, rescue_calls, budget_used, positives, failed;
 static bool joined = true, factory_new, ota_active;
+static bool slow_credit_ready;
 static uint8_t pending_sequence;
 static void (*zdo_callback)(void *);
 static uint32_t hal_millis(void) {return now;}
@@ -65,6 +66,10 @@ static zdo_status_t zb_zdoNodeDescReq(uint16_t dst,
 static void schedule_reboot(uint32_t ms) {assert(ms==2000);rescue_calls++;}
 static bool bseed_router_rescue_budget_consume(void)
     {if(budget_used>=2)return false;budget_used++;return true;}
+static bool bseed_wedge_credit_tick(uint32_t now_ms, bool wedged)
+    {(void)now_ms; return wedged && slow_credit_ready;}
+static bool bseed_wedge_credit_consume(void)
+    {if(!slow_credit_ready)return false;slow_credit_ready=false;return true;}
 static void bseed_router_rescue_budget_note_good_coordinator(uint32_t timestamp)
     {(void)timestamp;positives++;}
 static void bseed_router_rescue_budget_note_failure(void) {failed++;}
@@ -126,7 +131,7 @@ int main(void) {
     /* Even a validated coordinator reply cannot prove an orphaned SDK
      * operation ended; do not permit another scan on its evidence alone. */
     joined=true;
-    router_reboot_scheduled=false;
+    /* A reboot has already been scheduled above; keep it pending. */
     assert(router_one_shot_stalled);
     router_probe_initialized=false;
     router_probe_failures=0;
@@ -141,6 +146,12 @@ int main(void) {
     assert(router_one_shot_stalled && rejoin_calls==1);
     now+=3600000; telink_zigbee_hal_router_recovery_tick();
     assert(router_one_shot_stalled && rejoin_calls==1);
+    /* A later outage with the ordinary budget exhausted can still consume
+     * accumulated wedge credit and reset the orphaned SDK state. */
+    joined=false; budget_used=2; router_reboot_scheduled=false;
+    slow_credit_ready=true;
+    telink_zigbee_hal_router_recovery_tick();
+    assert(rescue_calls==2 && router_reboot_scheduled && !slow_credit_ready);
     return 0;
 }
 """
