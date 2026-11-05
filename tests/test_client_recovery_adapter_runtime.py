@@ -117,3 +117,42 @@ int main(void) {
                     "-I", str(ROOT / "src"), str(cfile), "-o", str(binary)],
                    check=True, capture_output=True, text=True)
     subprocess.run([str(binary)], check=True, capture_output=True, text=True)
+    # A coordinator route may be broken despite healthy parent MAC ACKs.
+    # Use production C, real coordinator probe bookkeeping and the same
+    # operation-owner stub as the normal Client watchdog.
+    isolation = r'''
+int main(void) {
+    telink_zigbee_hal_client_recovery_tick();
+    now=631000u;
+    telink_zigbee_hal_client_recovery_tick();
+    assert(probes==1 && client_coord_core.probe_pending);
+    now+=31000u;
+    telink_zigbee_hal_client_recovery_tick();
+    assert(client_coord_core.probe_failures==1);
+    now+=60000u;
+    telink_zigbee_hal_client_recovery_tick();
+    assert(probes==2 && client_coord_core.probe_pending);
+    now+=31000u;
+    telink_zigbee_hal_client_recovery_tick();
+    assert(bseed_recovery_degraded(&client_coord_core));
+    assert(rejoin_starts==0);
+    /* Both probes failed independently; no MAC-parent failure was needed.
+     * The bounded qualification window must start exactly one SDK backoff. */
+    now=CLIENT_COORD_ISOLATION_MS+CLIENT_COORD_REJOIN_JITTER_MS+100u;
+    telink_zigbee_hal_client_recovery_tick();
+    assert(rejoin_starts==1 && network_recovery_state==TELINK_NETWORK_RECOVERY_REJOIN);
+    now+=60000u;
+    telink_zigbee_hal_client_recovery_tick();
+    assert(rejoin_starts==1);
+    return 0;
+}
+'''
+    isolation_file = tmp_path / "client_isolation.c"
+    isolation_binary = tmp_path / "client_isolation"
+    isolation_file.write_text(prelude + section + isolation, encoding="utf8")
+    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
+                    "-I", str(ROOT / "src"), str(isolation_file),
+                    "-o", str(isolation_binary)],
+                   check=True, capture_output=True, text=True)
+    subprocess.run([str(isolation_binary)], check=True,
+                   capture_output=True, text=True)
