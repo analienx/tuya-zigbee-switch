@@ -877,7 +877,8 @@ static bool     client_coord_started, client_reboot_scheduled;
 static uint32_t client_last_probe_ms, client_outage_since_ms;
 static uint32_t client_first_rejection_ms;
 static uint8_t  client_probe_rejections;
-static bool     client_rejections_started;
+static bool     client_rejections_started, client_not_joined_started;
+static uint32_t client_not_joined_since_ms;
 
 static void client_coordinator_node_desc_response(void *arg) {
     if (arg == NULL)
@@ -911,7 +912,18 @@ void telink_zigbee_hal_client_recovery_tick(void) {
         client_last_probe_ms   = now;
         client_outage_since_ms = now;
     }
+    /* A previously accepted backoff cannot be started again in this boot.
+     * A later genuine NOT_JOINED episode needs its own monotonic clock,
+     * independent of the last successful coordinator proof (which may be
+     * days old while the device was healthy). */
+    if (zb_isDeviceJoinedNwk()) {
+        client_not_joined_started = false;
+    } else if (!client_not_joined_started) {
+        client_not_joined_started  = true;
+        client_not_joined_since_ms = now;
+    }
     if (zb_isDeviceFactoryNew() || ota_fast_poll_active) {
+        client_not_joined_started = false;
         /* OTA/commissioning suspends both radio actions and qualification:
          * time spent waiting for the image cannot fabricate a queue stall. */
         client_coord_core.probe_pending = false;
@@ -995,9 +1007,12 @@ void telink_zigbee_hal_client_recovery_tick(void) {
     bool checkpoint_after_previous_owner =
         network_sdk_backoff_started_once &&
         network_recovery_state == TELINK_NETWORK_RECOVERY_IDLE &&
-        (bseed_recovery_degraded(&client_coord_core) || queue_stalled) &&
-        (uint32_t)(now - client_outage_since_ms) >=
-            CLIENT_COORD_CHECKPOINT_MS + stagger;
+        ((bseed_recovery_degraded(&client_coord_core) || queue_stalled) &&
+         (uint32_t)(now - client_outage_since_ms) >=
+             CLIENT_COORD_CHECKPOINT_MS + stagger ||
+         (client_not_joined_started &&
+          (uint32_t)(now - client_not_joined_since_ms) >=
+              CLIENT_COORD_CHECKPOINT_MS + stagger));
     bool checkpoint_local_queue =
         queue_stalled &&
         network_recovery_state == TELINK_NETWORK_RECOVERY_IDLE &&
