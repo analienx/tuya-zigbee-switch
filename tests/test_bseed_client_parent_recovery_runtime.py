@@ -61,6 +61,9 @@ static uint32_t now, rate=60000, calls, retries, delay, af_calls;
 static bool joined=true, factory_new, sdk_owned, reject, reject_disconnected, sync_success;
 static struct {u8 scanDuration;} g_bdbAttrs;
 static struct {u8 extAddress[8];} g_zbMacPib;
+/* The extracted Client coordinator-probe section is owned by a separate
+ * linked native harness; model only its pending transaction here. */
+static bseed_recovery_core_t client_coord_core;
 firmware_health_t firmware_health;
 uint32_t hal_millis(void) {return now;}
 static bool zb_isDeviceJoinedNwk(void) {return joined;}
