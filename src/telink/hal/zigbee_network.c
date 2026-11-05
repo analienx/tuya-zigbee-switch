@@ -362,7 +362,7 @@ static void router_coordinator_node_desc_response(void *arg) {
         return;
 
     zdo_zdpDataInd_t *ind = (zdo_zdpDataInd_t *)arg;
-    if (ind->length < sizeof(zdo_node_descript_resp_t))
+    if (ind->zpdu == NULL || ind->length < sizeof(zdo_node_descript_resp_t))
         return;
 
     zdo_node_descript_resp_t *rsp = (zdo_node_descript_resp_t *)ind->zpdu;
@@ -808,7 +808,7 @@ static void client_coordinator_node_desc_response(void *arg) {
     if (arg == NULL)
         return;
     zdo_zdpDataInd_t *ind = (zdo_zdpDataInd_t *)arg;
-    if (ind->length < sizeof(zdo_node_descript_resp_t))
+    if (ind->zpdu == NULL || ind->length < sizeof(zdo_node_descript_resp_t))
         return;
     zdo_node_descript_resp_t *rsp = (zdo_node_descript_resp_t *)ind->zpdu;
     if (bseed_recovery_probe_answer(&client_coord_core, rsp->seq_num,

@@ -35,7 +35,7 @@ typedef struct __attribute__((packed)) {
 typedef struct {
     uint16_t src_addr;
     uint16_t length;
-    uint8_t zpdu[8];
+    uint8_t *zpdu;
 } zdo_zdpDataInd_t;
 
 typedef struct {uint32_t rejoin_start, rejoin_failure;} health_t;
@@ -94,6 +94,7 @@ int main(void) {
     assert(probes==1 && router_probe_pending);
     /* Wrong source NWK / stale sequence cannot reset this timeout. */
     zdo_zdpDataInd_t ind={0};
+    uint8_t payload[8]={0}; ind.zpdu=payload;
     zdo_node_descript_resp_t reply={pending_sequence, ZDO_SUCCESS, 0};
     ind.src_addr=0x1234; ind.length=sizeof(reply);
     __builtin_memcpy(ind.zpdu,&reply,sizeof(reply));

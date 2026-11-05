@@ -25,7 +25,7 @@ typedef struct { uint16_t nwk_addr_interest; } zdo_node_descriptor_req_t;
 typedef struct __attribute__((packed)) {
     uint8_t seq_num, status; uint16_t nwk_addr_interest;
 } zdo_node_descript_resp_t;
-typedef struct { uint16_t src_addr, length; uint8_t zpdu[8]; } zdo_zdpDataInd_t;
+typedef struct { uint16_t src_addr, length; uint8_t *zpdu; } zdo_zdpDataInd_t;
 static struct { uint8_t extAddress[8]; } g_zbMacPib;
 static uint32_t now, network_last_start_attempt;
 static int network_recovery_state;
@@ -44,7 +44,7 @@ static uint8_t zb_zdoNodeDescReq(uint16_t dst, zdo_node_descriptor_req_t *req,
     *seq=++next_sequence; probe_callback=callback;
     if (synchronous) {
         zdo_zdpDataInd_t ind={0}; zdo_node_descript_resp_t rsp={*seq,0,0};
-        ind.length=sizeof(rsp); memcpy(ind.zpdu,&rsp,sizeof(rsp)); callback(&ind);
+        ind.length=sizeof(rsp); ind.zpdu=(uint8_t *)&rsp; callback(&ind);
     }
     return 0;
 }
@@ -75,7 +75,7 @@ int main(void) {
     assert(client_coord_core.probe_pending);
     zdo_zdpDataInd_t ind={0};
     zdo_node_descript_resp_t rsp={next_sequence,0,0};
-    ind.length=sizeof(rsp); ind.src_addr=0x1234; memcpy(ind.zpdu,&rsp,sizeof(rsp));
+    ind.length=sizeof(rsp); ind.src_addr=0x1234; ind.zpdu=(uint8_t *)&rsp;
     probe_callback(&ind); assert(client_coord_core.probe_pending);
     now+=31000u; telink_zigbee_hal_client_recovery_tick();
     assert(client_coord_core.probe_failures==1);
