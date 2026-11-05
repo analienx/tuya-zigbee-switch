@@ -1112,7 +1112,13 @@ static bool request_rejoin_with_backoff_impl(bool allow_joined,
     network_recovery_state = TELINK_NETWORK_RECOVERY_REJOIN;
     network_sdk_backoff_started_once = true;
 #ifdef BSEED_MAINS_CLIENT
+    /* A previously armed coordinator probe cannot be allowed to complete
+     * after the SDK has acquired the radio for a rejoin. */
+    client_coord_core.probe_pending = false;
     zb_rejoinSecModeSet(REJOIN_SECURITY);
+#endif
+#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
+    router_probe_pending = false;
 #endif
 #ifdef BSEED_LINK_POLICY
 #ifdef BSEED_MAINS_CLIENT
