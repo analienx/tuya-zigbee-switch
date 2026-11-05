@@ -63,6 +63,7 @@ GCC_FLAGS := \
 	-MP
 
 LNK_FLAGS := --gc-sections -nostartfiles
+LNK_FLAGS += --wrap=zcl_report --wrap=zcl_reportAttrs
 
 ASM_FLAGS := \
 	-fomit-frame-pointer \
@@ -183,6 +184,7 @@ TELINK_SOURCES := \
 	hal/zigbee.c \
 	hal/zigbee_network.c \
 	hal/zigbee_zcl.c \
+	hal/zigbee_telemetry.c \
 	hal/zigbee_ota.c \
 	hal/adc.c \
 	libc_polyfills/atoi.c \

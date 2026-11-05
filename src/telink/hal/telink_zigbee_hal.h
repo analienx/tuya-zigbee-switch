@@ -27,6 +27,8 @@ bool telink_zigbee_hal_router_ota_in_progress(void);
 #endif
 /* Re-arms SDK recovery ownership after a terminal, quiet operation. */
 void telink_zigbee_hal_sdk_owner_rearm_tick(void);
+bool telink_zigbee_hal_hold_coordinator_telemetry(void);
+void telink_zigbee_hal_telemetry_tick(void);
 
 #ifdef BSEED_MAINS_CLIENT
 void telink_zigbee_hal_client_recovery_tick(void);

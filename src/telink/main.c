@@ -97,6 +97,7 @@ int real_main(startup_state_e state) {
 #endif
         drv_wd_clear();
         report_handler();
+        telink_zigbee_hal_telemetry_tick();
         drv_wd_clear();
 
 #if PM_ENABLE

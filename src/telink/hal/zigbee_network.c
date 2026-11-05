@@ -994,6 +994,7 @@ zdo_appIndCb_t zdo_callbacks = {
  * parent vanished mid-probe (likely while degraded: one probe per minute). */
 #define CLIENT_ZDO_DRAIN_GRACE_MS        (2u * 60u * 1000u)
 static bseed_recovery_core_t client_coord_core;
+static bool client_coord_verified;
 static bool     client_coord_started, client_reboot_scheduled;
 static uint32_t client_last_probe_ms, client_outage_since_ms;
 static uint32_t client_first_rejection_ms;
@@ -1018,6 +1019,7 @@ static void client_coordinator_node_desc_response(void *arg) {
                                     ind->src_addr, rsp->nwk_addr_interest,
                                     rsp->status == ZDO_SUCCESS)) {
         client_outage_since_ms    = hal_millis();
+        client_coord_verified     = true;
         client_probe_rejections   = 0u;
         client_rejections_started = false;
 
@@ -1776,6 +1778,33 @@ void telink_zigbee_hal_link_snapshot_update(void) {
 #endif
 
 // Internal interface functions
+
+/* Telemetry resumes only on a new coordinator proof, never on JOINED or a
+ * locally accepted ZDO submission. This does not affect bound controls. */
+bool telink_zigbee_hal_hold_coordinator_telemetry(void) {
+    static bool held;
+    static uint32_t proof_at_hold;
+    bool failed = false, verified = false;
+    uint32_t proof = 0u;
+#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
+    failed = !zb_isDeviceJoinedNwk() || router_probe_failures >= 2u ||
+             router_probe_rejections >= ROUTER_PROBE_REJECT_THRESHOLD;
+    verified = router_positive_seen;
+    proof = router_last_positive_ms;
+#elif defined(BSEED_MAINS_CLIENT)
+    failed = !zb_isDeviceJoinedNwk() || bseed_recovery_degraded(&client_coord_core) ||
+             client_probe_rejections >= CLIENT_COORD_REJECT_THRESHOLD;
+    verified = client_coord_verified;
+    proof = client_outage_since_ms;
+#endif
+    if (failed && !held) {
+        held = true;
+        proof_at_hold = proof;
+    } else if (!failed && held && verified && proof != proof_at_hold) {
+        held = false;
+    }
+    return held;
+}
 
 void telink_zigbee_hal_network_init(void) {
     zb_init();
