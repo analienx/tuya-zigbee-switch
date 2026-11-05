@@ -54,8 +54,6 @@ static int network_recovery_state;
 static uint32_t network_last_start_attempt;
 static bool network_sdk_backoff_started_once;
 static bool network_sdk_steering_started_once;
-static bool network_steering_terminal_seen;
-static uint32_t network_steering_terminal_ms;
 static struct { uint8_t extAddress[8]; } g_zbMacPib;
 static struct {uint8_t scanDuration;} g_bdbAttrs;
 static uint32_t now, probes, rejoin_calls, rescue_calls, budget_used, positives, failed;
@@ -306,6 +304,8 @@ def test_late_bdb_callback_cannot_reassign_router_radio_owner(tmp_path):
     extras = r"""
 #define BSEED_PM_B28WRPVX 1
 static unsigned backoff_calls, announces;
+static bool network_steering_terminal_seen;
+static uint32_t network_steering_terminal_ms;
 static bool network_start_retry_pending;
 static bool network_start_ready(void) {
     return !network_start_retry_pending ||

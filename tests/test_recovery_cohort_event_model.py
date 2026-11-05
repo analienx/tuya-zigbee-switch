@@ -4,9 +4,9 @@ This is an explicit *assumption-based* hosted CI simulation, not a Telink RF
 emulator or physical child-retention measurement. Its jitter is obtained by
 compiling the actual production C hash, not reimplementing it in Python.
 """
-from collections import defaultdict
 from pathlib import Path
 import json
+import os
 import math
 import subprocess
 
@@ -143,10 +143,6 @@ def _model(rows):
             # Two children per Router, each polling once per 60s. Detach if
             # three consecutive hypothetical polls miss the parent during
             # a 30s scan. Real RF route churn is not represented.
-            scan_intervals = [
-                (t, t + duration)
-                for t in range(first, OUTAGE_MS, SCAN_REPEAT_MS)
-            ]
             for child in range(CHILDREN_PER_ROUTER):
                 phase = (idx * 811 + child * 19_001) % CHILD_POLL_MS
                 consecutive = max_consecutive = 0
@@ -213,3 +209,17 @@ def test_80_router_20_client_cohort_scans_reboots_and_recovery(tmp_path):
     # Hosted test logs can report the model; these values are conditional
     # simulated quantities, NOT a physical Zigbee/relay release gate.
     print("BSEED_RECOVERY_COHORT_MODEL " + json.dumps(report, sort_keys=True))
+    # Also publish the conditional model as a visible hosted Actions summary.
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as handle:
+            handle.write("\n## BSEED conditional 80-Router recovery model\n")
+            handle.write(
+                "This is an assumption-based event simulation, NOT actual RF "
+                "or relay-continuity acceptance.\n\n"
+            )
+            handle.write("| Metric | Model output |\n|---|---:|\n")
+            for metric, value in report.items():
+                if isinstance(value, dict):
+                    continue
+                handle.write(f"| `{metric}` | {value} |\n")
