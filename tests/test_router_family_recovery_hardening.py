@@ -66,7 +66,9 @@ def test_telink_superloop_services_router_watchdog_without_clients():
 
 def test_routers_probe_real_coordinator_reachability_before_secure_rejoin():
     source = TELINK.read_text(encoding="utf-8")
-    assert "zb_zdoNodeDescReq(0x0000u" in source
+    assert "zb_zdoNodeDescReq(" in source
+    assert "0x0000u, &req, &router_probe_sequence" in source
+    assert "router_probe_pending  = true;" in source
     assert "router_coordinator_node_desc_response" in source
     assert "rsp->status == ZDO_SUCCESS" in source
     assert "rsp->nwk_addr_interest == 0x0000u" in source
