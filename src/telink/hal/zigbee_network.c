@@ -981,9 +981,24 @@ void telink_zigbee_hal_client_recovery_tick(void) {
                       CLIENT_BACKOFF_WEDGE_MS &&
                   (uint32_t)(now - client_outage_since_ms) >=
                       CLIENT_BACKOFF_WEDGE_MS;
-    bool     slow_ready = bseed_wedge_credit_tick(now, wedged);
-    uint32_t stagger    = bseed_recovery_action_stagger_ms(
+    uint32_t stagger = bseed_recovery_action_stagger_ms(
         g_zbMacPib.extAddress, 0x43425254u, 15u * 60u * 1000u);
+    /* Do not call wedge_credit_tick(false) followed by tick(true) on each
+     * checkpoint cycle: that discards every partial six-hour credit. The
+     * persistent clock receives exactly one policy decision per tick. */
+    bool checkpoint_after_previous_owner =
+        network_sdk_backoff_started_once &&
+        network_recovery_state == TELINK_NETWORK_RECOVERY_IDLE &&
+        (bseed_recovery_degraded(&client_coord_core) || queue_stalled) &&
+        (uint32_t)(now - client_outage_since_ms) >=
+            CLIENT_COORD_CHECKPOINT_MS + stagger;
+    bool checkpoint_local_queue =
+        queue_stalled &&
+        network_recovery_state == TELINK_NETWORK_RECOVERY_IDLE &&
+        (uint32_t)(now - client_first_rejection_ms) >=
+            CLIENT_COORD_CHECKPOINT_MS + stagger;
+    bool slow_ready = bseed_wedge_credit_tick(
+        now, wedged || checkpoint_after_previous_owner || checkpoint_local_queue);
     if (wedged && !client_reboot_scheduled &&
         (uint32_t)(now - network_last_start_attempt) >=
         CLIENT_BACKOFF_WEDGE_MS + stagger) {
@@ -999,27 +1014,13 @@ void telink_zigbee_hal_client_recovery_tick(void) {
         }
     }
 
-    /* When an earlier SDK backoff completed, a duplicate/late BDB callback
-     * could release a newer owner. Do not start that newer owner in this
-     * boot. Only sustained independent coordinator failures can qualify for
-     * a fail-closed checkpoint, with its own fleet stagger and NVM budget. */
-    bool checkpoint_after_previous_owner =
-        network_sdk_backoff_started_once &&
-        network_recovery_state == TELINK_NETWORK_RECOVERY_IDLE &&
-        (bseed_recovery_degraded(&client_coord_core) || queue_stalled) &&
-        (uint32_t)(now - client_outage_since_ms) >=
-            CLIENT_COORD_CHECKPOINT_MS + stagger;
-    bool checkpoint_local_queue =
-        queue_stalled &&
-        network_recovery_state == TELINK_NETWORK_RECOVERY_IDLE &&
-        (uint32_t)(now - client_first_rejection_ms) >=
-            CLIENT_COORD_CHECKPOINT_MS + stagger;
+    /* An uncorrelated BDB callback cannot release a new radio owner. An
+     * earlier accepted backoff can only be superseded after a checkpoint. */
     if (!client_reboot_scheduled &&
         (checkpoint_after_previous_owner || checkpoint_local_queue)) {
         bseed_budget_result_t result = bseed_router_rescue_budget_try_consume();
-        bool slow_available = bseed_wedge_credit_tick(now, true);
         if (result == BSEED_BUDGET_CONSUMED ||
-            (result == BSEED_BUDGET_EXHAUSTED && slow_available &&
+            (result == BSEED_BUDGET_EXHAUSTED && slow_ready &&
              bseed_wedge_credit_consume())) {
             client_reboot_scheduled = true;
             (void)bseed_recovery_diag_record(
