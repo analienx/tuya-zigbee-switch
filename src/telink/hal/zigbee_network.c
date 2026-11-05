@@ -90,6 +90,38 @@ static void link_snapshot_fill(uint8_t flags, uint16_t addr, uint8_t lqi,
 
 #if defined(BSEED_LINK_POLICY) && defined(BSEED_MAINS_CLIENT)
 static bseed_parent_policy_t parent_policy;
+static bool     client_floor_active;
+static uint32_t client_floor_since_ms;
+
+static void link_floor_restore(void) {
+    client_floor_active = false;
+    NWK_NEIGHBORTBL_ADD_LQITHRESHOLD = BSEED_PARENT_FLOOR_DEFAULT;
+}
+
+static void link_floor_begin(void) {
+    client_floor_since_ms = hal_millis();
+    client_floor_active = true;
+    NWK_NEIGHBORTBL_ADD_LQITHRESHOLD = BSEED_PARENT_FLOOR_STRONG;
+}
+
+static void link_floor_tick(bool suspended) {
+    if (suspended) {
+        link_floor_restore();
+        return;
+    }
+    if (!client_floor_active)
+        return;
+    uint8_t floor = bseed_parent_floor(hal_millis() - client_floor_since_ms);
+    NWK_NEIGHBORTBL_ADD_LQITHRESHOLD = floor;
+    if (floor == BSEED_PARENT_FLOOR_DEFAULT)
+        client_floor_active = false;
+}
+
+static bool link_previous_parent_good(void) {
+    tl_zb_normal_neighbor_entry_t *parent =
+        nwk_neTblGetByShortAddr(zb_getParentShortAddr());
+    return parent && bseed_parent_previous_good(link_neighbor_cost(parent));
+}
 
 /* Every Client parent-loss signal feeds the rescan policy. */
 static void link_note_parent_loss(void) {
@@ -1282,8 +1314,11 @@ static bool request_rejoin_with_backoff_impl(bool allow_joined,
      * without polluting the parent-loss telemetry/policy. */
     PRE_PARENT_FIRST_WHEN_REJOIN =
         (allow_joined && !parent_stale) ? FALSE :
-        (bseed_parent_policy_prefer_previous(&parent_policy, hal_millis()) ?
+        (link_previous_parent_good() &&
+         bseed_parent_policy_prefer_previous(&parent_policy, hal_millis()) ?
          TRUE : FALSE);
+    if (!ota_fast_poll_active)
+        link_floor_begin();
 #else
     /* Not-joined recovery stays sticky; only the verified-failure Router
      * one-shot below rescans. */
@@ -1293,6 +1328,9 @@ static bool request_rejoin_with_backoff_impl(bool allow_joined,
     u8 res =
         zb_rejoinReqWithBackOff(zb_apsChannelMaskGet(), g_bdbAttrs.scanDuration);
     if (res != RET_OK) {
+#if defined(BSEED_LINK_POLICY) && defined(BSEED_MAINS_CLIENT)
+        link_floor_restore();
+#endif
         /* Some SDKs can emit a terminal callback synchronously. If that
          * callback already changed the owner state, a contradictory return
          * code cannot retroactively prove that no operation existed. */
@@ -1365,6 +1403,12 @@ void bdb_init_callback(u8 status, u8 joinedNetwork) {
 
 void bdb_commissioning_callback(u8 status, void *arg) {
     printf("BDB commissioning callback, status: %d\r\n", status);
+#if defined(BSEED_LINK_POLICY) && defined(BSEED_MAINS_CLIENT)
+    /* Failure indications inside SDK backoff also restore admission. Never
+     * restart the strong tier from an intermediate failure callback. */
+    if (status != BDB_COMMISSION_STA_IN_PROGRESS)
+        link_floor_restore();
+#endif
 #if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
     /* PARENT_LOST may arrive in the middle of an active secure rejoin.
      * Only explicit success or one-shot failure is a terminal boundary.
@@ -1506,6 +1550,10 @@ void hal_register_on_network_status_change_callback(
 void hal_zigbee_leave_network(void) {
     nlme_leave_req_t leaveReq;
 
+#if defined(BSEED_LINK_POLICY) && defined(BSEED_MAINS_CLIENT)
+    link_floor_restore();
+#endif
+
     TL_SETSTRUCTCONTENT(leaveReq, 0);
     leaveReq.removeChildren     = 1;
     leaveReq.rejoin             = 0;
@@ -1626,6 +1674,9 @@ hal_zigbee_status_t hal_zigbee_send_announce(void) {
 #define SDK_STEERING_REARM_JITTER_MS    (30u * 1000u)
 
 void telink_zigbee_hal_sdk_owner_rearm_tick(void) {
+#if defined(BSEED_LINK_POLICY) && defined(BSEED_MAINS_CLIENT)
+    link_floor_tick(ota_fast_poll_active);
+#endif
     static bool     idle_seen;
     static uint32_t idle_since_ms;
     uint32_t        now        = hal_millis();
@@ -1710,7 +1761,8 @@ void telink_zigbee_hal_link_snapshot_update(void) {
     link_snapshot_fill((uint8_t)((parent_policy.rescan ? 2u : 0u) | (e ? 4u : 0u)),
                        parent, e ? e->lqi : 0u, e ? link_neighbor_cost(e) : 0u,
                        bseed_parent_losses_recent(&parent_policy, now),
-                       parent_policy.rescan_entries, 0u, 0u, now);
+                       parent_policy.rescan_entries,
+                       NWK_NEIGHBORTBL_ADD_LQITHRESHOLD, 0u, now);
 #elif ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
     link_snapshot_fill((uint8_t)(1u | (route_known ? 4u : 0u)), route_next_hop,
                        route_lqi, route_cost, router_probe_failures,
@@ -1727,6 +1779,9 @@ void telink_zigbee_hal_link_snapshot_update(void) {
 
 void telink_zigbee_hal_network_init(void) {
     zb_init();
+#if defined(BSEED_LINK_POLICY) && defined(BSEED_MAINS_CLIENT)
+    link_floor_restore();
+#endif
 
 #if ZB_ROUTER_ROLE
     /* Zigbee R23 section 3.6.10 requires a parent that accepts End Device

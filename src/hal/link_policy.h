@@ -20,6 +20,27 @@
 #define BSEED_PARENT_LOSS_WINDOW_MS    (60u * 60u * 1000u)
 #define BSEED_PARENT_STABLE_MS         (6u * 60u * 60u * 1000u)
 
+/* Client-only admission floor, scoped to the start of a recovery sequence.
+ * These are elapsed-time windows, not promises about SDK scan cadence.
+ * The ordinary SDK floor is restored after 90s even without a callback. */
+#define BSEED_PARENT_FLOOR_DEFAULT    69u
+#define BSEED_PARENT_FLOOR_MEDIUM     94u
+#define BSEED_PARENT_FLOOR_STRONG     118u
+#define BSEED_PARENT_FLOOR_STRONG_MS  30000u
+#define BSEED_PARENT_FLOOR_MEDIUM_MS  90000u
+
+static inline uint8_t bseed_parent_floor(uint32_t elapsed_ms) {
+    if (elapsed_ms < BSEED_PARENT_FLOOR_STRONG_MS)
+        return BSEED_PARENT_FLOOR_STRONG;
+    if (elapsed_ms < BSEED_PARENT_FLOOR_MEDIUM_MS)
+        return BSEED_PARENT_FLOOR_MEDIUM;
+    return BSEED_PARENT_FLOOR_DEFAULT;
+}
+
+static inline bool bseed_parent_previous_good(uint8_t cost) {
+    return cost != 0u && cost <= 2u;
+}
+
 typedef struct {
     uint32_t loss_ms[BSEED_PARENT_LOSS_TRIGGER]; /* ring of recent losses */
     uint8_t  loss_count;                         /* valid ring entries */
