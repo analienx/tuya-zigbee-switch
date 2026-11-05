@@ -225,7 +225,7 @@ int main(void) {
     assert(rejoin_starts>0 && network_recovery_state==TELINK_NETWORK_RECOVERY_IDLE);
     assert(client_coord_core.probe_failures==0);
     assert(reboots==1 && client_reboot_scheduled);
-    assert(budget_used==1u);
+    assert(used_reboots==1u);
     return 0;
 }
 '''
