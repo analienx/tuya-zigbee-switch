@@ -165,8 +165,13 @@ def test_sdk_joins_rearm_device_announce_even_without_join_state_edge():
     app = APP.read_text(encoding="utf-8")
     header = Path("src/app.h").read_text(encoding="utf-8")
     callback = net.split("void bdb_commissioning_callback(u8 status, void *arg) {", 1)[1]
-    success = callback.split("case BDB_COMMISSION_STA_SUCCESS:", 1)[1].split("break;", 1)[0]
+    success = callback.split("case BDB_COMMISSION_STA_SUCCESS:", 1)[1].split(
+        "case BDB_COMMISSION_STA_IN_PROGRESS:", 1
+    )[0]
     assert "app_rearm_network_announcement();" in success
+    assert success.index("Unverified BDB SUCCESS") < success.index(
+        "app_rearm_network_announcement();"
+    )
     assert "void app_rearm_network_announcement(void)" in app
     assert "announce_retry_pending = false" in app.split(
         "void app_rearm_network_announcement(void)", 1
