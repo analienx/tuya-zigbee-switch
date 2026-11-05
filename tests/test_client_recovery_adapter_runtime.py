@@ -19,6 +19,10 @@ def test_client_probe_and_backoff_with_persistent_budget(tmp_path):
 #include "hal/bseed_recovery_core.h"
 #include "hal/nvm.h"
 #include "device_config/nvm_items.h"
+#include "telink/hal/recovery_diagnostics.h"
+bool bseed_recovery_diag_record(bseed_rescue_reason_t reason, uint8_t sdk_state) {
+    (void)reason; (void)sdk_state; return true;
+}
 #define ZDO_SUCCESS 0
 #define TELINK_NETWORK_RECOVERY_IDLE 0
 #define TELINK_NETWORK_RECOVERY_REJOIN 1
