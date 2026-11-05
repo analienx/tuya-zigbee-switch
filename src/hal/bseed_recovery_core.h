@@ -13,9 +13,16 @@ typedef struct {
     uint32_t scheduled_at_ms;
     uint32_t delay_ms;
     uint32_t stagger_ms;
+    uint32_t pending_since_ms; /* valid only while pending */
     uint8_t  failures;
     bool     pending;
+    bool     all_channels_next;
 } bseed_recovery_core_t;
+
+typedef enum {
+    BSEED_RECOVERY_SECURE_CURRENT_CHANNEL = 0,
+    BSEED_RECOVERY_SECURE_ALL_CHANNELS,
+} bseed_recovery_rung_t;
 
 static inline uint32_t bseed_recovery_stagger_ms(const uint8_t ieee[8]) {
     uint32_t hash = 2166136261u;
@@ -50,11 +57,21 @@ static inline uint32_t bseed_recovery_delay_ms(uint8_t failures,
 static inline void bseed_recovery_init(bseed_recovery_core_t *core,
                                        const uint8_t ieee[8], uint32_t now,
                                        bool immediate) {
-    core->scheduled_at_ms = now;
-    core->stagger_ms      = bseed_recovery_stagger_ms(ieee);
-    core->delay_ms        = immediate ? 0u : bseed_recovery_delay_ms(0u, core->stagger_ms);
-    core->failures        = 0u;
-    core->pending         = false;
+    core->scheduled_at_ms  = now;
+    core->stagger_ms       = bseed_recovery_stagger_ms(ieee);
+    core->delay_ms         = immediate ? 0u : bseed_recovery_delay_ms(0u, core->stagger_ms);
+    core->pending_since_ms = 0u;
+    core->failures         = 0u;
+    core->pending          = false;
+    core->all_channels_next = false;
+}
+
+/* Both rungs are secure. Alternate independently of the saturating diagnostic
+ * failure counter, so the ladder continues alternating after 255 failures. */
+static inline bseed_recovery_rung_t bseed_recovery_rung(
+    const bseed_recovery_core_t *core) {
+    return core->all_channels_next ? BSEED_RECOVERY_SECURE_ALL_CHANNELS :
+           BSEED_RECOVERY_SECURE_CURRENT_CHANNEL;
 }
 
 /* Call only when the device owns prior network credentials and neither OTA
@@ -66,7 +83,8 @@ static inline bool bseed_recovery_claim(bseed_recovery_core_t *core,
         (uint32_t)(now - core->scheduled_at_ms) < core->delay_ms)
         return false;
 
-    core->pending = true;
+    core->pending_since_ms = now;
+    core->pending          = true;
     return true;
 }
 
@@ -75,12 +93,17 @@ static inline void bseed_recovery_finish(bseed_recovery_core_t *core,
     if (!core->pending)
         return;
 
-    core->pending = false;
+    core->pending          = false;
+    core->pending_since_ms = 0u;
     if (succeeded) {
-        core->failures = 0u;
+        core->failures          = 0u;
+        core->all_channels_next = false;
     } else if (core->failures < UINT8_MAX) {
         core->failures++;
     }
+    if (!succeeded)
+        core->all_channels_next = !core->all_channels_next;
+
     core->scheduled_at_ms = now;
     core->delay_ms        = bseed_recovery_delay_ms(core->failures, core->stagger_ms);
 }
