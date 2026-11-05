@@ -955,6 +955,12 @@ zdo_appIndCb_t zdo_callbacks = {
 #define CLIENT_COORD_REJECT_QUIET_MS     (60u * 60u * 1000u)
 #define CLIENT_COORD_CHECKPOINT_MS       (3u * 60u * 60u * 1000u)
 #define CLIENT_BACKOFF_UNPROVEN_MS       (3u * 60u * 60u * 1000u)
+
+/* A PARENT_LOST during an accepted NodeDesc defers the SDK rejoin. That
+ * exchange cannot outlive its deadline by minutes, so the deferral ends a
+ * short drain grace after it; holding it for hours orphans a Client whose
+ * parent vanished mid-probe (likely while degraded: one probe per minute). */
+#define CLIENT_ZDO_DRAIN_GRACE_MS        (2u * 60u * 1000u)
 static bseed_recovery_core_t client_coord_core;
 static bool     client_coord_started, client_reboot_scheduled;
 static uint32_t client_last_probe_ms, client_outage_since_ms;
@@ -1027,6 +1033,13 @@ void telink_zigbee_hal_client_recovery_tick(void) {
         bseed_recovery_probe_timeout(&client_coord_core, now,
                                      client_coord_core.probe_sequence);
         bseed_router_rescue_budget_note_failure();
+    }
+    if (client_zdo_rejoin_deferred && !client_coord_core.probe_pending &&
+        (uint32_t)(now - client_last_probe_ms) >=
+        CLIENT_COORD_TIMEOUT_MS + CLIENT_ZDO_DRAIN_GRACE_MS) {
+        /* The ordinary paths (app ensure-connectivity while NOT_JOINED,
+         * coordinator isolation while JOINED) resume the recovery. */
+        client_zdo_rejoin_deferred = false;
     }
 
     /* The watchdog always runs, even while an SDK rejoin owns the radio.

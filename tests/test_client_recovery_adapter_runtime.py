@@ -305,16 +305,18 @@ int main(void) {
     subprocess.run([str(second_binary)], check=True,
                    capture_output=True, text=True)
 
-    # A parent's loss while NodeDesc is accepted cannot cancel the SDK
-    # transaction merely by clearing an application pending flag. Without a
-    # genuine terminal ZDO response, preserve the quarantine until a budgeted
-    # three-hour checkpoint; never launch another coordinator probe.
+    # A parent's loss while NodeDesc is accepted defers the SDK rejoin, and
+    # no further coordinator probe starts meanwhile. The exchange cannot
+    # outlive its deadline by minutes: the deferral ends a short drain grace
+    # after it (not after a three-hour checkpoint reboot) and ordinary
+    # recovery resumes. OTA still suspends the release.
     deferred = r"""
 int main(void) {
     telink_zigbee_hal_client_recovery_tick();
     now=631000u;
     telink_zigbee_hal_client_recovery_tick();
     assert(probes==1u && client_coord_core.probe_pending);
+    uint32_t probe_started=now;
     client_zdo_rejoin_deferred=true; client_zdo_rejoin_deferred_since_ms=now;
     now+=CLIENT_COORD_TIMEOUT_MS+1000u;
     telink_zigbee_hal_client_recovery_tick();
@@ -322,15 +324,15 @@ int main(void) {
     assert(client_coord_core.probe_failures==1u && probes==1u);
     now+=BSEED_RECOVERY_PROBE_SPACING_MS+1000u;
     telink_zigbee_hal_client_recovery_tick();
-    assert(probes==1u && rejoin_starts==0u);
+    assert(probes==1u && rejoin_starts==0u && client_zdo_rejoin_deferred);
     ota_fast_poll_active=true;
-    now=client_zdo_rejoin_deferred_since_ms+
-        CLIENT_COORD_CHECKPOINT_MS+CLIENT_COORD_REJOIN_JITTER_MS+100u;
+    now=probe_started+CLIENT_COORD_TIMEOUT_MS+CLIENT_ZDO_DRAIN_GRACE_MS+1000u;
     telink_zigbee_hal_client_recovery_tick();
-    assert(probes==1u && reboots==0u);
+    assert(client_zdo_rejoin_deferred && reboots==0u);
     ota_fast_poll_active=false;
     telink_zigbee_hal_client_recovery_tick();
-    assert(probes==1u && reboots==1u && used_reboots==1u);
+    /* Released without a reboot; probing resumes at the degraded spacing. */
+    assert(!client_zdo_rejoin_deferred && reboots==0u && probes==2u);
     return 0;
 }
 """
