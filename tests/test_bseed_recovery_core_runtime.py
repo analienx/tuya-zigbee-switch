@@ -18,10 +18,22 @@ int main(void) {
     bseed_recovery_core_t core;
     uint32_t now = UINT32_MAX - 1000u;
     bseed_recovery_init(&core, ieee, now, true);
+    bseed_recovery_probe_result(&core, now, 1u, false);
+    assert(!bseed_recovery_degraded(&core));
+    bseed_recovery_probe_result(&core, now + 60000u, 1u, false); /* duplicate */
+    assert(!bseed_recovery_degraded(&core));
+    bseed_recovery_probe_result(&core, now + 59999u, 2u, false); /* too soon */
+    assert(!bseed_recovery_degraded(&core));
+    bseed_recovery_probe_result(&core, now + 60000u, 2u, false); /* wraps */
+    assert(bseed_recovery_degraded(&core));
+    bseed_recovery_probe_result(&core, now + 60001u, 3u, true);
+    assert(!bseed_recovery_degraded(&core));
     assert(bseed_recovery_rung(&core) == BSEED_RECOVERY_SECURE_CURRENT_CHANNEL);
     assert(!bseed_recovery_claim(&core, now, false)); /* OTA/factory-new */
     assert(bseed_recovery_claim(&core, now, true));
     assert(core.pending_since_ms == now);
+    bseed_recovery_probe_result(&core, now, 4u, true);
+    assert(core.pending); /* reachability is not SDK completion */
     assert(!bseed_recovery_wedged(&core, now + BSEED_RECOVERY_WEDGE_MS - 1u));
     assert(bseed_recovery_wedged(&core, now + BSEED_RECOVERY_WEDGE_MS));
     assert(!bseed_recovery_claim(&core, now + 900000u, true)); /* SDK owns it */
