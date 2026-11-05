@@ -7,7 +7,8 @@
  * rescue boots until 12h and 24 consecutive coordinator acknowledgements.
  * Never use reset reason, host clock or user power cycling to waive the cap.
  * NVM corruption/read/write/verification failure denies automatic reboot. */
-#define BSEED_RESCUE_MAGIC           0xB5u
+#define BSEED_RESCUE_MAGIC           0xB6u
+#define BSEED_RESCUE_LEGACY_MAGIC    0xB5u
 #define BSEED_RESCUE_MAX             2u
 #define BSEED_RESCUE_GOOD_MS         (12u * 60u * 60u * 1000u)
 #define BSEED_RESCUE_GOOD_REPLIES    24u
@@ -25,9 +26,24 @@ static bool     good_run_started;
 static uint32_t good_run_since;
 static uint8_t  good_replies;
 
+/* Version B6 uses an independent CRC8 instead of the legacy XOR whose
+ * count and complement cancel algebraically. B5 remains readable to preserve
+ * deployed four-byte records, but is migrated with readback on first load. */
 static uint8_t budget_crc(const bseed_rescue_record_t *r) {
-    return (uint8_t)(r->magic ^ r->used ^ r->used_inverse ^ 0x5au);
+    const uint8_t fields[] = { r->magic, r->used, r->used_inverse };
+    uint8_t crc = 0u;
+    for (unsigned i = 0; i < sizeof(fields); i++) {
+        crc ^= fields[i];
+        for (unsigned bit = 0; bit < 8u; bit++) {
+            crc = (uint8_t)((crc & 0x80u) ?
+                            (((uint32_t)crc << 1) ^ 0x07u) :
+                            ((uint32_t)crc << 1));
+        }
+    }
+    return crc;
 }
+
+static bool budget_store(uint8_t used);
 
 static void budget_load(void) {
     if (budget_loaded)
@@ -41,12 +57,22 @@ static void budget_load(void) {
         used_reboots = 0;
         budget_valid = true;
     } else if (st == HAL_NVM_SUCCESS &&
-               r.magic == BSEED_RESCUE_MAGIC &&
                r.used <= BSEED_RESCUE_MAX &&
                r.used_inverse == (uint8_t)(r.used ^ 0xffu) &&
-               r.crc == budget_crc(&r)) {
+               ((r.magic == BSEED_RESCUE_MAGIC &&
+                 r.crc == budget_crc(&r)) ||
+                (r.magic == BSEED_RESCUE_LEGACY_MAGIC &&
+                 r.crc == (uint8_t)(r.magic ^ r.used ^
+                                    r.used_inverse ^ 0x5au)))) {
         used_reboots = r.used;
         budget_valid = true;
+        /* No in-place struct growth or credit reset; migrate same count.
+         * Failure to persist/verify the upgrade is fail-closed. */
+        if (r.magic == BSEED_RESCUE_LEGACY_MAGIC &&
+            !budget_store(used_reboots)) {
+            used_reboots = BSEED_RESCUE_MAX;
+            budget_valid = false;
+        }
     } else {
         used_reboots = BSEED_RESCUE_MAX;
         budget_valid = false;
