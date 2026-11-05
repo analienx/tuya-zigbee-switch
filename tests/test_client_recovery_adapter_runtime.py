@@ -30,7 +30,7 @@ bool bseed_recovery_diag_record(bseed_rescue_reason_t reason, uint8_t sdk_state)
 static bool client_health_recovery_attempted;
 static uint32_t client_health_last_recovery_ms;
 static bool network_start_ready(void) { return true; }
-static bool request_rejoin_with_backoff(bool parent_stale);
+static bool request_rejoin_for_isolated_coordinator(void);
 typedef struct { uint16_t nwk_addr_interest; } zdo_node_descriptor_req_t;
 typedef struct __attribute__((packed)) {
     uint8_t seq_num, status; uint16_t nwk_addr_interest;
@@ -42,8 +42,8 @@ static int network_recovery_state;
 static bool joined=true, factory_new, ota_fast_poll_active, reject_probe, synchronous;
 static uint8_t next_sequence;
 static unsigned probes, reboots, rejoin_starts;
-static bool request_rejoin_with_backoff(bool parent_stale) {
-    assert(parent_stale); assert(network_recovery_state==TELINK_NETWORK_RECOVERY_IDLE);
+static bool request_rejoin_for_isolated_coordinator(void) {
+    assert(network_recovery_state==TELINK_NETWORK_RECOVERY_IDLE);
     rejoin_starts++; network_recovery_state=TELINK_NETWORK_RECOVERY_REJOIN;
     return true;
 }
