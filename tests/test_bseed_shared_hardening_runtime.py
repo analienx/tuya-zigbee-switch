@@ -112,6 +112,7 @@ def test_rejected_recovery_is_paced_and_sdk_backoff_keeps_ownership(tmp_path, fl
 #include <stdio.h>
 #include <stddef.h>
 #include "hal/firmware_health.h"
+#include "hal/bseed_recovery_core.h"
 typedef uint8_t u8;
 #define RET_OK 0
 #define BSEED_PM_B28WRPVX 1
