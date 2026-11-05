@@ -67,6 +67,31 @@ int main(void) {
     deny_read=0; flash_valid=0; reboot_simulated(); deny_write=1;
     assert(!bseed_router_rescue_budget_consume());
     assert(bseed_router_rescue_budget_try_consume() == BSEED_BUDGET_STORAGE_ERROR);
+
+    /* Older r19 firmware writes B5 with an algebraically constant XOR.
+     * Preserve the spent credit on upgrade; rewrite in B6 CRC8 without
+     * expanding the existing four-byte NVM record. */
+    deny_write=deny_read=0; flash_valid=1; reboot_simulated();
+    flash_record[0]=BSEED_RESCUE_LEGACY_MAGIC;
+    flash_record[1]=1u; flash_record[2]=0xfeu;
+    flash_record[3]=(uint8_t)(flash_record[0]^flash_record[1]^
+                              flash_record[2]^0x5au);
+    assert(bseed_router_rescue_budget_try_consume()==BSEED_BUDGET_CONSUMED);
+    assert(flash_record[0]==BSEED_RESCUE_MAGIC && flash_record[1]==2u);
+    reboot_simulated();
+    assert(bseed_router_rescue_budget_try_consume()==BSEED_BUDGET_EXHAUSTED);
+
+    /* With versioned CRC, paired used/complement corruption is detected. */
+    flash_record[1]=0u; flash_record[2]=0xffu;
+    reboot_simulated();
+    assert(bseed_router_rescue_budget_try_consume()==BSEED_BUDGET_STORAGE_ERROR);
+
+    /* A failed migration write must NEVER reset old used credits. */
+    reboot_simulated(); deny_write=0;
+    flash_record[0]=BSEED_RESCUE_LEGACY_MAGIC; flash_record[1]=1u;
+    flash_record[2]=0xfeu; flash_record[3]=(uint8_t)(0xB5u^0xffu^0x5au);
+    deny_write=1;
+    assert(bseed_router_rescue_budget_try_consume()==BSEED_BUDGET_STORAGE_ERROR);
     return 0;
 }
 """
