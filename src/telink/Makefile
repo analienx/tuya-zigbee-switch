@@ -175,6 +175,7 @@ TELINK_SOURCES := \
 	hal/router_health.c \
 	hal/router_recovery_budget.c \
 	hal/recovery_wedge_credit.c \
+	hal/recovery_diagnostics.c \
 	hal/gpio.c \
 	hal/gpio_counter.c \
 	hal/gpio_interrupts.c \
