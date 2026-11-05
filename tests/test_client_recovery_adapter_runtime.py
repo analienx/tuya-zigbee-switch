@@ -126,10 +126,14 @@ int main(void) {
     cfile = tmp_path / "client_adapter.c"
     binary = tmp_path / "client_adapter"
     cfile.write_text(prelude + section + cases, encoding="utf8")
-    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
-                    "-I", str(ROOT / "src"), str(cfile), "-o", str(binary)],
-                   check=True, capture_output=True, text=True)
-    subprocess.run([str(binary)], check=True, capture_output=True, text=True)
+    initial_build = subprocess.run(
+        ["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
+         "-I", str(ROOT / "src"), str(cfile), "-o", str(binary)],
+        capture_output=True, text=True, timeout=30)
+    assert initial_build.returncode == 0, initial_build.stdout + initial_build.stderr
+    initial_run = subprocess.run(
+        [str(binary)], capture_output=True, text=True, timeout=15)
+    assert initial_run.returncode == 0, initial_run.stdout + initial_run.stderr
     # A coordinator route may be broken despite healthy parent MAC ACKs.
     # Use production C, real coordinator probe bookkeeping and the same
     # operation-owner stub as the normal Client watchdog.
