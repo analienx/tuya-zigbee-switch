@@ -123,9 +123,8 @@ int main(void) {
     now+=3600000; telink_zigbee_hal_router_recovery_tick();
     assert(rescue_calls==1 && budget_used==1);
 
-    /* The orphan marker survives rejoin until the coordinator path is
-     * proven again. A validated reply must release it, otherwise no later
-     * one-shot rejoin could ever start in this uptime. */
+    /* Even a validated coordinator reply cannot prove an orphaned SDK
+     * operation ended; do not permit another scan on its evidence alone. */
     joined=true;
     router_reboot_scheduled=false;
     assert(router_one_shot_stalled);
@@ -139,7 +138,9 @@ int main(void) {
     __builtin_memcpy(ind.zpdu,&reply,sizeof(reply));
     zdo_callback(&ind);
     assert(!router_probe_pending && router_probe_failures==0 && positives==1);
-    assert(!router_one_shot_stalled && rejoin_calls==1);
+    assert(router_one_shot_stalled && rejoin_calls==1);
+    now+=3600000; telink_zigbee_hal_router_recovery_tick();
+    assert(router_one_shot_stalled && rejoin_calls==1);
     return 0;
 }
 """

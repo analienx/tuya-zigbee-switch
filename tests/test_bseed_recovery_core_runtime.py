@@ -18,27 +18,39 @@ int main(void) {
     bseed_recovery_core_t core;
     uint32_t now = UINT32_MAX - 1000u;
     bseed_recovery_init(&core, ieee, now, true);
-    bseed_recovery_probe_result(&core, now, 1u, false);
+    assert(!bseed_recovery_probe_answer(&core, 1u, 0u, 0u, true));
+    assert(bseed_recovery_probe_begin(&core, 1u));
+    assert(!bseed_recovery_probe_begin(&core, 2u));
+    assert(!bseed_recovery_probe_answer(&core, 1u, 1u, 0u, true));
+    assert(!bseed_recovery_probe_answer(&core, 2u, 0u, 0u, true));
+    assert(!bseed_recovery_probe_answer(&core, 1u, 0u, 1u, true));
+    assert(!bseed_recovery_probe_answer(&core, 1u, 0u, 0u, false));
+    bseed_recovery_probe_timeout(&core, now, 1u);
     assert(!bseed_recovery_degraded(&core));
-    bseed_recovery_probe_result(&core, now + 60000u, 1u, false); /* duplicate */
+    bseed_recovery_probe_timeout(&core, now + 60000u, 1u); /* duplicate */
     assert(!bseed_recovery_degraded(&core));
-    bseed_recovery_probe_result(&core, now + 59999u, 2u, false); /* too soon */
+    assert(bseed_recovery_probe_begin(&core, 2u));
+    bseed_recovery_probe_timeout(&core, now + 59999u, 2u); /* too soon */
     assert(!bseed_recovery_degraded(&core));
-    bseed_recovery_probe_result(&core, now + 60000u, 2u, false); /* wraps */
+    assert(bseed_recovery_probe_begin(&core, 3u));
+    bseed_recovery_probe_timeout(&core, now + 60000u, 3u); /* wraps */
     assert(bseed_recovery_degraded(&core));
-    bseed_recovery_probe_result(&core, now + 60001u, 3u, true);
+    assert(bseed_recovery_probe_begin(&core, 4u));
+    assert(bseed_recovery_probe_answer(&core, 4u, 0u, 0u, true));
     assert(!bseed_recovery_degraded(&core));
     assert(bseed_recovery_rung(&core) == BSEED_RECOVERY_SECURE_CURRENT_CHANNEL);
     assert(!bseed_recovery_claim(&core, now, false)); /* OTA/factory-new */
     assert(bseed_recovery_claim(&core, now, true));
     assert(core.pending_since_ms == now);
-    bseed_recovery_probe_result(&core, now, 4u, true);
+    assert(bseed_recovery_probe_begin(&core, 5u));
+    assert(bseed_recovery_probe_answer(&core, 5u, 0u, 0u, true));
     assert(core.pending); /* reachability is not SDK completion */
     assert(!bseed_recovery_wedged(&core, now + BSEED_RECOVERY_WEDGE_MS - 1u));
     assert(bseed_recovery_wedged(&core, now + BSEED_RECOVERY_WEDGE_MS));
     assert(!bseed_recovery_claim(&core, now + 900000u, true)); /* SDK owns it */
     assert(core.pending_since_ms == now); /* failed claim cannot mask a wedge */
-    bseed_recovery_finish(&core, now, false);
+    uint32_t previous_generation = core.generation;
+    bseed_recovery_finish(&core, previous_generation, now, false);
     assert(!core.pending && core.pending_since_ms == 0u);
     assert(!bseed_recovery_wedged(&core, now + BSEED_RECOVERY_WEDGE_MS));
     assert(bseed_recovery_rung(&core) == BSEED_RECOVERY_SECURE_ALL_CHANNELS);
@@ -52,7 +64,10 @@ int main(void) {
         now += delay; /* wraps naturally */
         assert(bseed_recovery_claim(&core, now, true));
         assert(core.pending_since_ms == now);
-        bseed_recovery_finish(&core, now, false);
+        bseed_recovery_finish(&core, previous_generation, now, false);
+        assert(core.pending); /* delayed callback cannot finish the new claim */
+        previous_generation = core.generation;
+        bseed_recovery_finish(&core, previous_generation, now, false);
         assert(bseed_recovery_rung(&core) == (i % 2u == 0u ?
                BSEED_RECOVERY_SECURE_CURRENT_CHANNEL : BSEED_RECOVERY_SECURE_ALL_CHANNELS));
     }
@@ -61,7 +76,7 @@ int main(void) {
         bseed_recovery_rung_t before = bseed_recovery_rung(&core);
         now += core.delay_ms;
         assert(bseed_recovery_claim(&core, now, true));
-        bseed_recovery_finish(&core, now, false);
+        bseed_recovery_finish(&core, core.generation, now, false);
         assert(core.delay_ms >= 270000u && core.delay_ms <= 300000u);
         assert(bseed_recovery_rung(&core) != before);
     }
@@ -86,11 +101,11 @@ int main(void) {
            != core.delay_ms);
     now += core.delay_ms;
     assert(bseed_recovery_claim(&core, now, true));
-    bseed_recovery_finish(&core, now, true);
+    bseed_recovery_finish(&core, core.generation, now, true);
     assert(core.failures == 0u && !core.pending);
     assert(core.pending_since_ms == 0u);
     assert(bseed_recovery_rung(&core) == BSEED_RECOVERY_SECURE_CURRENT_CHANNEL);
-    bseed_recovery_finish(&core, now, false); /* late duplicate ignored */
+    bseed_recovery_finish(&core, core.generation, now, false); /* duplicate ignored */
     assert(core.failures == 0u);
     return 0;
 }

@@ -14,11 +14,14 @@ typedef struct {
     uint32_t delay_ms;
     uint32_t stagger_ms;
     uint32_t pending_since_ms; /* valid only while pending */
+    uint32_t generation; /* internal token, not supplied by the Telink SDK */
     uint32_t last_probe_failure_ms;
     uint8_t  failures;
     uint8_t  probe_failures;
     uint8_t  last_probe_sequence;
+    uint8_t  probe_sequence;
     bool     pending;
+    bool     probe_pending;
     bool     all_channels_next;
 } bseed_recovery_core_t;
 
@@ -80,25 +83,46 @@ static inline void bseed_recovery_init(bseed_recovery_core_t *core,
     core->stagger_ms            = bseed_recovery_stagger_ms(ieee);
     core->delay_ms              = immediate ? 0u : bseed_recovery_delay_ms(0u, core->stagger_ms);
     core->pending_since_ms      = 0u;
+    core->generation            = 0u;
     core->last_probe_failure_ms = 0u;
     core->failures              = 0u;
     core->probe_failures        = 0u;
     core->last_probe_sequence   = 0u;
+    core->probe_sequence        = 0u;
+    core->probe_pending         = false;
     core->pending           = false;
     core->all_channels_next = false;
 }
 
-/* A local parent acknowledgement is deliberately not an input: only a
-* transaction-matched coordinator reply can reset coordinator failure
-* evidence. The adapter must call failure only for a genuinely timed-out
-* probe, not for a rejected local request or an unrelated response. */
-static inline void bseed_recovery_probe_result(bseed_recovery_core_t *core,
-                                               uint32_t now, uint8_t sequence,
-                                               bool coordinator_answered) {
-    if (coordinator_answered) {
-        core->probe_failures = 0u;
+/* Register only an accepted coordinator request, never a local rejection. */
+static inline bool bseed_recovery_probe_begin(bseed_recovery_core_t *core,
+                                             uint8_t sequence) {
+    if (core->probe_pending)
+        return false;
+    core->probe_pending  = true;
+    core->probe_sequence = sequence;
+    return true;
+}
+
+/* The adapter must first validate the ZDO frame length and status. */
+static inline bool bseed_recovery_probe_answer(bseed_recovery_core_t *core,
+                                              uint8_t sequence, uint16_t source,
+                                              uint16_t address_of_interest,
+                                              bool success) {
+    if (!core->probe_pending || sequence != core->probe_sequence ||
+        source != 0u || address_of_interest != 0u || !success)
+        return false;
+    core->probe_pending  = false;
+    core->probe_failures = 0u;
+    return true;
+}
+
+/* A timeout applies only to the currently outstanding transaction. */
+static inline void bseed_recovery_probe_timeout(bseed_recovery_core_t *core,
+                                                uint32_t now, uint8_t sequence) {
+    if (!core->probe_pending || sequence != core->probe_sequence)
         return;
-    }
+    core->probe_pending = false;
     if (core->probe_failures != 0u &&
         (sequence == core->last_probe_sequence ||
          (uint32_t)(now - core->last_probe_failure_ms) < BSEED_RECOVERY_PROBE_SPACING_MS))
@@ -132,13 +156,20 @@ static inline bool bseed_recovery_claim(bseed_recovery_core_t *core,
         return false;
 
     core->pending_since_ms = now;
+    core->generation++;
+    if (core->generation == 0u)
+        core->generation++;
     core->pending          = true;
     return true;
 }
 
 static inline void bseed_recovery_finish(bseed_recovery_core_t *core,
-                                         uint32_t now, bool succeeded) {
-    if (!core->pending)
+                                         uint32_t generation, uint32_t now,
+                                         bool succeeded) {
+    /* The caller must establish the token from a genuinely correlated
+     * completion. Reading core->generation in an uncorrelated SDK callback
+     * would not protect a newer operation from an old callback. */
+    if (!core->pending || generation == 0u || generation != core->generation)
         return;
 
     core->pending          = false;

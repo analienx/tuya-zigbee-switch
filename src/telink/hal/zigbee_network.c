@@ -372,14 +372,9 @@ static void router_coordinator_node_desc_response(void *arg) {
         router_probe_rejections  = 0;
         router_one_shot_attempts = 0;
 
-        /* A valid coordinator response restores liveness, not proof that an
-         * unrelated in-flight SDK rejoin is terminal. Keep SDK ownership
-         * until its real completion callback to prevent overlapping scans.
-         * An orphaned one-shot (completion lost past its deadline) is
-         * different: this joined round-trip proves the path recovered, so
-         * release the marker or no later one-shot could ever start. */
-        router_one_shot_stalled = false;
-        router_probe_pending    = false;
+        /* Reachability cannot prove that an orphaned SDK operation has
+         * stopped. Keep its guard until a terminal boundary or reboot. */
+        router_probe_pending = false;
     }
 }
 
