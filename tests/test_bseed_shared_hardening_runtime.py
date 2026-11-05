@@ -166,9 +166,6 @@ static void schedule_reboot(uint16_t ms) {
     assert(ms==2000u);checkpoint_reboots++;
 }
 static void configure_mains_client_keepalive(void) {}
-#ifdef BSEED_MAINS_CLIENT
-static void client_health_join_epoch(void) {}
-#endif
 static void telink_zigbee_hal_request_ota_query(void) {}
 '''
     checks = r'''
