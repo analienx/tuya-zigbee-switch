@@ -19,8 +19,9 @@ static uint32_t wedge_checkpoint_ms;
 
 static uint8_t credit_checksum(const wedge_credit_record_t *r) {
     /* CRC-8/ATM over the actual stored bytes, including both counter fields. */
-    uint8_t crc = 0u;
+    uint8_t       crc     = 0u;
     const uint8_t bytes[] = { r->magic, r->chunks, r->inverse };
+
     for (unsigned i = 0; i < sizeof(bytes); i++) {
         crc ^= bytes[i];
         for (unsigned bit = 0; bit < 8u; bit++)
