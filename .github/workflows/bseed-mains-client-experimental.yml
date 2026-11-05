@@ -97,7 +97,7 @@ jobs:
                'OUTLET_BSEED_PM_TS011F', CANDIDATES['client']['build'],
                CANDIDATES['client']['version'], 65024),
               (Path('build/bseed-ts0726-client/manifest.json'), 'ts0726',
-               'SWITCH_BSEED_TS0726_3GANG', '1.1.8-bseedcli4', 0x11023011, 65025),
+               'SWITCH_BSEED_TS0726_3GANG', '1.1.8-bseedcli5', 0x11023012, 65025),
           ]
           for path, target, board, build, version, image_type in cases:
               manifest = json.loads(path.read_text())

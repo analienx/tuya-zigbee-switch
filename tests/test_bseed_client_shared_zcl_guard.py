@@ -42,7 +42,7 @@ def test_candidate_clients_keep_identity_reproducibility_and_role_gates() -> Non
     assert "from bseed_pm_release import CANDIDATES" in workflow
     assert "CANDIDATES['client']['build']" in workflow
     assert "CANDIDATES['client']['version']" in workflow
-    assert "1.1.8-bseedcli4" in workflow
+    assert "1.1.8-bseedcli5" in workflow
     assert "Rebuild both clients and require byte-identical output" in workflow
     assert "tests/test_bseed_mains_client.py" in workflow
     assert "ref: ${{ github.event.pull_request.head.sha || github.sha }}" in workflow
