@@ -27,7 +27,7 @@ Exact device identity. Independent relay control. PM telemetry. Router and mains
 
 ## Firmware availability
 
-**Snapshot: 2026-11-03.** The public BSEED OTA index contains accepted **Router** images and matching stock-conversion wrappers. Newer **sealed candidates are not published**. Each device family has its own native OTA identity.
+**Snapshot: 2026-11-05.** The public BSEED OTA index contains accepted **Router** images and matching stock-conversion wrappers. The newer draft candidates are unsealed and unpublished. Each device family has its own native OTA identity.
 
 | Hardware family | Zigbee manufacturer / model | Published Router | Current sealed Router / mains Client |
 | --- | --- | --- | --- |

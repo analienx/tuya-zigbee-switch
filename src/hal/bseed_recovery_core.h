@@ -14,7 +14,7 @@ typedef struct {
     uint32_t delay_ms;
     uint32_t stagger_ms;
     uint32_t pending_since_ms; /* valid only while pending */
-    uint32_t generation; /* internal token, not supplied by the Telink SDK */
+    uint32_t generation;       /* internal token, not supplied by the Telink SDK */
     uint32_t last_probe_failure_ms;
     uint8_t  failures;
     uint8_t  probe_failures;
@@ -96,9 +96,10 @@ static inline void bseed_recovery_init(bseed_recovery_core_t *core,
 
 /* Register only an accepted coordinator request, never a local rejection. */
 static inline bool bseed_recovery_probe_begin(bseed_recovery_core_t *core,
-                                             uint8_t sequence) {
+                                              uint8_t sequence) {
     if (core->probe_pending)
         return false;
+
     core->probe_pending  = true;
     core->probe_sequence = sequence;
     return true;
@@ -106,12 +107,13 @@ static inline bool bseed_recovery_probe_begin(bseed_recovery_core_t *core,
 
 /* The adapter must first validate the ZDO frame length and status. */
 static inline bool bseed_recovery_probe_answer(bseed_recovery_core_t *core,
-                                              uint8_t sequence, uint16_t source,
-                                              uint16_t address_of_interest,
-                                              bool success) {
+                                               uint8_t sequence, uint16_t source,
+                                               uint16_t address_of_interest,
+                                               bool success) {
     if (!core->probe_pending || sequence != core->probe_sequence ||
         source != 0u || address_of_interest != 0u || !success)
         return false;
+
     core->probe_pending  = false;
     core->probe_failures = 0u;
     return true;
@@ -122,6 +124,7 @@ static inline void bseed_recovery_probe_timeout(bseed_recovery_core_t *core,
                                                 uint32_t now, uint8_t sequence) {
     if (!core->probe_pending || sequence != core->probe_sequence)
         return;
+
     core->probe_pending = false;
     if (core->probe_failures != 0u &&
         (sequence == core->last_probe_sequence ||
@@ -159,7 +162,7 @@ static inline bool bseed_recovery_claim(bseed_recovery_core_t *core,
     core->generation++;
     if (core->generation == 0u)
         core->generation++;
-    core->pending          = true;
+    core->pending = true;
     return true;
 }
 

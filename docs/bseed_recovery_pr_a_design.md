@@ -7,6 +7,16 @@ current-channel and all-channel rungs, and exposes the pending start time.
 
 ## Ownership and SDK callbacks
 
+The pinned SDK's `zdo_start_device_confirm_t` contains status, channel, PAN ID
+and short address, but no operation token. A software generation guards only
+callbacks genuinely associated with the generation that created them; giving
+the current generation to an uncorrelated callback cannot protect against a
+delayed duplicate. A fixed delay is not proof that callbacks have drained.
+Until a documented SDK terminal/quiescence guarantee or equally safe mechanism
+is established, do not connect this core to production retries or claim that
+the adapter handles duplicate completions. The shared core now rejects a
+mismatched internal generation token; the SDK adapter remains outstanding.
+
 The pinned Telink SDK provides a one-shot `zb_rejoinReq()` and a separate
 SDK-owned `zb_rejoinReqWithBackOff()`; both must not run at once. The new
 driver must claim the shared core before calling the one-shot, including when
