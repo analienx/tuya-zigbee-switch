@@ -131,6 +131,7 @@ static struct {u8 scanDuration;} g_bdbAttrs;
 #define KEEPALIVE_VERIFY_TICK_MS 60000u
 static uint32_t client_health_next_tick_ms;
 static bool ota_fast_poll_active;
+static bseed_recovery_core_t client_coord_core;
 static struct { unsigned char extAddress[8]; } g_zbMacPib;
 static u8 zb_setPollRate(uint32_t ms) {(void)ms; return RET_OK;}
 static u8 zb_rejoinReq(uint32_t channel,u8 duration)
