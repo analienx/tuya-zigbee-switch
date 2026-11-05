@@ -190,6 +190,7 @@ static uint32_t network_last_start_attempt;
  * a late completion from the first owner could terminate the second.
  * A persistent, budgeted checkpoint is the only safe new ownership epoch. */
 static bool network_sdk_backoff_started_once;
+static bool network_sdk_steering_started_once;
 
 static bool network_start_ready(void) {
     return !network_start_retry_pending ||
@@ -731,8 +732,10 @@ void telink_zigbee_hal_router_recovery_tick(void) {
      * incoming application traffic before one checkpointed rescue reboot. */
     if (bseed_router_joined_rescue_eligible(
             router_reboot_scheduled, router_one_shot_active,
-            router_one_shot_stalled ? ROUTER_MIN_REJOIN_ATTEMPTS :
-            router_one_shot_attempts,
+            (router_one_shot_stalled || router_one_shot_attempted ||
+             network_sdk_backoff_started_once ||
+             network_sdk_steering_started_once) ?
+            ROUTER_MIN_REJOIN_ATTEMPTS : router_one_shot_attempts,
             ROUTER_MIN_REJOIN_ATTEMPTS, now,
             router_positive_seen ? router_last_positive_ms : router_observation_epoch_ms,
             router_inbound_seen ? router_last_inbound_ms : router_observation_epoch_ms,
@@ -758,9 +761,12 @@ void telink_zigbee_hal_router_recovery_tick(void) {
             ROUTER_QUIET_MIN_MS, ROUTER_ACTIVE_NEIGHBOR_HOLD_MS,
             ROUTER_NEIGHBOR_ACTIVITY_MS, rejoin_stagger_ms) &&
         !link_router_rejoin_held(now) &&
-        (!router_one_shot_attempted ||
-         (uint32_t)(now - router_one_shot_ms) >=
-         ROUTER_REJOIN_COOLDOWN_MS)) {
+        /* BDB callbacks cannot identify their SDK operation. A previous
+         * backoff or one-shot can deliver a late duplicate after success.
+         * Require a processor checkpoint before ANY subsequent owner. */
+        !router_one_shot_attempted &&
+        !network_sdk_backoff_started_once &&
+        !network_sdk_steering_started_once) {
         /* Require a verified failure history, never infer link loss merely
          * from the absence of application traffic. No BDB steering, factory
          * reset, counter rollback or channel changes. With the link policy
@@ -1088,7 +1094,8 @@ static bool request_rejoin_with_backoff_impl(bool allow_joined,
 #if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
     /* Every caller, not only steering and PARENT_LOST, must respect a
      * pending/orphaned one-shot. BDB callbacks are not operation-tagged. */
-    if (router_one_shot_active || router_one_shot_stalled)
+    if (router_one_shot_active || router_one_shot_stalled ||
+        router_one_shot_attempted || network_sdk_steering_started_once)
         return false;
 #endif
     if ((zb_isDeviceJoinedNwk() && !allow_joined) || zb_isDeviceFactoryNew() ||
@@ -1164,7 +1171,9 @@ void zdo_leave_indication_callback(nlme_leave_ind_t *pLeaveInd) {
 }
 
 void zdo_leave_confirmation_callback(nlme_leave_cnf_t *pLeaveCnf) {
-    network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
+    /* A generic leave indication cannot terminate an uncorrelated SDK
+     * owner. Explicit hal_zigbee_leave_network() handles user-requested leave
+     * before invoking the SDK; no implicit ownership release here. */
     notify_about_network_status_change();
 }
 
@@ -1374,8 +1383,10 @@ void hal_zigbee_start_network_steering(void) {
     /* Steering can report completion synchronously. Claim ownership before
      * entering the SDK, then do not overwrite a terminal callback's state. */
     network_recovery_state = TELINK_NETWORK_RECOVERY_STEERING;
+    network_sdk_steering_started_once = true;
     u8 res = bdb_networkSteerStart();
     if (res != RET_OK) {
+        network_sdk_steering_started_once = false;
         if (network_recovery_state == TELINK_NETWORK_RECOVERY_STEERING)
             network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
         printf("Failed to start network steering, status: %d\r\n", res);
