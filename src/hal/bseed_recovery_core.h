@@ -13,12 +13,13 @@ typedef struct {
     uint32_t scheduled_at_ms;
     uint32_t delay_ms;
     uint32_t stagger_ms;
-    uint8_t failures;
-    bool pending;
+    uint8_t  failures;
+    bool     pending;
 } bseed_recovery_core_t;
 
 static inline uint32_t bseed_recovery_stagger_ms(const uint8_t ieee[8]) {
     uint32_t hash = 2166136261u;
+
     for (unsigned i = 0; i < 8u; i++)
         hash = (hash ^ ieee[i]) * 16777619u;
     return hash % 30001u;
@@ -27,18 +28,22 @@ static inline uint32_t bseed_recovery_stagger_ms(const uint8_t ieee[8]) {
 static inline uint32_t bseed_recovery_backoff_ms(uint8_t failures) {
     if (failures <= 1u)
         return 30000u;
+
     if (failures == 2u)
         return 60000u;
+
     if (failures == 3u)
         return 120000u;
+
     return 300000u;
 }
 
 static inline uint32_t bseed_recovery_delay_ms(uint8_t failures,
                                                uint32_t stagger_ms) {
-    uint32_t base = bseed_recovery_backoff_ms(failures);
+    uint32_t base         = bseed_recovery_backoff_ms(failures);
     uint32_t jitter_limit = base / 4u;
-    uint32_t jitter = stagger_ms < jitter_limit ? stagger_ms : jitter_limit;
+    uint32_t jitter       = stagger_ms < jitter_limit ? stagger_ms : jitter_limit;
+
     return base + jitter > 300000u ? 300000u : base + jitter;
 }
 
@@ -56,10 +61,11 @@ static inline void bseed_recovery_init(bseed_recovery_core_t *core,
  * nor a different commissioning operation owns the radio. Factory-new join
  * remains the platform's normal commissioning path. */
 static inline bool bseed_recovery_claim(bseed_recovery_core_t *core,
-                                       uint32_t now, bool eligible) {
+                                        uint32_t now, bool eligible) {
     if (!eligible || core->pending ||
         (uint32_t)(now - core->scheduled_at_ms) < core->delay_ms)
         return false;
+
     core->pending = true;
     return true;
 }
@@ -68,6 +74,7 @@ static inline void bseed_recovery_finish(bseed_recovery_core_t *core,
                                          uint32_t now, bool succeeded) {
     if (!core->pending)
         return;
+
     core->pending = false;
     if (succeeded) {
         core->failures = 0u;
@@ -75,7 +82,7 @@ static inline void bseed_recovery_finish(bseed_recovery_core_t *core,
         core->failures++;
     }
     core->scheduled_at_ms = now;
-    core->delay_ms = bseed_recovery_delay_ms(core->failures, core->stagger_ms);
+    core->delay_ms        = bseed_recovery_delay_ms(core->failures, core->stagger_ms);
 }
 
 #endif
