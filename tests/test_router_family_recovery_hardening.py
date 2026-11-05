@@ -211,7 +211,7 @@ def test_router_one_shot_retains_sdk_ownership_across_transient_not_joined():
         "// Telink ZDO callbacks", 1
     )[0]
     lost = tick.split("if (zb_isDeviceFactoryNew() || !zb_isDeviceJoinedNwk())", 1)[1].split(
-        "router_recovery_timer_active = false;", 1
+        "if (zb_isDeviceFactoryNew() ||", 1
     )[0]
     assert "router_one_shot_stalled = true" in lost
     assert "ROUTER_ONE_SHOT_DEADLINE_MS" in lost
