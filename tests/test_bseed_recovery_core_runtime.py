@@ -30,7 +30,8 @@ int main(void) {
     const uint32_t expected[] = {30000u, 60000u, 120000u, 300000u, 300000u};
     for (unsigned i = 0; i < 5u; i++) {
         uint32_t delay = bseed_recovery_delay_ms(core.failures, core.stagger_ms);
-        assert(delay >= expected[i] && delay <= 300000u);
+        assert(delay >= (expected[i] == 300000u ? 270000u : expected[i]));
+        assert(delay <= 300000u);
         assert(core.delay_ms == delay);
         assert(!bseed_recovery_claim(&core, now + delay - 1u, true));
         now += delay; /* wraps naturally */
@@ -46,10 +47,14 @@ int main(void) {
         now += core.delay_ms;
         assert(bseed_recovery_claim(&core, now, true));
         bseed_recovery_finish(&core, now, false);
-        assert(core.delay_ms == 300000u);
+        assert(core.delay_ms >= 270000u && core.delay_ms <= 300000u);
         assert(bseed_recovery_rung(&core) != before);
     }
     assert(core.failures == UINT8_MAX);
+    /* Capped retry schedules still differ across devices. */
+    const uint8_t other_ieee[8] = {1,2,3,4,5,6,7,9};
+    assert(bseed_recovery_delay_ms(UINT8_MAX, bseed_recovery_stagger_ms(other_ieee))
+           != core.delay_ms);
     now += core.delay_ms;
     assert(bseed_recovery_claim(&core, now, true));
     bseed_recovery_finish(&core, now, true);
