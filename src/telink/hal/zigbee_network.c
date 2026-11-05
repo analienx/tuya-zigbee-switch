@@ -557,6 +557,7 @@ void telink_zigbee_hal_router_recovery_tick(void) {
                           !zb_isDeviceFactoryNew() &&
                           !telink_zigbee_hal_router_ota_in_progress();
     bool slow_ready = bseed_wedge_credit_tick(now, wedge_eligible);
+
     if (wedge_eligible && !router_reboot_scheduled &&
         (uint32_t)(now - router_one_shot_ms) >=
         ROUTER_ONE_SHOT_DEADLINE_MS + reboot_stagger_ms) {
