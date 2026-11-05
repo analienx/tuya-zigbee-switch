@@ -75,7 +75,7 @@ static bseed_budget_result_t bseed_router_rescue_budget_try_consume(void) {
     budget_used++;
     return BSEED_BUDGET_CONSUMED;
 }
-static bool bseed_recovery_diag_record(bseed_rescue_reason_t reason,
+bool bseed_recovery_diag_record(bseed_rescue_reason_t reason,
                                         uint8_t state) {
     assert(reason==BSEED_RESCUE_REASON_FACTORY_STEERING);
     (void)state; return true;

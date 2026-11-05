@@ -94,14 +94,6 @@ static void qualify_joined(void) {
     assert(!router_reboot_scheduled && wedge_active);
     assert(rejoin_calls==0);
 }
-static void qualify_unjoined(void) {
-    telink_zigbee_hal_router_recovery_tick();
-    assert(router_not_joined_observed && !wedge_active);
-    now+=ROUTER_RECOVERY_STALL_MS+15u*60u*1000u+1u;
-    telink_zigbee_hal_router_recovery_tick();
-    assert(!router_reboot_scheduled && wedge_active);
-    assert(rejoin_calls==0);
-}
 static void advance_chunks(unsigned n) {
     for(unsigned i=0u;i<n;i++) {
         now+=WEDGE_CREDIT_CHUNK_MS;

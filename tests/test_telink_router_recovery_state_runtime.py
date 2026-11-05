@@ -49,10 +49,13 @@ static health_t firmware_health;
 static void firmware_health_increment(uint32_t *counter) {(*counter)++;}
 #define TELINK_NETWORK_RECOVERY_IDLE 0
 #define TELINK_NETWORK_RECOVERY_REJOIN 1
+#define TELINK_NETWORK_RECOVERY_STEERING 2
 static int network_recovery_state;
 static uint32_t network_last_start_attempt;
 static bool network_sdk_backoff_started_once;
 static bool network_sdk_steering_started_once;
+static bool network_steering_terminal_seen;
+static uint32_t network_steering_terminal_ms;
 static struct { uint8_t extAddress[8]; } g_zbMacPib;
 static struct {uint8_t scanDuration;} g_bdbAttrs;
 static uint32_t now, probes, rejoin_calls, rescue_calls, budget_used, positives, failed;
