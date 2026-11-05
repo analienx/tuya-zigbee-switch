@@ -44,7 +44,7 @@ typedef struct {
     uint8_t *zpdu;
 } zdo_zdpDataInd_t;
 
-typedef struct {uint32_t rejoin_start, rejoin_failure;} health_t;
+typedef struct {uint32_t rejoin_start, rejoin_failure, rejoin_success, parent_loss;} health_t;
 static health_t firmware_health;
 static void firmware_health_increment(uint32_t *counter) {(*counter)++;}
 #define TELINK_NETWORK_RECOVERY_IDLE 0
