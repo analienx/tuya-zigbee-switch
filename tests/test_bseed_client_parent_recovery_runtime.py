@@ -43,6 +43,7 @@ def recovery_binary(request, tmp_path_factory):
 #include "hal/firmware_health.h"
 #include "hal/bseed_recovery_core.h"
 typedef uint8_t u8;
+typedef uint8_t zdo_status_t;
 typedef struct {void (*handler)(void *); void *arg;} hal_task_t;
 typedef enum {HAL_ZIGBEE_NETWORK_NOT_JOINED, HAL_ZIGBEE_NETWORK_JOINED,
               HAL_ZIGBEE_NETWORK_JOINING} hal_zigbee_network_status_t;
@@ -175,9 +176,12 @@ int main(int argc,char **argv) {
         stale_parent();sdk_owned=false;joined=true;
         bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,NULL);
         now+=CLIENT_HEALTH_REJOIN_COOLDOWN_MS;failed_polls(4);
-        keepalive_verify_handler(NULL);assert(calls==2 && sdk_owned);
-        sdk_owned=false;joined=true;bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,NULL);
-        assert(firmware_health.rejoin_start==2 && firmware_health.rejoin_success==2);
+        /* A second SDK owner before reboot is unsafe: late completion from
+         * the first backoff has no operation token. Checkpoint policy handles
+         * subsequent qualified outages rather than overlapping operations. */
+        keepalive_verify_handler(NULL);assert(calls==1 && !sdk_owned);
+        assert(network_sdk_backoff_started_once);
+        assert(firmware_health.rejoin_start==1 && firmware_health.rejoin_success==1);
     } else if(!strcmp(argv[1],"ota-entry-exit")) {
         hal_zigbee_set_ota_poll_active(true);assert(rate==250);
         stale_parent();assert(calls==0);
