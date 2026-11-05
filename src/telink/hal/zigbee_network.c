@@ -15,6 +15,7 @@
 #include "hal/router_recovery_policy.h"
 #include "router_recovery_budget.h"
 #include "recovery_wedge_credit.h"
+#include "recovery_diagnostics.h"
 #include "hal/link_policy.h"
 #include "device_config/reset.h"
 #include "app.h"
@@ -38,7 +39,8 @@ void zdo_leave_confirmation_callback(nlme_leave_cnf_t *pLeaveCnf);
  * 6 Client parent losses in the last hour / Router failed coordinator probes
  * 7 Client rescan-mode entries / Router route refreshes (saturating)
  * 8 Router rescan rejoins (saturating) | 9-12 ms since last action, or
- * 0xFFFFFFFF if none | 13 Router best other neighbour cost | 14-15 reserved */
+ * 0xFFFFFFFF if none | 13 Router best other neighbour cost
+ * 14 last controlled rescue reason | 15 SDK recovery state at checkpoint */
 uint8_t         firmware_link_snapshot[17] = { 16, 1 };
 static uint32_t link_last_action_ms;
 static bool     link_action_seen;
@@ -78,8 +80,10 @@ static void link_snapshot_fill(uint8_t flags, uint16_t addr, uint8_t lqi,
     p[11] = (uint8_t)(age >> 16);
     p[12] = (uint8_t)(age >> 24);
     p[13] = best;
-    p[14] = 0;
-    p[15] = 0;
+    uint8_t reason = 0u, sdk_state = 0u;
+    (void)bseed_recovery_diag_last(&reason, &sdk_state);
+    p[14] = reason;
+    p[15] = sdk_state;
 }
 
 #endif
@@ -605,6 +609,10 @@ void telink_zigbee_hal_router_recovery_tick(void) {
             (result == BSEED_BUDGET_EXHAUSTED && slow_ready &&
              bseed_wedge_credit_consume())) {
             router_reboot_scheduled = true;
+            (void)bseed_recovery_diag_record(
+                router_one_shot_stalled ? BSEED_RESCUE_REASON_ROUTER_ORPHAN :
+                                          BSEED_RESCUE_REASON_ROUTER_BACKOFF,
+                (uint8_t)network_recovery_state);
             schedule_reboot(2000);
             return;
         }
@@ -638,6 +646,9 @@ void telink_zigbee_hal_router_recovery_tick(void) {
             if (bseed_router_rescue_budget_consume()) {
                 router_reboot_scheduled = true;
                 printf("Router: stalled rejoin, budgeted checkpoint reboot\r\n");
+                (void)bseed_recovery_diag_record(
+                    BSEED_RESCUE_REASON_ROUTER_NOT_JOINED,
+                    (uint8_t)network_recovery_state);
                 schedule_reboot(2000);
             }
         }
@@ -717,6 +728,9 @@ void telink_zigbee_hal_router_recovery_tick(void) {
         if (bseed_router_rescue_budget_consume()) {
             router_reboot_scheduled = true;
             printf("Router: joined isolated, budgeted checkpoint reboot\r\n");
+            (void)bseed_recovery_diag_record(
+                BSEED_RESCUE_REASON_ROUTER_ISOLATED,
+                (uint8_t)network_recovery_state);
             schedule_reboot(2000);
             return;
         }
@@ -903,6 +917,9 @@ void telink_zigbee_hal_client_recovery_tick(void) {
             (result == BSEED_BUDGET_EXHAUSTED && slow_ready &&
              bseed_wedge_credit_consume())) {
             client_reboot_scheduled = true;
+            (void)bseed_recovery_diag_record(
+                BSEED_RESCUE_REASON_CLIENT_BACKOFF,
+                (uint8_t)network_recovery_state);
             schedule_reboot(2000);
         }
     }
