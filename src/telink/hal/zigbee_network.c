@@ -959,6 +959,12 @@ static bool start_rejoin_with_backoff(void) {
 }
 
 static bool request_rejoin_with_backoff(bool parent_stale) {
+#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
+    /* Every caller, not only steering and PARENT_LOST, must respect a
+     * pending/orphaned one-shot. BDB callbacks are not operation-tagged. */
+    if (router_one_shot_active || router_one_shot_stalled)
+        return false;
+#endif
     if ((zb_isDeviceJoinedNwk() && !parent_stale) || zb_isDeviceFactoryNew() ||
         network_recovery_state != TELINK_NETWORK_RECOVERY_IDLE ||
         !network_start_ready()) {
@@ -1050,8 +1056,11 @@ void bdb_commissioning_callback(u8 status, void *arg) {
     /* PARENT_LOST may arrive in the middle of an active secure rejoin.
      * Only explicit success or one-shot failure is a terminal boundary.
      * Other BDB indications must not give a second SDK operation ownership. */
-    if (status == BDB_COMMISSION_STA_SUCCESS ||
-        status == BDB_COMMISSION_STA_REJOIN_FAILURE) {
+    if (router_one_shot_active &&
+        (status == BDB_COMMISSION_STA_SUCCESS ||
+         status == BDB_COMMISSION_STA_REJOIN_FAILURE)) {
+        /* Only an active one-shot may terminate here. A late uncorrelated
+         * callback must not release an orphaned SDK radio operation. */
         router_one_shot_active  = false;
         router_one_shot_stalled = false;
 #ifdef BSEED_LINK_POLICY
