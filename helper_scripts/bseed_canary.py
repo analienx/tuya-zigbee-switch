@@ -35,7 +35,7 @@ sys.path.insert(0, str(ROOT / 'helper_scripts'))
 
 from bseed_ota_identity import DEFAULT_REGISTRY, load_registry, parse_ota_header  # noqa: E402
 from bseed_network_campaign_lock import (  # noqa: E402
-    ABANDONED_PHASE, ACCEPTED_PHASE, RECONCILED_PHASE)
+    ABANDONED_PHASE, ACCEPTED_PHASE, RECONCILED_PHASE, FAILED_POSTFLASH_PHASE)
 
 BOARDS = {
     'pm': {'manufacturer': 'b28wrpvx', 'model': 'TS011F-BS-PM', 'release': 'bseed_pm_release'},
@@ -173,7 +173,7 @@ def write_once(path, data):
 CLEAN_LOCK_PHASES = ('postflash_candidate', ACCEPTED_PHASE, RECONCILED_PHASE,
                      'source_unchanged_reconciled',
                      'postflash_software_verified_network_released',
-                     ABANDONED_PHASE)
+                     ABANDONED_PHASE, FAILED_POSTFLASH_PHASE)
 
 
 def find_campaign_locks(site, name, live=None):
