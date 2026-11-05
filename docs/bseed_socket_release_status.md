@@ -27,22 +27,24 @@ These are the **unchanged public** custom Router builds. Exact stock-to-custom w
 
 The six index entries consist of **three accepted custom Router images and their three exact stock-conversion wrappers**. No TS011F Client image or Router↔Client role transition is published there. A GitHub *draft* release is not a public OTA image.
 
-## Latest sealed TS011F candidate train — 2026-11-02
+## Draft shared-recovery TS011F candidates — 2026-11-05
 
-These identities are defined in `helper_scripts/bseed_pm_release.py` and `helper_scripts/bseed_nonpm_release.py`, sealed using the [exact-source CI evidence](bseed_link_policy.md#sealed-from-exact-sha-public-ci-current-candidates), and documented in the [dated release notes](releases/2026-11-02-link-policy-candidates.md).
+These fresh identities are defined in `helper_scripts/bseed_pm_release.py` and `helper_scripts/bseed_nonpm_release.py`. They are **unsealed**, their shared-recovery implementation is incomplete, and they must not be flashed. The earlier 2026-11-02 train remains documented in the [dated release notes](releases/2026-11-02-link-policy-candidates.md).
 
 <!-- current-candidate-matrix:start -->
 | Board | Role | Current candidate | Native FILEVER | OTA image type | Publication / acceptance |
 | --- | --- | --- | --- | ---: | --- |
-| PM TS011F-BS-PM | Router | `1.2.5-bseedr19` | `0x12053021` | 43556 | **Sealed** · not public · full hardware acceptance pending |
-| PM TS011F-BS-PM | mains Client | `1.2.5-bseedcli22` | `0x12053021` | 65024 | **Sealed** · not public · full hardware acceptance pending |
-| non-PM TS011F-BS | Router | `1.1.3-bseedr18` | `0x1102301D` | 43555 | **Sealed** · not public · full hardware acceptance pending |
-| non-PM TS011F-BS | mains Client | `1.1.3-bseedc16` | `0x1102301D` | 65026 | **Sealed** · not public · full hardware acceptance pending |
+| PM TS011F-BS-PM | Router | `1.2.5-bseedr20` | `0x12053022` | 43556 | **Unsealed draft** · not public · implementation and hardware acceptance pending |
+| PM TS011F-BS-PM | mains Client | `1.2.5-bseedcli23` | `0x12053022` | 65024 | **Unsealed draft** · not public · implementation and hardware acceptance pending |
+| non-PM TS011F-BS | Router | `1.1.3-bseedr19` | `0x1102301E` | 43555 | **Unsealed draft** · not public · implementation and hardware acceptance pending |
+| non-PM TS011F-BS | mains Client | `1.1.3-bseedc17` | `0x1102301E` | 65026 | **Unsealed draft** · not public · implementation and hardware acceptance pending |
 <!-- current-candidate-matrix:end -->
 
 The PM Router and Client deliberately share one board-wide version counter but have distinct OTA image types. The same principle applies to the non-PM pair. **Never cross-flash**, change Zigbee roles using the ordinary index, rebuild under a previously sealed identity or use a GitHub build alone as deployment approval.
 
-### What is new in this train
+### Earlier sealed train
+
+The 2026-11-02 train contained PM `r19` / `cli22` and non-PM `r18` / `c16`. The following notes describe that earlier train, not completed features of the draft above.
 
 - **Mains Clients:** parent rescan after a measured parent-loss pattern; retain a stable parent when healthy.
 - **Routers:** measured coordinator route quality and bounded route refresh, with existing recovery protections.
@@ -53,7 +55,7 @@ The PM Router and Client deliberately share one board-wide version counter but h
 
 ### Remaining release gates
 
-Only the exact source and sealed package have been accepted offline. Each candidate needs a fresh single-device preflight, correct installed build and role after OTA, relay and configuration retention, PM power/energy validation on PM boards, relevant parent/child routing behavior and sustained soak. Coordinate firmware or Zigbee2MQTT maintenance separately: do not run overlapping hardware operations.
+The draft requires completed implementation, exact-source hosted verification and sealing before hardware acceptance. Each candidate then needs a fresh single-device preflight, correct installed build and role after OTA, relay and configuration retention, PM power/energy validation on PM boards, relevant parent/child routing behavior and sustained soak. Coordinate firmware or Zigbee2MQTT maintenance separately: do not run overlapping hardware operations.
 
 For the full historical gate sequence, see [promotion gates](#promotion-gates-in-order), [PM E2E acceptance](bseed_pm_e2e_acceptance.md) and [the targeted OTA guide](bseed_targeted_ota_runner.md).
 

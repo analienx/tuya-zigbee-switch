@@ -31,11 +31,11 @@ Exact device identity. Independent relay control. PM telemetry. Router and mains
 
 | Hardware family | Zigbee manufacturer / model | Published Router | Current sealed Router / mains Client |
 | --- | --- | --- | --- |
-| TS011F-BS-PM · power monitoring | `b28wrpvx` / `TS011F-BS-PM` | `1.2.5-bseedv8u4` | `1.2.5-bseedr19` / `1.2.5-bseedcli22` |
-| TS011F-BS · no metering | `o1jzcxou` / `TS011F-BS` | `1.1.3-bseedv8` | `1.1.3-bseedr18` / `1.1.3-bseedc16` |
+| TS011F-BS-PM · power monitoring | `b28wrpvx` / `TS011F-BS-PM` | `1.2.5-bseedv8u4` | `1.2.5-bseedr20` / `1.2.5-bseedcli23` |
+| TS011F-BS · no metering | `o1jzcxou` / `TS011F-BS` | `1.1.3-bseedv8` | `1.1.3-bseedr19` / `1.1.3-bseedc17` |
 | TS0726 · three-gang switch/dimmer | `iedhxgyi` / `TS0726-3-BS` | `1.1.8-bseedv8` | Separately controlled TS0726 candidate train |
 
-**Do not mistake the rightmost column for an upgrade offer.** The four TS011F candidates are sealed from exact-source GitHub Actions, but their complete board-specific hardware acceptance is still pending. Client images and role-transition wrappers are not in the public index. [See full identities, hex versions and acceptance status](docs/bseed_socket_release_status.md).
+**Do not mistake the rightmost column for an upgrade offer.** These new identities are unsealed draft candidates; their implementation and hardware acceptance are pending. Client images and role-transition wrappers are not in the public index. [See full identities, hex versions and acceptance status](docs/bseed_socket_release_status.md).
 
 ## What this fork adds
 
