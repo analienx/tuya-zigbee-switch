@@ -17,7 +17,8 @@ PRELUDE = r"""
 #include <assert.h>
 #include <limits.h>
 #include "hal/router_recovery_policy.h"
-#include "telink/hal/router_recovery_budget.h"
+typedef enum { BSEED_BUDGET_CONSUMED, BSEED_BUDGET_EXHAUSTED,
+               BSEED_BUDGET_STORAGE_ERROR } bseed_budget_result_t;
 #define ZB_ROUTER_ROLE 1
 #define ZB_COORDINATOR_ROLE 0
 #define RET_OK 0

@@ -160,16 +160,18 @@ int main(void) {
     bdb_commissioning_callback(BDB_COMMISSION_STA_PARENT_LOST,0);
     now=60000; hal_zigbee_start_network_steering(); assert(rejoin_calls==2);
     joined=true; assert(hal_zigbee_get_network_status()==HAL_ZIGBEE_NETWORK_JOINED);
+    assert(firmware_health.rejoin_success==0);
+    bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,0);
     assert(firmware_health.rejoin_success==1);
     joined=false; hal_zigbee_start_network_steering(); assert(rejoin_calls==3);
-    joined=true; hal_zigbee_get_network_status(); joined=false;
+    joined=true; bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,0); joined=false;
     factory_new=true; fail_start=1; now=UINT32_MAX-1000;
     hal_zigbee_start_network_steering(); assert(steer_calls==1);
     now+=4999; hal_zigbee_start_network_steering(); assert(steer_calls==1);
     now++; fail_start=0; hal_zigbee_start_network_steering(); assert(steer_calls==2);
     assert(hal_zigbee_get_network_status()==HAL_ZIGBEE_NETWORK_JOINING);
     bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,0);
-    assert(announce_rearms==1); /* proven new-epoch announce hook */
+    assert(announce_rearms==3); /* terminal successes rearm announcements */
     return 0;
 }
 '''

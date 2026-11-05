@@ -117,9 +117,11 @@ int main(int argc,char **argv) {
         assert(hal_zigbee_get_network_status()==HAL_ZIGBEE_NETWORK_JOINING);
         sdk_owned=false;joined=true;rate=250; /* success; BDB callback lost */
         assert(hal_zigbee_get_network_status()==HAL_ZIGBEE_NETWORK_JOINED);
+        assert(network_recovery_state==TELINK_NETWORK_RECOVERY_REJOIN);
+        assert(firmware_health.rejoin_success==0);
+        bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,NULL); /* late */
         assert(rate==60000 && client_poll_failure_streak==0);
         assert(client_health_last_good_ms==now && firmware_health.rejoin_success==1);
-        bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,NULL); /* late */
         hal_zigbee_get_network_status(); assert(firmware_health.rejoin_success==1);
     } else if(!strcmp(argv[1],"inbound-does-not-mask")) {
         apsdeDataInd_t frame={0};
@@ -173,7 +175,7 @@ int main(int argc,char **argv) {
         bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,NULL);
         now+=CLIENT_HEALTH_REJOIN_COOLDOWN_MS;failed_polls(4);
         keepalive_verify_handler(NULL);assert(calls==2 && sdk_owned);
-        sdk_owned=false;joined=true;hal_zigbee_get_network_status();
+        sdk_owned=false;joined=true;bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,NULL);
         assert(firmware_health.rejoin_start==2 && firmware_health.rejoin_success==2);
     } else if(!strcmp(argv[1],"ota-entry-exit")) {
         hal_zigbee_set_ota_poll_active(true);assert(rate==250);
@@ -182,7 +184,7 @@ int main(int argc,char **argv) {
         assert(calls==1 && sdk_owned);
         hal_zigbee_set_ota_poll_active(true);now+=3600000;
         keepalive_verify_handler(NULL);hal_zigbee_start_network_steering();assert(calls==1);
-        joined=true;sdk_owned=false;hal_zigbee_get_network_status();assert(rate==250);
+        joined=true;sdk_owned=false;bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,NULL);assert(rate==250);
         hal_zigbee_set_ota_poll_active(false);assert(rate==60000);
     } else if(!strcmp(argv[1],"synchronous-success")) {
         sync_success=true;stale_parent();assert(calls==1 && joined && !sdk_owned);
