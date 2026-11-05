@@ -62,12 +62,12 @@ static inline uint32_t bseed_recovery_delay_ms(uint8_t failures,
 static inline void bseed_recovery_init(bseed_recovery_core_t *core,
                                        const uint8_t ieee[8], uint32_t now,
                                        bool immediate) {
-    core->scheduled_at_ms  = now;
-    core->stagger_ms       = bseed_recovery_stagger_ms(ieee);
-    core->delay_ms         = immediate ? 0u : bseed_recovery_delay_ms(0u, core->stagger_ms);
-    core->pending_since_ms = 0u;
-    core->failures         = 0u;
-    core->pending          = false;
+    core->scheduled_at_ms   = now;
+    core->stagger_ms        = bseed_recovery_stagger_ms(ieee);
+    core->delay_ms          = immediate ? 0u : bseed_recovery_delay_ms(0u, core->stagger_ms);
+    core->pending_since_ms  = 0u;
+    core->failures          = 0u;
+    core->pending           = false;
     core->all_channels_next = false;
 }
 
