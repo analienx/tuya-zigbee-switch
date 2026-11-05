@@ -248,7 +248,9 @@ def test_route_repair_precedes_disruptive_secure_rejoin():
     source = TELINK.read_text(encoding="utf-8")
     assert "ROUTER_ACTIVE_NEIGHBOR_HOLD_MS" in source
     assert "ROUTER_NEIGHBOR_ACTIVITY_MS" in source
-    assert "rejoin_stagger_ms = reboot_stagger_ms;" in source
+    assert "0x52524a4eu" in source
+    assert "0x52524254u" in source
+    assert "bseed_recovery_action_stagger_ms(" in source
     assert "bseed_router_rejoin_eligible(" in source
     callback = source.split("void bdb_commissioning_callback(u8 status, void *arg) {", 1)[1]
     parent = callback.split("case BDB_COMMISSION_STA_PARENT_LOST:", 1)[1].split(
