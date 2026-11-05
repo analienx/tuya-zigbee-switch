@@ -367,8 +367,8 @@ static void router_coordinator_node_desc_response(void *arg) {
     if (ind->src_addr == 0x0000u &&
         rsp->seq_num == router_probe_sequence &&
         rsp->status == ZDO_SUCCESS && rsp->nwk_addr_interest == 0x0000u) {
-        router_last_positive_ms = hal_millis();
-        router_positive_seen    = true;
+        router_last_positive_ms  = hal_millis();
+        router_positive_seen     = true;
         router_recovery_since_ms = router_last_positive_ms;
         bseed_router_rescue_budget_note_good_coordinator(router_last_positive_ms);
         router_probe_failures    = 0;
@@ -531,7 +531,7 @@ static inline void link_router_rejoin_end(void) {
  * One rescue maximum per boot; a genuine prolonged coordinator outage can
  * never cause a rapid reset loop. */
 #define ROUTER_RECOVERY_STALL_MS    (45u * 60u * 1000u)
-static bool     router_reboot_scheduled;
+static bool router_reboot_scheduled;
 
 void telink_zigbee_hal_router_recovery_tick(void) {
     uint32_t now = hal_millis();
@@ -539,7 +539,7 @@ void telink_zigbee_hal_router_recovery_tick(void) {
     if (!router_observation_started) {
         router_observation_started  = true;
         router_observation_epoch_ms = now;
-        router_recovery_since_ms = now;
+        router_recovery_since_ms    = now;
     }
 
     /* Three IEEE bytes spread even a >60-Router mesh across the full
