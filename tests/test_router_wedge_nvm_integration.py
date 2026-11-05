@@ -47,6 +47,8 @@ static void cold_boot(void) {
     budget_loaded=budget_valid=false; used_reboots=0;
     credit_loaded=credit_usable=wedge_active=false; credit_chunks=0;
     router_reboot_scheduled=false; router_one_shot_stalled=true;
+    network_recovery_state=TELINK_NETWORK_RECOVERY_IDLE;
+    network_last_start_attempt=0;
     router_one_shot_ms=0; router_observation_started=false;
     joined=false; factory_new=false; ota_active=false; now=1000000u;
     fail_read70=fail_write70=bad_readback70=written70=false;
@@ -74,6 +76,13 @@ int main(void) {
     full_credit(2); ota_active=true;
     telink_zigbee_hal_router_recovery_tick();
     assert(rescue_calls==1 && !router_reboot_scheduled && records[1][1]==4);
+    /* An SDK-owned backoff with no completion is a separate wedge from a
+     * one-shot. Its persisted slow lane must work when item 70 is exhausted. */
+    full_credit(2); router_one_shot_stalled=false;
+    network_recovery_state=TELINK_NETWORK_RECOVERY_REJOIN; now=0;
+    telink_zigbee_hal_router_recovery_tick();
+    now=46u*60u*1000u; telink_zigbee_hal_router_recovery_tick();
+    assert(rescue_calls==2 && router_reboot_scheduled && records[1][1]==0);
     return 0;
 }
 '''

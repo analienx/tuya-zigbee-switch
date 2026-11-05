@@ -559,15 +559,22 @@ void telink_zigbee_hal_router_recovery_tick(void) {
      * communicates again. A checkpointed restart clears SDK state; when the
      * ordinary budget is exhausted, accumulate the separate slow-lane credit.
      * Never interrupt OTA or a factory-new commissioning session. */
-    bool wedge_eligible = router_one_shot_stalled &&
-                          (!zb_isDeviceJoinedNwk() ||
-                           router_probe_failures >= ROUTER_PROBE_FAILURE_THRESHOLD) &&
-                          !zb_isDeviceFactoryNew() &&
+    bool link_unreachable = !zb_isDeviceJoinedNwk() ||
+                            router_probe_failures >= ROUTER_PROBE_FAILURE_THRESHOLD;
+    bool backoff_wedged = network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN &&
+                          (uint32_t)(now - network_last_start_attempt) >=
+                          ROUTER_RECOVERY_STALL_MS &&
+                          (uint32_t)(now - router_recovery_since_ms) >=
+                          ROUTER_RECOVERY_STALL_MS;
+    bool wedge_eligible = (router_one_shot_stalled || backoff_wedged) &&
+                          link_unreachable && !zb_isDeviceFactoryNew() &&
                           !telink_zigbee_hal_router_ota_in_progress();
+    uint32_t wedge_started_ms = router_one_shot_stalled ? router_one_shot_ms :
+                                network_last_start_attempt;
     bool slow_ready = bseed_wedge_credit_tick(now, wedge_eligible);
 
     if (wedge_eligible && !router_reboot_scheduled &&
-        (uint32_t)(now - router_one_shot_ms) >=
+        (uint32_t)(now - wedge_started_ms) >=
         ROUTER_ONE_SHOT_DEADLINE_MS + reboot_stagger_ms) {
         bseed_budget_result_t result = bseed_router_rescue_budget_try_consume();
         if (result == BSEED_BUDGET_CONSUMED ||
