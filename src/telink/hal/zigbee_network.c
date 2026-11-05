@@ -187,9 +187,10 @@ static bool     network_start_retry_pending;
 static uint32_t network_last_start_attempt;
 
 /* The pinned BDB callback has NO per-operation token. After an accepted
- * SDK backoff, never acquire a second SDK recovery owner in the same boot:
- * a late completion from the first owner could terminate the second.
- * A persistent, budgeted checkpoint is the only safe new ownership epoch. */
+ * SDK backoff, no second SDK recovery owner may start while the first could
+ * still deliver a late completion. telink_zigbee_hal_sdk_owner_rearm_tick()
+ * clears these flags only after the owner's terminal callback and a quiet
+ * IDLE window; an orphaned owner keeps the budgeted checkpoint path. */
 static bool network_sdk_backoff_started_once;
 static bool network_sdk_steering_started_once;
 #ifdef BSEED_MAINS_CLIENT
@@ -839,11 +840,15 @@ void telink_zigbee_hal_router_recovery_tick(void) {
         !link_router_rejoin_held(now) &&
 
         /* BDB callbacks cannot identify their SDK operation. A previous
-        * backoff or one-shot can deliver a late duplicate after success.
-        * Require a processor checkpoint before ANY subsequent owner. */
+        * backoff or one-shot can deliver a late duplicate after success, so
+        * no new owner starts until telink_zigbee_hal_sdk_owner_rearm_tick()
+        * has seen it terminate and stay quiet. A later one-shot also keeps
+        * the 30-minute cooldown after the previous one. */
         !router_one_shot_attempted &&
         !network_sdk_backoff_started_once &&
-        !network_sdk_steering_started_once) {
+        !network_sdk_steering_started_once &&
+        (router_one_shot_attempts == 0u ||
+         (uint32_t)(now - router_one_shot_ms) >= ROUTER_REJOIN_COOLDOWN_MS)) {
         /* Require a verified failure history, never infer link loss merely
          * from the absence of application traffic. No BDB steering, factory
          * reset, counter rollback or channel changes. With the link policy
@@ -1536,11 +1541,11 @@ void hal_zigbee_start_network_steering(void) {
             g_zbMacPib.extAddress, 0x46535452u, 15u * 60u * 1000u);
 
         /* Terminal callbacks cannot be correlated with separate attempts.
-         * No second steering operation within this boot. A budgeted reboot
-         * after the long hold gives factory-new commissioning a fresh SDK
-         * owner without leaving/erasing a network or switching the relay.
-         * Once the capped rescue budget is validly exhausted, a supervised
-         * power intervention is required; never force an unbounded loop. */
+         * After a terminal steering outcome, the re-arm tick permits the
+         * next attempt after a quiet, staggered delay. Only steering that
+         * never reported a terminal outcome reaches this long hold, where a
+         * budgeted reboot gives commissioning a fresh SDK owner without
+         * leaving/erasing a network or switching the relay. */
         if (!ota_busy &&
             (uint32_t)(now - from_ms) >= hold_ms + stagger &&
             bseed_router_rescue_budget_try_consume() ==
@@ -1586,6 +1591,82 @@ hal_zigbee_status_t hal_zigbee_send_announce(void) {
         return HAL_ZIGBEE_ERR_SEND_FAILED;
     }
     return HAL_ZIGBEE_OK;
+}
+
+/* Re-arm SDK recovery ownership after a genuinely finished operation.
+ *
+ * The pinned BDB callback has no operation token, so no second SDK owner may
+ * start while an earlier one could still deliver a callback. That guard must
+ * not become "one recovery per boot": the Telink samples rejoin repeatedly in
+ * one boot, and a mains Client on a weak parent can lose it many times a day.
+ * Without a re-arm, every later parent loss waits hours for a budgeted reboot.
+ *
+ * An owner is finished only when the SDK's own terminal callback ended it,
+ * which the existing callbacks already record: backoff REJOIN -> IDLE (only a
+ * terminal callback does that), one-shot active/stalled both cleared, steering
+ * terminal_seen. After that the HAL must stay IDLE, with no live owner and no
+ * scheduled checkpoint, for a quiet window before the flag is cleared. An
+ * orphaned owner (no terminal callback) is never re-armed here; it keeps the
+ * wedge/checkpoint path. Routers keep the 30-minute one-shot cooldown. */
+#define SDK_OWNER_REARM_QUIET_MS        (5u * 60u * 1000u)
+#define SDK_STEERING_REARM_QUIET_MS     (60u * 1000u)
+#define SDK_STEERING_REARM_JITTER_MS    (30u * 1000u)
+
+void telink_zigbee_hal_sdk_owner_rearm_tick(void) {
+    static bool     idle_seen;
+    static uint32_t idle_since_ms;
+    uint32_t        now = hal_millis();
+    bool            owner_live =
+        network_recovery_state != TELINK_NETWORK_RECOVERY_IDLE ||
+        network_steering_checkpoint_scheduled;
+
+#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
+    owner_live = owner_live || router_one_shot_active ||
+                 router_one_shot_stalled || router_reboot_scheduled;
+#endif
+#ifdef BSEED_MAINS_CLIENT
+    owner_live = owner_live || client_reboot_scheduled;
+#endif
+    if (owner_live) {
+        idle_seen = false;
+        return;
+    }
+    if (!idle_seen) {
+        idle_seen     = true;
+        idle_since_ms = now;
+    }
+
+    uint32_t idle_ms = (uint32_t)(now - idle_since_ms);
+    if (network_sdk_backoff_started_once && idle_ms >= SDK_OWNER_REARM_QUIET_MS) {
+        network_sdk_backoff_started_once = false;
+        printf("SDK backoff finished; recovery re-armed\r\n");
+    }
+#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
+    /* The SDK backoff may follow a finished one-shot after the quiet window;
+     * a further one-shot keeps its own 30-minute cooldown in the Router tick. */
+    if (router_one_shot_attempted && idle_ms >= SDK_OWNER_REARM_QUIET_MS) {
+        router_one_shot_attempted = false;
+        printf("Router one-shot finished; recovery re-armed\r\n");
+    }
+#endif
+    if (!network_sdk_steering_started_once)
+        return;
+
+    if (network_steering_terminal_seen) {
+        /* A failed factory-new steering retries like the SDK samples do,
+         * after a quiet, IEEE-staggered delay; never a power-cycle wait. */
+        uint32_t jitter = bseed_recovery_action_stagger_ms(
+            g_zbMacPib.extAddress, 0x53524d41u, SDK_STEERING_REARM_JITTER_MS);
+        if (idle_ms >= SDK_STEERING_REARM_QUIET_MS &&
+            (uint32_t)(now - network_steering_terminal_ms) >=
+            SDK_STEERING_REARM_QUIET_MS + jitter) {
+            network_sdk_steering_started_once = false;
+            network_steering_terminal_seen    = false;
+        }
+    } else if (!zb_isDeviceFactoryNew() && idle_ms >= SDK_OWNER_REARM_QUIET_MS) {
+        /* Steering succeeded: later recovery uses the ordinary rejoin path. */
+        network_sdk_steering_started_once = false;
+    }
 }
 
 void hal_zigbee_set_poll_rate_ms(uint32_t poll_rate_ms) {
