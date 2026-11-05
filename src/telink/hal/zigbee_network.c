@@ -200,7 +200,9 @@ static hal_network_status_change_callback_t network_status_change_callback =
     NULL;
 
 static bool request_rejoin_with_backoff(bool parent_stale);
+#ifdef BSEED_MAINS_CLIENT
 static bool request_rejoin_for_isolated_coordinator(void);
+#endif
 
 #ifdef BSEED_MAINS_CLIENT
 
@@ -1047,9 +1049,11 @@ static bool request_rejoin_with_backoff(bool parent_stale) {
     return request_rejoin_with_backoff_impl(parent_stale, parent_stale);
 }
 
+#ifdef BSEED_MAINS_CLIENT
 static bool request_rejoin_for_isolated_coordinator(void) {
     return request_rejoin_with_backoff_impl(true, false);
 }
+#endif
 
 static void notify_about_network_status_change() {
     if (network_status_change_callback != NULL) {
