@@ -57,4 +57,29 @@ static inline bool bseed_router_joined_rescue_eligible(
            isolated;
 }
 
+/* A per-boot SDK ownership quarantine blocks additional radio owners after
+ * an uncorrelated callback. Do NOT fake a number of rejoin attempts to reuse
+ * the ordinary joined-rescue predicate: this is a different recovery reason.
+ *
+ * Joined Routers need independent coordinator delivery-failure evidence and
+ * a long inbound-neighbor hold; NOT_JOINED Routers need a monotonic observed
+ * non-joined epoch that cannot be reset by an unverified JOINED transition.
+ * The caller owns OTA/factory-new checks and persistent budget semantics. */
+static inline bool bseed_router_quarantine_checkpoint_eligible(
+    bool quarantined_no_owner, bool joined, bool coordinator_delivery_failed,
+    bool reboot_scheduled, uint32_t now, uint32_t last_coordinator_proof,
+    uint32_t last_application_inbound, uint32_t not_joined_since_ms,
+    uint32_t joined_no_proof_ms, uint32_t inbound_grace_ms,
+    uint32_t not_joined_grace_ms) {
+    if (!quarantined_no_owner || reboot_scheduled)
+        return false;
+
+    if (!joined)
+        return (uint32_t)(now - not_joined_since_ms) >= not_joined_grace_ms;
+
+    return coordinator_delivery_failed &&
+           (uint32_t)(now - last_coordinator_proof) >= joined_no_proof_ms &&
+           (uint32_t)(now - last_application_inbound) >= inbound_grace_ms;
+}
+
 #endif
