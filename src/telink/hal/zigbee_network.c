@@ -185,6 +185,7 @@ static telink_network_recovery_state_t network_recovery_state =
 #define NETWORK_START_RETRY_MS    5000u
 static bool     network_start_retry_pending;
 static uint32_t network_last_start_attempt;
+
 /* The pinned BDB callback has NO per-operation token. After an accepted
  * SDK backoff, never acquire a second SDK recovery owner in the same boot:
  * a late completion from the first owner could terminate the second.
@@ -761,9 +762,10 @@ void telink_zigbee_hal_router_recovery_tick(void) {
             ROUTER_QUIET_MIN_MS, ROUTER_ACTIVE_NEIGHBOR_HOLD_MS,
             ROUTER_NEIGHBOR_ACTIVITY_MS, rejoin_stagger_ms) &&
         !link_router_rejoin_held(now) &&
+
         /* BDB callbacks cannot identify their SDK operation. A previous
-         * backoff or one-shot can deliver a late duplicate after success.
-         * Require a processor checkpoint before ANY subsequent owner. */
+        * backoff or one-shot can deliver a late duplicate after success.
+        * Require a processor checkpoint before ANY subsequent owner. */
         !router_one_shot_attempted &&
         !network_sdk_backoff_started_once &&
         !network_sdk_steering_started_once) {
@@ -865,13 +867,14 @@ zdo_appIndCb_t zdo_callbacks = {
  * even when parent polls continue successfully. */
 #define CLIENT_COORD_ISOLATION_MS        (20u * 60u * 1000u)
 #define CLIENT_COORD_REJOIN_JITTER_MS    (15u * 60u * 1000u)
+
 /* Synchronous ZDO queue rejection is NOT a failed on-air coordinator probe.
  * Only sustained, independently timed refusal after multiple attempts
  * qualifies as a local vendor-ZDO stall. */
 #define CLIENT_COORD_REJECT_THRESHOLD    6u
 #define CLIENT_COORD_REJECT_QUIET_MS     (60u * 60u * 1000u)
-#define CLIENT_COORD_CHECKPOINT_MS      (3u * 60u * 60u * 1000u)
-#define CLIENT_BACKOFF_UNPROVEN_MS      (3u * 60u * 60u * 1000u)
+#define CLIENT_COORD_CHECKPOINT_MS       (3u * 60u * 60u * 1000u)
+#define CLIENT_BACKOFF_UNPROVEN_MS       (3u * 60u * 60u * 1000u)
 static bseed_recovery_core_t client_coord_core;
 static bool     client_coord_started, client_reboot_scheduled;
 static uint32_t client_last_probe_ms, client_outage_since_ms;
@@ -896,9 +899,9 @@ static void client_coordinator_node_desc_response(void *arg) {
     if (bseed_recovery_probe_answer(&client_coord_core, rsp->seq_num,
                                     ind->src_addr, rsp->nwk_addr_interest,
                                     rsp->status == ZDO_SUCCESS)) {
-        client_outage_since_ms     = hal_millis();
-        client_probe_rejections    = 0u;
-        client_rejections_started  = false;
+        client_outage_since_ms    = hal_millis();
+        client_probe_rejections   = 0u;
+        client_rejections_started = false;
         bseed_router_rescue_budget_note_good_coordinator(client_outage_since_ms);
     }
 }
@@ -912,6 +915,7 @@ void telink_zigbee_hal_client_recovery_tick(void) {
         client_last_probe_ms   = now;
         client_outage_since_ms = now;
     }
+
     /* A previously accepted backoff cannot be started again in this boot.
      * A later genuine NOT_JOINED episode needs its own monotonic clock,
      * independent of the last successful coordinator proof (which may be
@@ -924,11 +928,12 @@ void telink_zigbee_hal_client_recovery_tick(void) {
     }
     if (zb_isDeviceFactoryNew() || ota_fast_poll_active) {
         client_not_joined_started = false;
+
         /* OTA/commissioning suspends both radio actions and qualification:
          * time spent waiting for the image cannot fabricate a queue stall. */
         client_coord_core.probe_pending = false;
-        client_probe_rejections = 0u;
-        client_rejections_started = false;
+        client_probe_rejections         = 0u;
+        client_rejections_started       = false;
         (void)bseed_wedge_credit_tick(now, false);
         return;
     }
@@ -938,6 +943,7 @@ void telink_zigbee_hal_client_recovery_tick(void) {
                                      client_coord_core.probe_sequence);
         bseed_router_rescue_budget_note_failure();
     }
+
     /* The watchdog always runs, even while an SDK rejoin owns the radio.
      * But an outstanding/retrying SDK backoff must NEVER compete with a new
      * coordinator ZDO transmission just because JOINED is stale. */
@@ -981,18 +987,19 @@ void telink_zigbee_hal_client_recovery_tick(void) {
         client_rejections_started &&
         client_probe_rejections >= CLIENT_COORD_REJECT_THRESHOLD &&
         (uint32_t)(now - client_first_rejection_ms) >=
-            CLIENT_COORD_REJECT_QUIET_MS &&
+        CLIENT_COORD_REJECT_QUIET_MS &&
         (uint32_t)(now - client_outage_since_ms) >=
-            CLIENT_COORD_REJECT_QUIET_MS;
+        CLIENT_COORD_REJECT_QUIET_MS;
     bool backoff_unproven =
         (uint32_t)(now - network_last_start_attempt) >=
-            CLIENT_BACKOFF_UNPROVEN_MS &&
+        CLIENT_BACKOFF_UNPROVEN_MS &&
         (uint32_t)(now - client_outage_since_ms) >=
-            CLIENT_BACKOFF_UNPROVEN_MS;
+        CLIENT_BACKOFF_UNPROVEN_MS;
     bool link_unreachable =
         !zb_isDeviceJoinedNwk() ||
         bseed_recovery_degraded(&client_coord_core) || queue_stalled ||
         backoff_unproven;
+
     /* A stale JOINED SDK backoff may coexist with healthy parent service.
      * A queue stall before the SDK claim does not authorize a disruptive
      * reboot after only 45 minutes: require the longer 3-hour independent
@@ -1002,11 +1009,12 @@ void telink_zigbee_hal_client_recovery_tick(void) {
     bool wedged = network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN &&
                   link_unreachable &&
                   (uint32_t)(now - network_last_start_attempt) >=
-                      owner_limit &&
+                  owner_limit &&
                   (uint32_t)(now - client_outage_since_ms) >=
-                      owner_limit;
+                  owner_limit;
     uint32_t stagger = bseed_recovery_action_stagger_ms(
         g_zbMacPib.extAddress, 0x43425254u, 15u * 60u * 1000u);
+
     /* Do not call wedge_credit_tick(false) followed by tick(true) on each
      * checkpoint cycle: that discards every partial six-hour credit. The
      * persistent clock receives exactly one policy decision per tick. */
@@ -1015,15 +1023,15 @@ void telink_zigbee_hal_client_recovery_tick(void) {
         network_recovery_state == TELINK_NETWORK_RECOVERY_IDLE &&
         ((bseed_recovery_degraded(&client_coord_core) || queue_stalled) &&
          (uint32_t)(now - client_outage_since_ms) >=
-             CLIENT_COORD_CHECKPOINT_MS + stagger ||
+         CLIENT_COORD_CHECKPOINT_MS + stagger ||
          (client_not_joined_started &&
           (uint32_t)(now - client_not_joined_since_ms) >=
-              CLIENT_COORD_CHECKPOINT_MS + stagger));
+          CLIENT_COORD_CHECKPOINT_MS + stagger));
     bool checkpoint_local_queue =
         queue_stalled &&
         network_recovery_state == TELINK_NETWORK_RECOVERY_IDLE &&
         (uint32_t)(now - client_first_rejection_ms) >=
-            CLIENT_COORD_CHECKPOINT_MS + stagger;
+        CLIENT_COORD_CHECKPOINT_MS + stagger;
     bool slow_ready = bseed_wedge_credit_tick(
         now, wedged || checkpoint_after_previous_owner || checkpoint_local_queue);
     if (wedged && !client_reboot_scheduled &&
@@ -1052,7 +1060,7 @@ void telink_zigbee_hal_client_recovery_tick(void) {
             client_reboot_scheduled = true;
             (void)bseed_recovery_diag_record(
                 queue_stalled ? BSEED_RESCUE_REASON_CLIENT_QUEUE_STALL :
-                                BSEED_RESCUE_REASON_CLIENT_BACKOFF,
+                BSEED_RESCUE_REASON_CLIENT_BACKOFF,
                 (uint8_t)network_recovery_state);
             schedule_reboot(2000);
             return;
@@ -1130,7 +1138,7 @@ static bool request_rejoin_with_backoff_impl(bool allow_joined,
 
     /* Claim before the SDK call: completion may be synchronous. Its native
     * implementation clears JOINED and owns all subsequent retry timers. */
-    network_recovery_state = TELINK_NETWORK_RECOVERY_REJOIN;
+    network_recovery_state           = TELINK_NETWORK_RECOVERY_REJOIN;
     network_sdk_backoff_started_once = true;
 #ifdef BSEED_MAINS_CLIENT
     /* A previously armed coordinator probe cannot be allowed to complete
@@ -1169,7 +1177,7 @@ static bool request_rejoin_with_backoff_impl(bool allow_joined,
          * callback already changed the owner state, a contradictory return
          * code cannot retroactively prove that no operation existed. */
         if (network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN) {
-            network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
+            network_recovery_state           = TELINK_NETWORK_RECOVERY_IDLE;
             network_sdk_backoff_started_once = false;
         }
         firmware_health_increment(&firmware_health.rejoin_failure);
@@ -1413,12 +1421,12 @@ void hal_zigbee_start_network_steering(void) {
 
     /* Steering can report completion synchronously. Claim ownership before
      * entering the SDK, then do not overwrite a terminal callback's state. */
-    network_recovery_state = TELINK_NETWORK_RECOVERY_STEERING;
+    network_recovery_state            = TELINK_NETWORK_RECOVERY_STEERING;
     network_sdk_steering_started_once = true;
     u8 res = bdb_networkSteerStart();
     if (res != RET_OK) {
         if (network_recovery_state == TELINK_NETWORK_RECOVERY_STEERING) {
-            network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
+            network_recovery_state            = TELINK_NETWORK_RECOVERY_IDLE;
             network_sdk_steering_started_once = false;
         }
         printf("Failed to start network steering, status: %d\r\n", res);
