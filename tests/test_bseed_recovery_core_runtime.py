@@ -51,6 +51,20 @@ int main(void) {
         assert(bseed_recovery_rung(&core) != before);
     }
     assert(core.failures == UINT8_MAX);
+    /* Jitter is distributed rather than clipped to the same short delay. */
+    assert(bseed_recovery_delay_ms(1u, 10000u) !=
+           bseed_recovery_delay_ms(1u, 20000u));
+    uint32_t delays[60];
+    unsigned distinct = 0;
+    for (unsigned i = 0; i < 60u; i++) {
+        uint8_t sample[8] = {1,2,3,4,5,6,7,(uint8_t)i};
+        delays[i] = bseed_recovery_delay_ms(1u, bseed_recovery_stagger_ms(sample));
+        bool seen = false;
+        for (unsigned j = 0; j < i; j++)
+            if (delays[j] == delays[i]) seen = true;
+        if (!seen) distinct++;
+    }
+    assert(distinct >= 40u);
     /* Capped retry schedules still differ across devices. */
     const uint8_t other_ieee[8] = {1,2,3,4,5,6,7,9};
     assert(bseed_recovery_delay_ms(UINT8_MAX, bseed_recovery_stagger_ms(other_ieee))

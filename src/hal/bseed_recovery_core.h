@@ -49,7 +49,7 @@ static inline uint32_t bseed_recovery_delay_ms(uint8_t failures,
                                                uint32_t stagger_ms) {
     uint32_t base         = bseed_recovery_backoff_ms(failures);
     uint32_t jitter_limit = base / 4u;
-    uint32_t jitter       = stagger_ms < jitter_limit ? stagger_ms : jitter_limit;
+    uint32_t jitter       = stagger_ms % (jitter_limit + 1u);
 
     /* Keep a five-minute maximum without losing the per-device stagger once
      * every device reaches the capped rung. */
