@@ -15,6 +15,8 @@ def test_report_fanout_coalescing_and_current_value_flush(tmp_path):
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include "hal/timer.h"
+#include "hal/bseed_recovery_core.h"
 typedef uint8_t u8; typedef uint16_t u16; typedef uint8_t status_t;
 typedef union {u16 shortAddr; u8 extAddr[8];} tl_zb_addr_t;
 typedef struct {tl_zb_addr_t dstAddr; u16 profileId; u8 dstAddrMode,dstEp;} epInfo_t;
@@ -111,8 +113,8 @@ int main(void){
 '''
     (tmp_path / 'fake_sdk.h').write_text(header)
     source = (ROOT / 'src/telink/hal/zigbee_telemetry.c').read_text()
-    (tmp_path / 'telemetry.c').write_text(source.replace(
-        '#include "telink_zigbee_hal.h"', '#include "fake_sdk.h"'))
+    (tmp_path / 'telemetry.c').write_text('#include "fake_sdk.h"\n' +
+                                         source[source.index('/* Wrap only'):])
     (tmp_path / 'sdk.c').write_text(sdk)
     (tmp_path / 'case.c').write_text(cases)
     binary = tmp_path / 'run'

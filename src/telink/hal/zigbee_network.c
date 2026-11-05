@@ -99,8 +99,8 @@ static void link_floor_restore(void) {
 }
 
 static void link_floor_begin(void) {
-    client_floor_since_ms = hal_millis();
-    client_floor_active = true;
+    client_floor_since_ms            = hal_millis();
+    client_floor_active              = true;
     NWK_NEIGHBORTBL_ADD_LQITHRESHOLD = BSEED_PARENT_FLOOR_STRONG;
 }
 
@@ -111,6 +111,7 @@ static void link_floor_tick(bool suspended) {
     }
     if (!client_floor_active)
         return;
+
     uint8_t floor = bseed_parent_floor(hal_millis() - client_floor_since_ms);
     NWK_NEIGHBORTBL_ADD_LQITHRESHOLD = floor;
     if (floor == BSEED_PARENT_FLOOR_DEFAULT)
@@ -120,6 +121,7 @@ static void link_floor_tick(bool suspended) {
 static bool link_previous_parent_good(void) {
     tl_zb_normal_neighbor_entry_t *parent =
         nwk_neTblGetByShortAddr(zb_getParentShortAddr());
+
     return parent && bseed_parent_previous_good(link_neighbor_cost(parent));
 }
 
@@ -994,7 +996,7 @@ zdo_appIndCb_t zdo_callbacks = {
  * parent vanished mid-probe (likely while degraded: one probe per minute). */
 #define CLIENT_ZDO_DRAIN_GRACE_MS        (2u * 60u * 1000u)
 static bseed_recovery_core_t client_coord_core;
-static bool client_coord_verified;
+static bool     client_coord_verified;
 static bool     client_coord_started, client_reboot_scheduled;
 static uint32_t client_last_probe_ms, client_outage_since_ms;
 static uint32_t client_first_rejection_ms;
@@ -1333,6 +1335,7 @@ static bool request_rejoin_with_backoff_impl(bool allow_joined,
 #if defined(BSEED_LINK_POLICY) && defined(BSEED_MAINS_CLIENT)
         link_floor_restore();
 #endif
+
         /* Some SDKs can emit a terminal callback synchronously. If that
          * callback already changed the owner state, a contradictory return
          * code cannot retroactively prove that no operation existed. */
@@ -1780,25 +1783,26 @@ void telink_zigbee_hal_link_snapshot_update(void) {
 // Internal interface functions
 
 /* Telemetry resumes only on a new coordinator proof, never on JOINED or a
- * locally accepted ZDO submission. This does not affect bound controls. */
+* locally accepted ZDO submission. This does not affect bound controls. */
 bool telink_zigbee_hal_hold_coordinator_telemetry(void) {
-    static bool held;
+    static bool     held;
     static uint32_t proof_at_hold;
-    bool failed = false, verified = false;
-    uint32_t proof = 0u;
+    bool            failed = false, verified = false;
+    uint32_t        proof = 0u;
+
 #if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
     failed = !zb_isDeviceJoinedNwk() || router_probe_failures >= 2u ||
              router_probe_rejections >= ROUTER_PROBE_REJECT_THRESHOLD;
     verified = router_positive_seen;
-    proof = router_last_positive_ms;
+    proof    = router_last_positive_ms;
 #elif defined(BSEED_MAINS_CLIENT)
     failed = !zb_isDeviceJoinedNwk() || bseed_recovery_degraded(&client_coord_core) ||
              client_probe_rejections >= CLIENT_COORD_REJECT_THRESHOLD;
     verified = client_coord_verified;
-    proof = client_outage_since_ms;
+    proof    = client_outage_since_ms;
 #endif
     if (failed && !held) {
-        held = true;
+        held          = true;
         proof_at_hold = proof;
     } else if (!failed && held && verified && proof != proof_at_hold) {
         held = false;
