@@ -1,5 +1,12 @@
 # BSEED recovery — Round 7 acceptance and operational limits
 
+**Historical Round 7 record.** Round 8 replaced the permanent same-boot
+quarantine and the three-hour Client ZDO deferral with bounded re-arm/drain
+delays. The subsequent follow-up adds Client signal-floor selection and
+coordinator-only telemetry coalescing. See
+[the current implementation and limits](bseed_recovery_pr_a_design.md);
+the original Round 7 behavior below must not be used as the current contract.
+
 Status: **draft / no OTA, no critical-load flashing**. This document captures the
 quarantine-liveness correction and distinguishes hosted tests from physical
 evidence. It is not a claim that `LivingRoomSocketTableLeft` has recovered.

@@ -1,77 +1,107 @@
-# BSEED recovery PR-A implementation notes
+# BSEED recovery PR-A: current implementation and release limits
 
-Status: **draft, not wired into firmware and not suitable for deployment**.
-The planned release covers the PM, non-PM and TS0726 Router/Client pairs. The
-shared retry core currently owns one claimed operation, alternates the secure
-current-channel and all-channel rungs, and exposes the pending start time.
+PR #114 is draft. Recovery supervision, Client signal-floor selection and
+coordinator-only metering report coalescing are integrated into the Telink
+firmware. This supersedes the earlier statement that none of the changes were
+wired in. It does **not** establish hardware acceptance or completion of every
+item in the original rev-3 plan.
 
-## Ownership and SDK callbacks
+## Actual recovery owner
 
-The pinned SDK's `zdo_start_device_confirm_t` contains status, channel, PAN ID
-and short address, but no operation token. A software generation guards only
-callbacks genuinely associated with the generation that created them; giving
-the current generation to an uncorrelated callback cannot protect against a
-delayed duplicate. A fixed delay is not proof that callbacks have drained.
-Until a documented SDK terminal/quiescence guarantee or equally safe mechanism
-is established, do not connect this core to production retries or claim that
-the adapter handles duplicate completions. The shared core now rejects a
-mismatched internal generation token; the SDK adapter remains outstanding.
+Production retains the vendor `zb_rejoinReqWithBackOff()` for previously joined
+devices and the guarded Router secure one-shot. Shared probe/hash helpers are
+used in production; the standalone `claim/finish/rung` scheduler is still
+auxiliary code. Its synthetic generation tests do not validate real SDK callback
+attribution. There is no claim that the proposed alternating secure-channel
+ladder or five-minute retry cap is the running SDK policy.
 
-The pinned Telink SDK provides a one-shot `zb_rejoinReq()` and a separate
-SDK-owned `zb_rejoinReqWithBackOff()`; both must not run at once. The new
-driver must claim the shared core before calling the one-shot, including when
-the SDK completes synchronously. A timeout marks the operation wedged but
-does not clear the claim. Rejected requests and real terminal results release
-the claim once; neither a parent MAC ACK nor an unrelated coordinator probe
-proves that an in-flight SDK operation has finished.
+Round 8 removed the permanent one-operation-per-boot restriction: after a
+terminal callback, recovery may re-arm following five minutes continuously
+IDLE without an outstanding owner or scheduled reboot. Failed factory-new
+steering uses 60 seconds plus an IEEE stagger of up to 30 seconds. Missing
+terminal callbacks retain their watchdog/checkpoint path. Router one-shots
+retain their 30-minute cooldown. Client rejoin deferred by an outstanding
+coordinator probe resumes two minutes after the probe deadline, outside OTA.
 
-The pinned `bdb_zdoStartDevCnf()` maps a failed start confirmation with status
-`ZDO_NETWORK_LOST` to `BDB_COMMISSION_STA_PARENT_LOST`, whereas other rejoin
-failures map to `BDB_COMMISSION_STA_REJOIN_FAILURE`. `PARENT_LOST` can also
-arrive as a nonterminal indication during a recovery. Therefore the adapter
-must distinguish actual one-shot completion from an unrelated parent-loss
-indication rather than treating every `PARENT_LOST` as completion or ignoring
-all of them. Exercise synchronous completion, rejections, delayed or missing
-callbacks and this mapping against the pinned SDK contract.
+**Remaining SDK limitation:** BDB completions have no operation token. These
+quiet/grace periods are operational mitigations, not proof that every old SDK
+callback or transaction has drained. A sufficiently late duplicate callback
+could still terminate a newer HAL owner. Do not describe this as proven
+correlation, or restore permanent quarantine and recreate the liveness trap.
+Resolution requires an established SDK boundary or further adapter work, plus
+the real-radio repeated-outage acceptance. Host tests alone cannot close it.
 
-The existing Router not-joined recovery tick itself does not retry, but the
-application can start SDK backoff for an ordinary unjoined, non-factory-new
-device. The true gap includes an orphaned one-shot that keeps the application
-in JOINING. The replacement must remove competing recovery ownership from
-both paths without disrupting factory-new commissioning, active OTA or local
-relay and protection behavior.
+## Client parent selection
 
-## Persistent budget compatibility
+`link_policy.h` contains the pure selection rules. Immediately before an
+eligible Client backoff starts, neighbour admission requires LQI 118. The
+superloop relaxes this to 94 at 30 seconds and the SDK default 69 at 90 seconds.
+These are elapsed-time windows, **not** a measurement of individual SDK scans.
+Success, request rejection, failure indication and explicit leave restore 69;
+OTA restores it on the next superloop pass. A missing callback cannot keep a
+strong floor indefinitely. Boot initializes 69, and Routers never change it.
 
-Existing NVM item 70 stores a four-byte Router rescue record. Any expanded
-record must preserve valid existing consumption when upgrading, handle the
-HAL's fixed-size read checks, fail closed on unreadable or corrupt data, and
-verify persisted writes. Connected-credit refill and a wedged-device slow
-lane need distinct accounting: a disconnected wedge cannot earn CONNECTED
-credit. With no persistent real-time clock, outages and lost uncheckpointed
-uptime can delay a slow-lane reboot beyond 24 hours; do not claim a hard
-wall-clock guarantee. Never erase Zigbee keys or application settings.
+Previous-parent preference additionally requires a known SDK link cost at most
+2 and the existing repeated-loss policy to allow it. Unknown/poor parents are
+not preferred. Coordinator isolation can request a rescan without counting a
+parent MAC loss. Basic 0xFF13 byte 8 now gives the active floor for Clients;
+its existing Router rescan counter meaning is unchanged.
 
-## Reporting and identity
+## Coordinator-only telemetry hold
 
-The pinned SDK's reporting code sends via APS bindings. Holding the whole
-reporting handler would also suppress non-coordinator recipients. Implement
-destination-specific hold and latest-value flush only when it can preserve
-the other binding, local-control and protection paths. Do not claim this
-behavior until exercised against the actual reporting path.
+`zigbee_telemetry.c` wraps SDK `zcl_report` and `zcl_reportAttrs` references at
+link time. Only standard server attribute reports in Electrical Measurement
+(0x0B04) and Metering (0x0702) qualify. Failed coordinator probes, sustained
+request rejection or being unjoined latch the hold; only a subsequent matched
+coordinator reply releases it. JOINED or local enqueue success cannot do so.
 
-`zigbee-herdsman` 10.9.1 updates cached Basic fields when it receives a
-`genBasic` report or read response. A report still requires a working path,
-does not prove the cached Zigbee role, and is not a substitute for the
-runner's correlated identity and role verification.
+During the hold, bindings are enumerated without changing the table. Reports
+to known coordinator 0x0000 destinations are coalesced; other IEEE recipients
+and groups are sent normally. Relay/level reports, commands, reads, protection
+and local buttons keep their original path. Unknown IEEE destinations and
+attributes that cannot be safely queued retain the original send behavior.
 
-## Scope and candidate identities
+A bounded 32-entry RAM table stores endpoint/profile/attribute identities,
+not historical measurement values. After recovery, a full-IEEE stagger of
+0–60 seconds precedes a flush of current attribute values, at most one per
+second. Removed bindings are not resurrected. Local rejection retains the
+entry for retry; local success is not claimed as an APS delivery confirmation.
+There are no extra flash writes or changes to energy values/divisors.
 
-The GitHub-hosted allocator run `41993716294` selected PM `r20`/`cli23`
-at `0x12053022`, non-PM `r19`/`c17` at `0x1102301e`, and TS0726
-`rv3`/`cli5` at `0x11023012`. These are allocation results only, not sealed
-images. Recheck the registry at release time. The old TS0726 `rv2`/`cli4`
-tuple remains distinct and must be marked retired rather than reused. Run
-exact-head GitHub CI, the PM and non-PM matrices, and Router and Client TS0726
-builds before proposing artifacts. Hardware canaries remain staged, with the
-living-room TS0726 flash scheduled with the user.
+## Persistence, rollback and evidence
+
+Item 70 remains four bytes. B5-to-B6 migration preserves consumed reboot
+credits and verifies the CRC-protected write. A storage error cannot consume
+item-71 slow-lane credit; only valid ordinary-budget exhaustion can. Item 71
+stores cumulative six-hour wedge-uptime chunks; item 72 records a bounded last
+checkpoint reason. Lost uncheckpointed uptime can delay recovery. There is no
+guaranteed 24-hour wall-clock bound.
+
+Historical r19 understands B5 only and rejects B6 fail-closed. Direct downgrade
+to r19 is therefore not a supported automatic rollback after migration. Use a
+B6-aware rollback or supervised bench recovery; never rewrite the record to
+manufacture credits or erase network/application data.
+
+Hosted tests execute the production Client policy/adapter, actual NVM modules,
+and real report wrappers using the linker's `--wrap` mechanism. Recipient
+isolation, coalescing, current-value flush, unbinding and proof-only hold
+release are checked. PM matrix runs include these tests. All six firmware
+roles must compile at the final source SHA on GitHub-hosted runners.
+
+## Release scope still open
+
+- Real SDK callback/transaction boundaries and repeated-outage recovery.
+- Independent electrical continuity under software/watchdog/OTA reboot on the
+  exact PM board, with energy, relay configuration, bindings and keys retained.
+- Actual RF/child retention and recovery latency; the cohort model is conditional
+  on its stated assumptions, not a physical mesh measurement.
+- Remaining original-plan work: unified one-shot scheduler integration,
+  persisted connected-credit refill changes, proactive Client movement limits,
+  first-verified-contact build report, and runner/extension changes. These were
+  not supplied by the Round 8 changes or the signal-floor/telemetry follow-up.
+
+Candidate allocations remain unsealed: PM r20/cli23 at 0x12053022, non-PM
+r19/c17 at 0x1102301e, TS0726 rv3/cli5 at 0x11023012. Old TS0726 rv2/cli4
+reservations are retired. No image, index or device is promoted by this document.
+Table Left's installed r19 remains a separate critical-load incident; no code
+commit establishes that it is reachable or safe to reset.
