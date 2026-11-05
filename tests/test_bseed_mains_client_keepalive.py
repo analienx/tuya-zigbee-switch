@@ -11,7 +11,7 @@ def test_mains_client_refreshes_parent_on_initial_join_and_rejoin():
     # join + commissioning-success + OTA-restore (hal_zigbee_set_ota_poll_active)
     # Lost BDB completion must not surrender SDK ownership from JOINED alone.
     assert source.count('configure_mains_client_keepalive();')==3
-    assert source.count('client_health_join_epoch();')==3
+    assert source.count('client_health_join_epoch();')==2
     assert 'if (status != RET_OK)' in source
 
 

@@ -343,14 +343,14 @@ static uint32_t router_last_probe_ms;
 static uint32_t router_last_positive_ms; /* only coordinator ZDO replies */
 static uint32_t router_last_inbound_ms;  /* any authenticated application ZCL */
 static uint32_t router_observation_epoch_ms;
-static bool router_observation_started, router_positive_seen, router_inbound_seen;
+static bool     router_observation_started, router_positive_seen, router_inbound_seen;
 static uint32_t router_one_shot_ms;
 
 void telink_zigbee_hal_router_note_inbound(void) {
     /* Neighbors can reach this Router even when coordinator 0x0000 cannot.
      * Do not discard a pending coordinator timeout or its failure history. */
     router_last_inbound_ms = hal_millis();
-    router_inbound_seen = true;
+    router_inbound_seen    = true;
 }
 
 static void router_coordinator_node_desc_response(void *arg) {
@@ -367,7 +367,7 @@ static void router_coordinator_node_desc_response(void *arg) {
         rsp->seq_num == router_probe_sequence &&
         rsp->status == ZDO_SUCCESS && rsp->nwk_addr_interest == 0x0000u) {
         router_last_positive_ms = hal_millis();
-        router_positive_seen = true;
+        router_positive_seen    = true;
         bseed_router_rescue_budget_note_good_coordinator(router_last_positive_ms);
         router_probe_failures    = 0;
         router_probe_rejections  = 0;
@@ -537,7 +537,7 @@ void telink_zigbee_hal_router_recovery_tick(void) {
     uint32_t now = hal_millis();
 
     if (!router_observation_started) {
-        router_observation_started = true;
+        router_observation_started  = true;
         router_observation_epoch_ms = now;
     }
 

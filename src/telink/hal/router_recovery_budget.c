@@ -76,6 +76,7 @@ bseed_budget_result_t bseed_router_rescue_budget_try_consume(void) {
     budget_load();
     if (!budget_valid)
         return BSEED_BUDGET_STORAGE_ERROR;
+
     if (used_reboots >= BSEED_RESCUE_MAX)
         return BSEED_BUDGET_EXHAUSTED;
 

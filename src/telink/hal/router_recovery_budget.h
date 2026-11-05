@@ -7,6 +7,7 @@
 /* Persistently cap automatic Router rescue resets across power cycles.
  * Never delete Zigbee keys, roles, configuration, or metering NVM. */
 bool bseed_router_rescue_budget_consume(void);
+
 typedef enum {
     BSEED_BUDGET_CONSUMED,
     BSEED_BUDGET_EXHAUSTED,
