@@ -559,6 +559,8 @@ void telink_zigbee_hal_router_recovery_tick(void) {
      * ordinary budget is exhausted, accumulate the separate slow-lane credit.
      * Never interrupt OTA or a factory-new commissioning session. */
     bool wedge_eligible = router_one_shot_stalled &&
+                          (!zb_isDeviceJoinedNwk() ||
+                           router_probe_failures >= ROUTER_PROBE_FAILURE_THRESHOLD) &&
                           !zb_isDeviceFactoryNew() &&
                           !telink_zigbee_hal_router_ota_in_progress();
     bool slow_ready = bseed_wedge_credit_tick(now, wedge_eligible);

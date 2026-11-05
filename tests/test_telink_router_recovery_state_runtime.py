@@ -158,8 +158,9 @@ int main(void) {
     zdo_callback(&ind);
     assert(!router_probe_pending && router_probe_failures==0 && positives==1);
     assert(router_one_shot_stalled && rejoin_calls==1);
+    router_reboot_scheduled=false;
     now+=3600000; telink_zigbee_hal_router_recovery_tick();
-    assert(router_one_shot_stalled && rejoin_calls==1);
+    assert(router_one_shot_stalled && rejoin_calls==1 && rescue_calls==1);
     /* A later outage with the ordinary budget exhausted can still consume
      * accumulated wedge credit and reset the orphaned SDK state. */
     joined=false; budget_used=2; router_reboot_scheduled=false;
