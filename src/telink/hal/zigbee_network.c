@@ -1021,9 +1021,9 @@ void telink_zigbee_hal_client_recovery_tick(void) {
     bool checkpoint_after_previous_owner =
         network_sdk_backoff_started_once &&
         network_recovery_state == TELINK_NETWORK_RECOVERY_IDLE &&
-        ((bseed_recovery_degraded(&client_coord_core) || queue_stalled) &&
-         (uint32_t)(now - client_outage_since_ms) >=
-         CLIENT_COORD_CHECKPOINT_MS + stagger ||
+        (((bseed_recovery_degraded(&client_coord_core) || queue_stalled) &&
+          (uint32_t)(now - client_outage_since_ms) >=
+          CLIENT_COORD_CHECKPOINT_MS + stagger) ||
          (client_not_joined_started &&
           (uint32_t)(now - client_not_joined_since_ms) >=
           CLIENT_COORD_CHECKPOINT_MS + stagger));
