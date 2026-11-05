@@ -18,6 +18,10 @@ PRELUDE = r"""
 #include <limits.h>
 #include "hal/router_recovery_policy.h"
 #include "hal/bseed_recovery_core.h"
+#include "telink/hal/recovery_diagnostics.h"
+bool bseed_recovery_diag_record(bseed_rescue_reason_t reason, uint8_t sdk_state) {
+    (void)reason; (void)sdk_state; return true;
+}
 typedef enum { BSEED_BUDGET_CONSUMED, BSEED_BUDGET_EXHAUSTED,
                BSEED_BUDGET_STORAGE_ERROR } bseed_budget_result_t;
 #define ZB_ROUTER_ROLE 1
