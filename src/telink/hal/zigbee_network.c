@@ -1165,9 +1165,13 @@ static bool request_rejoin_with_backoff_impl(bool allow_joined,
     u8 res =
         zb_rejoinReqWithBackOff(zb_apsChannelMaskGet(), g_bdbAttrs.scanDuration);
     if (res != RET_OK) {
-        network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
-        /* The SDK refused synchronously; no operation was accepted. */
-        network_sdk_backoff_started_once = false;
+        /* Some SDKs can emit a terminal callback synchronously. If that
+         * callback already changed the owner state, a contradictory return
+         * code cannot retroactively prove that no operation existed. */
+        if (network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN) {
+            network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
+            network_sdk_backoff_started_once = false;
+        }
         firmware_health_increment(&firmware_health.rejoin_failure);
         printf("Failed to start network rejoin/backoff, status: %d\r\n", res);
         return false;
@@ -1413,9 +1417,10 @@ void hal_zigbee_start_network_steering(void) {
     network_sdk_steering_started_once = true;
     u8 res = bdb_networkSteerStart();
     if (res != RET_OK) {
-        network_sdk_steering_started_once = false;
-        if (network_recovery_state == TELINK_NETWORK_RECOVERY_STEERING)
+        if (network_recovery_state == TELINK_NETWORK_RECOVERY_STEERING) {
             network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
+            network_sdk_steering_started_once = false;
+        }
         printf("Failed to start network steering, status: %d\r\n", res);
     }
 }
