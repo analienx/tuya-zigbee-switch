@@ -41,12 +41,31 @@ static inline bool bseed_recovery_wedged(const bseed_recovery_core_t *core,
            (uint32_t)(now - core->pending_since_ms) >= BSEED_RECOVERY_WEDGE_MS;
 }
 
-static inline uint32_t bseed_recovery_stagger_ms(const uint8_t ieee[8]) {
-    uint32_t hash = 2166136261u;
+/* A stable, well-mixed full-IEEE hash. The avalanche is important for
+ * sequential vendor serial numbers, which must not bunch Router rescans or
+ * checkpoint reboots into a few milliseconds. Use separate domain salts for
+ * distinct radio operations. Never base a fleet stagger on raw IEEE bytes. */
+static inline uint32_t bseed_recovery_hash_ieee(const uint8_t ieee[8],
+                                                 uint32_t domain) {
+    uint32_t hash = 2166136261u ^ domain;
 
     for (unsigned i = 0; i < 8u; i++)
         hash = (hash ^ ieee[i]) * 16777619u;
-    return hash % 30001u;
+    hash ^= hash >> 16;
+    hash *= 0x7feb352du;
+    hash ^= hash >> 15;
+    hash *= 0x846ca68bu;
+    hash ^= hash >> 16;
+    return hash;
+}
+
+static inline uint32_t bseed_recovery_action_stagger_ms(
+    const uint8_t ieee[8], uint32_t domain, uint32_t window_ms) {
+    return window_ms ? bseed_recovery_hash_ieee(ieee, domain) % window_ms : 0u;
+}
+
+static inline uint32_t bseed_recovery_stagger_ms(const uint8_t ieee[8]) {
+    return bseed_recovery_action_stagger_ms(ieee, 0x50524f42u, 30001u);
 }
 
 static inline uint32_t bseed_recovery_backoff_ms(uint8_t failures) {
