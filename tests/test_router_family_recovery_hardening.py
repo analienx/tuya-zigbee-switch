@@ -294,8 +294,8 @@ def test_persistent_router_budget_is_required_before_both_rescue_paths():
     budget = Path("src/telink/hal/router_recovery_budget.c").read_text(encoding="utf-8")
     items = Path("src/device_config/nvm_items.h").read_text(encoding="utf-8")
     make = Path("src/telink/Makefile").read_text(encoding="utf-8")
-    assert network.count("bseed_router_rescue_budget_consume()") == 3
-    assert "slow_ready && bseed_wedge_credit_consume()" in network
+    assert network.count("bseed_router_rescue_budget_consume()") == 2
+    assert "result == BSEED_BUDGET_EXHAUSTED && slow_ready" in network
     assert "bseed_router_rescue_budget_note_good_coordinator(" in network
     assert "bseed_router_rescue_budget_note_failure();" in network
     assert re.search(r"#define\s+NV_ITEM_ROUTER_RESCUE_BUDGET\s+70\b", items)

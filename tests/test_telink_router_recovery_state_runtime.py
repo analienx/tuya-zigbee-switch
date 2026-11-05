@@ -17,6 +17,7 @@ PRELUDE = r"""
 #include <assert.h>
 #include <limits.h>
 #include "hal/router_recovery_policy.h"
+#include "telink/hal/router_recovery_budget.h"
 #define ZB_ROUTER_ROLE 1
 #define ZB_COORDINATOR_ROLE 0
 #define RET_OK 0
@@ -46,6 +47,7 @@ static struct {uint8_t scanDuration;} g_bdbAttrs;
 static uint32_t now, probes, rejoin_calls, rescue_calls, budget_used, positives, failed;
 static bool joined = true, factory_new, ota_active;
 static bool slow_credit_ready;
+static bool budget_storage_error;
 static uint8_t pending_sequence;
 static void (*zdo_callback)(void *);
 static uint32_t hal_millis(void) {return now;}
@@ -66,6 +68,10 @@ static zdo_status_t zb_zdoNodeDescReq(uint16_t dst,
 static void schedule_reboot(uint32_t ms) {assert(ms==2000);rescue_calls++;}
 static bool bseed_router_rescue_budget_consume(void)
     {if(budget_used>=2)return false;budget_used++;return true;}
+static bseed_budget_result_t bseed_router_rescue_budget_try_consume(void) {
+    if (budget_storage_error) return BSEED_BUDGET_STORAGE_ERROR;
+    return bseed_router_rescue_budget_consume() ? BSEED_BUDGET_CONSUMED : BSEED_BUDGET_EXHAUSTED;
+}
 static bool bseed_wedge_credit_tick(uint32_t now_ms, bool wedged)
     {(void)now_ms; return wedged && slow_credit_ready;}
 static bool bseed_wedge_credit_consume(void)
@@ -150,6 +156,10 @@ int main(void) {
      * accumulated wedge credit and reset the orphaned SDK state. */
     joined=false; budget_used=2; router_reboot_scheduled=false;
     slow_credit_ready=true;
+    budget_storage_error=true;
+    telink_zigbee_hal_router_recovery_tick();
+    assert(rescue_calls==1 && !router_reboot_scheduled && slow_credit_ready);
+    budget_storage_error=false;
     telink_zigbee_hal_router_recovery_tick();
     assert(rescue_calls==2 && router_reboot_scheduled && !slow_credit_ready);
     return 0;

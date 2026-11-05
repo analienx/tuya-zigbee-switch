@@ -19,6 +19,7 @@ typedef struct {
 } bseed_rescue_record_t;
 
 static bool     budget_loaded;
+static bool     budget_valid;
 static uint8_t  used_reboots;
 static bool     good_run_started;
 static uint32_t good_run_since;
@@ -38,14 +39,17 @@ static void budget_load(void) {
                                             sizeof(r), (uint8_t *)&r);
     if (st == HAL_NVM_NOT_FOUND) {
         used_reboots = 0;
+        budget_valid = true;
     } else if (st == HAL_NVM_SUCCESS &&
                r.magic == BSEED_RESCUE_MAGIC &&
                r.used <= BSEED_RESCUE_MAX &&
                r.used_inverse == (uint8_t)(r.used ^ 0xffu) &&
                r.crc == budget_crc(&r)) {
         used_reboots = r.used;
+        budget_valid = true;
     } else {
         used_reboots = BSEED_RESCUE_MAX;
+        budget_valid = false;
     }
 }
 
@@ -68,19 +72,26 @@ static bool budget_store(uint8_t used) {
            verify.used_inverse == r.used_inverse && verify.crc == r.crc;
 }
 
-bool bseed_router_rescue_budget_consume(void) {
+bseed_budget_result_t bseed_router_rescue_budget_try_consume(void) {
     budget_load();
+    if (!budget_valid)
+        return BSEED_BUDGET_STORAGE_ERROR;
     if (used_reboots >= BSEED_RESCUE_MAX)
-        return false;
+        return BSEED_BUDGET_EXHAUSTED;
 
     if (!budget_store((uint8_t)(used_reboots + 1u))) {
         used_reboots = BSEED_RESCUE_MAX;
-        return false;
+        budget_valid = false;
+        return BSEED_BUDGET_STORAGE_ERROR;
     }
     used_reboots++;
     good_run_started = false;
     good_replies     = 0;
-    return true;
+    return BSEED_BUDGET_CONSUMED;
+}
+
+bool bseed_router_rescue_budget_consume(void) {
+    return bseed_router_rescue_budget_try_consume() == BSEED_BUDGET_CONSUMED;
 }
 
 void bseed_router_rescue_budget_note_failure(void) {
@@ -90,7 +101,7 @@ void bseed_router_rescue_budget_note_failure(void) {
 
 void bseed_router_rescue_budget_note_good_coordinator(uint32_t now_ms) {
     budget_load();
-    if (used_reboots == 0)
+    if (!budget_valid || used_reboots == 0)
         return;
 
     if (!good_run_started) {
@@ -104,8 +115,10 @@ void bseed_router_rescue_budget_note_good_coordinator(uint32_t now_ms) {
         (uint32_t)(now_ms - good_run_since) >= BSEED_RESCUE_GOOD_MS) {
         if (budget_store(0))
             used_reboots = 0;
-        else
+        else {
             used_reboots = BSEED_RESCUE_MAX;
+            budget_valid = false;
+        }
         good_run_started = false;
         good_replies     = 0;
     }

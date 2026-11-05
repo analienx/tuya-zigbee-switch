@@ -561,8 +561,10 @@ void telink_zigbee_hal_router_recovery_tick(void) {
     if (wedge_eligible && !router_reboot_scheduled &&
         (uint32_t)(now - router_one_shot_ms) >=
         ROUTER_ONE_SHOT_DEADLINE_MS + reboot_stagger_ms) {
-        if (bseed_router_rescue_budget_consume() ||
-            (slow_ready && bseed_wedge_credit_consume())) {
+        bseed_budget_result_t result = bseed_router_rescue_budget_try_consume();
+        if (result == BSEED_BUDGET_CONSUMED ||
+            (result == BSEED_BUDGET_EXHAUSTED && slow_ready &&
+             bseed_wedge_credit_consume())) {
             router_reboot_scheduled = true;
             schedule_reboot(2000);
             return;
@@ -1007,20 +1009,8 @@ void bdb_identify_callback(u8 endpoint, u16 srcAddr, u16 identifyTime) {
 
 hal_zigbee_network_status_t hal_zigbee_get_network_status(void) {
     if (zb_isDeviceJoinedNwk()) {
-        // Rejoin success is asynchronous. Synchronize our application-side
-        // state from the authoritative stack state so future losses can start
-        // a fresh recovery operation.
-        if (network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN) {
-            firmware_health_increment(&firmware_health.rejoin_success);
-#ifdef BSEED_MAINS_CLIENT
-            /* Restore the join epoch and keepalive after a lost BDB success.
-             * Clearing REJOIN below makes this accounting idempotent. */
-            client_health_join_epoch();
-            configure_mains_client_keepalive();
-#endif
-        }
-        network_recovery_state      = TELINK_NETWORK_RECOVERY_IDLE;
-        network_start_retry_pending = false;
+        /* Membership is not a terminal callback for an outstanding SDK
+         * operation. Report the stack state without surrendering ownership. */
         return HAL_ZIGBEE_NETWORK_JOINED;
     }
 #if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
@@ -1057,7 +1047,6 @@ void hal_zigbee_leave_network(void) {
 
 void hal_zigbee_start_network_steering(void) {
     if (zb_isDeviceJoinedNwk()) {
-        network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE;
         return;
     }
 
