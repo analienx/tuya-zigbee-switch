@@ -13,8 +13,8 @@ typedef struct {
     uint8_t checksum;
 } wedge_credit_record_t;
 
-static bool credit_loaded, credit_usable, wedge_active;
-static uint8_t credit_chunks;
+static bool     credit_loaded, credit_usable, wedge_active;
+static uint8_t  credit_chunks;
 static uint32_t wedge_checkpoint_ms;
 
 static uint8_t credit_checksum(const wedge_credit_record_t *r) {
@@ -24,10 +24,11 @@ static uint8_t credit_checksum(const wedge_credit_record_t *r) {
 static void credit_load(void) {
     if (credit_loaded)
         return;
+
     credit_loaded = true;
-    wedge_credit_record_t r = { 0 };
-    hal_nvm_status_t status = hal_nvm_read(NV_ITEM_RECOVERY_WEDGE_CREDIT,
-                                           sizeof(r), (uint8_t *)&r);
+    wedge_credit_record_t r      = { 0 };
+    hal_nvm_status_t      status = hal_nvm_read(NV_ITEM_RECOVERY_WEDGE_CREDIT,
+                                                sizeof(r), (uint8_t *)&r);
     if (status == HAL_NVM_NOT_FOUND) {
         credit_chunks = 0u;
         credit_usable = true;
@@ -44,14 +45,17 @@ static bool credit_store(uint8_t chunks) {
     wedge_credit_record_t r = {
         WEDGE_CREDIT_MAGIC, chunks, (uint8_t)(chunks ^ 0xffu), 0u
     };
+
     r.checksum = credit_checksum(&r);
     if (hal_nvm_write(NV_ITEM_RECOVERY_WEDGE_CREDIT, sizeof(r),
                       (uint8_t *)&r) != HAL_NVM_SUCCESS)
         return false;
+
     wedge_credit_record_t verify = { 0 };
     if (hal_nvm_read(NV_ITEM_RECOVERY_WEDGE_CREDIT, sizeof(verify),
                      (uint8_t *)&verify) != HAL_NVM_SUCCESS)
         return false;
+
     return verify.magic == r.magic && verify.chunks == r.chunks &&
            verify.inverse == r.inverse && verify.checksum == r.checksum;
 }
@@ -60,12 +64,13 @@ bool bseed_wedge_credit_tick(uint32_t now_ms, bool wedged) {
     credit_load();
     if (!credit_usable)
         return false;
+
     if (!wedged) {
         wedge_active = false;
         return false;
     }
     if (!wedge_active) {
-        wedge_active = true;
+        wedge_active        = true;
         wedge_checkpoint_ms = now_ms;
     }
     uint32_t elapsed = (uint32_t)(now_ms - wedge_checkpoint_ms);
@@ -78,7 +83,7 @@ bool bseed_wedge_credit_tick(uint32_t now_ms, bool wedged) {
             return false;
         }
         wedge_checkpoint_ms += (new_chunks - credit_chunks) * WEDGE_CREDIT_CHUNK_MS;
-        credit_chunks = (uint8_t)new_chunks;
+        credit_chunks        = (uint8_t)new_chunks;
     }
     return credit_chunks == WEDGE_CREDIT_MAX;
 }
@@ -87,11 +92,12 @@ bool bseed_wedge_credit_consume(void) {
     credit_load();
     if (!credit_usable || !wedge_active || credit_chunks != WEDGE_CREDIT_MAX)
         return false;
+
     if (!credit_store(0u)) {
         credit_usable = false;
         return false;
     }
     credit_chunks = 0u;
-    wedge_active = false;
+    wedge_active  = false;
     return true;
 }
