@@ -9,7 +9,7 @@ def test_client_probe_and_backoff_with_persistent_budget(tmp_path):
     source = (ROOT / "src/telink/hal/zigbee_network.c").read_text(encoding="utf8")
     section = source.split("#ifdef BSEED_MAINS_CLIENT\n\n/* A parent poll ACK", 1)[1]
     section = "/* A parent poll ACK" + section.split(
-        "\n#endif\n\n#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE", 1)[0]
+        "\n#endif\n\n// Telink BDB storage", 1)[0]
     prelude = r'''
 #include <assert.h>
 #include <stdbool.h>

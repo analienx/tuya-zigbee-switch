@@ -308,91 +308,7 @@ static void client_health_recovery_tick(void) {
 
 #endif
 
-#ifdef BSEED_MAINS_CLIENT
 
-/* A parent poll ACK is local evidence only. Probe the coordinator directly
- * and supervise an SDK-owned backoff without releasing its radio ownership. */
-#define CLIENT_COORD_PROBE_MS       (10u * 60u * 1000u)
-#define CLIENT_COORD_TIMEOUT_MS     (30u * 1000u)
-#define CLIENT_BACKOFF_WEDGE_MS     (45u * 60u * 1000u)
-static bseed_recovery_core_t client_coord_core;
-static bool client_coord_started, client_reboot_scheduled;
-static uint32_t client_last_probe_ms, client_outage_since_ms;
-
-static void client_coordinator_node_desc_response(void *arg) {
-    if (arg == NULL)
-        return;
-    zdo_zdpDataInd_t *ind = (zdo_zdpDataInd_t *)arg;
-    if (ind->length < sizeof(zdo_node_descript_resp_t))
-        return;
-    zdo_node_descript_resp_t *rsp = (zdo_node_descript_resp_t *)ind->zpdu;
-    if (bseed_recovery_probe_answer(&client_coord_core, rsp->seq_num,
-                                    ind->src_addr, rsp->nwk_addr_interest,
-                                    rsp->status == ZDO_SUCCESS)) {
-        client_outage_since_ms = hal_millis();
-        bseed_router_rescue_budget_note_good_coordinator(client_outage_since_ms);
-    }
-}
-
-void telink_zigbee_hal_client_recovery_tick(void) {
-    uint32_t now = hal_millis();
-    if (!client_coord_started) {
-        bseed_recovery_init(&client_coord_core, g_zbMacPib.extAddress, now, false);
-        client_coord_started = true;
-        client_last_probe_ms = now;
-        client_outage_since_ms = now;
-    }
-    if (zb_isDeviceFactoryNew() || ota_fast_poll_active) {
-        /* A cancelled probe is not a coordinator failure. */
-        client_coord_core.probe_pending = false;
-        (void)bseed_wedge_credit_tick(now, false);
-        return;
-    }
-    if (client_coord_core.probe_pending &&
-        (uint32_t)(now - client_last_probe_ms) >= CLIENT_COORD_TIMEOUT_MS) {
-        bseed_recovery_probe_timeout(&client_coord_core, now,
-                                     client_coord_core.probe_sequence);
-        bseed_router_rescue_budget_note_failure();
-    }
-    if (zb_isDeviceJoinedNwk() && !client_coord_core.probe_pending &&
-        (uint32_t)(now - client_last_probe_ms) >=
-        (client_coord_core.probe_failures ? BSEED_RECOVERY_PROBE_SPACING_MS :
-         CLIENT_COORD_PROBE_MS + client_coord_core.stagger_ms)) {
-        zdo_node_descriptor_req_t req;
-        req.nwk_addr_interest = 0u;
-        client_last_probe_ms = now;
-        /* Arm before calling the SDK so synchronous completions can match the
-         * sequence written by the SDK through this pointer. Rejection cancels
-         * the request without counting it as a failed coordinator probe. */
-        if (bseed_recovery_probe_begin(&client_coord_core, 0u) &&
-            zb_zdoNodeDescReq(0u, &req, &client_coord_core.probe_sequence,
-                              client_coordinator_node_desc_response) != ZDO_SUCCESS)
-            client_coord_core.probe_pending = false;
-    }
-    bool link_unreachable = !zb_isDeviceJoinedNwk() ||
-                            bseed_recovery_degraded(&client_coord_core);
-    bool wedged = network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN &&
-                  link_unreachable &&
-                  (uint32_t)(now - network_last_start_attempt) >= CLIENT_BACKOFF_WEDGE_MS &&
-                  (uint32_t)(now - client_outage_since_ms) >= CLIENT_BACKOFF_WEDGE_MS;
-    bool slow_ready = bseed_wedge_credit_tick(now, wedged);
-    uint32_t hash = 2166136261u;
-    for (unsigned i = 0; i < sizeof(g_zbMacPib.extAddress); i++)
-        hash = (hash ^ g_zbMacPib.extAddress[i]) * 16777619u;
-    uint32_t stagger = hash % (15u * 60u * 1000u);
-    if (wedged && !client_reboot_scheduled &&
-        (uint32_t)(now - network_last_start_attempt) >= CLIENT_BACKOFF_WEDGE_MS + stagger) {
-        bseed_budget_result_t result = bseed_router_rescue_budget_try_consume();
-        if (result == BSEED_BUDGET_CONSUMED ||
-            (result == BSEED_BUDGET_EXHAUSTED && slow_ready &&
-             bseed_wedge_credit_consume())) {
-            client_reboot_scheduled = true;
-            schedule_reboot(2000);
-        }
-    }
-}
-
-#endif
 
 #if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
 
@@ -876,6 +792,92 @@ zdo_appIndCb_t zdo_callbacks = {
     NULL,                            // tc detects that the frame counter is near limit
     zdo_network_status_callback,     // raw NWK status/address; never initiate recovery here
 };
+
+#ifdef BSEED_MAINS_CLIENT
+
+/* A parent poll ACK is local evidence only. Probe the coordinator directly
+ * and supervise an SDK-owned backoff without releasing its radio ownership. */
+#define CLIENT_COORD_PROBE_MS       (10u * 60u * 1000u)
+#define CLIENT_COORD_TIMEOUT_MS     (30u * 1000u)
+#define CLIENT_BACKOFF_WEDGE_MS     (45u * 60u * 1000u)
+static bseed_recovery_core_t client_coord_core;
+static bool client_coord_started, client_reboot_scheduled;
+static uint32_t client_last_probe_ms, client_outage_since_ms;
+
+static void client_coordinator_node_desc_response(void *arg) {
+    if (arg == NULL)
+        return;
+    zdo_zdpDataInd_t *ind = (zdo_zdpDataInd_t *)arg;
+    if (ind->length < sizeof(zdo_node_descript_resp_t))
+        return;
+    zdo_node_descript_resp_t *rsp = (zdo_node_descript_resp_t *)ind->zpdu;
+    if (bseed_recovery_probe_answer(&client_coord_core, rsp->seq_num,
+                                    ind->src_addr, rsp->nwk_addr_interest,
+                                    rsp->status == ZDO_SUCCESS)) {
+        client_outage_since_ms = hal_millis();
+        bseed_router_rescue_budget_note_good_coordinator(client_outage_since_ms);
+    }
+}
+
+void telink_zigbee_hal_client_recovery_tick(void) {
+    uint32_t now = hal_millis();
+    if (!client_coord_started) {
+        bseed_recovery_init(&client_coord_core, g_zbMacPib.extAddress, now, false);
+        client_coord_started = true;
+        client_last_probe_ms = now;
+        client_outage_since_ms = now;
+    }
+    if (zb_isDeviceFactoryNew() || ota_fast_poll_active) {
+        /* A cancelled probe is not a coordinator failure. */
+        client_coord_core.probe_pending = false;
+        (void)bseed_wedge_credit_tick(now, false);
+        return;
+    }
+    if (client_coord_core.probe_pending &&
+        (uint32_t)(now - client_last_probe_ms) >= CLIENT_COORD_TIMEOUT_MS) {
+        bseed_recovery_probe_timeout(&client_coord_core, now,
+                                     client_coord_core.probe_sequence);
+        bseed_router_rescue_budget_note_failure();
+    }
+    if (zb_isDeviceJoinedNwk() && !client_coord_core.probe_pending &&
+        (uint32_t)(now - client_last_probe_ms) >=
+        (client_coord_core.probe_failures ? BSEED_RECOVERY_PROBE_SPACING_MS :
+         CLIENT_COORD_PROBE_MS + client_coord_core.stagger_ms)) {
+        zdo_node_descriptor_req_t req;
+        req.nwk_addr_interest = 0u;
+        client_last_probe_ms = now;
+        /* Arm before calling the SDK so synchronous completions can match the
+         * sequence written by the SDK through this pointer. Rejection cancels
+         * the request without counting it as a failed coordinator probe. */
+        if (bseed_recovery_probe_begin(&client_coord_core, 0u) &&
+            zb_zdoNodeDescReq(0u, &req, &client_coord_core.probe_sequence,
+                              client_coordinator_node_desc_response) != ZDO_SUCCESS)
+            client_coord_core.probe_pending = false;
+    }
+    bool link_unreachable = !zb_isDeviceJoinedNwk() ||
+                            bseed_recovery_degraded(&client_coord_core);
+    bool wedged = network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN &&
+                  link_unreachable &&
+                  (uint32_t)(now - network_last_start_attempt) >= CLIENT_BACKOFF_WEDGE_MS &&
+                  (uint32_t)(now - client_outage_since_ms) >= CLIENT_BACKOFF_WEDGE_MS;
+    bool slow_ready = bseed_wedge_credit_tick(now, wedged);
+    uint32_t hash = 2166136261u;
+    for (unsigned i = 0; i < sizeof(g_zbMacPib.extAddress); i++)
+        hash = (hash ^ g_zbMacPib.extAddress[i]) * 16777619u;
+    uint32_t stagger = hash % (15u * 60u * 1000u);
+    if (wedged && !client_reboot_scheduled &&
+        (uint32_t)(now - network_last_start_attempt) >= CLIENT_BACKOFF_WEDGE_MS + stagger) {
+        bseed_budget_result_t result = bseed_router_rescue_budget_try_consume();
+        if (result == BSEED_BUDGET_CONSUMED ||
+            (result == BSEED_BUDGET_EXHAUSTED && slow_ready &&
+             bseed_wedge_credit_consume())) {
+            client_reboot_scheduled = true;
+            schedule_reboot(2000);
+        }
+    }
+}
+
+#endif
 
 // Telink BDB storage
 static bdb_commissionSetting_t bdb_commission_setting = {
