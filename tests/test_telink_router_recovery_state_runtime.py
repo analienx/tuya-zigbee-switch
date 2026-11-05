@@ -6,6 +6,7 @@ executes it against mocked, deterministic Telink callbacks/timer conditions.
 """
 from pathlib import Path
 import subprocess
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
 NETWORK = ROOT / "src/telink/hal/zigbee_network.c"
@@ -277,3 +278,102 @@ int main(void) {
     assert built.returncode==0, built.stdout+built.stderr
     run = subprocess.run([str(binary)],capture_output=True,text=True,timeout=15)
     assert run.returncode==0, run.stdout+run.stderr
+
+def test_late_bdb_callback_cannot_reassign_router_radio_owner(tmp_path):
+    """Production BDB callback + both SDK recovery entry points.
+
+    A backoff terminal callback can repeat after JOINED. Because Telink BDB
+    supplies no operation token, we quarantine subsequent owners until reboot
+    instead of attributing an old SUCCESS to a newer one-shot.
+    """
+    source = NETWORK.read_text(encoding="utf-8")
+    router = "/* A Router" + source.split(
+        "#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE\n\n/* A Router", 1
+    )[1].split("\n#endif\n\n// Telink ZDO callbacks", 1)[0]
+    rejoin = "static bool start_rejoin_with_backoff(void) {" + source.split(
+        "static bool start_rejoin_with_backoff(void) {", 1
+    )[1].split("static void notify_about_network_status_change()", 1)[0]
+    cb = "void bdb_commissioning_callback(u8 status, void *arg) {" + source.split(
+        "void bdb_commissioning_callback(u8 status, void *arg) {", 1
+    )[1].split("void bdb_identify_callback", 1)[0]
+    statuses = sorted(set(re.findall(r"BDB_COMMISSION_STA_\w+", cb)))
+    status_defines = "\n".join(
+        f"#define {name} {i + 1}" for i, name in enumerate(statuses)
+    )
+    extras = r"""
+#define BSEED_PM_B28WRPVX 1
+static unsigned backoff_calls, announces;
+static bool network_start_retry_pending;
+static bool network_start_ready(void) {
+    return !network_start_retry_pending ||
+           (uint32_t)(now-network_last_start_attempt)>=5000u;
+}
+static void network_start_attempt(void) {
+    network_start_retry_pending=true; network_last_start_attempt=now;
+}
+static bool request_rejoin_with_backoff(bool parent_stale);
+static u8 zb_rejoinReqWithBackOff(uint32_t mask,u8 duration) {
+    (void)mask; (void)duration; backoff_calls++; return RET_OK;
+}
+static void app_rearm_network_announcement(void) { announces++; }
+static void telink_zigbee_hal_request_ota_query(void) {}
+static void notify_about_network_status_change(void) {}
+"""
+    scenario = r"""
+int main(void) {
+    /* A: SDK-managed backoff is the one accepted recovery owner. */
+    now=20000u; joined=false;
+    assert(request_rejoin_with_backoff(false));
+    assert(backoff_calls==1 && network_sdk_backoff_started_once);
+    joined=true;
+    bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,0);
+    assert(network_recovery_state==TELINK_NETWORK_RECOVERY_IDLE);
+
+    /* Simulate real coordinator-response timeouts after A: the Router
+     * would otherwise qualify a one-shot B during this same boot. */
+    now=2u*60u*60u*1000u;
+    router_observation_started=true; router_observation_epoch_ms=0u;
+    router_probe_initialized=true; router_last_probe_ms=now;
+    router_probe_failures=ROUTER_PROBE_FAILURE_THRESHOLD;
+    telink_zigbee_hal_router_recovery_tick();
+    assert(rejoin_calls==0 && !router_one_shot_active);
+    /* Old A SUCCESS/FALSE completion is untagged and may duplicate:
+     * B was never started, so it cannot lose ownership to old A. */
+    bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,0);
+    bdb_commissioning_callback(BDB_COMMISSION_STA_REJOIN_FAILURE,0);
+    assert(!router_one_shot_active && backoff_calls==1);
+    joined=false;
+    assert(!request_rejoin_with_backoff(false) && backoff_calls==1);
+
+    /* A new reboot epoch may start one Router one-shot B. */
+    network_sdk_backoff_started_once=false; /* modeled software reboot */
+    network_start_retry_pending=false;
+    joined=true; router_probe_initialized=true;
+    now+=ROUTER_REJOIN_COOLDOWN_MS+20u*60u*1000u;
+    router_last_probe_ms=now; router_probe_failures=4u;
+    telink_zigbee_hal_router_recovery_tick();
+    assert(rejoin_calls==1 && router_one_shot_active);
+    bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,0);
+    assert(!router_one_shot_active && router_one_shot_attempted);
+    joined=false;
+    /* A delayed B duplicate cannot clear a later backoff: it is refused. */
+    assert(!request_rejoin_with_backoff(false) && backoff_calls==1);
+    bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,0);
+    assert(backoff_calls==1 && !router_one_shot_active);
+    return 0;
+}
+"""
+    path = tmp_path / "router_bdb_ownership.c"
+    binary = tmp_path / "router_bdb_ownership"
+    path.write_text(PRELUDE + "\n" + status_defines + "\n" + extras +
+                    "\n" + router + "\n" + rejoin + "\n" + cb +
+                    "\n" + scenario, encoding="utf-8")
+    result = subprocess.run(
+        ["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
+         "-Wno-unused-parameter", "-I", str(ROOT / "src"), str(path),
+         "-o", str(binary)], capture_output=True, text=True, timeout=30
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    result = subprocess.run([str(binary)], capture_output=True, text=True,
+                            timeout=15)
+    assert result.returncode == 0, result.stdout + result.stderr
