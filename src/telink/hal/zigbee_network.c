@@ -200,6 +200,7 @@ static hal_network_status_change_callback_t network_status_change_callback =
     NULL;
 
 static bool request_rejoin_with_backoff(bool parent_stale);
+static bool request_rejoin_for_isolated_coordinator(void);
 
 #ifdef BSEED_MAINS_CLIENT
 
@@ -953,7 +954,7 @@ void telink_zigbee_hal_client_recovery_tick(void) {
         client_health_last_recovery_ms   = now;
         client_health_recovery_attempted = true;
         printf("Mains client: coordinator isolation; secure rejoin/backoff\r\n");
-        (void)request_rejoin_with_backoff(true);
+        (void)request_rejoin_for_isolated_coordinator();
     }
 }
 
@@ -986,14 +987,15 @@ static bool start_rejoin_with_backoff(void) {
     return request_rejoin_with_backoff(false);
 }
 
-static bool request_rejoin_with_backoff(bool parent_stale) {
+static bool request_rejoin_with_backoff_impl(bool allow_joined,
+                                           bool parent_stale) {
 #if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE
     /* Every caller, not only steering and PARENT_LOST, must respect a
      * pending/orphaned one-shot. BDB callbacks are not operation-tagged. */
     if (router_one_shot_active || router_one_shot_stalled)
         return false;
 #endif
-    if ((zb_isDeviceJoinedNwk() && !parent_stale) || zb_isDeviceFactoryNew() ||
+    if ((zb_isDeviceJoinedNwk() && !allow_joined) || zb_isDeviceFactoryNew() ||
         network_recovery_state != TELINK_NETWORK_RECOVERY_IDLE ||
         !network_start_ready()) {
         return false;
@@ -1015,9 +1017,13 @@ static bool request_rejoin_with_backoff(bool parent_stale) {
     if (parent_stale)
         link_note_parent_loss();
     /* Read by the SDK on every attempt of this backoff sequence. */
+    /* An isolated coordinator with a responsive parent is NOT a parent
+     * loss. Permit this secure rejoin to search for an alternate path
+     * without polluting the parent-loss telemetry/policy. */
     PRE_PARENT_FIRST_WHEN_REJOIN =
-        bseed_parent_policy_prefer_previous(&parent_policy, hal_millis()) ?
-        TRUE : FALSE;
+        (allow_joined && !parent_stale) ? FALSE :
+        (bseed_parent_policy_prefer_previous(&parent_policy, hal_millis()) ?
+         TRUE : FALSE);
 #else
     /* Not-joined recovery stays sticky; only the verified-failure Router
      * one-shot below rescans. */
@@ -1035,6 +1041,14 @@ static bool request_rejoin_with_backoff(bool parent_stale) {
 
     printf("Starting network rejoin/backoff\r\n");
     return true;
+}
+
+static bool request_rejoin_with_backoff(bool parent_stale) {
+    return request_rejoin_with_backoff_impl(parent_stale, parent_stale);
+}
+
+static bool request_rejoin_for_isolated_coordinator(void) {
+    return request_rejoin_with_backoff_impl(true, false);
 }
 
 static void notify_about_network_status_change() {
