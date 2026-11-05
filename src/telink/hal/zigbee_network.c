@@ -993,12 +993,18 @@ void telink_zigbee_hal_client_recovery_tick(void) {
         !zb_isDeviceJoinedNwk() ||
         bseed_recovery_degraded(&client_coord_core) || queue_stalled ||
         backoff_unproven;
+    /* A stale JOINED SDK backoff may coexist with healthy parent service.
+     * A queue stall before the SDK claim does not authorize a disruptive
+     * reboot after only 45 minutes: require the longer 3-hour independent
+     * operation tenure when JOINED still appears true. */
+    uint32_t owner_limit = zb_isDeviceJoinedNwk() ?
+                           CLIENT_BACKOFF_UNPROVEN_MS : CLIENT_BACKOFF_WEDGE_MS;
     bool wedged = network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN &&
                   link_unreachable &&
                   (uint32_t)(now - network_last_start_attempt) >=
-                      CLIENT_BACKOFF_WEDGE_MS &&
+                      owner_limit &&
                   (uint32_t)(now - client_outage_since_ms) >=
-                      CLIENT_BACKOFF_WEDGE_MS;
+                      owner_limit;
     uint32_t stagger = bseed_recovery_action_stagger_ms(
         g_zbMacPib.extAddress, 0x43425254u, 15u * 60u * 1000u);
     /* Do not call wedge_credit_tick(false) followed by tick(true) on each
@@ -1022,7 +1028,7 @@ void telink_zigbee_hal_client_recovery_tick(void) {
         now, wedged || checkpoint_after_previous_owner || checkpoint_local_queue);
     if (wedged && !client_reboot_scheduled &&
         (uint32_t)(now - network_last_start_attempt) >=
-        CLIENT_BACKOFF_WEDGE_MS + stagger) {
+        owner_limit + stagger) {
         bseed_budget_result_t result = bseed_router_rescue_budget_try_consume();
         if (result == BSEED_BUDGET_CONSUMED ||
             (result == BSEED_BUDGET_EXHAUSTED && slow_ready &&
