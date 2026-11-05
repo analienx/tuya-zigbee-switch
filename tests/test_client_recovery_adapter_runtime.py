@@ -21,6 +21,11 @@ def test_client_probe_and_backoff_with_persistent_budget(tmp_path):
 #define ZDO_SUCCESS 0
 #define TELINK_NETWORK_RECOVERY_IDLE 0
 #define TELINK_NETWORK_RECOVERY_REJOIN 1
+#define CLIENT_HEALTH_REJOIN_COOLDOWN_MS (15u * 60u * 1000u)
+static bool client_health_recovery_attempted;
+static uint32_t client_health_last_recovery_ms;
+static bool network_start_ready(void) { return true; }
+static bool request_rejoin_with_backoff(bool parent_stale);
 typedef struct { uint16_t nwk_addr_interest; } zdo_node_descriptor_req_t;
 typedef struct __attribute__((packed)) {
     uint8_t seq_num, status; uint16_t nwk_addr_interest;
@@ -31,7 +36,12 @@ static uint32_t now, network_last_start_attempt;
 static int network_recovery_state;
 static bool joined=true, factory_new, ota_fast_poll_active, reject_probe, synchronous;
 static uint8_t next_sequence;
-static unsigned probes, reboots;
+static unsigned probes, reboots, rejoin_starts;
+static bool request_rejoin_with_backoff(bool parent_stale) {
+    assert(parent_stale); assert(network_recovery_state==TELINK_NETWORK_RECOVERY_IDLE);
+    rejoin_starts++; network_recovery_state=TELINK_NETWORK_RECOVERY_REJOIN;
+    return true;
+}
 static void (*probe_callback)(void *);
 static uint32_t hal_millis(void) { return now; }
 static bool zb_isDeviceJoinedNwk(void) { return joined; }
