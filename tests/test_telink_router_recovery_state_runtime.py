@@ -17,6 +17,7 @@ PRELUDE = r"""
 #include <assert.h>
 #include <limits.h>
 #include "hal/router_recovery_policy.h"
+#include "hal/bseed_recovery_core.h"
 typedef enum { BSEED_BUDGET_CONSUMED, BSEED_BUDGET_EXHAUSTED,
                BSEED_BUDGET_STORAGE_ERROR } bseed_budget_result_t;
 #define ZB_ROUTER_ROLE 1
@@ -195,3 +196,78 @@ def test_telink_sdk_callback_route_recovery_and_rescue(tmp_path):
     assert built.returncode == 0, built.stdout + built.stderr
     test = subprocess.run([str(binary)], capture_output=True, text=True, timeout=15)
     assert test.returncode == 0, test.stdout + test.stderr
+
+
+def test_joined_sdk_backoff_without_coordinator_proof_cannot_starve(tmp_path):
+    """An SDK backoff that reports JOINED cannot mask a multi-hour outage."""
+    source = NETWORK.read_text(encoding="utf-8")
+    section = "/* A Router" + source.split(
+        "#if ZB_ROUTER_ROLE && !ZB_COORDINATOR_ROLE\n\n/* A Router", 1
+    )[1].split("\n#endif\n\n// Telink ZDO callbacks", 1)[0]
+    cases = r"""
+int main(void) {
+    now=1000000u; joined=true;
+    network_recovery_state=TELINK_NETWORK_RECOVERY_REJOIN;
+    network_last_start_attempt=now;
+    telink_zigbee_hal_router_recovery_tick();
+    assert(probes==0 && rescue_calls==0 && !router_positive_seen);
+
+    /* The SDK is still marked JOINED. Its owner gate prevents normal
+     * coordinator probes, but must not prevent watchdog escalation. */
+    now+=ROUTER_BACKOFF_JOINED_QUIET_MS+15u*60u*1000u;
+    telink_zigbee_hal_router_recovery_tick();
+    assert(probes==0 && rejoin_calls==0);
+    assert(rescue_calls==1 && budget_used==1);
+
+    /* A separate boot with a genuinely active neighbor receives the longer
+     * grace, preventing an unnecessary scan while it serves children. */
+    return 0;
+}
+"""
+    harness = tmp_path / "false_joined.c"
+    binary = tmp_path / "false_joined"
+    harness.write_text(PRELUDE + "\n" + section + "\n" + cases, encoding="utf-8")
+    built = subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
+                           "-I", str(ROOT / "src"), str(harness), "-o", str(binary)],
+                          capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    outcome = subprocess.run([str(binary)], capture_output=True, text=True, timeout=15)
+    assert outcome.returncode == 0, outcome.stdout + outcome.stderr
+
+
+def test_hash_spreads_sequential_router_addresses(tmp_path):
+    """Regression: three raw IEEE bytes concentrated 80 Routers into 80ms."""
+    source = tmp_path / "jitter.c"
+    binary = tmp_path / "jitter"
+    source.write_text(r"""
+#include <assert.h>
+#include <stdint.h>
+#include "hal/bseed_recovery_core.h"
+int main(void) {
+    uint8_t ieee[8]={0xa4,0xc1,0x38,0xcd,0xf9,0x63,0xea,0};
+    uint32_t min=900000u,max=0u;
+    unsigned slots[90]={0};
+    for(unsigned i=0;i<80u;i++) {
+        ieee[7]=(uint8_t)i;
+        uint32_t v=bseed_recovery_action_stagger_ms(ieee,0x52524a4eu,900000u);
+        if(v<min)min=v;
+        if(v>max)max=v;
+        slots[v/10000u]++;
+        assert(bseed_recovery_action_stagger_ms(ieee,0x52524254u,900000u)!=v);
+    }
+    assert(max-min>600000u);
+    unsigned used=0,peak=0;
+    for(unsigned i=0;i<90u;i++) {
+        if(slots[i])used++;
+        if(slots[i]>peak)peak=slots[i];
+    }
+    assert(used>40u && peak<6u);
+    return 0;
+}
+""",encoding="utf-8")
+    built = subprocess.run(["cc","-std=c11","-Wall","-Wextra","-Werror",
+                            "-I",str(ROOT/"src"),str(source),"-o",str(binary)],
+                           capture_output=True,text=True,timeout=30)
+    assert built.returncode==0, built.stdout+built.stderr
+    run = subprocess.run([str(binary)],capture_output=True,text=True,timeout=15)
+    assert run.returncode==0, run.stdout+run.stderr
