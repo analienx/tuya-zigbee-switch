@@ -6,14 +6,22 @@ import struct
 
 from bseed_ota_identity import IdentityError, parse_ota_header, require_embedded_string
 
-CLIENT = {'role': 'EndDevice', 'build': '1.2.5-bseedcli23',
-          'version': 0x12053022, 'type': 65024, 'artifact': 'forward.ota',
-          'date': '20261105'}
-ROUTER = {'role': 'Router', 'build': '1.2.5-bseedr20',
-          'version': 0x12053022, 'type': 43556, 'artifact': 'forward.ota',
-          'date': '20261105'}
+CLIENT = {'role': 'EndDevice', 'build': '1.2.5-bseedcli24',
+          'version': 0x12053023, 'type': 65024, 'artifact': 'forward.ota',
+          'date': '20261106'}
+ROUTER = {'role': 'Router', 'build': '1.2.5-bseedr21',
+          'version': 0x12053023, 'type': 43556, 'artifact': 'forward.ota',
+          'date': '20261106'}
 CANDIDATES = {'client': CLIENT, 'router': ROUTER}
 RELEASE_DATE = '20261003'  # Immutable input for this candidate set, not wall-clock build time.
+PM_OTA_MAX_BYTES = 0x34000  # Telink V3.7.2.0, 512 KiB layout, no bootloader.
+
+
+def require_pm_ota_size(size):
+    if size > PM_OTA_MAX_BYTES:
+        raise IdentityError(
+            f'PM OTA container is {size} bytes, exceeding the installed SDK limit '
+            f'of {PM_OTA_MAX_BYTES} bytes')
 
 
 def validate_candidate_set():
@@ -34,6 +42,7 @@ def validate_candidate_set():
 def verify_native_image(data, expected, transport_type=None):
     """Check the downloaded bytes, not just manifest claims or OTA headers."""
     validate_candidate_set()
+    require_pm_ota_size(len(data))
     if not expected['build'].isascii() or not 1 <= len(expected['build']) <= 16:
         raise IdentityError('native verifier: expected Basic build ID exceeds 16 ASCII bytes')
     header = parse_ota_header(data)

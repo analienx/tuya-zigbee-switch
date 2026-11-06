@@ -46,8 +46,9 @@ ifeq ($(DEVICE_TYPE), end_device)
 	LIBS := -ldrivers_8258 -lzb_ed
 endif
 
+OPT_LEVEL ?= -O2
 GCC_FLAGS := \
-	-O2 \
+	$(OPT_LEVEL) \
 	-ffunction-sections \
 	-fdata-sections \
 	-Wall \

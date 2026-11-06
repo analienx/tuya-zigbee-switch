@@ -34,8 +34,8 @@ These fresh identities are defined in `helper_scripts/bseed_pm_release.py` and `
 <!-- current-candidate-matrix:start -->
 | Board | Role | Current candidate | Native FILEVER | OTA image type | Publication / acceptance |
 | --- | --- | --- | --- | ---: | --- |
-| PM TS011F-BS-PM | Router | `1.2.5-bseedr20` | `0x12053022` | 43556 | **Unsealed draft** · not public · implementation and hardware acceptance pending |
-| PM TS011F-BS-PM | mains Client | `1.2.5-bseedcli23` | `0x12053022` | 65024 | **Unsealed draft** · not public · implementation and hardware acceptance pending |
+| PM TS011F-BS-PM | Router | `1.2.5-bseedr21` | `0x12053023` | 43556 | **Unsealed draft** · not public · implementation and hardware acceptance pending |
+| PM TS011F-BS-PM | mains Client | `1.2.5-bseedcli24` | `0x12053023` | 65024 | **Unsealed draft** · not public · implementation and hardware acceptance pending |
 | non-PM TS011F-BS | Router | `1.1.3-bseedr19` | `0x1102301E` | 43555 | **Unsealed draft** · not public · implementation and hardware acceptance pending |
 | non-PM TS011F-BS | mains Client | `1.1.3-bseedc17` | `0x1102301E` | 65026 | **Unsealed draft** · not public · implementation and hardware acceptance pending |
 <!-- current-candidate-matrix:end -->

@@ -160,6 +160,9 @@ def verify_image(args):
         raise AssertionError('Invalid OTA header')
     if not ((header[4], header[5], header[6]) == (args.manufacturer_code, args.image_type, args.file_version)):
         raise AssertionError('Wrong OTA identity')
+    if header[5] in (43556, 65024):
+        from bseed_pm_release import require_pm_ota_size
+        require_pm_ota_size(len(image))
     native = image
     native_header = header
     if args.native_image:

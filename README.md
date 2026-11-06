@@ -31,7 +31,7 @@ Exact device identity. Independent relay control. PM telemetry. Router and mains
 
 | Hardware family | Zigbee manufacturer / model | Published Router | Draft Router / mains Client |
 | --- | --- | --- | --- |
-| TS011F-BS-PM · power monitoring | `b28wrpvx` / `TS011F-BS-PM` | `1.2.5-bseedv8u4` | `1.2.5-bseedr20` / `1.2.5-bseedcli23` |
+| TS011F-BS-PM · power monitoring | `b28wrpvx` / `TS011F-BS-PM` | `1.2.5-bseedv8u4` | `1.2.5-bseedr21` / `1.2.5-bseedcli24` |
 | TS011F-BS · no metering | `o1jzcxou` / `TS011F-BS` | `1.1.3-bseedv8` | `1.1.3-bseedr19` / `1.1.3-bseedc17` |
 | TS0726 · three-gang switch/dimmer | `iedhxgyi` / `TS0726-3-BS` | `1.1.8-bseedv8` | Separately controlled TS0726 candidate train |
 
