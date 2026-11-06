@@ -85,8 +85,22 @@ jobs:
           layout = (Path(os.environ["RUNNER_TEMP"]) / "boot/layout.txt").read_text()
           symbols = {
               name: int(addr, 16)
-              for addr, name in re.findall(r"^([0-9a-f]{8})\s+\S*\s+F\s+\S+\s+[0-9a-f]+\s+(\S+)$", layout, re.M)
+              for addr, name in re.findall(
+                  r"^([0-9a-f]{8})[ \t]+[lgw][ \t]+(?:[FO][ \t]+)?"
+                  r"\.[\w.]+[ \t]+[0-9a-f]+[ \t]+(\S+)$", layout, re.M
+              )
           }
+
+          def skip_stack_paint(machine):
+              # Both SDK images fill the unused stack from an unaligned symbol.
+              # The model rejects the store. Skip only that diagnostic fill.
+              machine.r[15] = symbols["COPY_DATA"]
+
+          def run(machine, cycles=1_500_000):
+              try:
+                  return machine.run(machine.cycles + cycles)
+              except (te.EmuError, te.SoftwareReset, te.WatchdogReset, te.Stop) as error:
+                  return f"{type(error).__name__}: {error}"
 
           milestones = (
               "main", "drv_platform_init", "ensure_correct_ota_scheme",
@@ -112,13 +126,36 @@ jobs:
                   if name in symbols:
                       machine.hooks[symbols[name]] = lambda m, name=name: observe(m, name)
 
-              print(f"Simulating slot {slot:#07x}, empty NVM, TLSR8278 peripheral model")
-              try:
-                  reason = machine.run(1_500_000)
-              except (te.EmuError, te.SoftwareReset, te.WatchdogReset) as error:
-                  reason = f"{type(error).__name__}: {error}"
+              machine.hooks[symbols["FLL_STK"]] = skip_stack_paint
+              print(f"Simulating slot {slot:#07x}, empty NVM, TLSR8278 peripheral model, stack paint skipped")
+              reason = run(machine)
               print(f"Stopped at {machine.symbolize(machine.r[15])}: {reason}")
               print(f"Local GPIO initialized: {'hal_gpio_init' in seen}; application loop: {'app_task' in seen}")
+
+          for deny_counter_writes in (False, True):
+              flash = te.Flash()
+              flash.mem[:len(image)] = image
+              if deny_counter_writes:
+                  flash.protected = lambda addr, size: addr < 0x3e000 and addr + size > 0x3c000
+              machine = te.Machine(flash, symbols=symbols)
+              machine.r[13] = 0x850000
+              machine.r[14] = 0x1fe
+              machine.r[0] = 8192
+              machine.r[15] = symbols["nv_nwkFrameCountSaveToFlash"]
+              reached = []
+
+              def returned(m):
+                  reached.append(f"returned status {m.r[0]}")
+                  raise te.Stop("return to caller")
+
+              def fault(m):
+                  reached.append(f"entered hal_telink_counter_fault with status {m.r[0]}")
+
+              machine.hooks[0x1fe] = returned
+              machine.hooks[symbols["hal_telink_counter_fault"]] = fault
+              reason = run(machine, 250_000)
+              print(f"Counter commit with deny_writes={deny_counter_writes}: {reached}")
+              print(f"Stopped at {machine.symbolize(machine.r[15])}: {reason}")
           PY
       - uses: actions/upload-artifact@v4
         with:
