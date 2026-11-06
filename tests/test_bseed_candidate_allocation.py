@@ -42,15 +42,15 @@ def test_candidates_follow_canonical_board_allocator():
     # The previous TS0726 tuple stays retired and cannot be reused. Its
     # replacement is allocated above the board-wide maximum for both roles.
     for role, ver, build in ((45577, 0x11023011, '1.1.9-bseedrv2'),
-                             (65025, 0x11023011, '1.1.8-bseedcli4')):
+                             (65025, 0x11023011, '1.1.8-bseedcli4'),
+                             (45577, 0x11023012, '1.1.9-bseedrv3'),
+                             (65025, 0x11023012, '1.1.8-bseedcli5')):
         own = [v for v in registry[role]['versions'] if v['file_version'] == ver]
         assert [v['version_str'] for v in own] == [build]
         assert own[0]['status'] == 'retired'
-        others = [v['file_version'] for v in registry[role]['versions'] if v['file_version'] != ver]
-        assert ver > max(others)
-    for role, build in ((45577, '1.1.9-bseedrv3'), (65025, '1.1.8-bseedcli5')):
+    for role, build in ((45577, '1.1.9-bseedrv4'), (65025, '1.1.8-bseedcli6')):
         allocation = emit_make_vars(registry, role, build)
-        assert int(allocation['FILE_VERSION'], 0) == 0x11023012
+        assert int(allocation['FILE_VERSION'], 0) == 0x11023014
 
 
 def test_retired_pm_return_tuple_stays_reserved_without_being_a_candidate():

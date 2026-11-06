@@ -17,6 +17,7 @@ STOCK_IMAGE_TYPE=54179
 # Historical identities keep their published/reserved bytes: only the
 # current candidate channel compiles the link policy (link_policy.h).
 LINK_POLICY=0
+OPT_LEVEL=-O2
 RELEASE_DATE_OVERRIDE=''
 SW_BUILD='1.1.8-bseedv8'
 FILE_VERSION_HEX='0x1102300A'
@@ -25,9 +26,11 @@ FILE_VERSION_DEC=285356042
 # Explicit single-device canary identity. Keep the published V8 baseline as
 # the default; do not change legacy builds or the production OTA index.
 if [[ "${BSEED_TS0726_RELEASE_CHANNEL:-}" == 'currentlevel-canary' ]]; then
-    SW_BUILD='1.1.9-bseedlv3'
-    FILE_VERSION_HEX='0x1102300F'
-    FILE_VERSION_DEC=285356047
+    SW_BUILD='1.1.9-bseedlv4'
+    FILE_VERSION_HEX='0x11023013'
+    FILE_VERSION_DEC=285356051
+    RELEASE_DATE_OVERRIDE='20261106'
+    OPT_LEVEL=-Os
 elif [[ "${BSEED_TS0726_RELEASE_CHANNEL:-}" == 'router-recovery-candidate' ]]; then
     # Unique, non-published recovery candidate. Never relabel the historical
     # v8/lv3 images when shared Router firmware changes.
@@ -37,11 +40,12 @@ elif [[ "${BSEED_TS0726_RELEASE_CHANNEL:-}" == 'router-recovery-candidate' ]]; t
 elif [[ "${BSEED_TS0726_RELEASE_CHANNEL:-}" == 'link-policy-candidate' ]]; then
     # Router recovery plus parent/route link policy (src/hal/link_policy.h).
     # The rv2 tuple is retired; the shared recovery uses a fresh identity.
-    SW_BUILD='1.1.9-bseedrv3'
+    SW_BUILD='1.1.9-bseedrv4'
     LINK_POLICY=1
-    FILE_VERSION_HEX='0x11023012'
-    FILE_VERSION_DEC=285356050
-    RELEASE_DATE_OVERRIDE='20261105'
+    FILE_VERSION_HEX='0x11023014'
+    FILE_VERSION_DEC=285356052
+    RELEASE_DATE_OVERRIDE='20261106'
+    OPT_LEVEL=-Os
 elif [[ -n "${BSEED_TS0726_RELEASE_CHANNEL:-}" ]]; then
     echo 'ERROR: unknown BSEED TS0726 release channel' >&2
     exit 2
@@ -121,6 +125,7 @@ OTA="$OUT_DIR/forward.ota"
 FROM_TUYA_OTA="$OUT_DIR/from_tuya.ota"
 
 COMMON_ARGS=(
+    OPT_LEVEL="$OPT_LEVEL"
   BSEED_LINK_POLICY="$LINK_POLICY"
     BSEED_BUILD_DATE="$RELEASE_DATE_OVERRIDE"
     VERSION_STR="$SW_BUILD"

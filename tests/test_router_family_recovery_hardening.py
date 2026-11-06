@@ -124,8 +124,8 @@ def test_ts0726_has_explicit_distinct_candidate_and_exact_sha_ci():
     assert "1.1.9-bseedrv1" in script
     assert "0x11023010" in script
     assert "link-policy-candidate" in script
-    assert "1.1.9-bseedrv3" in script
-    assert "0x11023012" in script
+    assert "1.1.9-bseedrv4" in script
+    assert "0x11023014" in script
     assert "BSEED_TS0726_RELEASE_CHANNEL: link-policy-candidate" in ci
     assert 'test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"' in ci
     assert "bseed_ota_identity.py gate" in ci

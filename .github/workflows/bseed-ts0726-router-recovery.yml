@@ -49,9 +49,9 @@ jobs:
           OUT=build/bseed-ts0726-router-recovery
           python3 helper_scripts/bseed_ota_identity.py gate \
             --image "$OUT/forward.ota" \
-            --expect-version-str 1.1.9-bseedrv3 \
+            --expect-version-str 1.1.9-bseedrv4 \
             --expect-image-type 45577 \
-            --expect-file-version 0x11023012
+            --expect-file-version 0x11023014
           python3 - <<'PY'
           import json, os
           from pathlib import Path
@@ -61,7 +61,7 @@ jobs:
               'exact source': manifest['sourceCommit'] == os.environ['EXPECTED_HEAD'],
               'clean source': manifest['sourceDirty'] is False,
               'board': manifest['board'] == 'SWITCH_BSEED_TS0726_3GANG',
-              'role/version identity': manifest['swBuildId'] == '1.1.9-bseedrv3' and manifest['fileVersion'] == 0x11023012,
+              'role/version identity': manifest['swBuildId'] == '1.1.9-bseedrv4' and manifest['fileVersion'] == 0x11023014,
               'image type': manifest['otaHeader']['imageType'] == 45577,
               'stock wrapper payload': manifest['stockConversion']['payloadFromByte56Identical'] is True,
           }
