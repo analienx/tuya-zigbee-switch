@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ matrix.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
       - uses: actions/cache@v4
         with:
@@ -38,6 +38,7 @@ jobs:
           BSEED_PM_CONSOLIDATED_OUTPUT: build/forensics
         run: |
           set -euo pipefail
+          git checkout -q --detach "$SOURCE_SHA"
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           make -C src/telink -f tools.mk sdk toolchain
           bash make_scripts/build_bseed_ts011f_pm_v8.sh
@@ -60,11 +61,13 @@ jobs:
           for offset in (0, 4, 8, 12, 0x18, 0x8008, 0x20008):
               print(f"offset {offset:#07x} = {unpack_from('<I', payload, offset)[0]:#010x}")
           print(f"OTA bytes: {len(image)}; payload bytes: {len(payload)}")
-          assert len(image) <= 0x34000
-          assert unpack_from("<I", payload, 0x18)[0] == len(payload)
-          assert unpack_from("<I", payload, 8)[0] == 0x544c4e4b
-          assert all(unpack_from("<I", payload, offset)[0] != 0x544c4e4b
-                     for offset in (0x8008, 0x20008))
+          if len(image) > 0x34000 or unpack_from("<I", payload, 0x18)[0] != len(payload):
+              raise ValueError("Telink image exceeds OTA limit or has an invalid native size")
+          if unpack_from("<I", payload, 8)[0] != 0x544c4e4b or any(
+              unpack_from("<I", payload, offset)[0] == 0x544c4e4b
+              for offset in (0x8008, 0x20008)
+          ):
+              raise ValueError("Invalid Telink boot marker layout")
           PY
       - name: Compare cold boot from both slots in TC32 model
         env:
@@ -114,7 +117,7 @@ jobs:
           for slot in (0, 0x40000):
               flash = te.Flash()
               flash.mem[slot:slot + len(image)] = image
-              machine = te.Machine(flash, boot_slot=slot, symbols=symbols)
+              machine = te.Machine(flash, boot_slot=slot, symbols=symbols, cpi=3)
               seen = set()
 
               def observe(m, name):
@@ -127,7 +130,7 @@ jobs:
                       machine.hooks[symbols[name]] = lambda m, name=name: observe(m, name)
 
               machine.hooks[symbols["FLL_STK"]] = skip_stack_paint
-              print(f"Simulating slot {slot:#07x}, empty NVM, TLSR8278 peripheral model, stack paint skipped")
+              print(f"Simulating slot {slot:#07x}, empty NVM, TLSR8278 peripherals, 3 cycles/instruction, stack paint skipped")
               reason = run(machine)
               print(f"Stopped at {machine.symbolize(machine.r[15])}: {reason}")
               print(f"Local GPIO initialized: {'hal_gpio_init' in seen}; application loop: {'app_task' in seen}")
@@ -138,6 +141,7 @@ jobs:
               if deny_counter_writes:
                   flash.protected = lambda addr, size: addr < 0x3e000 and addr + size > 0x3c000
               machine = te.Machine(flash, symbols=symbols)
+              machine.reg_write(0x74a, 1, 0xc3)  # boot enables the system timer before NVM calls
               machine.r[13] = 0x850000
               machine.r[14] = 0x1fe
               machine.r[0] = 8192
