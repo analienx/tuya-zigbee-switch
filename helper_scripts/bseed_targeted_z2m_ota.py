@@ -16,6 +16,7 @@ import json
 import math
 from pathlib import Path
 import struct
+import sys
 import threading
 import time
 import urllib.request
@@ -118,8 +119,17 @@ def write_live_status(work, **fields):
         # Unique temporary files also avoid collisions with another observer
         # process; the campaign/network locks still determine OTA ownership.
         tmp = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
-        tmp.write_text(json.dumps(current, indent=2, default=str) + '\n', encoding='utf8')
-        tmp.replace(path)
+        try:
+            tmp.write_text(json.dumps(current, indent=2, default=str) + '\n', encoding='utf8')
+            tmp.replace(path)
+        except OSError as error:
+            # A status reader or Windows file scanner can temporarily block
+            # replace. This snapshot must never stop the MQTT callback.
+            print(f'OTA status snapshot not saved: {error}', file=sys.stderr, flush=True)
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
         return current
 
 
