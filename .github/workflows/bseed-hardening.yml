@@ -24,8 +24,8 @@ jobs:
       - name: Allocate next recovery identities
         run: |
           set -euo pipefail
-          python3 helper_scripts/bseed_ota_identity.py emit-make-vars --image-type 43556 --version-str 1.2.5-bseedr21
-          python3 helper_scripts/bseed_ota_identity.py emit-make-vars --image-type 65024 --version-str 1.2.5-bseedcli24
+          python3 helper_scripts/bseed_ota_identity.py emit-make-vars --image-type 43556 --version-str 1.2.5-bseedr22
+          python3 helper_scripts/bseed_ota_identity.py emit-make-vars --image-type 65024 --version-str 1.2.5-bseedcli25
           python3 helper_scripts/bseed_ota_identity.py emit-make-vars --image-type 43555 --version-str 1.1.3-bseedr19
           python3 helper_scripts/bseed_ota_identity.py emit-make-vars --image-type 65026 --version-str 1.1.3-bseedc17
           python3 helper_scripts/bseed_ota_identity.py emit-make-vars --image-type 45577 --version-str 1.1.9-bseedrv4

@@ -60,8 +60,9 @@ RELEASE_DATE_OVERRIDE=''
 OPT_LEVEL=-O2
 if [[ "${BSEED_PM_CONSOLIDATED:-0}" == "1" ]]; then
     LINK_POLICY=1
-    # Fit the complete OTA container in the installed 512 KiB SDK's slot.
-    OPT_LEVEL=-Os
+    # Fit the installed OTA slot. TC32 -Os miscompiles the SDK's flash
+    # calibration jump table during early boot unless jump tables are disabled.
+    OPT_LEVEL="-Os -fno-jump-tables"
     readarray -t release_vars < <(python3 helper_scripts/bseed_pm_release.py vars --role router)
     [[ ${#release_vars[@]} == 4 ]] || exit 2
     SW_BUILD="${release_vars[0]}"

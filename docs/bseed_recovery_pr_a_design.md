@@ -115,7 +115,7 @@ roles must compile at the final source SHA on GitHub-hosted runners.
   first-verified-contact build report, and runner/extension changes. These were
   not supplied by the Round 8 changes or the signal-floor/telemetry follow-up.
 
-Candidate allocations remain unsealed: PM r21/cli24 at 0x12053023, non-PM
+Candidate allocations remain unsealed: PM r22/cli25 at 0x12053024, non-PM
 r19/c17 at 0x1102301e, TS0726 rv4/cli6 at 0x11023014. Old TS0726 rv2/cli4
 reservations are retired. No image, index or device is promoted by this document.
 Table Left's installed r19 remains a separate critical-load incident; no code

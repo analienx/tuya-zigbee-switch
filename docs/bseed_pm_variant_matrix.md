@@ -48,8 +48,10 @@ flag change and use the original source and flags to reproduce sealed images.
 
 Published Router `1.2.5-bseedv8u4` (`0x12053007`) must remain byte-stable.
 Current candidates are defined in `helper_scripts/bseed_pm_release.py`:
-`BSEED_PM_CONSOLIDATED=1` builds draft `1.2.5-bseedr21` (`0x12053023`, type 43556),
-and the PM Client build produces draft `1.2.5-bseedcli24` (same version, type 65024).
+`BSEED_PM_CONSOLIDATED=1` builds draft `1.2.5-bseedr22` (`0x12053024`, type 43556),
+and the PM Client build produces draft `1.2.5-bseedcli25` (same version, type 65024).
+The compact PM Router disables jump tables to avoid the TC32 flash-calibration
+miscompilation reproduced in r21. The r21/cli24 tuple is retired.
 These recovery candidates are not sealed or hardware accepted. The preceding
 cli22/r19 pair added shared parent/route policy; see `docs/bseed_link_policy.md`.
 See [the four-variant review](bseed_four_variant_review_20261031.md) for this
