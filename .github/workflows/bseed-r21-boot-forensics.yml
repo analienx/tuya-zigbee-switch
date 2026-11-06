@@ -66,6 +66,60 @@ jobs:
           assert all(unpack_from("<I", payload, offset)[0] != 0x544c4e4b
                      for offset in (0x8008, 0x20008))
           PY
+      - name: Compare cold boot from both slots in TC32 model
+        env:
+          TC32EMU_FLASH_SIZE: '0x80000'
+          EMU_REV: 2e1bcaed762e3124b024047db981172d2b0395ba
+        run: |
+          set -euo pipefail
+          git clone -q https://github.com/goyamamoto/tc32-devtools.git "$RUNNER_TEMP/tc32"
+          git -C "$RUNNER_TEMP/tc32" checkout -q --detach "$EMU_REV"
+          PYTHONPATH="$RUNNER_TEMP/tc32/emulator" python3 - <<'PY' | tee "$RUNNER_TEMP/boot/cold-boot.txt"
+          import re
+          import os
+          from pathlib import Path
+
+          import tc32emu as te
+
+          image = Path("build/forensics/forward.ota").read_bytes()[62:]
+          layout = (Path(os.environ["RUNNER_TEMP"]) / "boot/layout.txt").read_text()
+          symbols = {
+              name: int(addr, 16)
+              for addr, name in re.findall(r"^([0-9a-f]{8})\s+\S*\s+F\s+\S+\s+[0-9a-f]+\s+(\S+)$", layout, re.M)
+          }
+
+          milestones = (
+              "main", "drv_platform_init", "ensure_correct_ota_scheme",
+              "real_main", "os_init", "app_init", "handle_version_changes",
+              "migrate_legacy_bseed_pm_nvm", "parse_config", "hal_gpio_init",
+              "hal_gpio_callback", "hal_zigbee_init", "bdb_init", "hal_zigbee_init_ota",
+              "drv_wd_start", "bdb_init_callback", "app_task",
+              "telink_zigbee_hal_router_recovery_tick", "telink_zigbee_hal_telemetry_tick",
+              "hal_telink_counter_fault", "tl_printf",
+          )
+          for slot in (0, 0x40000):
+              flash = te.Flash()
+              flash.mem[slot:slot + len(image)] = image
+              machine = te.Machine(flash, boot_slot=slot, symbols=symbols)
+              seen = set()
+
+              def observe(m, name):
+                  if name not in seen:
+                      seen.add(name)
+                      print(f"{name} at 0x{m.r[15]:05x}, {m.ms():.3f} ms")
+
+              for name in milestones:
+                  if name in symbols:
+                      machine.hooks[symbols[name]] = lambda m, name=name: observe(m, name)
+
+              print(f"Simulating slot {slot:#07x}, empty NVM, TLSR8278 peripheral model")
+              try:
+                  reason = machine.run(1_500_000)
+              except (te.EmuError, te.SoftwareReset, te.WatchdogReset) as error:
+                  reason = f"{type(error).__name__}: {error}"
+              print(f"Stopped at {machine.symbolize(machine.r[15])}: {reason}")
+              print(f"Local GPIO initialized: {'hal_gpio_init' in seen}; application loop: {'app_task' in seen}")
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: bseed-boot-forensics-${{ matrix.build }}
