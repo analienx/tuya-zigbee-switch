@@ -1,0 +1,73 @@
+name: BSEED r21 boot forensics
+
+on:
+  push:
+    branches: [diag/bseed-r21-boot-20261106]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - build: r19
+            sha: 1cc08a92d4dd68ff3607dc224f707c3e757d4ec8
+            ota_sha: d17571a1d996ff798f1b6334cac1d799fbc1c6125a0212741aca89446053fc95
+          - build: r21
+            sha: b28624d80b4f3c419954239de2c919a2cf53f1a1
+            ota_sha: 9be8010d4f85e31a378a85bb159860dcccf2febd2a398b32f7f2dda4cc4f70fb
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+          fetch-depth: 0
+      - uses: actions/cache@v4
+        with:
+          path: telink_tools
+          key: telink-tools-v3.7.2.0
+      - name: Reproduce deployed OTA image
+        env:
+          SOURCE_SHA: ${{ matrix.sha }}
+          OTA_SHA: ${{ matrix.ota_sha }}
+          BSEED_PM_CONSOLIDATED: '1'
+          BSEED_PM_CONSOLIDATED_OUTPUT: build/forensics
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          make -C src/telink -f tools.mk sdk toolchain
+          bash make_scripts/build_bseed_ts011f_pm_v8.sh
+          printf '%s  %s\n' "$OTA_SHA" build/forensics/forward.ota | sha256sum -c -
+      - name: Record actual boot and flash code
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/boot"
+          objdump=telink_tools/toolchain/tc32/bin/tc32-elf-objdump
+          elf=build/telink/tlc_switch.elf
+          "$objdump" -h -t "$elf" > "$RUNNER_TEMP/boot/layout.txt"
+          "$objdump" -d "$elf" > "$RUNNER_TEMP/boot/disassembly.txt"
+          cp build/telink/profile-macros.txt "$RUNNER_TEMP/boot/"
+          python3 - <<'PY' | tee "$RUNNER_TEMP/boot/native-header.txt"
+          from pathlib import Path
+          from struct import unpack_from
+
+          image = Path("build/forensics/forward.ota").read_bytes()
+          payload = image[62:]
+          for offset in (0, 4, 8, 12, 0x18, 0x8008, 0x20008):
+              print(f"offset {offset:#07x} = {unpack_from('<I', payload, offset)[0]:#010x}")
+          print(f"OTA bytes: {len(image)}; payload bytes: {len(payload)}")
+          assert len(image) <= 0x34000
+          assert unpack_from("<I", payload, 0x18)[0] == len(payload)
+          assert unpack_from("<I", payload, 8)[0] == 0x544c4e4b
+          assert all(unpack_from("<I", payload, offset)[0] != 0x544c4e4b
+                     for offset in (0x8008, 0x20008))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bseed-boot-forensics-${{ matrix.build }}
+          path: ${{ runner.temp }}/boot
+          if-no-files-found: error
