@@ -22,6 +22,9 @@ jobs:
           - build: r21
             sha: b28624d80b4f3c419954239de2c919a2cf53f1a1
             ota_sha: 9be8010d4f85e31a378a85bb159860dcccf2febd2a398b32f7f2dda4cc4f70fb
+          - build: r21-no-jump-tables
+            sha: b28624d80b4f3c419954239de2c919a2cf53f1a1
+            ota_sha: 9be8010d4f85e31a378a85bb159860dcccf2febd2a398b32f7f2dda4cc4f70fb
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,6 +47,16 @@ jobs:
           make -C src/telink -f tools.mk sdk toolchain
           bash make_scripts/build_bseed_ts011f_pm_v8.sh
           printf '%s  %s\n' "$OTA_SHA" build/forensics/forward.ota | sha256sum -c -
+      - name: Rebuild with jump tables disabled for diagnosis
+        if: matrix.build == 'r21-no-jump-tables'
+        env:
+          BSEED_PM_CONSOLIDATED: '1'
+          BSEED_PM_CONSOLIDATED_OUTPUT: build/forensics
+        run: |
+          set -euo pipefail
+          sed -i 's/^    OPT_LEVEL=-Os$/    OPT_LEVEL="-Os -fno-jump-tables"/' make_scripts/build_bseed_ts011f_pm_v8.sh
+          rg -F -- '-Os -fno-jump-tables' make_scripts/build_bseed_ts011f_pm_v8.sh
+          bash make_scripts/build_bseed_ts011f_pm_v8.sh
       - name: Record actual boot and flash code
         run: |
           set -euo pipefail
@@ -116,7 +129,7 @@ jobs:
                   return f"{type(error).__name__}: {error}"
 
           milestones = (
-              "main", "drv_platform_init", "ensure_correct_ota_scheme",
+              "main", "drv_platform_init", "flash_vdd_f_calib", "ensure_correct_ota_scheme",
               "real_main", "os_init", "app_init", "handle_version_changes",
               "migrate_legacy_bseed_pm_nvm", "parse_config", "hal_gpio_init",
               "hal_gpio_callback", "hal_zigbee_init", "bdb_init", "hal_zigbee_init_ota",
@@ -152,6 +165,9 @@ jobs:
               reason = run(machine)
               print(f"Stopped at {machine.symbolize(machine.r[15])}: {reason}")
               print(f"Local GPIO initialized: {'hal_gpio_init' in seen}; application loop: {'app_task' in seen}")
+              if bypass_crystal_wait and os.environ["BUILD_ID"] == "r21-no-jump-tables":
+                  if not {"hal_gpio_callback", "drv_wd_start", "app_task"} <= seen:
+                      raise RuntimeError("Compiler workaround did not reach the application loop")
 
           for deny_counter_writes in (False, True):
               flash = te.Flash()
