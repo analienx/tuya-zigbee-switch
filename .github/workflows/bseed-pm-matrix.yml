@@ -58,7 +58,7 @@ jobs:
           echo "PYTHONPATH=$RUNNER_TEMP/tc32/emulator" >> "$GITHUB_ENV"
           echo "TC32EMU_FLASH_SIZE=0x80000" >> "$GITHUB_ENV"
 
-      - name: Prove the boot check accepts r19 and catches the shipped r21 defect
+      - name: Replay the shipped r19 and r21 boot and OTA activation cases
         shell: bash
         run: |
           set -euo pipefail
@@ -81,10 +81,14 @@ jobs:
             python3 helper_scripts/bseed_pm_boot.py "$control/build/boot-control/forward.ota" \
               "$control/build/boot-control/tc32-symbols.txt" "$ota_hash" "$@"
           }
-          replay r19 1cc08a92d4dd68ff3607dc224f707c3e757d4ec8 \
-            d17571a1d996ff798f1b6334cac1d799fbc1c6125a0212741aca89446053fc95
-          replay r21 b28624d80b4f3c419954239de2c919a2cf53f1a1 \
-            9be8010d4f85e31a378a85bb159860dcccf2febd2a398b32f7f2dda4cc4f70fb --expect-r21-fault
+          r19_hash=d17571a1d996ff798f1b6334cac1d799fbc1c6125a0212741aca89446053fc95
+          r21_hash=9be8010d4f85e31a378a85bb159860dcccf2febd2a398b32f7f2dda4cc4f70fb
+          replay r19 1cc08a92d4dd68ff3607dc224f707c3e757d4ec8 "$r19_hash"
+          replay r21 b28624d80b4f3c419954239de2c919a2cf53f1a1 "$r21_hash" --expect-r21-fault
+          r19="$RUNNER_TEMP/boot-control-r19/build/boot-control"
+          r21="$RUNNER_TEMP/boot-control-r21/build/boot-control"
+          python3 helper_scripts/bseed_pm_ota_activation.py "$r19/forward.ota" \
+            "$r19/tc32-symbols.txt" "$r19_hash" "$r21/forward.ota" "$r21_hash"
 
       - name: Run PM Router/Client matrix from one commit
         shell: bash
