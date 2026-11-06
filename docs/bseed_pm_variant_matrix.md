@@ -18,6 +18,14 @@ It repeats both clean role builds and requires identical binary hashes.
 The build matrix is a *candidate gate*, not equivalent to a live device read,
 radio-report proof, fixture calibration or Router child-parenting verification.
 
+The Telink 512 KiB layout accepts at most **212,992 bytes (208 KiB)** in the
+complete Zigbee OTA file, including the 56-byte OTA header, 6-byte subelement
+header, firmware padding and CRC. The packager rejects larger files on both
+creation and resealing. The PM matrix and targeted runner also check this cap.
+Use `OPT_LEVEL=-Os` for a new size-optimized Telink candidate. The consolidated
+PM Router recipe already sets it. Assign a fresh OTA version for any compiler
+flag change and use the original source and flags to reproduce sealed images.
+
 Published Router `1.2.5-bseedv8u4` (`0x12053007`) must remain byte-stable.
 Current candidates are defined in `helper_scripts/bseed_pm_release.py`:
 `BSEED_PM_CONSOLIDATED=1` builds draft `1.2.5-bseedr21` (`0x12053023`, type 43556),

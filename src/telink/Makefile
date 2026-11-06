@@ -297,7 +297,6 @@ ota: $(BIN_FILE)
 	      --image-type $(OTA_IMAGE_TYPE) \
 	      $(OTA_VERSION_ARG) \
 	      $(BIN_FILE) $(OTA_FILE); \
-	    echo ''; \
 	fi
 
 flash: $(BIN_FILE)
@@ -359,6 +358,7 @@ help:
 	@echo "  DEVICE_TYPE         - router or end_device (default: $(DEVICE_TYPE))"
 	@echo "  CONFIG_STR          - Device pin configuration string"
 	@echo "  DEBUG               - Enable debug output (0/1, default: $(DEBUG))"
+	@echo "  OPT_LEVEL           - Compiler optimization (default: -O2, use -Os for a new compact image)"
 	@echo "  TLSRPGM_TTY         - Programmer serial port (default: $(TLSRPGM_TTY))"
 	@echo ""
 	@echo "Output Files:"

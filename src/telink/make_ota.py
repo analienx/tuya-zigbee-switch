@@ -8,10 +8,24 @@ import click
 
 ZIGBEE_OTA_MAGIC = 0xBEEF11E
 TELINK_OTA_MAGIC = b"\x5d\x02"
+# Telink V3.7.2.0 compares the entire advertised OTA container against
+# FLASH_OTA_IMAGE_MAX_SIZE. This project uses the 512 KiB layout with no
+# bootloader, where that limit is NV_BASE_ADDRESS (0x34000).
+TELINK_OTA_MAX_BYTES = 0x34000
 
 OTA_HDR_STRUCT = struct.Struct("<I5HIH32sI")
 
 OTA_SUB_ELEMENT_HDR_STRUCT = struct.Struct("<HI")
+
+
+def check_ota_size(total_image_size: int) -> None:
+    if total_image_size > TELINK_OTA_MAX_BYTES:
+        raise click.ClickException(
+            f"Telink OTA container is {total_image_size} bytes, over the "
+            f"{TELINK_OTA_MAX_BYTES}-byte slot by "
+            f"{total_image_size - TELINK_OTA_MAX_BYTES} bytes. "
+            "For a new firmware identity, rebuild with OPT_LEVEL=-Os."
+        )
 
 
 @dataclass
@@ -107,6 +121,7 @@ def make_ota_image(
     total_image_size = (
         OTA_HDR_STRUCT.size + OTA_SUB_ELEMENT_HDR_STRUCT.size + len(image_data)
     )
+    check_ota_size(total_image_size)
     if file_version is None:
         file_version = int.from_bytes(image_data[2:6], byteorder="little")
 
@@ -256,6 +271,7 @@ def reseal_ota(
         raise click.ClickException(f"unsupported OTA header length: {header_length}")
     if total != len(source):
         raise click.ClickException(f"OTA total size mismatch: header={total}, actual={len(source)}")
+    check_ota_size(total)
     if manufacturer != manufacturer_id:
         raise click.ClickException(
             f"manufacturer mismatch: expected {manufacturer_id}, found {manufacturer}"
