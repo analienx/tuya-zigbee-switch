@@ -55,7 +55,7 @@ jobs:
         run: |
           set -euo pipefail
           sed -i 's/^    OPT_LEVEL=-Os$/    OPT_LEVEL="-Os -fno-jump-tables"/' make_scripts/build_bseed_ts011f_pm_v8.sh
-          rg -F -- '-Os -fno-jump-tables' make_scripts/build_bseed_ts011f_pm_v8.sh
+          grep -F -- '-Os -fno-jump-tables' make_scripts/build_bseed_ts011f_pm_v8.sh
           bash make_scripts/build_bseed_ts011f_pm_v8.sh
       - name: Record actual boot and flash code
         run: |
