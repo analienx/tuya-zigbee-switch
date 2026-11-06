@@ -142,8 +142,10 @@ jobs:
               machine.hooks[symbols["FLL_STK"]] = skip_stack_paint
               if bypass_crystal_wait:
                   # Both images reset inside the shared SDK crystal probe in
-                  # this TLSR8278 timing model. Assume that probe succeeds.
+                  # this TLSR8278 timing model. Model a running system timer
+                  # and assume that the crystal probe succeeds.
                   def crystal_ready(m):
+                      m.reg_write(0x74a, 1, 0xc3)
                       m.r[15] = m.r[14] & ~1
                   machine.hooks[symbols["pm_wait_xtal_ready"]] = crystal_ready
               print(f"Simulating slot {slot:#07x}, empty NVM, stack paint skipped, crystal probe bypass={bypass_crystal_wait}")
