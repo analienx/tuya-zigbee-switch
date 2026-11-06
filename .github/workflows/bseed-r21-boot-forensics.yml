@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   audit:
@@ -73,10 +74,19 @@ jobs:
         env:
           TC32EMU_FLASH_SIZE: '0x80000'
           EMU_REV: 2e1bcaed762e3124b024047db981172d2b0395ba
+          BUILD_ID: ${{ matrix.build }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git clone -q https://github.com/goyamamoto/tc32-devtools.git "$RUNNER_TEMP/tc32"
           git -C "$RUNNER_TEMP/tc32" checkout -q --detach "$EMU_REV"
+          if [ "$BUILD_ID" = r19 ]; then
+            gh run download 42185667875 -R analienx/tuya-zigbee-switch \
+              -n bseed-flash-candidates-b28624d80b4f3c419954239de2c919a2cf53f1a1 \
+              -D "$RUNNER_TEMP/r21"
+            printf '%s  %s\n' 9be8010d4f85e31a378a85bb159860dcccf2febd2a398b32f7f2dda4cc4f70fb \
+              "$RUNNER_TEMP/r21/pm-router/firmware.ota" | sha256sum -c -
+          fi
           PYTHONPATH="$RUNNER_TEMP/tc32/emulator" python3 - <<'PY' | tee "$RUNNER_TEMP/boot/cold-boot.txt"
           import re
           import os
@@ -114,7 +124,7 @@ jobs:
               "telink_zigbee_hal_router_recovery_tick", "telink_zigbee_hal_telemetry_tick",
               "hal_telink_counter_fault", "tl_printf",
           )
-          for slot in (0, 0x40000):
+          for slot, bypass_crystal_wait in ((0, False), (0, True), (0x40000, True)):
               flash = te.Flash()
               flash.mem[slot:slot + len(image)] = image
               machine = te.Machine(flash, boot_slot=slot, symbols=symbols, cpi=3)
@@ -130,7 +140,13 @@ jobs:
                       machine.hooks[symbols[name]] = lambda m, name=name: observe(m, name)
 
               machine.hooks[symbols["FLL_STK"]] = skip_stack_paint
-              print(f"Simulating slot {slot:#07x}, empty NVM, TLSR8278 peripherals, 3 cycles/instruction, stack paint skipped")
+              if bypass_crystal_wait:
+                  # Both images reset inside the shared SDK crystal probe in
+                  # this TLSR8278 timing model. Assume that probe succeeds.
+                  def crystal_ready(m):
+                      m.r[15] = m.r[14] & ~1
+                  machine.hooks[symbols["pm_wait_xtal_ready"]] = crystal_ready
+              print(f"Simulating slot {slot:#07x}, empty NVM, stack paint skipped, crystal probe bypass={bypass_crystal_wait}")
               reason = run(machine)
               print(f"Stopped at {machine.symbolize(machine.r[15])}: {reason}")
               print(f"Local GPIO initialized: {'hal_gpio_init' in seen}; application loop: {'app_task' in seen}")
@@ -160,6 +176,29 @@ jobs:
               reason = run(machine, 250_000)
               print(f"Counter commit with deny_writes={deny_counter_writes}: {reached}")
               print(f"Stopped at {machine.symbolize(machine.r[15])}: {reason}")
+
+          if os.environ["BUILD_ID"] == "r19":
+              r21 = (Path(os.environ["RUNNER_TEMP"]) / "r21/pm-router/firmware.ota").read_bytes()[62:]
+              for old_slot, new_slot in ((0, 0x40000), (0x40000, 0)):
+                  flash = te.Flash()
+                  flash.mem[old_slot:old_slot + len(image)] = image
+                  flash.mem[new_slot:new_slot + len(r21)] = r21
+                  flash.mem[new_slot + 8] = 0xff  # SDK leaves new flag unset during transfer
+                  machine = te.Machine(flash, boot_slot=old_slot, symbols=symbols)
+                  machine.reg_write(0x74a, 1, 0xc3)
+                  machine.write(symbols["mcuBootAddr"], 4, old_slot)
+                  machine.r[13] = 0x850000
+                  machine.r[14] = 0x1fe
+                  machine.hooks[0x1fe] = returned
+                  machine.r[15] = symbols["ota_mcuReboot"]
+                  reason = run(machine, 30_000_000)
+                  old_marker = flash.mem[old_slot + 8]
+                  new_marker = flash.mem[new_slot + 8]
+                  print(f"OTA activate {old_slot:#07x} -> {new_slot:#07x}: {reason}")
+                  print(f"Old marker={old_marker:#04x}; new marker={new_marker:#04x}")
+                  if (old_marker, new_marker) == (0, 0x4b):
+                      machine.reset()
+                      print(f"Model reselected slot {machine.boot_slot:#07x} after reset")
           PY
       - uses: actions/upload-artifact@v4
         with:
