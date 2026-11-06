@@ -60,7 +60,7 @@ def trace_boot(image, symbols, slot):
     return passed, location, reason
 
 
-def verify_boot(ota_path, layout_path, expected_hash, *, expect_r21_fault=False):
+def read_payload(ota_path, expected_hash):
     ota = ota_path.read_bytes()
     if hashlib.sha256(ota).hexdigest() != expected_hash:
         raise BootFailure(f'{ota_path}: OTA hash differs from the verified artifact')
@@ -68,13 +68,22 @@ def verify_boot(ota_path, layout_path, expected_hash, *, expect_r21_fault=False)
     for offset in (0x8008, 0x20008):
         if image[offset:offset + 4] == b'KNLT':
             raise BootFailure(f'{ota_path}: unexpected legacy boot marker at {offset:#x}')
-    symbols = {
+    return image
+
+
+def read_symbols(layout_path):
+    return {
         name: int(address, 16)
         for address, name in re.findall(
             r'^([0-9a-f]{8})[ \t]+[lgw][ \t]+(?:[FO][ \t]+)?'
             r'\.[\w.]+[ \t]+[0-9a-f]+[ \t]+(\S+)$',
             layout_path.read_text(encoding='utf8'), re.M)
     }
+
+
+def verify_boot(ota_path, layout_path, expected_hash, *, expect_r21_fault=False):
+    image = read_payload(ota_path, expected_hash)
+    symbols = read_symbols(layout_path)
     print(f'Booting {ota_path} (OTA SHA-256 {expected_hash})', flush=True)
     failures = []
     for slot in BOOT_SLOTS:
