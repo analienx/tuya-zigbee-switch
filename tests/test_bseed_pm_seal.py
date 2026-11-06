@@ -8,6 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'helper_scripts'))
 from bseed_ota_identity import IdentityError
+from bseed_pm_boot import BOOT_SLOTS, LOOP_ENTRIES
 from bseed_pm_release import CLIENT, ROUTER
 from bseed_pm_seal import seal_entries, verify_bundle
 from bseed_image_fixture import image_for as ota_image
@@ -54,8 +55,11 @@ def bundle(tmp_path):
         parent = tmp_path / ('fixture-' + name); parent.mkdir()
         folder, manifest = sample_artifact(parent, candidate)
         manifest['sourceCommit'] = 'a' * 40
+        sha256 = manifest['artifacts']['forward.ota']['sha256']
         reports.append({'role': candidate['role'],
-                        'sha256': manifest['artifacts']['forward.ota']['sha256']})
+                        'sha256': sha256, 'tc32Boot': {
+                            'otaSha256': sha256, 'slots': list(BOOT_SLOTS),
+                            'appLoopEntriesPerSlot': LOOP_ENTRIES}})
         folder = folder.rename(matrix / name)
         (folder / 'manifest.json').write_text(json.dumps(manifest))
     (matrix / 'ROLE_MATRIX.json').write_text(json.dumps({
@@ -113,6 +117,7 @@ def test_sealer_refuses_conflicting_payload_role_metadata():
 
 @pytest.mark.parametrize('fault', [
     'not_reproduced', 'stale_source', 'wrong_board', 'dirty', 'matrix_hash', 'native_bytes',
+    'missing_boot', 'wrong_boot_hash', 'one_boot_slot', 'one_loop_entry',
 ])
 def test_bundle_refuses_incomplete_or_inconsistent_evidence(tmp_path, fault):
     matrix = bundle(tmp_path)
@@ -121,6 +126,10 @@ def test_bundle_refuses_incomplete_or_inconsistent_evidence(tmp_path, fault):
     if fault == 'not_reproduced': data['reproducedBothRoles'] = False
     if fault == 'stale_source': data['sourceCommit'] = 'b' * 40
     if fault == 'matrix_hash': data['artifacts'][0]['sha256'] = 'wrong'
+    if fault == 'missing_boot': del data['artifacts'][0]['tc32Boot']
+    if fault == 'wrong_boot_hash': data['artifacts'][0]['tc32Boot']['otaSha256'] = 'wrong'
+    if fault == 'one_boot_slot': data['artifacts'][0]['tc32Boot']['slots'] = [0]
+    if fault == 'one_loop_entry': data['artifacts'][0]['tc32Boot']['appLoopEntriesPerSlot'] = 1
     path.write_text(json.dumps(data))
     path = matrix / 'client' / 'manifest.json'
     data = json.loads(path.read_text())

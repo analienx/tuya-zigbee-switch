@@ -14,6 +14,14 @@ ROUTER = {'role': 'Router', 'build': '1.2.5-bseedr19',
           'date': '20261102'}
 CANDIDATES = {'client': CLIENT, 'router': ROUTER}
 RELEASE_DATE = '20261003'  # Immutable input for this candidate set, not wall-clock build time.
+PM_OTA_MAX_BYTES = 0x34000  # Telink V3.7.2.0, 512 KiB layout, no bootloader.
+
+
+def require_pm_ota_size(size):
+    if size > PM_OTA_MAX_BYTES:
+        raise IdentityError(
+            f'PM OTA container is {size} bytes, exceeding the installed SDK limit '
+            f'of {PM_OTA_MAX_BYTES} bytes')
 
 
 def validate_candidate_set():
@@ -31,9 +39,22 @@ def validate_candidate_set():
         raise IdentityError('unexpected PM role image type')
 
 
+def extract_native_image(data, header):
+    if header['header_length'] != 56:
+        raise IdentityError('native verifier: unsupported OTA header format')
+    if len(data) < 94:
+        raise IdentityError('native verifier: truncated firmware')
+    tag, size = struct.unpack_from('<HI', data, 56)
+    firmware = data[62:]
+    if tag != 0 or size != len(firmware):
+        raise IdentityError('native verifier: bad firmware subelement')
+    return firmware
+
+
 def verify_native_image(data, expected, transport_type=None):
     """Check the downloaded bytes, not just manifest claims or OTA headers."""
     validate_candidate_set()
+    require_pm_ota_size(len(data))
     if not expected['build'].isascii() or not 1 <= len(expected['build']) <= 16:
         raise IdentityError('native verifier: expected Basic build ID exceeds 16 ASCII bytes')
     header = parse_ota_header(data)
@@ -44,12 +65,7 @@ def verify_native_image(data, expected, transport_type=None):
     if (header['header_length'], header['manufacturer_code'], header['image_type'],
             header['file_version']) != (56, 4417, image_type, expected['version']):
         raise IdentityError('native verifier: wrong transport identity')
-    if len(data) < 94:
-        raise IdentityError('native verifier: truncated firmware')
-    tag, size = struct.unpack_from('<HI', data, 56)
-    fw = data[62:]
-    if tag != 0 or size != len(fw):
-        raise IdentityError('native verifier: bad firmware subelement')
+    fw = extract_native_image(data, header)
     if fw[6:12] != b'\x5d\x02KNLT':
         raise IdentityError('native verifier: bad startup/CRC marker')
     if struct.unpack_from('<I', fw, 2)[0] != expected['version']:

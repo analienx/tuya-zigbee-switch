@@ -47,6 +47,49 @@ jobs:
       - name: Install pinned Telink build dependencies
         run: make -C src/telink -f tools.mk sdk toolchain
 
+      - name: Install pinned TC32 startup model
+        shell: bash
+        env:
+          TC32_EMULATOR_REV: 2e1bcaed762e3124b024047db981172d2b0395ba
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/goyamamoto/tc32-devtools.git "$RUNNER_TEMP/tc32"
+          git -C "$RUNNER_TEMP/tc32" checkout --quiet --detach "$TC32_EMULATOR_REV"
+          echo "PYTHONPATH=$RUNNER_TEMP/tc32/emulator" >> "$GITHUB_ENV"
+          echo "TC32EMU_FLASH_SIZE=0x80000" >> "$GITHUB_ENV"
+
+      - name: Replay the shipped r19 and r21 boot and OTA activation cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          replay() {
+            local label="$1" source="$2" ota_hash="$3"
+            shift 3
+            local control="$RUNNER_TEMP/boot-control-$label"
+            git worktree add --quiet --detach "$control" "$source"
+            ln -s "$GITHUB_WORKSPACE/telink_tools" "$control/telink_tools"
+            (
+              cd "$control" &&
+              BSEED_PM_CONSOLIDATED=1 BSEED_PM_CONSOLIDATED_OUTPUT=build/boot-control \
+                bash make_scripts/build_bseed_ts011f_pm_v8.sh &&
+              telink_tools/toolchain/tc32/bin/tc32-elf-objdump -t build/telink/tlc_switch.elf \
+                > build/boot-control/tc32-symbols.txt
+            ) > "$RUNNER_TEMP/boot-control-$label.log" 2>&1 || {
+              tail -80 "$RUNNER_TEMP/boot-control-$label.log"
+              return 1
+            }
+            python3 helper_scripts/bseed_pm_boot.py "$control/build/boot-control/forward.ota" \
+              "$control/build/boot-control/tc32-symbols.txt" "$ota_hash" "$@"
+          }
+          r19_hash=d17571a1d996ff798f1b6334cac1d799fbc1c6125a0212741aca89446053fc95
+          r21_hash=9be8010d4f85e31a378a85bb159860dcccf2febd2a398b32f7f2dda4cc4f70fb
+          replay r19 1cc08a92d4dd68ff3607dc224f707c3e757d4ec8 "$r19_hash"
+          replay r21 b28624d80b4f3c419954239de2c919a2cf53f1a1 "$r21_hash" --expect-r21-fault
+          r19="$RUNNER_TEMP/boot-control-r19/build/boot-control"
+          r21="$RUNNER_TEMP/boot-control-r21/build/boot-control"
+          python3 helper_scripts/bseed_pm_ota_activation.py "$r19/forward.ota" \
+            "$r19/tc32-symbols.txt" "$r19_hash" "$r21/forward.ota" "$r21_hash"
+
       - name: Run PM Router/Client matrix from one commit
         shell: bash
         run: |
@@ -54,7 +97,6 @@ jobs:
           make bseed/pm-matrix 2>&1 | tee "$RUNNER_TEMP/pm-matrix.log"
 
       - name: Upload matrix evidence
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bseed-pm-role-matrix-${{ github.event.pull_request.head.sha || github.sha }}
@@ -72,5 +114,5 @@ jobs:
         with:
           name: bseed-pm-role-matrix-log-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/pm-matrix.log
-          if-no-files-found: error
+          if-no-files-found: ignore
 

@@ -14,6 +14,7 @@ import sys
 import uuid
 from bseed_pm_release import CLIENT, ROUTER, RELEASE_DATE, verify_native_image
 from bseed_ota_identity import IdentityError
+from bseed_pm_boot import BootFailure, verify_boot
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMON_TESTS = ('tests/test_unified_pm_v8.py', 'tests/test_pm_cluster_layout_guard.py',
@@ -97,6 +98,26 @@ def verify_artifact(path, expected, source_commit):
             'imageType': image_type, 'sha256': hashlib.sha256(data).hexdigest(),
             'artifact': str(artifact), **integrity}
 
+
+def record_linker_symbols(directory):
+    objdump = ROOT / 'telink_tools/toolchain/tc32/bin/tc32-elf-objdump'
+    symbols = run([objdump, '-t', ROOT / 'build/telink/tlc_switch.elf'])
+    (directory / 'tc32-symbols.txt').write_text(symbols, encoding='utf8')
+
+
+def verify_both_roles_boot(artifacts):
+    failures = []
+    for artifact in artifacts:
+        ota = Path(artifact['artifact'])
+        try:
+            artifact['tc32Boot'] = verify_boot(
+                ota, ota.with_name('tc32-symbols.txt'), artifact['sha256'])
+        except BootFailure as error:
+            failures.append(str(error))
+    if failures:
+        raise BootFailure('\n'.join(failures))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-dir', default=None,
@@ -130,9 +151,11 @@ def main(argv=None):
                       BSEED_PM_CONSOLIDATED_OUTPUT=str(output / 'router'))
     run(['bash', 'make_scripts/build_bseed_ts011f_pm_v8.sh'], env=router_env)
     result['artifacts'].append(verify_artifact(output / 'router', ROUTER, head))
+    record_linker_symbols(output / 'router')
     run(['bash', 'make_scripts/build_bseed_mains_client.sh', 'pm',
          str(output / 'client')])
     result['artifacts'].append(verify_artifact(output / 'client', CLIENT, head))
+    record_linker_symbols(output / 'client')
     if not (result['artifacts'][0]['sha256'] != result['artifacts'][1]['sha256']):
         raise AssertionError()
     # Two independent clean builds per role: manifests alone cannot establish
@@ -146,6 +169,7 @@ def main(argv=None):
         repeated = verify_artifact(output / ('repeat-' + name), candidate, head)
         if repeated['sha256'] != original['sha256']:
             raise RuntimeError('non-reproducible clean build: ' + name)
+    verify_both_roles_boot(result['artifacts'])
     result['reproducedBothRoles'] = True
     result['compiledBothRoles'] = True
     (output / 'ROLE_MATRIX.json').write_text(json.dumps(result, indent=2)+'\n',

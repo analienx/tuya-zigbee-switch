@@ -14,7 +14,27 @@ energy accumulation, NVM, converter and live-test logic), both role-specific
 host suites, then builds **both roles from one source commit**. It verifies
 manifest source provenance, OTA version/type, image hash, size and configuration,
 native Telink startup/version/length/CRC and the length-prefixed Basic build ID.
-It repeats both clean role builds and requires identical binary hashes.
+It repeats both clean role builds and requires identical binary hashes. The
+GitHub workflow also rebuilds r19 and r21 from pinned source commits and checks
+their OTA hashes. The TC32 startup check must accept r19 and reproduce r21's
+flash-calibration fault before the workflow checks the candidate.
+The regression also executes r19's OTA activation routine with complete,
+partial, and CRC-corrupt r21 staging in both slot directions. It checks slot
+selection from flash snapshots before activation and after each marker write.
+This covers power loss between writes in the model. Flash programming faults
+within a write and candidate-specific upgrade paths need separate coverage.
+
+The matrix runs the native payload from each verified candidate OTA artifact
+in the pinned TC32 model from both flash slots (`0x00000` and `0x40000`).
+Each run must initialize the local button callback, start the watchdog and
+enter the application loop three times within a fixed cycle budget.
+Candidate finalization requires boot evidence tied to each role's OTA hash.
+The model uses empty NVM and TLSR8278 peripherals, assumes a ready crystal
+with a running timer, and skips the SDK's diagnostic stack fill. It does not
+model real relay outputs, flash timing, or Zigbee connectivity.
+The existing host suite covers corrupt settings and safe defaults, energy
+retention across a failed checkpoint and reboot, Zigbee frame-counter write
+failures, and mains Client parent recovery.
 The build matrix is a *candidate gate*, not equivalent to a live device read,
 radio-report proof, fixture calibration or Router child-parenting verification.
 

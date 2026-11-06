@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 
 from bseed_ota_identity import DEFAULT_REGISTRY, IdentityError, gate_image
+from bseed_pm_boot import boot_evidence
 from bseed_pm_release import CLIENT, ROUTER
 from bseed_pm_variant_matrix import verify_artifact
 
@@ -59,6 +60,9 @@ def verify_bundle(matrix_dir, source_commit, document):
         matching = [a for a in matrix['artifacts'] if a['role'] == candidate['role']]
         if len(matching) != 1 or matching[0]['sha256'] != verified['sha256']:
             raise IdentityError('role matrix artifact hash mismatch')
+        if matching[0].get('tc32Boot') != boot_evidence(verified['sha256']):
+            raise IdentityError('missing or mismatched TC32 boot evidence')
+        verified['tc32Boot'] = matching[0]['tc32Boot']
         data = (folder / 'forward.ota').read_bytes()
         artifacts.append((data, candidate, candidate['type']))
         report.append(verified)
