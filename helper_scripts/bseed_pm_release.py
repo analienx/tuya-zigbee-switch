@@ -31,6 +31,18 @@ def validate_candidate_set():
         raise IdentityError('unexpected PM role image type')
 
 
+def extract_native_image(data, header):
+    if header['header_length'] != 56:
+        raise IdentityError('native verifier: unsupported OTA header format')
+    if len(data) < 94:
+        raise IdentityError('native verifier: truncated firmware')
+    tag, size = struct.unpack_from('<HI', data, 56)
+    firmware = data[62:]
+    if tag != 0 or size != len(firmware):
+        raise IdentityError('native verifier: bad firmware subelement')
+    return firmware
+
+
 def verify_native_image(data, expected, transport_type=None):
     """Check the downloaded bytes, not just manifest claims or OTA headers."""
     validate_candidate_set()
@@ -44,12 +56,7 @@ def verify_native_image(data, expected, transport_type=None):
     if (header['header_length'], header['manufacturer_code'], header['image_type'],
             header['file_version']) != (56, 4417, image_type, expected['version']):
         raise IdentityError('native verifier: wrong transport identity')
-    if len(data) < 94:
-        raise IdentityError('native verifier: truncated firmware')
-    tag, size = struct.unpack_from('<HI', data, 56)
-    fw = data[62:]
-    if tag != 0 or size != len(fw):
-        raise IdentityError('native verifier: bad firmware subelement')
+    fw = extract_native_image(data, header)
     if fw[6:12] != b'\x5d\x02KNLT':
         raise IdentityError('native verifier: bad startup/CRC marker')
     if struct.unpack_from('<I', fw, 2)[0] != expected['version']:
