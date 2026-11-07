@@ -7,6 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'helper_scripts'))
 from bseed_pm_release import CANDIDATES, CLIENT, ROUTER, verify_native_image, validate_candidate_set
+from bseed_pm_release import PM_OTA_MAX_BYTES
 from bseed_ota_identity import IdentityError
 from tests.bseed_image_fixture import image_for
 
@@ -47,3 +48,8 @@ def test_candidate_set_rejects_overlength_basic_name(monkeypatch):
     monkeypatch.setitem(CLIENT, 'build', '1.2.5-bseedv8u5-rc5')
     with pytest.raises(IdentityError, match='16 ASCII'):
         validate_candidate_set()
+
+
+def test_ota_container_above_installed_sdk_limit_is_rejected():
+    with pytest.raises(IdentityError, match='exceeding the installed SDK limit'):
+        verify_native_image(bytes(PM_OTA_MAX_BYTES + 1), ROUTER)
