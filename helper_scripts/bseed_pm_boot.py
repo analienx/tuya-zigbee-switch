@@ -1,4 +1,4 @@
-"""Run the exact PM OTA payload in the pinned TC32 startup model."""
+"""Run a Telink OTA payload in the pinned TC32 startup model."""
 
 import argparse
 import hashlib

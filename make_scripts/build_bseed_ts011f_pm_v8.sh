@@ -57,8 +57,12 @@ if [[ "${BSEED_PM_ROUTER_READ_FIX:-0}" == "1" ]]; then
 fi
 # Consolidated same-source Router companion to PM Client cli11.
 RELEASE_DATE_OVERRIDE=''
+OPT_LEVEL=-O2
 if [[ "${BSEED_PM_CONSOLIDATED:-0}" == "1" ]]; then
     LINK_POLICY=1
+    # Fit the installed OTA slot. TC32 -Os miscompiles the SDK's flash
+    # calibration jump table during early boot unless jump tables are disabled.
+    OPT_LEVEL="-Os -fno-jump-tables"
     readarray -t release_vars < <(python3 helper_scripts/bseed_pm_release.py vars --role router)
     [[ ${#release_vars[@]} == 4 ]] || exit 2
     SW_BUILD="${release_vars[0]}"
@@ -148,6 +152,7 @@ FROM_TUYA_OTA="$OUT_DIR/from_tuya.ota"
 
 COMMON_ARGS=(
   BSEED_LINK_POLICY="$LINK_POLICY"
+    OPT_LEVEL="$OPT_LEVEL"
     BSEED_BUILD_DATE="$RELEASE_DATE_OVERRIDE"
     VERSION_STR="$SW_BUILD"
     FILE_VERSION="$FILE_VERSION_HEX"

@@ -66,7 +66,9 @@ def test_telink_superloop_services_router_watchdog_without_clients():
 
 def test_routers_probe_real_coordinator_reachability_before_secure_rejoin():
     source = TELINK.read_text(encoding="utf-8")
-    assert "zb_zdoNodeDescReq(0x0000u" in source
+    assert "zb_zdoNodeDescReq(" in source
+    assert "0x0000u, &req, &router_probe_sequence" in source
+    assert "router_probe_pending  = true;" in source
     assert "router_coordinator_node_desc_response" in source
     assert "rsp->status == ZDO_SUCCESS" in source
     assert "rsp->nwk_addr_interest == 0x0000u" in source
@@ -122,8 +124,8 @@ def test_ts0726_has_explicit_distinct_candidate_and_exact_sha_ci():
     assert "1.1.9-bseedrv1" in script
     assert "0x11023010" in script
     assert "link-policy-candidate" in script
-    assert "1.1.9-bseedrv2" in script
-    assert "0x11023011" in script
+    assert "1.1.9-bseedrv5" in script
+    assert "0x11023016" in script
     assert "BSEED_TS0726_RELEASE_CHANNEL: link-policy-candidate" in ci
     assert 'test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"' in ci
     assert "bseed_ota_identity.py gate" in ci
@@ -163,8 +165,13 @@ def test_sdk_joins_rearm_device_announce_even_without_join_state_edge():
     app = APP.read_text(encoding="utf-8")
     header = Path("src/app.h").read_text(encoding="utf-8")
     callback = net.split("void bdb_commissioning_callback(u8 status, void *arg) {", 1)[1]
-    success = callback.split("case BDB_COMMISSION_STA_SUCCESS:", 1)[1].split("break;", 1)[0]
+    success = callback.split("case BDB_COMMISSION_STA_SUCCESS:", 1)[1].split(
+        "case BDB_COMMISSION_STA_IN_PROGRESS:", 1
+    )[0]
     assert "app_rearm_network_announcement();" in success
+    assert success.index("Unverified BDB SUCCESS") < success.index(
+        "app_rearm_network_announcement();"
+    )
     assert "void app_rearm_network_announcement(void)" in app
     assert "announce_retry_pending = false" in app.split(
         "void app_rearm_network_announcement(void)", 1
@@ -211,7 +218,7 @@ def test_router_one_shot_retains_sdk_ownership_across_transient_not_joined():
         "// Telink ZDO callbacks", 1
     )[0]
     lost = tick.split("if (zb_isDeviceFactoryNew() || !zb_isDeviceJoinedNwk())", 1)[1].split(
-        "router_recovery_timer_active = false;", 1
+        "if (zb_isDeviceFactoryNew() ||", 1
     )[0]
     assert "router_one_shot_stalled = true" in lost
     assert "ROUTER_ONE_SHOT_DEADLINE_MS" in lost
@@ -239,7 +246,11 @@ def test_orphaned_one_shot_cannot_launch_another_rejoin():
     )[0]
     assert "bseed_router_rejoin_eligible(" in method
     assert "router_one_shot_stalled, now" in method
-    assert "router_one_shot_stalled ? ROUTER_MIN_REJOIN_ATTEMPTS" in method
+    assert "bseed_router_quarantine_checkpoint_eligible(" in method
+    assert "quarantined_no_owner" in method
+    assert "router_one_shot_attempts," in method
+    assert "network_sdk_backoff_started_once" in method
+    assert "!router_one_shot_attempted" in method
     assert "ROUTER_INBOUND_GRACE_MS" in method
     assert "router_probe_initialized = false" in method
 
@@ -248,7 +259,9 @@ def test_route_repair_precedes_disruptive_secure_rejoin():
     source = TELINK.read_text(encoding="utf-8")
     assert "ROUTER_ACTIVE_NEIGHBOR_HOLD_MS" in source
     assert "ROUTER_NEIGHBOR_ACTIVITY_MS" in source
-    assert "rejoin_stagger_ms = reboot_stagger_ms;" in source
+    assert "0x52524a4eu" in source
+    assert "0x52524254u" in source
+    assert "bseed_recovery_action_stagger_ms(" in source
     assert "bseed_router_rejoin_eligible(" in source
     callback = source.split("void bdb_commissioning_callback(u8 status, void *arg) {", 1)[1]
     parent = callback.split("case BDB_COMMISSION_STA_PARENT_LOST:", 1)[1].split(
@@ -295,6 +308,7 @@ def test_persistent_router_budget_is_required_before_both_rescue_paths():
     items = Path("src/device_config/nvm_items.h").read_text(encoding="utf-8")
     make = Path("src/telink/Makefile").read_text(encoding="utf-8")
     assert network.count("bseed_router_rescue_budget_consume()") == 2
+    assert "result == BSEED_BUDGET_EXHAUSTED && slow_ready" in network
     assert "bseed_router_rescue_budget_note_good_coordinator(" in network
     assert "bseed_router_rescue_budget_note_failure();" in network
     assert re.search(r"#define\s+NV_ITEM_ROUTER_RESCUE_BUDGET\s+70\b", items)

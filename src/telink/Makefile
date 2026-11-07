@@ -46,8 +46,14 @@ ifeq ($(DEVICE_TYPE), end_device)
 	LIBS := -ldrivers_8258 -lzb_ed
 endif
 
+OPT_LEVEL ?= -O2
+ifneq ($(filter -Os,$(OPT_LEVEL)),)
+ifeq ($(filter -fno-jump-tables,$(OPT_LEVEL)),)
+$(error TC32 -Os requires -fno-jump-tables to avoid the flash-calibration boot defect)
+endif
+endif
 GCC_FLAGS := \
-	-O2 \
+	$(OPT_LEVEL) \
 	-ffunction-sections \
 	-fdata-sections \
 	-Wall \
@@ -63,6 +69,7 @@ GCC_FLAGS := \
 	-MP
 
 LNK_FLAGS := --gc-sections -nostartfiles
+LNK_FLAGS += --wrap=zcl_report --wrap=zcl_reportAttrs
 
 ASM_FLAGS := \
 	-fomit-frame-pointer \
@@ -174,6 +181,8 @@ TELINK_SOURCES := \
 	hal/firmware_health.c \
 	hal/router_health.c \
 	hal/router_recovery_budget.c \
+	hal/recovery_wedge_credit.c \
+	hal/recovery_diagnostics.c \
 	hal/gpio.c \
 	hal/gpio_counter.c \
 	hal/gpio_interrupts.c \
@@ -181,6 +190,7 @@ TELINK_SOURCES := \
 	hal/zigbee.c \
 	hal/zigbee_network.c \
 	hal/zigbee_zcl.c \
+	hal/zigbee_telemetry.c \
 	hal/zigbee_ota.c \
 	hal/adc.c \
 	libc_polyfills/atoi.c \
@@ -292,7 +302,6 @@ ota: $(BIN_FILE)
 	      --image-type $(OTA_IMAGE_TYPE) \
 	      $(OTA_VERSION_ARG) \
 	      $(BIN_FILE) $(OTA_FILE); \
-	    echo ''; \
 	fi
 
 flash: $(BIN_FILE)
@@ -354,6 +363,7 @@ help:
 	@echo "  DEVICE_TYPE         - router or end_device (default: $(DEVICE_TYPE))"
 	@echo "  CONFIG_STR          - Device pin configuration string"
 	@echo "  DEBUG               - Enable debug output (0/1, default: $(DEBUG))"
+	@echo "  OPT_LEVEL           - Compiler optimization (default: -O2, compact: -Os -fno-jump-tables)"
 	@echo "  TLSRPGM_TTY         - Programmer serial port (default: $(TLSRPGM_TTY))"
 	@echo ""
 	@echo "Output Files:"

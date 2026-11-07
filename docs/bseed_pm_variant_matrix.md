@@ -38,11 +38,23 @@ failures, and mains Client parent recovery.
 The build matrix is a *candidate gate*, not equivalent to a live device read,
 radio-report proof, fixture calibration or Router child-parenting verification.
 
+The Telink 512 KiB layout accepts at most **212,992 bytes (208 KiB)** in the
+complete Zigbee OTA file, including the 56-byte OTA header, 6-byte subelement
+header, firmware padding and CRC. The packager rejects larger files on both
+creation and resealing. The PM matrix and targeted runner also check this cap.
+Use `OPT_LEVEL="-Os -fno-jump-tables"` for a new compact Telink candidate.
+The build rejects `-Os` without the jump-table workaround. The consolidated
+PM Router recipe already sets it. Assign a fresh OTA version for any compiler
+flag change and use the original source and flags to reproduce sealed images.
+
 Published Router `1.2.5-bseedv8u4` (`0x12053007`) must remain byte-stable.
 Current candidates are defined in `helper_scripts/bseed_pm_release.py`:
-`BSEED_PM_CONSOLIDATED=1` builds `1.2.5-bseedr19` (`0x12053021`, type 43556),
-and the PM Client build produces `1.2.5-bseedcli22` (same version, type 65024).
-cli22/r19 add the shared parent/route link policy; see `docs/bseed_link_policy.md`.
+`BSEED_PM_CONSOLIDATED=1` builds draft `1.2.5-bseedr22` (`0x12053024`, type 43556),
+and the PM Client build produces draft `1.2.5-bseedcli25` (same version, type 65024).
+The compact PM Router disables jump tables to avoid the TC32 flash-calibration
+miscompilation reproduced in r21. The r21/cli24 tuple is retired.
+These recovery candidates are not sealed or hardware accepted. The preceding
+cli22/r19 pair added shared parent/route policy; see `docs/bseed_link_policy.md`.
 See [the four-variant review](bseed_four_variant_review_20261031.md) for this
 candidate's Router recovery merge and fixes, and
 [Client parent recovery corrections](bseed_client_parent_recovery_20261013.md)

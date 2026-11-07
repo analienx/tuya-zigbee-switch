@@ -103,11 +103,11 @@ def test_active_sdk_rejoin_callbacks_do_not_restart_backoff() -> None:
     assert failure_block.index(guard) < failure_block.index("start_rejoin_with_backoff")
 
 
-def test_join_success_clears_recovery_state_for_future_failures() -> None:
+def test_joined_membership_does_not_release_sdk_recovery() -> None:
     source = _source()
     status_fn = source.split(
         "hal_zigbee_network_status_t hal_zigbee_get_network_status(void)", 1
     )[1].split("void hal_register_on_network_status_change_callback", 1)[0]
     joined_block = status_fn.split("if (zb_isDeviceJoinedNwk())", 1)[1].split(
         "return HAL_ZIGBEE_NETWORK_JOINED", 1)[0]
-    assert "network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE" in joined_block
+    assert "network_recovery_state = TELINK_NETWORK_RECOVERY_IDLE" not in joined_block

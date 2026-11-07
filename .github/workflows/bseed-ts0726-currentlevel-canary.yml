@@ -3,6 +3,8 @@ name: BSEED TS0726 CurrentLevel canary artifact
 on:
   pull_request:
     paths:
+      - 'src/telink/make_ota.py'
+      - 'src/telink/Makefile'
       - 'make_scripts/build_bseed_ts0726_v8.sh'
       - 'make_scripts/build_bseed_ts0726_level_canary.sh'
       - 'tests/test_bseed_ts0726_currentlevel_canary.py'
@@ -70,11 +72,11 @@ jobs:
           require(manifest['sourceCommit'] == os.environ['EXPECTED_HEAD'], 'sourceCommit is not the candidate head')
           require(manifest['sourceDirty'] is False, 'built from dirty source')
           require(manifest['board'] == 'SWITCH_BSEED_TS0726_3GANG', 'board mismatch')
-          require(manifest['swBuildId'] == '1.1.9-bseedlv3', 'build ID mismatch')
-          require(manifest['fileVersion'] == 0x1102300F, 'file version mismatch')
+          require(manifest['swBuildId'] == '1.1.9-bseedlv5', 'build ID mismatch')
+          require(manifest['fileVersion'] == 0x11023015, 'file version mismatch')
           require(manifest['otaHeader']['manufacturerCode'] == 4417, 'manufacturer mismatch')
           require(manifest['otaHeader']['imageType'] == 45577, 'image type mismatch')
-          require(manifest['otaHeader']['fileVersion'] == 0x1102300F, 'header version mismatch')
+          require(manifest['otaHeader']['fileVersion'] == 0x11023015, 'header version mismatch')
           require(manifest['stockConversion']['payloadFromByte56Identical'] is True, 'wrapper payload changed')
           require((out / 'forward.ota').stat().st_size > 56, 'truncated OTA')
           print('Validated source SHA, image identity and wrapper integrity')

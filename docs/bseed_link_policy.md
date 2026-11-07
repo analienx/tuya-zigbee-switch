@@ -5,6 +5,11 @@ Actions by `tests/test_bseed_link_policy_runtime.py`). Actions:
 `src/telink/hal/zigbee_network.c`. Enabled for every Telink build by
 `BSEED_LINK_POLICY ?= 1` in `src/telink/Makefile`.
 
+PR #114 adds the Client signal floor and weak-previous-parent restriction below.
+Its current unsealed identities and release limits are in
+[the recovery implementation notes](bseed_recovery_pr_a_design.md). The sealed
+identity tables later in this document describe the earlier release only.
+
 ## Why
 
 KitchenSocketLeft (PM Client cli20, 2026-11-02) reported over 8.1 h of
@@ -23,7 +28,8 @@ while the in-house PM Router beside it did not list it at all. The Telink
 2. Least disruptive action first: observe, route refresh, rescan on rejoin,
    rejoin, then (Routers only) the existing budgeted reboot.
 3. Hysteresis: trigger count within a window, cooldowns, return to sticky.
-4. SDK path costs (1 best .. 7 worst), never raw LQI. On TLSR8258,
+4. SDK path costs (1 best .. 7 worst) drive route selection. Client admission
+   separately uses a bounded raw-LQI floor. On TLSR8258,
    LQI = 255 * (RSSI + 99) / 84 and LQI <= 45 (about -84 dBm) is already cost 7.
 5. Never act while an OTA, SDK-owned rejoin backoff or Router one-shot owns
    the network.
@@ -32,7 +38,8 @@ while the in-house PM Router beside it did not list it at all. The Telink
 
 | State | Rule |
 |---|---|
-| Sticky (default) | `PRE_PARENT_FIRST_WHEN_REJOIN = TRUE` |
+| Prefer previous parent | Only when its SDK cost is known and <=2 and the repeated-loss policy permits it. Unknown or poor links are not preferred. |
+| Client admission floor | LQI >=118 for the first 30 s of backoff, >=94 until 90 s, then default 69. Success, rejection, failure or leave restores 69 early; OTA restores on the next superloop. Router admission is unchanged. |
 | Enter rescan | 3 parent-loss signals within 60 min: a BDB `PARENT_LOST` that starts a new recovery, or silent-parent recovery. `PARENT_LOST` raised inside the SDK's own ongoing backoff is the same outage and is not counted. |
 | Rescan | Flag set `FALSE` immediately before our `zb_rejoinReqWithBackOff()`; the SDK then scans and chooses the best parent |
 | Back to sticky | 6 h without a parent loss, evaluated before a new loss is recorded (recording first would reset the timer and never leave rescan mode) |
@@ -69,10 +76,10 @@ ZCL octet string, length byte 16, then (multibyte little-endian):
 | 5 | its SDK cost |
 | 6 | Client parent losses in the last hour / Router failed coordinator probes |
 | 7 | Client rescan-mode entries / Router route refreshes (saturating) |
-| 8 | Router rescan rejoins (saturating) |
+| 8 | Router rescan rejoins (saturating); Client active LQI admission floor (69/94/118) |
 | 9-12 | ms since last policy action, 0xFFFFFFFF if none |
 | 13 | Router best other neighbour cost |
-| 14-15 | reserved |
+| 14-15 | last controlled rescue reason and SDK recovery state at checkpoint |
 
 Read each Basic diagnostic attribute separately (0xFF10, 0xFF12, 0xFF13):
 a combined read of the 48-byte snapshots times out on a Client.
@@ -98,7 +105,7 @@ it leaves the stock parent or parent losses fall from about 5/h to under
 1/day over a 24 h soak, read from 0xFF10 and 0xFF13. A green CI never
 authorizes flashing.
 
-### Sealed from exact-SHA public CI (current candidates)
+### Earlier release sealed from exact-SHA public CI
 
 Source `1cc08a92d4dd68ff3607dc224f707c3e757d4ec8`. All required GitHub-hosted checks passed on it
 ([candidate finalization](https://github.com/analienx/tuya-zigbee-switch/actions/runs/41449369099),

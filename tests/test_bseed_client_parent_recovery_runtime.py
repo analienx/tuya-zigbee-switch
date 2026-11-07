@@ -20,6 +20,7 @@ def span(source, start, end):
 def recovery_binary(request, tmp_path_factory):
     source = (ROOT / 'src/telink/hal/zigbee_network.c').read_text()
     poll = source.split('#ifdef BSEED_MAINS_CLIENT', 1)[1].split('#endif', 1)[0]
+    link = span(source, 'static bseed_parent_policy_t parent_policy;', '\n#endif')
     state = span(source, 'typedef enum {', '// Telink ZDO callbacks')
     recovery = span(source, 'static bool start_rejoin_with_backoff(void)',
                     'void zdo_leave_indication_callback')
@@ -41,7 +42,12 @@ def recovery_binary(request, tmp_path_factory):
 #include <stdio.h>
 #include <string.h>
 #include "hal/firmware_health.h"
+#include "hal/bseed_recovery_core.h"
+#include "hal/link_policy.h"
+#include "telink/hal/router_recovery_budget.h"
+#include "telink/hal/recovery_diagnostics.h"
 typedef uint8_t u8;
+typedef uint8_t zdo_status_t;
 typedef struct {void (*handler)(void *); void *arg;} hal_task_t;
 typedef enum {HAL_ZIGBEE_NETWORK_NOT_JOINED, HAL_ZIGBEE_NETWORK_JOINED,
               HAL_ZIGBEE_NETWORK_JOINING} hal_zigbee_network_status_t;
@@ -49,6 +55,9 @@ typedef void (*hal_network_status_change_callback_t)(hal_zigbee_network_status_t
 hal_zigbee_network_status_t hal_zigbee_get_network_status(void);
 void bdb_commissioning_callback(u8 status,void *arg);
 #define BSEED_MAINS_CLIENT 1
+#define BSEED_LINK_POLICY 1
+#define TRUE 1
+#define FALSE 0
 #define RET_OK 0
 #define RESPONSE_POLL_RATE 250u
 #define MAC_SUCCESS 0
@@ -56,9 +65,28 @@ void bdb_commissioning_callback(u8 status,void *arg);
 #define REJOIN_SECURITY 1
 #define OTA_QUERY_INTERVAL 1u
 static uint32_t now, rate=60000, calls, retries, delay, af_calls;
+static u8 NWK_NEIGHBORTBL_ADD_LQITHRESHOLD = 69;
+static bool PRE_PARENT_FIRST_WHEN_REJOIN = true;
+typedef struct {u8 cost;} tl_zb_normal_neighbor_entry_t;
+static tl_zb_normal_neighbor_entry_t parent = {2};
+static uint16_t zb_getParentShortAddr(void) {return 0x1234;}
+static tl_zb_normal_neighbor_entry_t *nwk_neTblGetByShortAddr(uint16_t addr) {return &parent;}
+static u8 link_neighbor_cost(const tl_zb_normal_neighbor_entry_t *entry) {return entry->cost;}
+static void link_note_action(uint32_t time) {(void)time;}
 static bool joined=true, factory_new, sdk_owned, reject, reject_disconnected, sync_success;
 static struct {u8 scanDuration;} g_bdbAttrs;
 static struct {u8 extAddress[8];} g_zbMacPib;
+/* The extracted Client coordinator-probe section is owned by a separate
+ * linked native harness; model only its pending transaction here. */
+static bseed_recovery_core_t client_coord_core;
+static unsigned checkpoint_reboots;
+bseed_budget_result_t bseed_router_rescue_budget_try_consume(void) {
+    return BSEED_BUDGET_EXHAUSTED;
+}
+bool bseed_recovery_diag_record(bseed_rescue_reason_t reason,uint8_t state) {
+    (void)reason; (void)state; return true;
+}
+static void schedule_reboot(uint16_t ms) { assert(ms==2000u); checkpoint_reboots++; }
 firmware_health_t firmware_health;
 uint32_t hal_millis(void) {return now;}
 static bool zb_isDeviceJoinedNwk(void) {return joined;}
@@ -117,9 +145,11 @@ int main(int argc,char **argv) {
         assert(hal_zigbee_get_network_status()==HAL_ZIGBEE_NETWORK_JOINING);
         sdk_owned=false;joined=true;rate=250; /* success; BDB callback lost */
         assert(hal_zigbee_get_network_status()==HAL_ZIGBEE_NETWORK_JOINED);
+        assert(network_recovery_state==TELINK_NETWORK_RECOVERY_REJOIN);
+        assert(firmware_health.rejoin_success==0);
+        bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,NULL); /* late */
         assert(rate==60000 && client_poll_failure_streak==0);
         assert(client_health_last_good_ms==now && firmware_health.rejoin_success==1);
-        bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,NULL); /* late */
         hal_zigbee_get_network_status(); assert(firmware_health.rejoin_success==1);
     } else if(!strcmp(argv[1],"inbound-does-not-mask")) {
         apsdeDataInd_t frame={0};
@@ -172,9 +202,12 @@ int main(int argc,char **argv) {
         stale_parent();sdk_owned=false;joined=true;
         bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,NULL);
         now+=CLIENT_HEALTH_REJOIN_COOLDOWN_MS;failed_polls(4);
-        keepalive_verify_handler(NULL);assert(calls==2 && sdk_owned);
-        sdk_owned=false;joined=true;hal_zigbee_get_network_status();
-        assert(firmware_health.rejoin_start==2 && firmware_health.rejoin_success==2);
+        /* A second SDK owner before reboot is unsafe: late completion from
+         * the first backoff has no operation token. Checkpoint policy handles
+         * subsequent qualified outages rather than overlapping operations. */
+        keepalive_verify_handler(NULL);assert(calls==1 && !sdk_owned);
+        assert(network_sdk_backoff_started_once);
+        assert(firmware_health.rejoin_start==1 && firmware_health.rejoin_success==1);
     } else if(!strcmp(argv[1],"ota-entry-exit")) {
         hal_zigbee_set_ota_poll_active(true);assert(rate==250);
         stale_parent();assert(calls==0);
@@ -182,7 +215,7 @@ int main(int argc,char **argv) {
         assert(calls==1 && sdk_owned);
         hal_zigbee_set_ota_poll_active(true);now+=3600000;
         keepalive_verify_handler(NULL);hal_zigbee_start_network_steering();assert(calls==1);
-        joined=true;sdk_owned=false;hal_zigbee_get_network_status();assert(rate==250);
+        joined=true;sdk_owned=false;bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,NULL);assert(rate==250);
         hal_zigbee_set_ota_poll_active(false);assert(rate==60000);
     } else if(!strcmp(argv[1],"synchronous-success")) {
         sync_success=true;stale_parent();assert(calls==1 && joined && !sdk_owned);
@@ -209,6 +242,30 @@ int main(int argc,char **argv) {
         uint32_t limit=CLIENT_PARENT_SILENCE_MS+client_health_stagger_ms();
         now=limit-123;keepalive_verify_handler(NULL);assert(calls==0 && delay==123);
         now+=delay;keepalive_verify_handler(NULL);assert(calls==1);
+    } else if(!strcmp(argv[1],"signal-floor")) {
+        now=UINT32_MAX-10000u; joined=false;
+        assert(start_rejoin_with_backoff());
+        assert(PRE_PARENT_FIRST_WHEN_REJOIN);
+        assert(NWK_NEIGHBORTBL_ADD_LQITHRESHOLD==118);
+        uint32_t start=now;
+        now=start+29999u;link_floor_tick(false);assert(NWK_NEIGHBORTBL_ADD_LQITHRESHOLD==118);
+        now=start+30000u;link_floor_tick(false);assert(NWK_NEIGHBORTBL_ADD_LQITHRESHOLD==94);
+        now=start+89999u;link_floor_tick(false);assert(NWK_NEIGHBORTBL_ADD_LQITHRESHOLD==94);
+        now=start+90000u;link_floor_tick(false);assert(NWK_NEIGHBORTBL_ADD_LQITHRESHOLD==69);
+        assert(!client_floor_active && sdk_owned); /* floor expiry never releases the SDK */
+        link_floor_begin(); bdb_commissioning_callback(BDB_COMMISSION_STA_REJOIN_FAILURE,NULL);
+        assert(!client_floor_active && NWK_NEIGHBORTBL_ADD_LQITHRESHOLD==69 && sdk_owned);
+        link_floor_begin();hal_zigbee_set_ota_poll_active(true);link_floor_tick(ota_fast_poll_active);
+        assert(!client_floor_active && NWK_NEIGHBORTBL_ADD_LQITHRESHOLD==69);
+        link_floor_begin();sdk_owned=false;joined=true;
+        bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,NULL);
+        assert(!client_floor_active && NWK_NEIGHBORTBL_ADD_LQITHRESHOLD==69);
+    } else if(!strcmp(argv[1],"weak-previous-parent")) {
+        parent.cost=5;joined=false;assert(start_rejoin_with_backoff());
+        assert(!PRE_PARENT_FIRST_WHEN_REJOIN && NWK_NEIGHBORTBL_ADD_LQITHRESHOLD==118);
+    } else if(!strcmp(argv[1],"floor-rejection")) {
+        reject=true;joined=false;assert(!start_rejoin_with_backoff());
+        assert(!client_floor_active && NWK_NEIGHBORTBL_ADD_LQITHRESHOLD==69);
     } else if(!strcmp(argv[1],"factory-new")) {
         factory_new=true;stale_parent();assert(calls==0 && !sdk_owned);
     } else assert(0);
@@ -219,7 +276,7 @@ int main(int argc,char **argv) {
     flags = ['-DBSEED_PM_B28WRPVX=1'] if request.param == 'pm' else []
     subprocess.run(['cc', '-std=c99', *flags, '-I', str(ROOT / 'src'),
                     '-x', 'c', '-', '-o', str(binary)],
-                   input=harness + defines + '\n' + poll + state + recovery + callback
+                   input=harness + defines + '\n' + link + poll + state + recovery + callback
                    + status + ensure + af + sdk,
                    text=True, capture_output=True, check=True)
     return binary
@@ -230,6 +287,7 @@ int main(int argc,char **argv) {
     'rejected-cooldown', 'ota-entry-exit', 'synchronous-success',
     'wrap-and-boundary', 'jitter', 'factory-new',
     'rejected-after-disconnect', 'unrelated-terminal-status', 'second-parent-loss',
+    'signal-floor', 'weak-previous-parent', 'floor-rejection',
 ])
 def test_client_parent_recovery_contract(recovery_binary, case):
     subprocess.run([str(recovery_binary), case], check=True, timeout=10)
