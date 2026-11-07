@@ -122,5 +122,6 @@ roles must compile at the final source SHA on GitHub-hosted runners.
 Candidate allocations remain unsealed: PM r22/cli25 at 0x12053024, non-PM
 r19/c17 at 0x1102301e, TS0726 rv5/cli7 at 0x11023016. Old TS0726 rv2/cli4
 reservations are retired. No image, index or device is promoted by this document.
-Table Left's installed r19 remains a separate critical-load incident; no code
-commit establishes that it is reachable or safe to reset.
+Table Left's r21 boot failure remains a separate device incident. Its exact
+binary reproduces the flash-calibration defect in the startup model.
+Device-side recovery and the actual flash-slot state remain unverified.
