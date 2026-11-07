@@ -18,6 +18,7 @@ from bseed_pm_boot import BootFailure, verify_boot
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMON_TESTS = ('tests/test_unified_pm_v8.py', 'tests/test_pm_cluster_layout_guard.py',
+                'tests/test_bseed_compact_flags.py',
                 'tests/test_telink_timer_runtime.py',
                 'tests/test_telink_counter_persistence.py',
                 'tests/test_telink_router_health.py',

@@ -24,7 +24,7 @@ def check_ota_size(total_image_size: int) -> None:
             f"Telink OTA container is {total_image_size} bytes, over the "
             f"{TELINK_OTA_MAX_BYTES}-byte slot by "
             f"{total_image_size - TELINK_OTA_MAX_BYTES} bytes. "
-            "For a new firmware identity, rebuild with OPT_LEVEL=-Os."
+            "For a new firmware identity, rebuild with OPT_LEVEL='-Os -fno-jump-tables'."
         )
 
 

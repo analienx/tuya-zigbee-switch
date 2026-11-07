@@ -42,7 +42,8 @@ The Telink 512 KiB layout accepts at most **212,992 bytes (208 KiB)** in the
 complete Zigbee OTA file, including the 56-byte OTA header, 6-byte subelement
 header, firmware padding and CRC. The packager rejects larger files on both
 creation and resealing. The PM matrix and targeted runner also check this cap.
-Use `OPT_LEVEL=-Os` for a new size-optimized Telink candidate. The consolidated
+Use `OPT_LEVEL="-Os -fno-jump-tables"` for a new compact Telink candidate.
+The build rejects `-Os` without the jump-table workaround. The consolidated
 PM Router recipe already sets it. Assign a fresh OTA version for any compiler
 flag change and use the original source and flags to reproduce sealed images.
 

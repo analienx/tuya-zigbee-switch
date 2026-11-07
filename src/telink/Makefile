@@ -47,6 +47,11 @@ ifeq ($(DEVICE_TYPE), end_device)
 endif
 
 OPT_LEVEL ?= -O2
+ifneq ($(filter -Os,$(OPT_LEVEL)),)
+ifeq ($(filter -fno-jump-tables,$(OPT_LEVEL)),)
+$(error TC32 -Os requires -fno-jump-tables to avoid the flash-calibration boot defect)
+endif
+endif
 GCC_FLAGS := \
 	$(OPT_LEVEL) \
 	-ffunction-sections \
@@ -358,7 +363,7 @@ help:
 	@echo "  DEVICE_TYPE         - router or end_device (default: $(DEVICE_TYPE))"
 	@echo "  CONFIG_STR          - Device pin configuration string"
 	@echo "  DEBUG               - Enable debug output (0/1, default: $(DEBUG))"
-	@echo "  OPT_LEVEL           - Compiler optimization (default: -O2, use -Os for a new compact image)"
+	@echo "  OPT_LEVEL           - Compiler optimization (default: -O2, compact: -Os -fno-jump-tables)"
 	@echo "  TLSRPGM_TTY         - Programmer serial port (default: $(TLSRPGM_TTY))"
 	@echo ""
 	@echo "Output Files:"
