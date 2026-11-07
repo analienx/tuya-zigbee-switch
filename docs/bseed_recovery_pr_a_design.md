@@ -1,6 +1,10 @@
 # BSEED recovery PR-A: current implementation and release limits
 
-PR #114 is draft. Recovery supervision, Client signal-floor selection and
+PR #114 uses software acceptance for review and merge, following the owner's
+2026-11-07 instruction to proceed without noncritical hardware. Hardware
+evidence will come from production deployment. See
+[software acceptance](RECOVERY_PR114_SOFTWARE_ACCEPTANCE.md).
+Recovery supervision, Client signal-floor selection and
 coordinator-only metering report coalescing are integrated into the Telink
 firmware. This supersedes the earlier statement that none of the changes were
 wired in. It does **not** establish hardware acceptance or completion of every
@@ -116,7 +120,7 @@ roles must compile at the final source SHA on GitHub-hosted runners.
   not supplied by the Round 8 changes or the signal-floor/telemetry follow-up.
 
 Candidate allocations remain unsealed: PM r22/cli25 at 0x12053024, non-PM
-r19/c17 at 0x1102301e, TS0726 rv4/cli6 at 0x11023014. Old TS0726 rv2/cli4
+r19/c17 at 0x1102301e, TS0726 rv5/cli7 at 0x11023016. Old TS0726 rv2/cli4
 reservations are retired. No image, index or device is promoted by this document.
 Table Left's installed r19 remains a separate critical-load incident; no code
 commit establishes that it is reachable or safe to reset.

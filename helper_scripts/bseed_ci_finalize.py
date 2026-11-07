@@ -17,7 +17,8 @@ import zipfile
 
 REQUIRED = ('test', 'BSEED PM role matrix', 'BSEED non-PM role matrix',
             'Telink Router TC32 validation', 'BSEED experimental mains clients',
-            'BSEED Router hardening evidence', 'BSEED shared hardening')
+            'BSEED Router hardening evidence', 'BSEED shared hardening',
+            'BSEED TS0726 startup')
 
 
 def api_request(url, token, binary=False):

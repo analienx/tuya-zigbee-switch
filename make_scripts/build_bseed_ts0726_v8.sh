@@ -26,11 +26,11 @@ FILE_VERSION_DEC=285356042
 # Explicit single-device canary identity. Keep the published V8 baseline as
 # the default; do not change legacy builds or the production OTA index.
 if [[ "${BSEED_TS0726_RELEASE_CHANNEL:-}" == 'currentlevel-canary' ]]; then
-    SW_BUILD='1.1.9-bseedlv4'
-    FILE_VERSION_HEX='0x11023013'
-    FILE_VERSION_DEC=285356051
-    RELEASE_DATE_OVERRIDE='20261106'
-    OPT_LEVEL=-Os
+    SW_BUILD='1.1.9-bseedlv5'
+    FILE_VERSION_HEX='0x11023015'
+    FILE_VERSION_DEC=285356053
+    RELEASE_DATE_OVERRIDE='20261107'
+    OPT_LEVEL="-Os -fno-jump-tables"
 elif [[ "${BSEED_TS0726_RELEASE_CHANNEL:-}" == 'router-recovery-candidate' ]]; then
     # Unique, non-published recovery candidate. Never relabel the historical
     # v8/lv3 images when shared Router firmware changes.
@@ -40,12 +40,12 @@ elif [[ "${BSEED_TS0726_RELEASE_CHANNEL:-}" == 'router-recovery-candidate' ]]; t
 elif [[ "${BSEED_TS0726_RELEASE_CHANNEL:-}" == 'link-policy-candidate' ]]; then
     # Router recovery plus parent/route link policy (src/hal/link_policy.h).
     # The rv2 tuple is retired; the shared recovery uses a fresh identity.
-    SW_BUILD='1.1.9-bseedrv4'
+    SW_BUILD='1.1.9-bseedrv5'
     LINK_POLICY=1
-    FILE_VERSION_HEX='0x11023014'
-    FILE_VERSION_DEC=285356052
-    RELEASE_DATE_OVERRIDE='20261106'
-    OPT_LEVEL=-Os
+    FILE_VERSION_HEX='0x11023016'
+    FILE_VERSION_DEC=285356054
+    RELEASE_DATE_OVERRIDE='20261107'
+    OPT_LEVEL="-Os -fno-jump-tables"
 elif [[ -n "${BSEED_TS0726_RELEASE_CHANNEL:-}" ]]; then
     echo 'ERROR: unknown BSEED TS0726 release channel' >&2
     exit 2

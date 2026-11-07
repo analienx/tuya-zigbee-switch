@@ -7,7 +7,10 @@ coordinator-only telemetry coalescing. See
 [the current implementation and limits](bseed_recovery_pr_a_design.md);
 the original Round 7 behavior below must not be used as the current contract.
 
-Status: **draft / no OTA, no critical-load flashing**. This document captures the
+The owner superseded the physical-test draft gate on 2026-11-07.
+[Software acceptance](RECOVERY_PR114_SOFTWARE_ACCEPTANCE.md) determines
+current PR readiness, and hardware evidence will come from production deployment.
+This document captures the
 quarantine-liveness correction and distinguishes hosted tests from physical
 evidence. It is not a claim that `LivingRoomSocketTableLeft` has recovered.
 
@@ -140,6 +143,5 @@ relay state should be altered by a budget-record migration.
   outlet before **any** physical intervention. An RF-unreachable r19 cannot
   receive a code fix merely because a PR was merged.
 
-**Review decision:** PR stays draft and must not be flashed, merged, sealed
-or distributed as a critical-load firmware candidate until hardware
-evidence and the explicit rollback policy are accepted.
+The historical physical acceptance decision above is superseded for source
+review and merge by the owner's software acceptance scope.

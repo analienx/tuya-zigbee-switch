@@ -48,9 +48,9 @@ def test_candidates_follow_canonical_board_allocator():
         own = [v for v in registry[role]['versions'] if v['file_version'] == ver]
         assert [v['version_str'] for v in own] == [build]
         assert own[0]['status'] == 'retired'
-    for role, build in ((45577, '1.1.9-bseedrv4'), (65025, '1.1.8-bseedcli6')):
+    for role, build in ((45577, '1.1.9-bseedrv5'), (65025, '1.1.8-bseedcli7')):
         allocation = emit_make_vars(registry, role, build)
-        assert int(allocation['FILE_VERSION'], 0) == 0x11023014
+        assert int(allocation['FILE_VERSION'], 0) == 0x11023016
 
 
 def test_retired_pm_return_tuple_stays_reserved_without_being_a_candidate():

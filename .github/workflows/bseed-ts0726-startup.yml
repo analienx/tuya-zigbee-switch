@@ -1,0 +1,116 @@
+name: BSEED TS0726 startup
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  startup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: currentlevel
+            channel: currentlevel-canary
+            build: 1.1.9-bseedlv5
+            version: '0x11023015'
+            image_type: 45577
+          - variant: recovery
+            channel: link-policy-candidate
+            build: 1.1.9-bseedrv5
+            version: '0x11023016'
+            image_type: 45577
+          - variant: client
+            channel: ''
+            build: 1.1.8-bseedcli7
+            version: '0x11023016'
+            image_type: 65025
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      BSEED_TS0726_RELEASE_CHANNEL: ${{ matrix.channel }}
+      EXPECTED_BUILD: ${{ matrix.build }}
+      EXPECTED_VERSION: ${{ matrix.version }}
+      EXPECTED_IMAGE_TYPE: ${{ matrix.image_type }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make python3 python3-yaml curl wget unzip bzip2
+      - uses: actions/cache@v4
+        with:
+          path: telink_tools
+          key: telink-tools-v3.7.2.0
+      - name: Install pinned compiler, SDK and TC32 model
+        env:
+          TC32_EMULATOR_REV: 2e1bcaed762e3124b024047db981172d2b0395ba
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          make -C src/telink -f tools.mk sdk toolchain
+          git clone --quiet https://github.com/goyamamoto/tc32-devtools.git "$RUNNER_TEMP/tc32"
+          git -C "$RUNNER_TEMP/tc32" checkout --quiet --detach "$TC32_EMULATOR_REV"
+          echo "PYTHONPATH=$RUNNER_TEMP/tc32/emulator" >> "$GITHUB_ENV"
+          echo "TC32EMU_FLASH_SIZE=0x80000" >> "$GITHUB_ENV"
+      - name: Build exact candidate and capture its linker symbols
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          set -euo pipefail
+          if [ "$VARIANT" = client ]; then
+            bash make_scripts/build_bseed_mains_client.sh ts0726 build/ts0726-startup
+          else
+            bash make_scripts/build_bseed_ts0726_v8.sh build/ts0726-startup
+          fi
+          telink_tools/toolchain/tc32/bin/tc32-elf-objdump -t build/telink/tlc_switch.elf > build/ts0726-startup/tc32-symbols.txt
+      - name: Verify identity and boot the actual OTA payload from both slots
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee "$RUNNER_TEMP/startup.log"
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, 'helper_scripts')
+          from bseed_pm_release import verify_native_image
+          from bseed_pm_boot import verify_boot
+
+          folder = Path('build/ts0726-startup')
+          ota = folder / 'forward.ota'
+          manifest = json.loads((folder / 'manifest.json').read_text())
+          expected = {'build': os.environ['EXPECTED_BUILD'],
+                      'version': int(os.environ['EXPECTED_VERSION'], 0),
+                      'type': int(os.environ['EXPECTED_IMAGE_TYPE'])}
+          if (manifest['sourceCommit'] != os.environ['EXPECTED_HEAD']
+                  or manifest['sourceDirty'] is not False
+                  or manifest['board'] != 'SWITCH_BSEED_TS0726_3GANG'):
+              raise RuntimeError('TS0726 boot candidate has incorrect source or board')
+          integrity = verify_native_image(ota.read_bytes(), expected)
+          digest = hashlib.sha256(ota.read_bytes()).hexdigest()
+          if manifest['artifacts']['forward.ota']['sha256'] != digest:
+              raise RuntimeError('TS0726 manifest and boot payload hashes differ')
+          evidence = verify_boot(ota, folder / 'tc32-symbols.txt', digest)
+          report = dict(sourceCommit=os.environ['EXPECTED_HEAD'], **expected,
+                        tc32Boot=evidence, **integrity)
+          (folder / 'BOOT_REPORT.json').write_text(json.dumps(report, indent=2) + '\n')
+          print(json.dumps(report, indent=2))
+          PY
+      - name: Upload startup evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseed-ts0726-startup-${{ matrix.variant }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/startup.log
+            build/ts0726-startup/BOOT_REPORT.json
+            build/ts0726-startup/tc32-symbols.txt
+          if-no-files-found: warn

@@ -1,5 +1,12 @@
 # PR #114 — RF and electrical acceptance protocol (NOT YET EXECUTED)
 
+The owner superseded this protocol as a PR readiness requirement on
+2026-11-07. There is no noncritical test hardware. Hardware validation will
+come from production deployment. Use the
+[software acceptance gates](RECOVERY_PR114_SOFTWARE_ACCEPTANCE.md) for
+review and merge. The original physical protocol below is retained as a
+reference for future observations.
+
 This is an operator-owned, device-specific acceptance plan, **not** a CI
 certificate. Green source builds, 1,400 host tests, OTA 100% and JOINED bits
 cannot prove relay continuity, SDK callback quiescence or verified ZCL contact.
@@ -98,6 +105,5 @@ Z2M logs, air-capture hash if available, independently powered relay-logger
 trace hash and resolution, coordinator NodeDesc/endpoint/ZCL proofs, reboot
 reason and NVM raw-state audit, expected/observed behavior and operator verdict.
 
-Accept only if all applicable gates have independently reviewed **PASS**
-evidence. Any missing trace is **UNTESTED**, not PASS. Keep PR #114 draft,
-unsealed and unflashed for critical supplies until this record is complete.
+Record each observed result and retain missing measurements as UNTESTED.
+Source readiness follows the software acceptance gates linked above.
