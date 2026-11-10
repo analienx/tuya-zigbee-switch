@@ -37,7 +37,8 @@ def make_image(size=0x3000, *, version=0x12053024, manufacturer=0x1141, image_ty
     struct.pack_into('<HH', body, 0x12, manufacturer, image_type)
     struct.pack_into('<I', body, 0x18, size)
     for offset in tool.OTHER_START_MARKERS:
-        body[offset:offset + 4] = b'\0\0\0\0'
+        if offset + 4 <= len(body):            # a slice past the end would grow the image
+            body[offset:offset + 4] = b'\0\0\0\0'
     if size > 0x1200:
         body[0x1100:0x1200] = b'\xff' * 0x100     # an all-0xFF page is skipped
     return bytes(body) + struct.pack('<I', tool.telink_crc(bytes(body)))
