@@ -32,13 +32,16 @@ import time
 import zlib
 
 # Wire timing from pvvx USBCOMFlashTx.html v0.5 (TX-only). The SWS divider is
-# tuned for this baud rate; do not change one without the other.
+# tuned for this baud rate; do not change one without the other. The chip
+# cannot report busy, so the waits are fixed and longer than pvvx's (300 ms
+# erase, 3 ms status) to cover slow SPI NOR status writes and erases.
 UART_BAUD = 460800
 SWS_DIVIDER = 55
-ERASE_WAIT = 0.300
+ERASE_WAIT = 0.400
 PAGE_WAIT = 0.010
-STATUS_WAIT = 0.003
+STATUS_WAIT = 0.050
 STOP_CPU_SECONDS = 3.0
+STAGE_FRESH_SECONDS = 1800
 
 SECTOR = 0x1000
 PAGE = 0x100
@@ -48,12 +51,20 @@ MARKER = b'KNLT'
 ACTIVATE_BYTE = b'K'              # 0xFF -> 0x4B only clears bits, so no erase
 TELINK_8258_MAGIC = b'\x5d\x02'
 SIZE_OFFSET = 0x18
-# A start marker here would make the firmware treat the image as a
-# bootloader-mode or small-OTA image and move it (ensure_ota_scheme.c).
+# A start marker here makes the firmware treat flash as a bootloader-mode or
+# small-OTA image and move it (ensure_ota_scheme.c). The image must not carry
+# one, and stale flash there is always erased, however short the image.
 OTHER_START_MARKERS = (0x8008, 0x20008)
+MIN_ERASE_END = 0x21000
 OTA_MAGIC = 0x0BEEF11E
 OTA_HEADER = 56
-PASSES = 2
+# Which passes erase before programming. Three passes survive one lost burst
+# anywhere: pass 2 redoes a lost pass-1 erase or page, and pass 3 reprograms a
+# page whose pass-2 program was lost after its erase landed. Reprogramming the
+# same bytes over correct data changes nothing.
+SCHEDULES = {1: (True,), 2: (True, False), 3: (True, True, False)}
+PASSES = 3
+ACTIVATION_CASES = {'complete', 'partial', 'corrupt-crc'}
 
 BUNDLE_IMAGE = 'image.bin'
 BUNDLE_PLAN = 'plan.json'
@@ -86,6 +97,11 @@ def u32(data, offset):
 def telink_crc(data):
     """CRC-32 without the final inversion, as Telink stores it in the image tail."""
     return zlib.crc32(data) ^ 0xFFFFFFFF
+
+
+def erase_end(length):
+    """First address after the sectors stage erases."""
+    return max(-(-length // SECTOR) * SECTOR, MIN_ERASE_END)
 
 
 def check_image(image):
@@ -151,13 +167,22 @@ def check_manifest(manifest, ota, info):
 
 
 def check_role_matrix(matrix, ota_sha):
-    entries = [a for a in matrix.get('artifacts', []) if a.get('sha256') == ota_sha]
+    """The checks of bseed_pm_boot.has_tc32_evidence, restated so the kit stays one file."""
+    if matrix.get('compiledBothRoles') is not True or matrix.get('reproducedBothRoles') is not True:
+        raise RecoveryError('role matrix does not show both roles compiled and reproduced')
+    artifacts = matrix.get('artifacts', [])
+    entries = [a for a in artifacts if a.get('sha256') == ota_sha]
     if len(entries) != 1:
         raise RecoveryError('role matrix does not list this OTA file exactly once')
     entry = entries[0]
-    if (entry.get('tc32Boot', {}).get('otaSha256') != ota_sha
-            or entry.get('tc32Activation', {}).get('activatorOtaSha256') != ota_sha):
-        raise RecoveryError('role matrix has no TC32 start and OTA activation evidence for this image')
+    boot, activation = entry.get('tc32Boot', {}), entry.get('tc32Activation', {})
+    if (boot.get('otaSha256') != ota_sha or boot.get('slots') != [0, 0x40000]
+            or boot.get('restartsPerSlot', 0) < 1
+            or activation.get('activatorOtaSha256') != ota_sha
+            or activation.get('stagedOtaSha256') not in {a.get('sha256') for a in artifacts}
+            or set(activation.get('staging', [])) != ACTIVATION_CASES
+            or activation.get('slotDirections') != 2):
+        raise RecoveryError('role matrix has no complete TC32 start and OTA activation evidence for this image')
     return {'role': entry.get('role'), 'build': entry.get('build'),
             'sourceCommit': matrix.get('sourceCommit')}
 
@@ -257,23 +282,22 @@ class TxOnlyWriter:
     def stage(self, image, passes=PASSES):
         """Erase slot A and write the image with the start marker left at 0xFF.
 
-        Later passes program the same bytes again without erasing. That is a
-        no-op for bytes that arrived and repairs pages lost in an earlier pass;
-        it cannot repair a lost erase.
+        See SCHEDULES for which passes erase. The erase always reaches
+        MIN_ERASE_END so no stale start marker survives at 0x8008 or 0x20008.
         """
-        if not 1 <= passes <= 3:
-            raise RecoveryError('passes must be 1 to 3')
+        if passes not in SCHEDULES:
+            raise RecoveryError(f'passes must be one of {sorted(SCHEDULES)}')
         check_image(image)
         staged = bytearray(image)
         staged[MARKER_OFFSET] = 0xFF
         self.stop_cpu()
         self.unprotect()
-        for number in range(passes):
-            for address in range(0, len(staged), PAGE):
-                if number == 0 and address % SECTOR == 0:
+        for erasing in SCHEDULES[passes]:
+            for address in range(0, erase_end(len(staged)), PAGE):
+                if erasing and address % SECTOR == 0:
                     self.erase(address)
                 chunk = bytes(staged[address:address + PAGE])
-                if chunk.count(0xFF) != len(chunk):
+                if chunk and chunk.count(0xFF) != len(chunk):
                     self.program(address, chunk)
 
     def activate(self):
@@ -342,15 +366,15 @@ def prepare(ota_path, out, *, manifest=None, role_matrix=None, expect_ota_sha256
     if out.exists() and any(out.iterdir()):
         raise RecoveryError(f'{out} is not empty')
     out.mkdir(parents=True, exist_ok=True)
-    erase_end = -(-len(image) // SECTOR) * SECTOR
+    end = erase_end(len(image))
     plan = {
         'schema': SCHEMA,
-        'createdUtc': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
+        'createdUtc': utc_now().isoformat(timespec='seconds'),
         'source': source,
         'image': info,
-        'slotA': {'eraseFrom': '0x00000', 'eraseTo': f'{erase_end:#07x}', 'sectors': erase_end // SECTOR,
+        'slotA': {'eraseFrom': '0x00000', 'eraseTo': f'{end:#07x}', 'sectors': end // SECTOR,
                   'markerOffset': '0x08'},
-        'neverWritten': f'{erase_end:#07x}-0x7ffff',
+        'neverWritten': f'{end:#07x}-0x7ffff',
         'transport': {'baud': UART_BAUD, 'chipFeedback': False, 'passes': PASSES},
         'estimatedSeconds': estimate_seconds(image),
     }
@@ -370,6 +394,10 @@ def load_bundle(folder):
     return plan, image
 
 
+def utc_now():
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
 def receipts(folder):
     path = Path(folder) / BUNDLE_LOG
     if not path.exists():
@@ -377,16 +405,33 @@ def receipts(folder):
     return [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines() if line.strip()]
 
 
-def record(folder, action, port, image_sha, writer):
+def record(folder, action, port, image_sha, writer, result, passes, now=utc_now):
     entry = {
-        'utc': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
-        'action': action, 'port': port, 'imageSha256': image_sha,
-        'result': 'SENT_UNVERIFIED', 'uartBytes': writer.uart_bytes, 'swireFrames': writer.frames,
+        'utc': now().isoformat(timespec='seconds'),
+        'action': action, 'port': port, 'imageSha256': image_sha, 'result': result,
+        'passes': passes if action == 'stage' else None,
+        'uartBytes': writer.uart_bytes, 'swireFrames': writer.frames,
         'sectorsErased': len(writer.erased), 'pagesProgrammed': writer.pages,
     }
     with (Path(folder) / BUNDLE_LOG).open('a', encoding='utf-8') as log:
         log.write(json.dumps(entry) + '\n')
     return entry
+
+
+def fresh_stage(folder, image_sha, port, now=utc_now):
+    """True if the latest stage of this image finished, on this port, recently.
+
+    The kit can be reused for several devices, so an old stage receipt says
+    nothing about the chip on the wires now.
+    """
+    for entry in reversed(receipts(folder)):
+        if entry.get('action') != 'stage' or entry.get('imageSha256') != image_sha:
+            continue
+        if entry.get('result') != 'SENT_UNVERIFIED':
+            return False
+        age = (now() - datetime.datetime.fromisoformat(entry['utc'])).total_seconds()
+        return entry.get('port') == port and 0 <= age <= STAGE_FRESH_SECONDS
+    return False
 
 
 def describe(plan):
@@ -430,41 +475,57 @@ def open_port(port, timeout=0.5):
     return com
 
 
-def selftest(com, seconds=3.0):
-    """Loop TXD back to RXD on the adapter alone and compare what comes back."""
+def selftest(com, seconds=3.0, chunk=512):
+    """Loop TXD back to RXD on the adapter alone and compare what comes back.
+
+    Sends in small chunks and reads each back, so the driver's receive
+    buffer never has to hold more than one chunk.
+    """
     pattern = swire_frame(0x0602, b'\x05') * 40 + bytes(range(256)) * 4
     com.reset_input_buffer()
-    com.write(pattern)
-    com.flush()
     echoed = b''
     deadline = time.monotonic() + seconds
-    while len(echoed) < len(pattern) and time.monotonic() < deadline:
-        echoed += com.read(len(pattern) - len(echoed))
+    for start in range(0, len(pattern), chunk):
+        piece = pattern[start:start + chunk]
+        com.write(piece)
+        com.flush()
+        while len(echoed) < start + len(piece) and time.monotonic() < deadline:
+            echoed += com.read(start + len(piece) - len(echoed))
     return echoed == pattern, len(echoed), len(pattern)
 
 
-def run_write(action, folder, port, provided, passes=PASSES, *, opener=open_port, out=print):
+def run_write(action, folder, port, provided, passes=PASSES, *, opener=open_port, out=print,
+              now=utc_now):
     plan, image = load_bundle(folder)
     image_sha = plan['image']['sha256']
-    if action == 'activate' and not any(
-            r.get('action') in ('stage', 'flash') and r.get('imageSha256') == image_sha
-            for r in receipts(folder)):
-        raise RecoveryError('no stage of this image is recorded in this bundle; run stage or flash first')
+    if action == 'activate' and not fresh_stage(folder, image_sha, port, now):
+        raise RecoveryError(f'activate needs a finished stage of this image on {port} within the last '
+                            f'{STAGE_FRESH_SECONDS // 60} minutes; run flash instead')
     out(describe(plan))
     out('Check before you continue:')
     for line in CHECKLIST:
         out(f'  - {line}')
     out('The chip does not answer. The only proof is the device starting afterwards.')
     confirm(action, image_sha, provided)
+    if passes not in SCHEDULES:
+        raise RecoveryError(f'passes must be one of {sorted(SCHEDULES)}')
     entries = []
+    phases = {'stage': ('stage',), 'activate': ('activate',), 'flash': ('stage', 'activate')}[action]
     with opener(port) as com:
         writer = TxOnlyWriter(com)
-        if action in ('stage', 'flash'):
-            writer.stage(image, passes)
-            entries.append(record(folder, 'stage', port, image_sha, writer))
-        if action in ('activate', 'flash'):
-            writer.activate()
-            entries.append(record(folder, 'activate', port, image_sha, writer))
+        for phase in phases:
+            # Written before sending, so an interrupted write still leaves a trace.
+            record(folder, phase, port, image_sha, writer, 'STARTED', passes, now)
+            try:
+                if phase == 'stage':
+                    writer.stage(image, passes)
+                else:
+                    writer.activate()
+            except BaseException as error:
+                record(folder, phase, port, image_sha, writer,
+                       f'INTERRUPTED: {type(error).__name__}', passes, now)
+                raise
+            entries.append(record(folder, phase, port, image_sha, writer, 'SENT_UNVERIFIED', passes, now))
     out(f'{action}: all bytes sent ({writer.uart_bytes:,} UART bytes). Not verified on the chip.')
     if action == 'stage':
         out('Slot A start marker is still off. Run activate next.')
@@ -509,7 +570,7 @@ def main(argv=None):
         write.add_argument('--confirm', help='ACTION-<first 8 hex digits of the image SHA-256>')
         if name != 'activate':
             write.add_argument('--passes', type=int, default=PASSES,
-                               help='program passes; extra passes resend pages without erasing')
+                               help='3 (default) survives one lost erase or page; 1 and 2 do not')
     args = parser.parse_args(argv)
     try:
         if args.action == 'ports':
@@ -536,6 +597,9 @@ def main(argv=None):
     except (RecoveryError, OSError, ValueError, KeyError) as error:
         print(f'BLOCKED: {error}', file=sys.stderr)
         return 2
+    except KeyboardInterrupt:
+        print('BLOCKED: interrupted. Slot A may be partly erased; run flash again.', file=sys.stderr)
+        return 130
     return 0
 
 

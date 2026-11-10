@@ -116,22 +116,25 @@ python telink_swire_recovery.py flash --bundle router --port COM5
 The tool shows the image, the address range it will write and a short
 checklist, then asks you to type `FLASH-` followed by the first eight hex
 digits of the image SHA-256. Use `--confirm FLASH-xxxxxxxx` to skip the
-prompt. A Router-size image takes about two and a half minutes. Do not touch
-the leads until it prints that the chip restarted.
+prompt. A Router-size image takes about four minutes. Do not touch the leads
+until it prints that the chip restarted.
 
 `flash` is `stage` followed by `activate`. They can be run separately:
 
-- `stage` restarts and halts the chip, clears flash write protection,
-  erases slot A sector by sector up to the end of the image, and writes the
-  image with the first byte of its start marker left at `0xFF`. A second
-  pass sends the same pages again without erasing, which repairs a page
-  lost on the wire.
+- `stage` restarts and halts the chip, clears flash write protection and
+  writes the image with the first byte of its start marker left at `0xFF`.
+  It makes three passes: erase and write, erase and write again, then write
+  only. Losing any one erase or page on the wire is repaired by a later
+  pass. Reprogramming bytes that already arrived changes nothing.
 - `activate` writes the single byte `0x4B` at `0x08` without an erase,
-  which turns the marker into `KNLT`, then restarts the chip.
+  which turns the marker into `KNLT`, then restarts the chip. It refuses
+  unless the latest `stage` of the same image, on the same port, finished
+  within the last 30 minutes. The same kit may be reused for several devices.
 
-Each step appends a line to `receipts.jsonl` in the bundle folder.
-`SENT_UNVERIFIED` there means the PC sent the bytes. It does not mean the
-chip received them.
+Each step appends a `STARTED` line to `receipts.jsonl` in the bundle folder
+before it sends anything. When it ends, it adds `SENT_UNVERIFIED` if all the
+bytes were sent, or `INTERRUPTED` otherwise. `SENT_UNVERIFIED` means the PC
+sent the bytes. It does not mean the chip received them.
 
 Running `flash` again is safe. It erases slot A again, so the slot stays
 unbootable until the new activation.
@@ -158,13 +161,16 @@ evidence from Zigbee2MQTT:
 
 | Range | Content | Tool |
 | --- | --- | --- |
-| `0x00000` to the end of the image, rounded up to 4 KiB | slot A | erased and written |
+| `0x00000` to the end of the image, rounded up to 4 KiB, at least to `0x20FFF` | slot A | erased and written |
 | rest of slot A, up to `0x33FFF` | unused | left as is |
 | `0x34000`–`0x3FFFF` | Zigbee NVM: network key, bindings, energy | never written |
 | `0x40000`–`0x73FFF` | slot B | never written |
 | `0x76000`, `0x77000` | IEEE address, factory RF/ADC/voltage calibration | never written |
 | `0x78000`–`0x7FFFF` | install code, reset counter, second NVM area | never written |
 
+The erase always covers `0x8008` and `0x20008`, even for a short image. A
+stale start marker there would make the firmware treat the flash as a
+bootloader-mode or small-OTA layout and move it at startup.
 Those limits are hard-coded in the writer, not just in the plan. When slot B
 also holds a start marker, both the SDK's `mcuBootAddrGet()` and the tool
 assume slot A starts first. The next OTA update overwrites slot B and clears
@@ -176,12 +182,15 @@ slot A's marker in the normal way.
   flash memory read needs a bidirectional SWire adapter, such as pvvx's
   [TlsrComSwireWriter](https://github.com/pvvx/TlsrComSwireWriter) circuit
   or [TLSRPGM](https://github.com/pvvx/TLSRPGM).
-- **Lost erases are not repaired.** The second pass repairs lost page writes
-  but not a lost sector erase. Run `flash` again if the device does not start.
-- **Fixed timing.** The SWire timing (460800 baud, divider 55, 300 ms per
-  sector, 10 ms per page) is pvvx's
+- **One loss at a time.** The three passes repair one lost erase or page.
+  They do not repair losses in two of the passes at the same address, such
+  as a clip that keeps slipping. Run `flash` again if the device does not
+  start.
+- **Fixed timing.** The SWire encoding (460800 baud, divider 55) is pvvx's
   [USBCOMFlashTx v0.5](https://github.com/pvvx/pvvx.github.io/blob/master/ATC_MiThermometer/USBCOMFlashTx.html).
-  The flash wait times are fixed delays, not status polling.
+  The chip cannot report when it is busy, so the waits are fixed: 400 ms per
+  sector erase, 10 ms per page and 50 ms per status write. Those are longer
+  than pvvx's, to allow for slow flash chips.
 - **No slot B fallback.** If the recovered image does not start, the tool
   does not fall back to slot B. Run `flash` again with a known-good image.
 
@@ -192,12 +201,14 @@ decodes every UART byte the writer sends back into SWire register writes. It
 then applies them to a model of the TLSR8258 SPI controller and a 512 KiB
 NOR flash that starts in the bricked state: an image enabled in slot A,
 another disabled in slot B, and live NVM. The tests check that slot A ends
-up byte-identical to the image and that nothing above it changes. They also
-check that the marker stays off after `stage`, that a lost page is repaired
-by the second pass but not by one pass, and that every flash command follows
-a write enable while the CPU is halted. The frame encoding is checked
-against vectors from pvvx's original JavaScript. None of this exercises a
-real adapter or chip.
+up byte-identical to the image, that stale markers at `0x8008` and `0x20008`
+are erased, and that nothing above the erased range changes. They also check
+that the marker stays off after `stage`, and that every flash command follows
+a write enable while the CPU is halted. One lost frame (a page in pass 1 or 2,
+or the sector-0 erase in pass 1 or 2) must be repaired. With fewer passes,
+the test confirms that the same losses do break the image, so the extra
+passes are not decoration. The frame encoding is checked against vectors
+from pvvx's original JavaScript. None of this exercises a real adapter or chip.
 
 For BSEED devices, the repository's flashing rules still apply. Read
 [the BSEED OTA skill](../../skills/bseed-zigbee-ota/SKILL.md) and the

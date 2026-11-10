@@ -4,6 +4,7 @@ Every UART byte the writer sends is decoded back into SWire register writes
 and applied to a model of the TLSR8258 SPI flash controller, so the tests
 check what would land in flash, not just which calls were made.
 """
+import datetime
 import hashlib
 import io
 import json
@@ -92,6 +93,7 @@ class Chip:
         self.status = None
         self.divider = None
         self.erases = []
+        self.ignored = []                                  # commands a real flash would drop
 
     def write(self, address, data):
         for index, value in enumerate(data):
@@ -133,7 +135,9 @@ class Chip:
             return
         if command == 0xAB:
             return
-        assert self.write_enabled, f'flash command {command:#x} without write enable'
+        if command not in (0x01, 0x20, 0x02) or not self.write_enabled:
+            self.ignored.append(command)                   # unknown, or no write enable
+            return
         self.write_enabled = False
         if command == 0x01:
             self.status = args
@@ -149,8 +153,6 @@ class Chip:
             assert data and address // 256 == (address + len(data) - 1) // 256
             for index, value in enumerate(data):
                 self.flash[address + index] &= value
-        else:
-            raise AssertionError(f'unexpected flash command {command:#x}')
 
 
 class ChipPort:
@@ -182,13 +184,15 @@ class ChipPort:
 
 
 def bricked_flash(seed=7):
-    """r21-like image enabled in slot A, r19-like image disabled in slot B, live NVM."""
+    """Enabled image in slot A, disabled one in slot B, live NVM, stale markers."""
     rng = random.Random(seed)
     flash = bytearray(rng.getrandbits(8) for _ in range(FLASH_SIZE))
     old = make_image(0x2E00, seed=21)
     flash[:len(old)] = old
     flash[0x40000 + 8] = 0x00
     flash[0x40009:0x4000C] = b'NLT'
+    for offset in tool.OTHER_START_MARKERS:        # left over from an older layout
+        flash[offset:offset + 4] = b'KNLT'
     return bytes(flash)
 
 
@@ -202,10 +206,13 @@ def writer_for(chip, **kwargs):
 
 
 def assert_recovered(chip, before, image):
-    end = -(-len(image) // 0x1000) * 0x1000
+    end = tool.erase_end(len(image))
+    assert end <= tool.SLOT_A_END
     assert bytes(chip.flash[:len(image)]) == image
     assert set(chip.flash[len(image):end]) <= {0xFF}
     assert chip.flash[end:] == before[end:], 'something outside slot A changed'
+    for offset in tool.OTHER_START_MARKERS:
+        assert chip.flash[offset:offset + 4] != b'KNLT', f'stale start marker left at {offset:#x}'
 
 
 def test_frames_match_pvvx_v05_javascript():
@@ -229,11 +236,13 @@ def test_stage_then_activate_rewrites_only_slot_a():
     writer = writer_for(chip)
     writer.stage(image)
     assert chip.flash[8:12] == b'\xffNLT', 'stage must leave the start marker off'
-    assert chip.erases == list(range(0, 0x6000, 0x1000))
+    # Two erasing passes over every sector up to 0x21000, the small-OTA area included.
+    assert chip.erases == list(range(0, 0x21000, 0x1000)) * 2
     assert chip.divider == tool.SWS_DIVIDER and chip.status == [0]
     writer.activate()
     assert_recovered(chip, before, image)
     assert not chip.stopped and chip.restarts == 3
+    assert chip.ignored == []
 
 
 def test_full_size_image_stays_below_nvm():
@@ -245,27 +254,56 @@ def test_full_size_image_stays_below_nvm():
     writer.activate()
     assert_recovered(chip, before, image)
     assert max(chip.erases) == 0x32000
+    assert chip.ignored == []
 
 
-def test_second_pass_repairs_a_lost_page_and_one_pass_does_not():
-    image = make_image(0x5432)
-    lost = []
+def drop_page(occurrence):
+    """Lose the nth program of page 0x2000 on the wire."""
+    seen = []
 
-    def drop_one_page(address, data, count):
-        if address == 0x0C and data[:1] == b'\x02' and data[1:4] == b'\x00\x20\x00' and not lost:
-            lost.append(count)
-            return True
+    def drop(address, data, count):
+        if address == 0x0C and data[:4] == b'\x02\x00\x20\x00':
+            seen.append(count)
+            return len(seen) == occurrence
         return False
+    return drop
 
-    for passes, expect_ok in ((1, False), (2, True)):
-        lost.clear()
-        before = bricked_flash()
-        chip = Chip(before)
-        writer = writer_for(chip, drop=drop_one_page)
-        writer.stage(image, passes)
-        writer.activate()
-        assert lost
-        assert (bytes(chip.flash[:len(image)]) == image) is expect_ok
+
+def drop_erase(occurrence):
+    """Lose the opcode of the nth sector erase (sector 0 is the first of each pass)."""
+    state = {'last': None, 'seen': 0}
+
+    def drop(address, data, count):
+        last, state['last'] = state['last'], (address, data)
+        if (address, data) == (0x0C, b'\x20') and last == (0x0D, b'\x00'):
+            state['seen'] += 1
+            return state['seen'] == occurrence
+        return False
+    return drop
+
+
+SECTORS = tool.erase_end(0x5432) // 0x1000
+
+
+@pytest.mark.parametrize('loss, passes, recovered', [
+    (lambda: drop_page(1), 1, False),
+    (lambda: drop_page(1), 3, True),
+    (lambda: drop_page(2), 3, True),          # lost after its pass-2 erase landed
+    (lambda: drop_erase(1), 2, False),        # old marker survives: must not boot
+    (lambda: drop_erase(1), 3, True),
+    (lambda: drop_erase(SECTORS + 1), 3, True),
+], ids=['page-1pass', 'page', 'page-pass2', 'erase0-2pass', 'erase0', 'erase0-pass2'])
+def test_three_passes_survive_one_lost_frame(loss, passes, recovered):
+    image = make_image(0x5432)
+    before = bricked_flash()
+    chip = Chip(before)
+    writer = writer_for(chip, drop=loss())
+    writer.stage(image, passes)
+    if not recovered and passes == 2:
+        assert chip.flash[8:12] == b'KNLT', 'the case the third pass exists for'
+    writer.activate()
+    assert (bytes(chip.flash[:len(image)]) == image) is recovered
+    assert chip.flash[0x21000:] == before[0x21000:]
 
 
 def test_writer_refuses_everything_outside_slot_a():
@@ -283,8 +321,9 @@ def test_writer_refuses_everything_outside_slot_a():
         writer.program(0, b'\0' * 12)              # would switch the marker on during stage
     with pytest.raises(RecoveryError):
         writer.program(0x40008, b'K', marker=True)
-    with pytest.raises(RecoveryError):
-        writer.stage(make_image(), passes=0)
+    for passes in (0, 4):
+        with pytest.raises(RecoveryError):
+            writer.stage(make_image(), passes=passes)
 
 
 def test_ota_extraction_and_rejections():
@@ -317,7 +356,11 @@ def test_ota_extraction_and_rejections():
         tool.image_from_ota(bytes(ota))
 
 
-def ci_artifact(folder, image, *, dirty=False, matrix_sha=None, commit='a' * 40):
+CLIENT_SHA = 'c' * 64
+
+
+def ci_artifact(folder, image, *, dirty=False, commit='a' * 40):
+    """forward.ota, manifest.json and ROLE_MATRIX.json shaped like the PM matrix artifact."""
     ota = make_ota(image)
     digest = hashlib.sha256(ota).hexdigest()
     (folder / 'forward.ota').write_bytes(ota)
@@ -327,12 +370,28 @@ def ci_artifact(folder, image, *, dirty=False, matrix_sha=None, commit='a' * 40)
         'swBuildId': '1.2.5-bseedr22', 'buildDate': '20261106',
         'otaHeader': {'manufacturerCode': 0x1141, 'imageType': 43556, 'fileVersion': 0x12053024},
     }))
-    evidence = matrix_sha or digest
-    (folder / 'ROLE_MATRIX.json').write_text(json.dumps({'sourceCommit': commit, 'artifacts': [{
-        'role': 'Router', 'build': '1.2.5-bseedr22', 'sha256': digest,
-        'tc32Boot': {'otaSha256': evidence}, 'tc32Activation': {'activatorOtaSha256': evidence},
-    }]}))
+
+    def evidence(own, other):
+        return {'tc32Boot': {'otaSha256': own, 'slots': [0, 0x40000], 'appLoopEntriesPerSlot': 3,
+                             'restartsPerSlot': 1},
+                'tc32Activation': {'activatorOtaSha256': own, 'stagedOtaSha256': other,
+                                   'staging': ['complete', 'partial', 'corrupt-crc'],
+                                   'slotDirections': 2}}
+    write_matrix(folder, {'sourceCommit': commit, 'compiledBothRoles': True, 'reproducedBothRoles': True,
+                          'artifacts': [
+                              {'role': 'Router', 'build': '1.2.5-bseedr22', 'sha256': digest,
+                               **evidence(digest, CLIENT_SHA)},
+                              {'role': 'EndDevice', 'build': '1.2.5-bseedcli25', 'sha256': CLIENT_SHA,
+                               **evidence(CLIENT_SHA, digest)}]})
     return digest
+
+
+def write_matrix(folder, data):
+    (folder / 'ROLE_MATRIX.json').write_text(json.dumps(data))
+
+
+def read_matrix(folder):
+    return json.loads((folder / 'ROLE_MATRIX.json').read_text())
 
 
 def prepare_from(folder, out, **kwargs):
@@ -347,23 +406,37 @@ def test_prepare_bundle_from_a_ci_artifact(tmp_path):
                         expect_build='1.2.5-bseedr22')
     assert plan['image']['sha256'] == hashlib.sha256(image).hexdigest()
     assert plan['source']['roleMatrix']['role'] == 'Router'
-    assert plan['slotA'] == {'eraseFrom': '0x00000', 'eraseTo': '0x06000', 'sectors': 6,
+    assert plan['slotA'] == {'eraseFrom': '0x00000', 'eraseTo': '0x21000', 'sectors': 33,
                              'markerOffset': '0x08'}
-    assert plan['neverWritten'] == '0x06000-0x7ffff'
+    assert plan['neverWritten'] == '0x21000-0x7ffff'
+    assert plan['transport']['passes'] == 3
     loaded, data = tool.load_bundle(tmp_path / 'kit')
     assert data == image and loaded == plan
     assert 'role Router' in tool.describe(plan)
 
 
-@pytest.mark.parametrize('fault', ['dirty', 'evidence', 'commit', 'build', 'sha', 'not_empty'])
+MATRIX_FAULTS = {
+    'commit': lambda m: m.update(sourceCommit='b' * 40),
+    'not_reproduced': lambda m: m.update(reproducedBothRoles=False),
+    'boot_other_image': lambda m: m['artifacts'][0]['tc32Boot'].update(otaSha256='0' * 64),
+    'no_restart': lambda m: m['artifacts'][0]['tc32Boot'].update(restartsPerSlot=0),
+    'one_slot': lambda m: m['artifacts'][0]['tc32Boot'].update(slots=[0]),
+    'activator_other_image': lambda m: m['artifacts'][0]['tc32Activation'].update(activatorOtaSha256='0' * 64),
+    'staged_unlisted': lambda m: m['artifacts'][0]['tc32Activation'].update(stagedOtaSha256='0' * 64),
+    'no_corrupt_case': lambda m: m['artifacts'][0]['tc32Activation']['staging'].remove('corrupt-crc'),
+    'one_direction': lambda m: m['artifacts'][0]['tc32Activation'].update(slotDirections=1),
+    'listed_twice': lambda m: m['artifacts'].append(dict(m['artifacts'][0])),
+}
+
+
+@pytest.mark.parametrize('fault', ['dirty', 'build', 'sha', 'not_empty', *MATRIX_FAULTS])
 def test_prepare_rejects_inconsistent_evidence(tmp_path, fault):
     image = make_image(0x5432)
-    ci_artifact(tmp_path, image, dirty=fault == 'dirty',
-                matrix_sha='0' * 64 if fault == 'evidence' else None)
-    if fault == 'commit':
-        data = json.loads((tmp_path / 'ROLE_MATRIX.json').read_text())
-        data['sourceCommit'] = 'b' * 40
-        (tmp_path / 'ROLE_MATRIX.json').write_text(json.dumps(data))
+    ci_artifact(tmp_path, image, dirty=fault == 'dirty')
+    if fault in MATRIX_FAULTS:
+        matrix = read_matrix(tmp_path)
+        MATRIX_FAULTS[fault](matrix)
+        write_matrix(tmp_path, matrix)
     if fault == 'not_empty':
         (tmp_path / 'kit').mkdir()
         (tmp_path / 'kit' / 'old.txt').write_text('x')
@@ -372,6 +445,7 @@ def test_prepare_rejects_inconsistent_evidence(tmp_path, fault):
         kwargs = {'expect_ota_sha256': '0' * 64}
     with pytest.raises(RecoveryError):
         prepare_from(tmp_path, tmp_path / 'kit', **kwargs)
+    assert fault == 'not_empty' or not (tmp_path / 'kit').exists()
 
 
 def test_manifest_for_another_file_is_rejected(tmp_path):
@@ -402,8 +476,9 @@ def test_run_write_end_to_end_with_receipts(tmp_path, monkeypatch):
     chip = Chip(before)
     opener = lambda port: ChipPort(chip)
     lines = []
-    with pytest.raises(RecoveryError, match='no stage'):
-        tool.run_write('activate', kit, 'COM5', f'ACTIVATE-{token}', opener=opener, out=lines.append)
+    activate = f'ACTIVATE-{token}'
+    with pytest.raises(RecoveryError, match='needs a finished stage'):
+        tool.run_write('activate', kit, 'COM5', activate, opener=opener, out=lines.append)
     with pytest.raises(RecoveryError, match='--confirm must be'):
         tool.run_write('stage', kit, 'COM5', 'STAGE-00000000', opener=opener, out=lines.append)
     with pytest.raises(RecoveryError, match='not run interactively'):
@@ -411,11 +486,40 @@ def test_run_write_end_to_end_with_receipts(tmp_path, monkeypatch):
     assert chip.flash == bytearray(before), 'refused runs must not send anything'
     tool.run_write('stage', kit, 'COM5', f'STAGE-{token}', opener=opener, out=lines.append)
     assert chip.flash[8] == 0xFF
-    tool.run_write('activate', kit, 'COM5', f'ACTIVATE-{token}', opener=opener, out=lines.append)
+    later = lambda: tool.utc_now() + datetime.timedelta(minutes=31)
+    for port, now in (('COM6', tool.utc_now), ('COM5', later)):   # another port, or too late
+        with pytest.raises(RecoveryError, match='needs a finished stage'):
+            tool.run_write('activate', kit, port, activate, opener=opener, out=lines.append, now=now)
+    tool.run_write('activate', kit, 'COM5', activate, opener=opener, out=lines.append)
     assert_recovered(chip, before, image)
     log = tool.receipts(kit)
-    assert [entry['action'] for entry in log] == ['stage', 'activate']
-    assert all(entry['result'] == 'SENT_UNVERIFIED' for entry in log)
+    assert [(entry['action'], entry['result']) for entry in log] == [
+        ('stage', 'STARTED'), ('stage', 'SENT_UNVERIFIED'),
+        ('activate', 'STARTED'), ('activate', 'SENT_UNVERIFIED')]
+    assert log[1]['passes'] == 3 and log[1]['sectorsErased'] == 2 * SECTORS
+
+
+class Unplugged(ChipPort):
+    """The adapter disappears partway through."""
+
+    def write(self, buf):
+        if self.count > 400:
+            raise KeyboardInterrupt
+        return super().write(buf)
+
+
+def test_interrupted_stage_is_recorded_and_blocks_activate(tmp_path):
+    ci_artifact(tmp_path, make_image(0x5432))
+    kit = tmp_path / 'kit'
+    token = prepare_from(tmp_path, kit)['image']['sha256'][:8]
+    chip = Chip(bricked_flash())
+    with pytest.raises(KeyboardInterrupt):
+        tool.run_write('stage', kit, 'COM5', f'STAGE-{token}', opener=lambda port: Unplugged(chip),
+                       out=lambda _: None)
+    assert [entry['result'] for entry in tool.receipts(kit)] == ['STARTED', 'INTERRUPTED: KeyboardInterrupt']
+    with pytest.raises(RecoveryError, match='needs a finished stage'):
+        tool.run_write('activate', kit, 'COM5', f'ACTIVATE-{token}', opener=lambda port: ChipPort(chip),
+                       out=lambda _: None)
 
 
 def test_flash_runs_both_phases_in_one_session(tmp_path):
@@ -427,7 +531,8 @@ def test_flash_runs_both_phases_in_one_session(tmp_path):
     tool.run_write('flash', tmp_path / 'kit', 'COM5', f'FLASH-{plan["image"]["sha256"][:8]}',
                    opener=lambda port: ChipPort(chip), out=lambda _: None)
     assert_recovered(chip, before, image)
-    assert [entry['action'] for entry in tool.receipts(tmp_path / 'kit')] == ['stage', 'activate']
+    assert [entry['action'] for entry in tool.receipts(tmp_path / 'kit')
+            if entry['result'] == 'SENT_UNVERIFIED'] == ['stage', 'activate']
 
 
 def test_estimate_is_minutes_not_hours():

@@ -113,6 +113,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          shopt -s nullglob
           matrices=(build/bseed-pm-role-matrix-*/)
           test "${#matrices[@]}" -eq 1
           matrix="${matrices[0]%/}"
