@@ -71,7 +71,7 @@ jobs:
             bash make_scripts/build_bseed_ts0726_v8.sh build/ts0726-startup
           fi
           telink_tools/toolchain/tc32/bin/tc32-elf-objdump -t build/telink/tlc_switch.elf > build/ts0726-startup/tc32-symbols.txt
-      - name: Verify identity and boot the actual OTA payload from both slots
+      - name: Verify identity, boot the actual OTA payload and run its own OTA activation
         run: |
           set -euo pipefail
           python3 - <<'PY' | tee "$RUNNER_TEMP/startup.log"
@@ -83,6 +83,7 @@ jobs:
           sys.path.insert(0, 'helper_scripts')
           from bseed_pm_release import verify_native_image
           from bseed_pm_boot import verify_boot
+          from bseed_pm_ota_activation import verify_activation
 
           folder = Path('build/ts0726-startup')
           ota = folder / 'forward.ota'
@@ -98,9 +99,13 @@ jobs:
           digest = hashlib.sha256(ota.read_bytes()).hexdigest()
           if manifest['artifacts']['forward.ota']['sha256'] != digest:
               raise RuntimeError('TS0726 manifest and boot payload hashes differ')
-          evidence = verify_boot(ota, folder / 'tc32-symbols.txt', digest)
+          symbols = folder / 'tc32-symbols.txt'
+          evidence = verify_boot(ota, symbols, digest)
+          # The next OTA is the only way off this image: its own activation
+          # routine must accept, reject and survive power loss in both slots.
+          activation = verify_activation(ota, symbols, digest, ota, digest)
           report = dict(sourceCommit=os.environ['EXPECTED_HEAD'], **expected,
-                        tc32Boot=evidence, **integrity)
+                        tc32Boot=evidence, tc32Activation=activation, **integrity)
           (folder / 'BOOT_REPORT.json').write_text(json.dumps(report, indent=2) + '\n')
           print(json.dumps(report, indent=2))
           PY

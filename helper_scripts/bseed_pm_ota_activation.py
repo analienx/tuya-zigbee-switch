@@ -3,9 +3,8 @@
 import argparse
 from pathlib import Path
 
-import tc32emu as emu
-
-from bseed_pm_boot import BOOT_SLOTS, BootFailure, read_payload, read_symbols
+from bseed_pm_boot import (ACTIVATION_CASES, BOOT_SLOTS, BootFailure,
+                           activation_evidence, read_payload, read_symbols)
 
 
 MARKER_OFFSET = 8
@@ -17,6 +16,8 @@ RETURN_PC = 0x1FE
 
 
 def activate(source, staged, symbols, old_slot, new_slot, *, valid):
+    import tc32emu as emu
+
     flash = emu.Flash()
     flash.mem[old_slot:old_slot + len(source)] = source
     flash.mem[new_slot:new_slot + len(staged)] = staged
@@ -74,6 +75,9 @@ def activate(source, staged, symbols, old_slot, new_slot, *, valid):
         reset = True
     except emu.Stop as error:
         rejected = str(error) == 'activation returned without reset'
+    except emu.EmuError as error:
+        raise BootFailure(f'OTA activation faulted at {machine.symbolize(machine.r[15])}: '
+                          f'{error}') from error
     if valid:
         if not reset or marker_writes != [new_marker, old_marker]:
             raise BootFailure('Valid staged image did not complete activation and reset')
@@ -84,6 +88,25 @@ def activate(source, staged, symbols, old_slot, new_slot, *, valid):
         check_power_on('rejected staging', (ENABLED, ERASED), old_slot)
 
 
+def verify_activation(source_ota, source_symbols, source_hash, staged_ota, staged_hash):
+    """Run the source image's own activation routine on the staged image."""
+    source = read_payload(source_ota, source_hash)
+    staged = read_payload(staged_ota, staged_hash)
+    symbols = read_symbols(source_symbols)
+    payloads = dict(zip(ACTIVATION_CASES, (
+        staged, staged[:len(staged) // 2], staged[:-1] + bytes([staged[-1] ^ 1]))))
+    print(f'Activating {staged_ota} with the OTA routine of {source_ota}', flush=True)
+    for case, payload in payloads.items():
+        print(f'Testing OTA activation with {case} staging', flush=True)
+        for old_slot, new_slot in (BOOT_SLOTS, BOOT_SLOTS[::-1]):
+            try:
+                activate(source, payload, symbols, old_slot, new_slot, valid=case == 'complete')
+            except BootFailure as error:
+                raise BootFailure(f'{source_ota} activating {staged_ota} ({case}, '
+                                  f'{old_slot:#07x} -> {new_slot:#07x}): {error}') from error
+    return activation_evidence(source_hash, staged_hash)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('source_ota', type=Path)
@@ -92,18 +115,8 @@ def main():
     parser.add_argument('staged_ota', type=Path)
     parser.add_argument('staged_hash')
     args = parser.parse_args()
-    source = read_payload(args.source_ota, args.source_hash)
-    staged = read_payload(args.staged_ota, args.staged_hash)
-    symbols = read_symbols(args.source_symbols)
-    corrupt = staged[:-1] + bytes([staged[-1] ^ 1])
-    for label, payload, valid in (
-        ('complete image', staged, True),
-        ('partial download', staged[:len(staged) // 2], False),
-        ('corrupt image CRC', corrupt, False),
-    ):
-        print(f'Testing OTA activation with {label}', flush=True)
-        for old_slot, new_slot in (BOOT_SLOTS, BOOT_SLOTS[::-1]):
-            activate(source, payload, symbols, old_slot, new_slot, valid=valid)
+    verify_activation(args.source_ota, args.source_symbols, args.source_hash,
+                      args.staged_ota, args.staged_hash)
 
 
 if __name__ == '__main__':

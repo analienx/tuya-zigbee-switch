@@ -49,10 +49,21 @@ jobs:
       - name: Install pinned Telink build dependencies
         run: make -C src/telink -f tools.mk sdk toolchain
 
+      - name: Install pinned TC32 startup model
+        shell: bash
+        env:
+          TC32_EMULATOR_REV: 2e1bcaed762e3124b024047db981172d2b0395ba
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/goyamamoto/tc32-devtools.git "$RUNNER_TEMP/tc32"
+          git -C "$RUNNER_TEMP/tc32" checkout --quiet --detach "$TC32_EMULATOR_REV"
+          echo "PYTHONPATH=$RUNNER_TEMP/tc32/emulator" >> "$GITHUB_ENV"
+          echo "TC32EMU_FLASH_SIZE=0x80000" >> "$GITHUB_ENV"
+
       - name: Verify stored historical artifacts against sealed identities
         run: make bseed/identity-gate
 
-      - name: Build and reproduce current non-PM Router and Client
+      - name: Build, reproduce, boot and activate current non-PM Router and Client
         shell: bash
         run: |
           set -o pipefail

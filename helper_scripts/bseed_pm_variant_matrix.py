@@ -114,12 +114,19 @@ def record_linker_symbols(directory):
 
 
 def verify_both_roles_boot(artifacts):
+    # Deferred: the host-test job imports this module without the TC32 model.
+    from bseed_pm_ota_activation import verify_activation
+
     failures = []
-    for artifact in artifacts:
+    for artifact, other in zip(artifacts, artifacts[::-1]):
         ota = Path(artifact['artifact'])
+        symbols = ota.with_name('tc32-symbols.txt')
         try:
-            artifact['tc32Boot'] = verify_boot(
-                ota, ota.with_name('tc32-symbols.txt'), artifact['sha256'])
+            artifact['tc32Boot'] = verify_boot(ota, symbols, artifact['sha256'])
+            # No bootloader: the next OTA is the only way off this image, so its
+            # own activation routine must accept, reject and survive power loss.
+            artifact['tc32Activation'] = verify_activation(
+                ota, symbols, artifact['sha256'], Path(other['artifact']), other['sha256'])
         except BootFailure as error:
             failures.append(str(error))
     if failures:

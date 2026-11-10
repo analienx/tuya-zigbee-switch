@@ -150,3 +150,25 @@ def test_historical_verification_does_not_rebuild_old_identities():
         text = (WORKFLOWS / name).read_text(encoding="utf8")
         assert "make bseed/identity-gate" in text, name
         assert "git worktree add" not in text, name
+
+
+def test_every_native_candidate_starts_and_takes_its_next_ota_in_the_tc32_model():
+    # The chip has no bootloader or rollback: every image that can be flashed
+    # must start, restart on its own flash state and activate a following OTA.
+    for name in ("bseed-pm-matrix.yml", "bseed-nonpm-client-canary.yml",
+                 "bseed-ts0726-startup.yml"):
+        text = (WORKFLOWS / name).read_text(encoding="utf8")
+        assert "TC32_EMULATOR_REV: 2e1bcaed762e3124b024047db981172d2b0395ba" in text, name
+        assert "TC32EMU_FLASH_SIZE=0x80000" in text, name
+    pm = (ROOT / "helper_scripts/bseed_pm_variant_matrix.py").read_text(encoding="utf8")
+    nonpm = (ROOT / "helper_scripts/bseed_nonpm_variant_matrix.py").read_text(encoding="utf8")
+    assert "verify_boot(" in pm and "verify_activation(" in pm
+    assert "    verify_both_roles_boot(result['artifacts'])" in pm
+    assert "record_linker_symbols(folder)" in nonpm
+    assert "    verify_both_roles_boot(artifacts)" in nonpm
+    startup = (WORKFLOWS / "bseed-ts0726-startup.yml").read_text(encoding="utf8")
+    assert "verify_boot(ota, symbols, digest)" in startup
+    assert "verify_activation(ota, symbols, digest, ota, digest)" in startup
+    for name in ("bseed_pm_seal.py", "bseed_nonpm_variant_matrix.py"):
+        text = (ROOT / "helper_scripts" / name).read_text(encoding="utf8")
+        assert "has_tc32_evidence(" in text, name

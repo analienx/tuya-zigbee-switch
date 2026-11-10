@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'helper_scripts'))
 from bseed_nonpm_release import CANDIDATES
 from bseed_nonpm_variant_matrix import verify_bundle
 from bseed_ota_identity import IdentityError
+from bseed_pm_boot import tc32_evidence
 from test_bseed_pm_variant_matrix import sample_artifact
 
 
@@ -22,6 +23,8 @@ def bundle(tmp_path):
         (folder / 'manifest.json').write_text(json.dumps(manifest))
         folder.rename(directory / role)
         reports.append(dict(role=candidate['role'], sha256=manifest['artifacts']['forward.ota']['sha256']))
+    for report, other in zip(reports, reports[::-1]):
+        report.update(tc32_evidence(report['sha256'], other['sha256']))
     (directory / 'ROLE_MATRIX.json').write_text(json.dumps(dict(
         sourceCommit='a' * 40, compiledBothRoles=True, reproducedBothRoles=True,
         hardwareAcceptance=False, artifacts=reports)))
@@ -34,7 +37,8 @@ def test_both_nonpm_roles_verified(tmp_path):
 
 
 @pytest.mark.parametrize('fault', ['source', 'rebuild', 'hardware_claim', 'duplicate_role',
-                                  'hash', 'board', 'date', 'dirty', 'bytes'])
+                                  'hash', 'board', 'date', 'dirty', 'bytes',
+                                  'no_boot', 'no_restart', 'no_activation', 'stale_activation'])
 def test_reject_incomplete_or_inconsistent_nonpm_evidence(tmp_path, fault):
     folder = bundle(tmp_path)
     path = folder / 'ROLE_MATRIX.json'
@@ -44,6 +48,10 @@ def test_reject_incomplete_or_inconsistent_nonpm_evidence(tmp_path, fault):
     if fault == 'hardware_claim': data['hardwareAcceptance'] = True
     if fault == 'duplicate_role': data['artifacts'].append(data['artifacts'][0])
     if fault == 'hash': data['artifacts'][0]['sha256'] = 'wrong'
+    if fault == 'no_boot': del data['artifacts'][0]['tc32Boot']
+    if fault == 'no_restart': data['artifacts'][0]['tc32Boot']['restartsPerSlot'] = 0
+    if fault == 'no_activation': del data['artifacts'][1]['tc32Activation']
+    if fault == 'stale_activation': data['artifacts'][1]['tc32Activation']['stagedOtaSha256'] = 'old'
     path.write_text(json.dumps(data))
     path = folder / 'client' / 'manifest.json'
     data = json.loads(path.read_text())

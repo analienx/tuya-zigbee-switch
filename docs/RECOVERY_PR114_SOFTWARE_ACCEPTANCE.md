@@ -19,6 +19,10 @@ earlier requirement to keep the source PR in draft until physical trials.
 - Both non-PM roles, the paired Router contract, and the TS0726 variants must
   pass their build and identity checks. Both TS0726 Router candidates and the
   mains Client must boot their exact OTA payloads from both slots.
+- Every candidate, including both non-PM roles, must boot from both slots,
+  restart once on the flash state its first start left, and run its own OTA
+  activation routine (complete, partial and CRC-corrupt staging, both slot
+  directions, power loss between marker writes) in the pinned TC32 model.
 - Candidate finalization must depend on the TS0726 startup workflow as well
   as the existing role matrices, host suite and hardening checks.
 
@@ -29,6 +33,12 @@ are recorded as unmeasured, with production validation tracked separately.
 
 The TC32 model uses TLSR8278 peripherals with 512 KiB flash and empty NVM.
 It assumes a working crystal and skips the SDK diagnostic stack fill.
+It runs three application loop entries per start with no radio. Joining,
+rejoining on a populated network record, interrupt load, NVM writes during
+operation and OTA block download are not executed by any software gate.
+The PM Router and both TS0726 Router variants are compiled with
+`-Os -fno-jump-tables`. The repository records no `-Os` image that started
+on real hardware; r21 is the only recorded install.
 The host suite supplies synthetic NVM and SDK callback events.
 
 Production deployment will establish actual relay continuity, metering,
