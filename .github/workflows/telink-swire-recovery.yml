@@ -52,6 +52,7 @@ jobs:
           import json, os, sys
           image = json.load(open(sys.argv[1]))['image']
           # Same bytes as glsd301p-stock-bank-a.bin in the Gledopto recovery kit.
-          assert image['sha256'] == os.environ['GLEDOPTO_IMAGE_SHA256'], image
+          if image['sha256'] != os.environ['GLEDOPTO_IMAGE_SHA256']:
+              sys.exit(f'GL-SD-301P image differs from the Gledopto kit: {image}')
           print('GL-SD-301P stock image matches the Gledopto kit:', image['sha256'])
           EOF
