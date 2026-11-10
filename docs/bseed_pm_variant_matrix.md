@@ -22,13 +22,24 @@ The regression also executes r19's OTA activation routine with complete,
 partial, and CRC-corrupt r21 staging in both slot directions. It checks slot
 selection from flash snapshots before activation and after each marker write.
 This covers power loss between writes in the model. Flash programming faults
-within a write and candidate-specific upgrade paths need separate coverage.
+within a write need separate coverage.
+
+Every candidate also runs **its own** activation routine, because the chip has
+no bootloader and the next OTA is the only way off an installed image. The PM
+and non-PM matrices stage the other role's image (the role-change path); each
+TS0726 variant stages a copy of itself. All three staging cases and both slot
+directions must pass, and the model rejects any instruction fetched from flash
+while a flash command is in progress. The non-PM matrix applies the same
+startup and activation checks as the PM matrix.
 
 The matrix runs the native payload from each verified candidate OTA artifact
 in the pinned TC32 model from both flash slots (`0x00000` and `0x40000`).
 Each run must initialize the local button callback, start the watchdog and
 enter the application loop three times within a fixed cycle budget.
-Candidate finalization requires boot evidence tied to each role's OTA hash.
+Each slot is then restarted once on the flash contents its first start left
+behind, and must reach the application loop again.
+Candidate finalization requires boot and activation evidence tied to each
+role's OTA hash.
 The model uses empty NVM and TLSR8278 peripherals, assumes a ready crystal
 with a running timer, and skips the SDK's diagnostic stack fill. It does not
 model real relay outputs, flash timing, or Zigbee connectivity.
@@ -38,11 +49,27 @@ failures, and mains Client parent recovery.
 The build matrix is a *candidate gate*, not equivalent to a live device read,
 radio-report proof, fixture calibration or Router child-parenting verification.
 
+The Telink 512 KiB layout accepts at most **212,992 bytes (208 KiB)** in the
+complete Zigbee OTA file, including the 56-byte OTA header, 6-byte subelement
+header, firmware padding and CRC. The packager rejects larger files on both
+creation and resealing. The PM matrix and targeted runner also check this cap.
+Use `OPT_LEVEL="-Os -fno-jump-tables"` for a new compact Telink candidate.
+The build rejects `-Os` without the jump-table workaround. The consolidated
+PM Router recipe already sets it. The repository records no `-Os` image that
+started on real hardware: r21 is the only recorded install, and it did not
+start. Until one has, treat every `-Os` candidate (PM Router, both TS0726 Router variants) as unproven beyond
+the model, and prefer a wired first install on a device that already needs
+physical recovery. Assign a fresh OTA version for any compiler
+flag change and use the original source and flags to reproduce sealed images.
+
 Published Router `1.2.5-bseedv8u4` (`0x12053007`) must remain byte-stable.
 Current candidates are defined in `helper_scripts/bseed_pm_release.py`:
-`BSEED_PM_CONSOLIDATED=1` builds `1.2.5-bseedr19` (`0x12053021`, type 43556),
-and the PM Client build produces `1.2.5-bseedcli22` (same version, type 65024).
-cli22/r19 add the shared parent/route link policy; see `docs/bseed_link_policy.md`.
+`BSEED_PM_CONSOLIDATED=1` builds draft `1.2.5-bseedr22` (`0x12053024`, type 43556),
+and the PM Client build produces draft `1.2.5-bseedcli25` (same version, type 65024).
+The compact PM Router disables jump tables to avoid the TC32 flash-calibration
+miscompilation reproduced in r21. The r21/cli24 tuple is retired.
+These recovery candidates are not sealed or hardware accepted. The preceding
+cli22/r19 pair added shared parent/route policy; see `docs/bseed_link_policy.md`.
 See [the four-variant review](bseed_four_variant_review_20261031.md) for this
 candidate's Router recovery merge and fixes, and
 [Client parent recovery corrections](bseed_client_parent_recovery_20261013.md)

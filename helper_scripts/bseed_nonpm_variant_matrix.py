@@ -7,7 +7,9 @@ import uuid
 
 from bseed_nonpm_release import CANDIDATES
 from bseed_ota_identity import IdentityError
-from bseed_pm_variant_matrix import ROOT, run, verify_artifact
+from bseed_pm_boot import has_tc32_evidence
+from bseed_pm_variant_matrix import (ROOT, record_linker_symbols, run, verify_artifact,
+                                     verify_both_roles_boot)
 
 
 def verify_bundle(directory, source_commit):
@@ -22,7 +24,11 @@ def verify_bundle(directory, source_commit):
         matches = [a for a in matrix.get('artifacts', []) if a.get('role') == candidate['role']]
         if len(matches) != 1 or matches[0]['sha256'] != verified['sha256']:
             raise IdentityError('non-PM matrix artifact hash mismatch')
+        verified['matrix'] = matches[0]
         report.append(verified)
+    for verified, other in zip(report, report[::-1]):
+        if not has_tc32_evidence(verified.pop('matrix'), verified['sha256'], other['sha256']):
+            raise IdentityError('missing or mismatched non-PM TC32 boot or OTA activation evidence')
     return report
 
 
@@ -51,8 +57,10 @@ def main():
             if originals is None:
                 originals = blobs
                 artifacts.append(verified)
+                record_linker_symbols(folder)  # before the repeat build replaces the ELF
             elif originals != blobs:
                 raise IdentityError('non-reproducible non-PM role: ' + role)
+    verify_both_roles_boot(artifacts)
     result = dict(sourceCommit=source, compiledBothRoles=True, reproducedBothRoles=True,
                   hardwareAcceptance=False, artifacts=artifacts)
     (output / 'ROLE_MATRIX.json').write_text(json.dumps(result, indent=2) + '\n')

@@ -43,6 +43,20 @@ def test_live_status_late_observation_preserves_terminal_result(tmp_path, phase)
     assert current['update']['progress'] == 100
 
 
+def test_live_status_replace_failure_does_not_interrupt_observer(tmp_path):
+    before = write_live_status(tmp_path, token='same', phase='ota_running',
+                               update={'progress': 99})
+    with patch.object(Path, 'replace', side_effect=PermissionError('file busy')):
+        write_live_status(tmp_path, token='same', phase='ota_running',
+                          update={'progress': 100})
+    assert json.loads((tmp_path / 'LIVE_STATUS.json').read_text()) == before
+    assert not list(tmp_path.glob('LIVE_STATUS.json.*.tmp'))
+    response = {'transaction': 'same', 'status': 'ok'}
+    write_live_status(tmp_path, token='same', phase='ota_transfer_ok_postflash_unverified',
+                      response=response)
+    assert json.loads((tmp_path / 'LIVE_STATUS.json').read_text())['response'] == response
+
+
 def test_live_status_concurrent_callback_writes_preserve_each_update(tmp_path):
     def write_sample(sequence):
         return write_live_status(tmp_path, token='same', phase='ota_running',

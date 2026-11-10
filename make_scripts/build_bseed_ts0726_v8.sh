@@ -17,6 +17,8 @@ STOCK_IMAGE_TYPE=54179
 # Historical identities keep their published/reserved bytes: only the
 # current candidate channel compiles the link policy (link_policy.h).
 LINK_POLICY=0
+OPT_LEVEL=-O2
+RELEASE_DATE_OVERRIDE=''
 SW_BUILD='1.1.8-bseedv8'
 FILE_VERSION_HEX='0x1102300A'
 FILE_VERSION_DEC=285356042
@@ -24,9 +26,11 @@ FILE_VERSION_DEC=285356042
 # Explicit single-device canary identity. Keep the published V8 baseline as
 # the default; do not change legacy builds or the production OTA index.
 if [[ "${BSEED_TS0726_RELEASE_CHANNEL:-}" == 'currentlevel-canary' ]]; then
-    SW_BUILD='1.1.9-bseedlv3'
-    FILE_VERSION_HEX='0x1102300F'
-    FILE_VERSION_DEC=285356047
+    SW_BUILD='1.1.9-bseedlv5'
+    FILE_VERSION_HEX='0x11023015'
+    FILE_VERSION_DEC=285356053
+    RELEASE_DATE_OVERRIDE='20261107'
+    OPT_LEVEL="-Os -fno-jump-tables"
 elif [[ "${BSEED_TS0726_RELEASE_CHANNEL:-}" == 'router-recovery-candidate' ]]; then
     # Unique, non-published recovery candidate. Never relabel the historical
     # v8/lv3 images when shared Router firmware changes.
@@ -35,11 +39,13 @@ elif [[ "${BSEED_TS0726_RELEASE_CHANNEL:-}" == 'router-recovery-candidate' ]]; t
     FILE_VERSION_DEC=285356048
 elif [[ "${BSEED_TS0726_RELEASE_CHANNEL:-}" == 'link-policy-candidate' ]]; then
     # Router recovery plus parent/route link policy (src/hal/link_policy.h).
-    # Fresh identity: shared Router bytes changed after rv1.
-    SW_BUILD='1.1.9-bseedrv2'
+    # The rv2 tuple is retired; the shared recovery uses a fresh identity.
+    SW_BUILD='1.1.9-bseedrv5'
     LINK_POLICY=1
-    FILE_VERSION_HEX='0x11023011'
-    FILE_VERSION_DEC=285356049
+    FILE_VERSION_HEX='0x11023016'
+    FILE_VERSION_DEC=285356054
+    RELEASE_DATE_OVERRIDE='20261107'
+    OPT_LEVEL="-Os -fno-jump-tables"
 elif [[ -n "${BSEED_TS0726_RELEASE_CHANNEL:-}" ]]; then
     echo 'ERROR: unknown BSEED TS0726 release channel' >&2
     exit 2
@@ -119,7 +125,9 @@ OTA="$OUT_DIR/forward.ota"
 FROM_TUYA_OTA="$OUT_DIR/from_tuya.ota"
 
 COMMON_ARGS=(
+    OPT_LEVEL="$OPT_LEVEL"
   BSEED_LINK_POLICY="$LINK_POLICY"
+    BSEED_BUILD_DATE="$RELEASE_DATE_OVERRIDE"
     VERSION_STR="$SW_BUILD"
     FILE_VERSION="$FILE_VERSION_HEX"
     NVM_MIGRATIONS_VERSION="$NVM_SCHEMA"

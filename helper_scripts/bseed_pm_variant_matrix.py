@@ -18,12 +18,20 @@ from bseed_pm_boot import BootFailure, verify_boot
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMON_TESTS = ('tests/test_unified_pm_v8.py', 'tests/test_pm_cluster_layout_guard.py',
+                'tests/test_bseed_compact_flags.py',
                 'tests/test_telink_timer_runtime.py',
                 'tests/test_telink_counter_persistence.py',
                 'tests/test_telink_router_health.py',
                 'tests/test_telink_zdp_lengths.py',
                 'tests/test_telink_mgmt_rtg.py',
                 'tests/test_bseed_shared_hardening_runtime.py',
+                'tests/test_bseed_recovery_core_runtime.py',
+                'tests/test_telink_router_recovery_state_runtime.py',
+                'tests/test_router_wedge_nvm_integration.py',
+                'tests/test_client_recovery_adapter_runtime.py',
+                'tests/test_telink_telemetry_hold_runtime.py',
+                'tests/test_bseed_client_parent_recovery_runtime.py',
+                'tests/test_sdk_owner_rearm_runtime.py',
                 'tests/test_bseed_socket_antibrick.py',
                 'tests/test_bseed_controlled_reboot.py',
                 'tests/test_bseed_energy_restore.py',
@@ -106,12 +114,19 @@ def record_linker_symbols(directory):
 
 
 def verify_both_roles_boot(artifacts):
+    # Deferred: the host-test job imports this module without the TC32 model.
+    from bseed_pm_ota_activation import verify_activation
+
     failures = []
-    for artifact in artifacts:
+    for artifact, other in zip(artifacts, artifacts[::-1]):
         ota = Path(artifact['artifact'])
+        symbols = ota.with_name('tc32-symbols.txt')
         try:
-            artifact['tc32Boot'] = verify_boot(
-                ota, ota.with_name('tc32-symbols.txt'), artifact['sha256'])
+            artifact['tc32Boot'] = verify_boot(ota, symbols, artifact['sha256'])
+            # No bootloader: the next OTA is the only way off this image, so its
+            # own activation routine must accept, reject and survive power loss.
+            artifact['tc32Activation'] = verify_activation(
+                ota, symbols, artifact['sha256'], Path(other['artifact']), other['sha256'])
         except BootFailure as error:
             failures.append(str(error))
     if failures:

@@ -1,0 +1,116 @@
+"""Run shared recovery scheduling with deterministic SDK outcomes on CI."""
+from pathlib import Path
+import subprocess
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_recovery_retry_ownership_backoff_and_rollover(tmp_path):
+    source = tmp_path / 'recovery.c'
+    binary = tmp_path / 'recovery'
+    source.write_text(r'''
+#include <assert.h>
+#include <stdint.h>
+#include "hal/bseed_recovery_core.h"
+
+int main(void) {
+    const uint8_t ieee[8] = {1,2,3,4,5,6,7,8};
+    bseed_recovery_core_t core;
+    uint32_t now = UINT32_MAX - 1000u;
+    bseed_recovery_init(&core, ieee, now, true);
+    assert(!bseed_recovery_probe_answer(&core, 1u, 0u, 0u, true));
+    assert(bseed_recovery_probe_begin(&core, 1u));
+    assert(!bseed_recovery_probe_begin(&core, 2u));
+    assert(!bseed_recovery_probe_answer(&core, 1u, 1u, 0u, true));
+    assert(!bseed_recovery_probe_answer(&core, 2u, 0u, 0u, true));
+    assert(!bseed_recovery_probe_answer(&core, 1u, 0u, 1u, true));
+    assert(!bseed_recovery_probe_answer(&core, 1u, 0u, 0u, false));
+    bseed_recovery_probe_timeout(&core, now, 1u);
+    assert(!bseed_recovery_degraded(&core));
+    bseed_recovery_probe_timeout(&core, now + 60000u, 1u); /* duplicate */
+    assert(!bseed_recovery_degraded(&core));
+    assert(bseed_recovery_probe_begin(&core, 2u));
+    bseed_recovery_probe_timeout(&core, now + 59999u, 2u); /* too soon */
+    assert(!bseed_recovery_degraded(&core));
+    assert(bseed_recovery_probe_begin(&core, 3u));
+    bseed_recovery_probe_timeout(&core, now + 60000u, 3u); /* wraps */
+    assert(bseed_recovery_degraded(&core));
+    assert(bseed_recovery_probe_begin(&core, 4u));
+    assert(bseed_recovery_probe_answer(&core, 4u, 0u, 0u, true));
+    assert(!bseed_recovery_degraded(&core));
+    assert(bseed_recovery_rung(&core) == BSEED_RECOVERY_SECURE_CURRENT_CHANNEL);
+    assert(!bseed_recovery_claim(&core, now, false)); /* OTA/factory-new */
+    assert(bseed_recovery_claim(&core, now, true));
+    assert(core.pending_since_ms == now);
+    assert(bseed_recovery_probe_begin(&core, 5u));
+    assert(bseed_recovery_probe_answer(&core, 5u, 0u, 0u, true));
+    assert(core.pending); /* reachability is not SDK completion */
+    assert(!bseed_recovery_wedged(&core, now + BSEED_RECOVERY_WEDGE_MS - 1u));
+    assert(bseed_recovery_wedged(&core, now + BSEED_RECOVERY_WEDGE_MS));
+    assert(!bseed_recovery_claim(&core, now + 900000u, true)); /* SDK owns it */
+    assert(core.pending_since_ms == now); /* failed claim cannot mask a wedge */
+    uint32_t previous_generation = core.generation;
+    bseed_recovery_finish(&core, previous_generation, now, false);
+    assert(!core.pending && core.pending_since_ms == 0u);
+    assert(!bseed_recovery_wedged(&core, now + BSEED_RECOVERY_WEDGE_MS));
+    assert(bseed_recovery_rung(&core) == BSEED_RECOVERY_SECURE_ALL_CHANNELS);
+    const uint32_t expected[] = {30000u, 60000u, 120000u, 300000u, 300000u};
+    for (unsigned i = 0; i < 5u; i++) {
+        uint32_t delay = bseed_recovery_delay_ms(core.failures, core.stagger_ms);
+        assert(delay >= (expected[i] == 300000u ? 270000u : expected[i]));
+        assert(delay <= 300000u);
+        assert(core.delay_ms == delay);
+        assert(!bseed_recovery_claim(&core, now + delay - 1u, true));
+        now += delay; /* wraps naturally */
+        assert(bseed_recovery_claim(&core, now, true));
+        assert(core.pending_since_ms == now);
+        bseed_recovery_finish(&core, previous_generation, now, false);
+        assert(core.pending); /* delayed callback cannot finish the new claim */
+        previous_generation = core.generation;
+        bseed_recovery_finish(&core, previous_generation, now, false);
+        assert(bseed_recovery_rung(&core) == (i % 2u == 0u ?
+               BSEED_RECOVERY_SECURE_CURRENT_CHANNEL : BSEED_RECOVERY_SECURE_ALL_CHANNELS));
+    }
+    /* Failure count and elapsed time cannot exhaust the retry schedule. */
+    for (unsigned i = 0; i < 300u; i++) {
+        bseed_recovery_rung_t before = bseed_recovery_rung(&core);
+        now += core.delay_ms;
+        assert(bseed_recovery_claim(&core, now, true));
+        bseed_recovery_finish(&core, core.generation, now, false);
+        assert(core.delay_ms >= 270000u && core.delay_ms <= 300000u);
+        assert(bseed_recovery_rung(&core) != before);
+    }
+    assert(core.failures == UINT8_MAX);
+    /* Jitter is distributed rather than clipped to the same short delay. */
+    assert(bseed_recovery_delay_ms(1u, 10000u) !=
+           bseed_recovery_delay_ms(1u, 20000u));
+    uint32_t delays[60];
+    unsigned distinct = 0;
+    for (unsigned i = 0; i < 60u; i++) {
+        uint8_t sample[8] = {1,2,3,4,5,6,7,(uint8_t)i};
+        delays[i] = bseed_recovery_delay_ms(1u, bseed_recovery_stagger_ms(sample));
+        bool seen = false;
+        for (unsigned j = 0; j < i; j++)
+            if (delays[j] == delays[i]) seen = true;
+        if (!seen) distinct++;
+    }
+    assert(distinct >= 40u);
+    /* Capped retry schedules still differ across devices. */
+    const uint8_t other_ieee[8] = {1,2,3,4,5,6,7,9};
+    assert(bseed_recovery_delay_ms(UINT8_MAX, bseed_recovery_stagger_ms(other_ieee))
+           != core.delay_ms);
+    now += core.delay_ms;
+    assert(bseed_recovery_claim(&core, now, true));
+    bseed_recovery_finish(&core, core.generation, now, true);
+    assert(core.failures == 0u && !core.pending);
+    assert(core.pending_since_ms == 0u);
+    assert(bseed_recovery_rung(&core) == BSEED_RECOVERY_SECURE_CURRENT_CHANNEL);
+    bseed_recovery_finish(&core, core.generation, now, false); /* duplicate ignored */
+    assert(core.failures == 0u);
+    return 0;
+}
+''', encoding='utf8')
+    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
+                    '-I', str(ROOT / 'src'), str(source), '-o', str(binary)],
+                   check=True, capture_output=True, text=True)
+    subprocess.run([str(binary)], check=True, capture_output=True, text=True)

@@ -118,6 +118,7 @@ jobs:
           curl --fail --location --retry 3 https://raw.githubusercontent.com/telink-semi/telink_zigbee_sdk/V3.7.2.0/tl_zigbee_sdk/platform/chip_8258/flash.c -o build/test-sdk/flash.c
           curl --fail --location --retry 3 https://raw.githubusercontent.com/telink-semi/telink_zigbee_sdk/V3.7.2.0/tl_zigbee_sdk/zigbee/common/includes/zb_common.h -o build/test-sdk/zb_common.h
           curl --fail --location --retry 3 https://raw.githubusercontent.com/telink-semi/telink_zigbee_sdk/V3.7.2.0/tl_zigbee_sdk/zigbee/zdo/zdp.h -o build/test-sdk/zdp.h
+          curl --fail --location --retry 3 https://raw.githubusercontent.com/telink-semi/telink_zigbee_sdk/V3.7.2.0/tl_zigbee_sdk/zigbee/bdb/bdb.c -o build/test-sdk/bdb.c
       - name: Run tests
         timeout-minutes: 15
         env:

@@ -95,6 +95,9 @@ def test_rejected_recovery_is_paced_and_sdk_backoff_keeps_ownership(tmp_path, fl
     rejoin = "static bool start_rejoin_with_backoff(void)" + source.split(
         "static bool start_rejoin_with_backoff(void)", 1)[1].split(
         "void zdo_leave_indication_callback", 1)[0]
+    init = "void bdb_init_callback(u8 status, u8 joinedNetwork) {" + source.split(
+        "void bdb_init_callback(u8 status, u8 joinedNetwork) {", 1)[1].split(
+        "void bdb_commissioning_callback", 1)[0]
     callback = "void bdb_commissioning_callback(u8 status, void *arg) {" + source.split(
         "void bdb_commissioning_callback(u8 status, void *arg) {", 1)[1].split(
         "void bdb_identify_callback", 1)[0]
@@ -112,8 +115,12 @@ def test_rejected_recovery_is_paced_and_sdk_backoff_keeps_ownership(tmp_path, fl
 #include <stdio.h>
 #include <stddef.h>
 #include "hal/firmware_health.h"
+#include "hal/bseed_recovery_core.h"
+#include "telink/hal/router_recovery_budget.h"
+#include "telink/hal/recovery_diagnostics.h"
 typedef uint8_t u8;
 #define RET_OK 0
+#define BDB_INIT_STATUS_SUCCESS 0
 #define BSEED_PM_B28WRPVX 1
 firmware_health_t firmware_health;
 typedef enum {HAL_ZIGBEE_NETWORK_NOT_JOINED,HAL_ZIGBEE_NETWORK_JOINED,HAL_ZIGBEE_NETWORK_JOINING} hal_zigbee_network_status_t;
@@ -124,13 +131,16 @@ static bool joined, factory_new;
 static void app_rearm_network_announcement(void) {announce_rearms++;}
 static u8 fail_start;
 static struct {u8 scanDuration;} g_bdbAttrs;
+static struct { unsigned char extAddress[8]; } g_zbMacPib;
+static unsigned checkpoint_reboots, budget_consumed;
+bseed_budget_result_t bseed_router_rescue_budget_try_consume(void);
 #ifdef BSEED_MAINS_CLIENT
 #define MAC_SUCCESS 0
 #define MAC_STA_NO_DATA 0xeb
 #define KEEPALIVE_VERIFY_TICK_MS 60000u
 static uint32_t client_health_next_tick_ms;
 static bool ota_fast_poll_active;
-static struct { unsigned char extAddress[8]; } g_zbMacPib;
+static bseed_recovery_core_t client_coord_core;
 static u8 zb_setPollRate(uint32_t ms) {(void)ms; return RET_OK;}
 static u8 zb_rejoinReq(uint32_t channel,u8 duration)
     {(void)channel;(void)duration; return RET_OK;}
@@ -144,6 +154,17 @@ static bool zb_isDeviceFactoryNew(void) {return factory_new;}
 static uint32_t zb_apsChannelMaskGet(void) {return 0;}
 static u8 zb_rejoinReqWithBackOff(uint32_t mask,u8 duration) {rejoin_calls++;return fail_start;}
 static u8 bdb_networkSteerStart(void) {steer_calls++;return fail_start;}
+bseed_budget_result_t bseed_router_rescue_budget_try_consume(void) {
+    if(budget_consumed>=2u) return BSEED_BUDGET_EXHAUSTED;
+    budget_consumed++;
+    return BSEED_BUDGET_CONSUMED;
+}
+bool bseed_recovery_diag_record(bseed_rescue_reason_t reason,uint8_t state) {
+    (void)reason;(void)state;return true;
+}
+static void schedule_reboot(uint16_t ms) {
+    assert(ms==2000u);checkpoint_reboots++;
+}
 static void configure_mains_client_keepalive(void) {}
 static void telink_zigbee_hal_request_ota_query(void) {}
 '''
@@ -160,21 +181,58 @@ int main(void) {
     bdb_commissioning_callback(BDB_COMMISSION_STA_PARENT_LOST,0);
     now=60000; hal_zigbee_start_network_steering(); assert(rejoin_calls==2);
     joined=true; assert(hal_zigbee_get_network_status()==HAL_ZIGBEE_NETWORK_JOINED);
+    assert(firmware_health.rejoin_success==0);
+    bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,0);
     assert(firmware_health.rejoin_success==1);
-    joined=false; hal_zigbee_start_network_steering(); assert(rejoin_calls==3);
-    joined=true; hal_zigbee_get_network_status(); joined=false;
+    /* The previous accepted backoff A cannot hand off ownership to B in
+     * this boot: a duplicate/late terminal A callback is uncorrelated. */
+    joined=false; hal_zigbee_start_network_steering(); assert(rejoin_calls==2);
+    /* Only a controlled processor checkpoint begins a new SDK epoch. */
+    network_sdk_backoff_started_once=false;
+    hal_zigbee_start_network_steering(); assert(rejoin_calls==3);
+    /* A late SUCCESS from A is not trustworthy while B's SDK state is
+     * still unjoined. The active owner must remain engaged; do not rearm. */
+    joined=false;
+    bdb_init_callback(BDB_INIT_STATUS_SUCCESS,1);
+    assert(network_recovery_state==TELINK_NETWORK_RECOVERY_REJOIN);
+    bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,0);
+    assert(network_recovery_state==TELINK_NETWORK_RECOVERY_REJOIN);
+    assert(firmware_health.rejoin_success==1);
+    assert(network_sdk_backoff_started_once);
+    joined=true;
+    bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,0);
+    assert(network_recovery_state==TELINK_NETWORK_RECOVERY_IDLE);
+    assert(firmware_health.rejoin_success==2);
+    joined=false;
+#ifdef BSEED_MAINS_CLIENT
+    /* An accepted in-flight NodeDesc is still owned by the SDK. A late
+     * parent-loss callback may not claim a competing SDK rejoin. Local
+     * probe timeout does not prove vendor transaction quiescence either. */
+    network_sdk_backoff_started_once=false; /* simulated processor epoch */
+    network_recovery_state=TELINK_NETWORK_RECOVERY_IDLE;
+    network_start_retry_pending=false;
+    client_coord_core.probe_pending=true;
+    unsigned before_parent_loss=rejoin_calls;
+    bdb_commissioning_callback(BDB_COMMISSION_STA_PARENT_LOST,0);
+    assert(rejoin_calls==before_parent_loss && client_zdo_rejoin_deferred);
+    assert(client_coord_core.probe_pending);
+    client_coord_core.probe_pending=false; /* app-side timeout only */
+    bdb_commissioning_callback(BDB_COMMISSION_STA_PARENT_LOST,0);
+    assert(rejoin_calls==before_parent_loss && client_zdo_rejoin_deferred);
+    client_zdo_rejoin_deferred=false; /* new processor epoch */
+#endif
     factory_new=true; fail_start=1; now=UINT32_MAX-1000;
     hal_zigbee_start_network_steering(); assert(steer_calls==1);
     now+=4999; hal_zigbee_start_network_steering(); assert(steer_calls==1);
     now++; fail_start=0; hal_zigbee_start_network_steering(); assert(steer_calls==2);
     assert(hal_zigbee_get_network_status()==HAL_ZIGBEE_NETWORK_JOINING);
     bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,0);
-    assert(announce_rearms==1); /* proven new-epoch announce hook */
+    assert(announce_rearms==3); /* terminal successes rearm announcements */
     return 0;
 }
 '''
     run_c(tmp_path, harness + defines + "\n" + state + rejoin +
-          callback + status + ensure + checks, flags)
+          init + callback + status + ensure + checks, flags)
 
 
 def test_poll_diagnostics_count_empty_ack_as_success_and_saturate(tmp_path):

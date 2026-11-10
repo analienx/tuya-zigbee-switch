@@ -1,4 +1,4 @@
-"""Run the exact PM OTA payload in the pinned TC32 startup model."""
+"""Run a Telink OTA payload in the pinned TC32 startup model."""
 
 import argparse
 import hashlib
@@ -11,18 +11,24 @@ from bseed_pm_release import extract_native_image
 
 BOOT_SLOTS = (0, 0x40000)
 LOOP_ENTRIES = 3
+RESTARTS = 1
 CYCLE_LIMIT = 4_000_000
+ACTIVATION_CASES = ('complete', 'partial', 'corrupt-crc')
 
 
 class BootFailure(RuntimeError):
     pass
 
 
-def trace_boot(image, symbols, slot):
+def trace_boot(image, symbols, slot, persisted=None):
     import tc32emu as emu
 
     flash = emu.Flash()
-    flash.mem[slot:slot + len(image)] = image
+    if persisted is None:
+        flash.mem[slot:slot + len(image)] = image
+    else:
+        # A power cycle keeps the flash and nothing else.
+        flash.mem[:] = persisted
     machine = emu.Machine(flash, boot_slot=slot, symbols=symbols, cpi=3)
     seen = set()
     loop_entries = 0
@@ -55,9 +61,10 @@ def trace_boot(image, symbols, slot):
         reason = f'{type(error).__name__}: {error}'
     location = machine.symbolize(machine.r[15])
     passed = loop_entries == LOOP_ENTRIES and seen == required
-    print(f'Slot {slot:#07x}: {sorted(seen)}, application loop entries={loop_entries}; '
+    kind = 'cold boot' if persisted is None else 'restart'
+    print(f'Slot {slot:#07x} {kind}: {sorted(seen)}, application loop entries={loop_entries}; '
           f'{location}: {reason}', flush=True)
-    return passed, location, reason
+    return passed, location, reason, bytes(flash.mem)
 
 
 def read_payload(ota_path, expected_hash):
@@ -87,7 +94,18 @@ def verify_boot(ota_path, layout_path, expected_hash, *, expect_r21_fault=False)
     print(f'Booting {ota_path} (OTA SHA-256 {expected_hash})', flush=True)
     failures = []
     for slot in BOOT_SLOTS:
-        passed, location, reason = trace_boot(image, symbols, slot)
+        passed, location, reason, state = trace_boot(image, symbols, slot)
+        if passed and not expect_r21_fault:
+            # The device restarts on whatever its first start left in flash.
+            blank = bytearray([0xFF]) * len(state)
+            blank[slot:slot + len(image)] = image
+            written = sum(before != after for before, after in zip(blank, state))
+            print(f'Slot {slot:#07x}: first start changed {written} flash bytes', flush=True)
+            for _ in range(RESTARTS):
+                passed, location, reason, state = trace_boot(image, symbols, slot, state)
+                if not passed:
+                    location = 'restart, ' + location
+                    break
         if expect_r21_fault:
             # The negative control must hit the known fault, even if some
             # other kind of rejection would also block a release candidate.
@@ -106,7 +124,23 @@ def verify_boot(ota_path, layout_path, expected_hash, *, expect_r21_fault=False)
 
 def boot_evidence(ota_hash):
     return {'otaSha256': ota_hash, 'slots': list(BOOT_SLOTS),
-            'appLoopEntriesPerSlot': LOOP_ENTRIES}
+            'appLoopEntriesPerSlot': LOOP_ENTRIES, 'restartsPerSlot': RESTARTS}
+
+
+def activation_evidence(activator_hash, staged_hash):
+    return {'activatorOtaSha256': activator_hash, 'stagedOtaSha256': staged_hash,
+            'staging': list(ACTIVATION_CASES), 'slotDirections': len(BOOT_SLOTS)}
+
+
+def tc32_evidence(ota_hash, staged_hash):
+    """What a candidate must show: it starts, restarts, and can take its next OTA."""
+    return {'tc32Boot': boot_evidence(ota_hash),
+            'tc32Activation': activation_evidence(ota_hash, staged_hash)}
+
+
+def has_tc32_evidence(recorded, ota_hash, staged_hash):
+    return all(recorded.get(key) == value
+               for key, value in tc32_evidence(ota_hash, staged_hash).items())
 
 
 def main():

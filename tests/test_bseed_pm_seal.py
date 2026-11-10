@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'helper_scripts'))
 from bseed_ota_identity import IdentityError
-from bseed_pm_boot import BOOT_SLOTS, LOOP_ENTRIES
+from bseed_pm_boot import tc32_evidence
 from bseed_pm_release import CLIENT, ROUTER
 from bseed_pm_seal import seal_entries, verify_bundle
 from bseed_image_fixture import image_for as ota_image
@@ -56,12 +56,11 @@ def bundle(tmp_path):
         folder, manifest = sample_artifact(parent, candidate)
         manifest['sourceCommit'] = 'a' * 40
         sha256 = manifest['artifacts']['forward.ota']['sha256']
-        reports.append({'role': candidate['role'],
-                        'sha256': sha256, 'tc32Boot': {
-                            'otaSha256': sha256, 'slots': list(BOOT_SLOTS),
-                            'appLoopEntriesPerSlot': LOOP_ENTRIES}})
+        reports.append({'role': candidate['role'], 'sha256': sha256})
         folder = folder.rename(matrix / name)
         (folder / 'manifest.json').write_text(json.dumps(manifest))
+    for report, other in zip(reports, reports[::-1]):
+        report.update(tc32_evidence(report['sha256'], other['sha256']))
     (matrix / 'ROLE_MATRIX.json').write_text(json.dumps({
         'sourceCommit': 'a' * 40, 'hostTests': 'passed', 'compiledBothRoles': True,
         'reproducedBothRoles': True, 'hardwareAcceptance': False, 'artifacts': reports}))
@@ -117,7 +116,9 @@ def test_sealer_refuses_conflicting_payload_role_metadata():
 
 @pytest.mark.parametrize('fault', [
     'not_reproduced', 'stale_source', 'wrong_board', 'dirty', 'matrix_hash', 'native_bytes',
-    'missing_boot', 'wrong_boot_hash', 'one_boot_slot', 'one_loop_entry',
+    'missing_boot', 'wrong_boot_hash', 'one_boot_slot', 'one_loop_entry', 'no_restart',
+    'missing_activation', 'foreign_activator', 'self_staged', 'no_corrupt_case',
+    'one_slot_direction',
 ])
 def test_bundle_refuses_incomplete_or_inconsistent_evidence(tmp_path, fault):
     matrix = bundle(tmp_path)
@@ -130,6 +131,13 @@ def test_bundle_refuses_incomplete_or_inconsistent_evidence(tmp_path, fault):
     if fault == 'wrong_boot_hash': data['artifacts'][0]['tc32Boot']['otaSha256'] = 'wrong'
     if fault == 'one_boot_slot': data['artifacts'][0]['tc32Boot']['slots'] = [0]
     if fault == 'one_loop_entry': data['artifacts'][0]['tc32Boot']['appLoopEntriesPerSlot'] = 1
+    if fault == 'no_restart': data['artifacts'][0]['tc32Boot']['restartsPerSlot'] = 0
+    activation = data['artifacts'][1]['tc32Activation']
+    if fault == 'missing_activation': del data['artifacts'][1]['tc32Activation']
+    if fault == 'foreign_activator': activation['activatorOtaSha256'] = activation['stagedOtaSha256']
+    if fault == 'self_staged': activation['stagedOtaSha256'] = activation['activatorOtaSha256']
+    if fault == 'no_corrupt_case': activation['staging'].remove('corrupt-crc')
+    if fault == 'one_slot_direction': activation['slotDirections'] = 1
     path.write_text(json.dumps(data))
     path = matrix / 'client' / 'manifest.json'
     data = json.loads(path.read_text())

@@ -10,6 +10,30 @@ ROOT = Path(__file__).resolve().parents[1]
 OTA_HEADER = struct.Struct("<I5HIH32sI")
 
 
+def test_create_ota_checks_complete_container_size_before_writing(tmp_path: Path):
+    source = tmp_path / "firmware.bin"
+    output = tmp_path / "firmware.ota"
+    # The input is already padded and CRC-stamped, so the outer OTA header
+    # (56 bytes) and subelement header (6 bytes) determine the exact limit.
+    payload = bytearray(212992 - 62)
+    payload[6:8] = b"\x5d\x02"
+    source.write_bytes(payload)
+    command = [
+        sys.executable, str(ROOT / "src/telink/make_ota.py"), "create-ota",
+        "--image-type", "43556", "--file-version", "0x12053023",
+        str(source), str(output),
+    ]
+    subprocess.run(command, check=True)
+    accepted = output.read_bytes()
+    assert len(accepted) == 212992
+
+    source.write_bytes(payload + b"\x00")
+    result = subprocess.run(command, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "over the 212992-byte slot by 1 bytes" in result.stderr
+    assert output.read_bytes() == accepted
+
+
 def test_reseal_ota_changes_only_identity_header_bytes(tmp_path: Path):
     payload = b"\x00\x00\x10\x20\x30\x40" + b"golden-router-payload"
     source = tmp_path / "source.ota"
