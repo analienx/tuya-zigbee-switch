@@ -1,6 +1,7 @@
 name: BSEED PM role matrix
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - 'src/**'
@@ -106,6 +107,29 @@ jobs:
             build/bseed-pm-role-matrix-*/router/manifest.json
             build/bseed-pm-role-matrix-*/client/forward.ota
             build/bseed-pm-role-matrix-*/client/manifest.json
+          if-no-files-found: error
+
+      - name: Prepare wired SWire recovery kits for both roles
+        shell: bash
+        run: |
+          set -euo pipefail
+          matrices=(build/bseed-pm-role-matrix-*/)
+          test "${#matrices[@]}" -eq 1
+          matrix="${matrices[0]%/}"
+          kit=build/wired-kit
+          mkdir -p "$kit"
+          cp helper_scripts/telink_swire_recovery.py "$kit/"
+          for role in router client; do
+            python3 helper_scripts/telink_swire_recovery.py prepare \
+              --ota "$matrix/$role/forward.ota" --manifest "$matrix/$role/manifest.json" \
+              --role-matrix "$matrix/ROLE_MATRIX.json" --out "$kit/$role"
+          done
+
+      - name: Upload wired recovery kits
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseed-pm-wired-kit-${{ github.event.pull_request.head.sha || github.sha }}
+          path: build/wired-kit/
           if-no-files-found: error
 
       - name: Upload matrix log

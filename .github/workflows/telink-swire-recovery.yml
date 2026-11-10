@@ -1,0 +1,57 @@
+name: Telink SWire recovery tool
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'helper_scripts/telink_swire_recovery.py'
+      - 'tests/test_telink_swire_recovery.py'
+      - '.github/workflows/telink-swire-recovery.yml'
+  pull_request:
+    paths:
+      - 'helper_scripts/telink_swire_recovery.py'
+      - 'tests/test_telink_swire_recovery.py'
+      - '.github/workflows/telink-swire-recovery.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  swire-tool:
+    runs-on: ubuntu-latest
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      # analienx/gledopto recovery branch; its kit pins the same stock image.
+      GLEDOPTO_COMMIT: 895567036301d25da68161358f96a37971488a08
+      GLEDOPTO_OTA_SHA256: 16595a38ab9783d3afc4eb58ab4ec32625249bd569c1fa6dbaf468bddc76dd72
+      GLEDOPTO_IMAGE_SHA256: 7ba122f1ebc9f6ec419d9ea6b27676d55c2a2aad864a03e90b896546248c4b48
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Install pytest
+        run: sudo apt-get update && sudo apt-get install -y python3-pytest
+
+      - name: Run the tool against the chip and flash model
+        run: python3 -m pytest --noconftest tests/test_telink_swire_recovery.py -v
+
+      - name: Prepare the GL-SD-301P stock OTA and match the Gledopto kit
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 -o "$RUNNER_TEMP/stock.ota" \
+            "https://raw.githubusercontent.com/analienx/gledopto/$GLEDOPTO_COMMIT/devices/gl-sd-301p/vendor-firmware/originals/GL-SD-301P_V20851203_20251230.ota"
+          python3 helper_scripts/telink_swire_recovery.py prepare --ota "$RUNNER_TEMP/stock.ota" \
+            --out "$RUNNER_TEMP/gledopto-kit" --expect-ota-sha256 "$GLEDOPTO_OTA_SHA256"
+          python3 - "$RUNNER_TEMP/gledopto-kit/plan.json" <<'EOF'
+          import json, os, sys
+          image = json.load(open(sys.argv[1]))['image']
+          # Same bytes as glsd301p-stock-bank-a.bin in the Gledopto recovery kit.
+          assert image['sha256'] == os.environ['GLEDOPTO_IMAGE_SHA256'], image
+          print('GL-SD-301P stock image matches the Gledopto kit:', image['sha256'])
+          EOF
