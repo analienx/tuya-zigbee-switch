@@ -24,7 +24,8 @@ FLASH_SIZE = 0x80000
 
 
 @pytest.fixture(autouse=True)
-def no_waiting(monkeypatch):
+def no_waiting(monkeypatch, tmp_path):
+    monkeypatch.setattr(tool, 'STATE_ROOT', tmp_path / 'private-state')
     for name in ('ERASE_WAIT', 'PAGE_WAIT', 'STATUS_WAIT', 'STOP_CPU_SECONDS'):
         monkeypatch.setattr(tool, name, 0.0)
 
@@ -488,7 +489,7 @@ def test_run_write_end_to_end_with_receipts(tmp_path, monkeypatch):
     assert chip.flash[8] == 0xFF
     later = lambda: tool.utc_now() + datetime.timedelta(minutes=31)
     for port, now in (('COM6', tool.utc_now), ('COM5', later)):   # another port, or too late
-        with pytest.raises(RecoveryError, match='needs a finished stage'):
+        with pytest.raises(RecoveryError):
             tool.run_write('activate', kit, port, activate, opener=opener, out=lines.append, now=now)
     tool.run_write('activate', kit, 'COM5', activate, opener=opener, out=lines.append)
     assert_recovered(chip, before, image)
@@ -513,11 +514,11 @@ def test_interrupted_stage_is_recorded_and_blocks_activate(tmp_path):
     kit = tmp_path / 'kit'
     token = prepare_from(tmp_path, kit)['image']['sha256'][:8]
     chip = Chip(bricked_flash())
-    with pytest.raises(KeyboardInterrupt):
+    with pytest.raises(RecoveryError, match='did not finish'):
         tool.run_write('stage', kit, 'COM5', f'STAGE-{token}', opener=lambda port: Unplugged(chip),
                        out=lambda _: None)
     assert [entry['result'] for entry in tool.receipts(kit)] == ['STARTED', 'INTERRUPTED: KeyboardInterrupt']
-    with pytest.raises(RecoveryError, match='needs a finished stage'):
+    with pytest.raises(RecoveryError, match='cannot activate'):
         tool.run_write('activate', kit, 'COM5', f'ACTIVATE-{token}', opener=lambda port: ChipPort(chip),
                        out=lambda _: None)
 
@@ -669,8 +670,10 @@ def test_device_profiles_block_cross_device_and_quarantined_images():
 @pytest.mark.parametrize('image_type', [43555, 43556, 65024, 65026])
 def test_bseed_four_native_identities(image_type):
     info = tool.check_image(make_image(image_type=image_type))
+    board = 'OUTLET_BSEED_PM_TS011F' if image_type in (43556, 65024) else 'OUTLET_BSEED_TS011F'
     assert tool.check_device('bseed-ts011f', info, {
-        'manifest': {'board': 'OUTLET_BSEED_PM_TS011F'}, 'roleMatrix': {'role': 'Router'}})
+        'manifest': {'board': board, 'swBuildId': 'fixture'},
+        'roleMatrix': {'role': 'Router' if image_type in (43555, 43556) else 'EndDevice', 'build': 'fixture'}})
 
 
 def test_inherited_cli_json_wiring_and_dry_run(tmp_path, capsys):
@@ -692,6 +695,7 @@ def full_backup(path, data, port='COM5'):
     path.with_name(path.name + '.second.bin').write_bytes(data)
     path.with_name(path.name + '.json').write_text(json.dumps({
         'status': 'READ_MATCHED', 'address': 0, 'bytes': FLASH_SIZE, 'port': port,
+        'utc': tool.utc_now().isoformat(),
         'reads': [{'sha256': tool.sha256(data)}] * 2}))
     return path
 
@@ -802,6 +806,9 @@ def test_slot_b_write_requires_baseline_and_slot_bound_receipt(tmp_path):
                             baseline_sha=tool.sha256(before))
     assert not tool.fresh_stage(kit, tool.sha256(image), 'COM5', slot='B', full_slot=True)
     assert not tool.fresh_stage(kit, tool.sha256(image), 'COM5')
+    staged = full_backup(tmp_path / 'staged', chip.flash)
+    tool.verify_dump(kit, staged, staged=True, baseline=dump, slot='B', full_slot=True,
+                     session=tool.default_session('COM5'))
     tool.run_write('activate', kit, 'COM5', f'ACTIVATE-B-FULL-{token}', baseline=dump, **options)
     assert chip.flash[0x40000:0x40000 + len(image)] == image
     assert chip.stopped
@@ -820,3 +827,165 @@ def test_backup_validation_rejects_changed_evidence(tmp_path):
     dump.with_name(dump.name + '.second.bin').write_bytes(bytes(FLASH_SIZE))
     with pytest.raises(RecoveryError, match='double read'):
         tool.inspect_slots(dump)
+
+
+def agent_fixture(tmp_path, *, baseline=False):
+    image = make_image()
+    ci_artifact(tmp_path, image)
+    kit = tmp_path / 'kit'
+    plan = prepare_from(tmp_path, kit)
+    before, _ = two_known_slots('B' if baseline else 'A')
+    chip = Chip(before)
+    session = tmp_path / 'private-session.json'
+    options = dict(session=session, target_id='fixture-target', opener=lambda p: ChipPort(chip), out=lambda _: None)
+    if baseline:
+        options.update(slot='B', full_slot=True, baseline=full_backup(tmp_path / 'baseline', before))
+    token = lambda action: tool.confirmation_token(action, plan['image']['sha256'],
+                                                  options.get('slot', 'A'), options.get('full_slot', False))
+    return kit, chip, session, options, token
+
+
+def test_agent_plan_json_matches_selected_slot(tmp_path, capsys):
+    kit, _, _, _, _ = agent_fixture(tmp_path)
+    assert tool.main(['--json', 'plan', '--bundle', str(kit), '--slot', 'B', '--full-slot']) == 0
+    plan = json.loads(capsys.readouterr().out)['plan']
+    assert 'slotA' not in plan and 'neverWritten' not in plan
+    assert plan['target']['eraseStart'] == 0x40000
+    assert plan['target']['eraseEndExclusive'] == 0x74000
+    assert plan['target']['markerAddress'] == 0x40008
+    assert plan['confirmationTokens']['stage'].startswith('STAGE-B-FULL-')
+
+
+@pytest.mark.parametrize('argv', [['read', '--json'], ['plan', '--slot', 'C', '--json'],
+                                  ['--json', 'no-such-command']])
+def test_argument_errors_always_have_json(argv, capsys):
+    assert tool.main(argv) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result['apiSchema'] == tool.API_SCHEMA and result['errorCode'] == 'INVALID_ARGUMENT'
+    assert not result['sideEffectsPossible']
+
+
+def test_json_never_prompts_even_in_a_tty(tmp_path, capsys, monkeypatch):
+    kit, _, session, _, _ = agent_fixture(tmp_path)
+    monkeypatch.setattr(tool.sys.stdin, 'isatty', lambda: True)
+    monkeypatch.setattr(tool, 'ask', lambda _: pytest.fail('JSON mode must not ask'))
+    args = ['stage', '--bundle', str(kit), '--port', 'COM5', '--session', str(session),
+            '--target-id', 'fixture-target', '--operation-id', 'stage-1', '--json']
+    assert tool.main(args) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert not result['sideEffectsPossible']
+
+
+def test_completed_operations_are_replayed_without_io(tmp_path):
+    kit, chip, session, options, token = agent_fixture(tmp_path)
+    first = tool.run_write('flash', kit, 'COM5', token('flash'), operation_id='flash-1', **options)
+    snapshot = bytes(chip.flash), chip.restarts, list(chip.erases)
+    options['opener'] = lambda _: pytest.fail('duplicate request must not open hardware')
+    repeated = tool.run_write('flash', kit, 'COM5', None, operation_id='flash-1', **options)
+    assert repeated['replayed'] and repeated['receipts'] == first['receipts']
+    assert snapshot == (bytes(chip.flash), chip.restarts, chip.erases)
+    with pytest.raises(RecoveryError, match='different arguments'):
+        tool.run_write('stage', kit, 'COM5', token('stage'), operation_id='flash-1', **options)
+    with pytest.raises(RecoveryError, match='cannot stage'):
+        tool.run_write('stage', kit, 'COM5', token('stage'), operation_id='new-id', **options)
+
+
+def test_separate_activation_never_resets_before_marker_and_is_consumed(tmp_path):
+    kit, chip, session, options, token = agent_fixture(tmp_path)
+    tool.run_write('stage', kit, 'COM5', token('stage'), operation_id='stage-1', **options)
+    resets = chip.restarts
+    result = tool.run_write('activate', kit, 'COM5', token('activate'), operation_id='activate-1', hold=True, **options)
+    assert chip.restarts == resets and chip.stopped
+    assert result['phase'] == 'HELD'
+    assert not tool.fresh_stage(kit, tool.load_bundle(kit)[0]['image']['sha256'], 'COM5')
+    with pytest.raises(RecoveryError, match='cannot activate'):
+        tool.run_write('activate', kit, 'COM5', token('activate'), operation_id='new-activate', **options)
+
+
+def test_verified_session_requires_matching_readback_before_activation(tmp_path):
+    kit, chip, session, options, token = agent_fixture(tmp_path, baseline=True)
+    tool.run_write('stage', kit, 'COM5', token('stage'), operation_id='stage-1', **options)
+    with pytest.raises(RecoveryError, match='requires a successful'):
+        tool.run_write('activate', kit, 'COM5', token('activate'), operation_id='activate-1', **options)
+    readback = full_backup(tmp_path / 'staged', chip.flash)
+    result = tool.verify_dump(kit, readback, staged=True, slot='B', full_slot=True,
+                              baseline=options['baseline'], session=session)
+    assert result['phase'] == 'VERIFIED'
+    tool.run_write('activate', kit, 'COM5', token('activate'), operation_id='activate-1', hold=True, **options)
+    readback = full_backup(tmp_path / 'activated', chip.flash)
+    result = tool.verify_dump(kit, readback, slot='B', full_slot=True, baseline=options['baseline'], session=session)
+    assert result['phase'] == 'ACTIVATED_VERIFIED' and not result['bootVerified']
+    assert tool.session_status(session)['nextActions'] == ['manual_bench_start']
+
+
+def test_failed_verification_blocks_activation(tmp_path):
+    kit, chip, session, options, token = agent_fixture(tmp_path, baseline=True)
+    tool.run_write('stage', kit, 'COM5', token('stage'), operation_id='stage-1', **options)
+    bad = bytearray(chip.flash)
+    bad[0x76000] ^= 1
+    readback = full_backup(tmp_path / 'bad', bad)
+    with pytest.raises(RecoveryError, match='preserved'):
+        tool.verify_dump(kit, readback, staged=True, slot='B', full_slot=True,
+                         baseline=options['baseline'], session=session)
+    with pytest.raises(RecoveryError, match='cannot activate'):
+        tool.run_write('activate', kit, 'COM5', token('activate'), **options)
+
+
+def test_uncertain_activation_cannot_be_retried_or_bypassed(tmp_path):
+    kit, chip, session, options, token = agent_fixture(tmp_path)
+    tool.run_write('stage', kit, 'COM5', token('stage'), operation_id='stage-1', **options)
+    options['opener'] = lambda _: (_ for _ in ()).throw(OSError('USB lost'))
+    with pytest.raises(RecoveryError) as error:
+        tool.run_write('activate', kit, 'COM5', token('activate'), operation_id='activate-1', **options)
+    assert error.value.code == 'WRITE_UNCERTAIN' and not error.value.retry_safe
+    assert error.value.side_effects
+    with pytest.raises(RecoveryError, match='did not complete'):
+        tool.run_write('activate', kit, 'COM5', token('activate'), operation_id='activate-1', **options)
+    with pytest.raises(RecoveryError, match='cannot activate'):
+        tool.run_write('activate', kit, 'COM5', token('activate'), operation_id='new-id', **options)
+    options['session'] = tmp_path / 'different-session.json'
+    with pytest.raises(RecoveryError, match='owns this port'):
+        tool.run_write('stage', kit, 'COM5', token('stage'), operation_id='bypass', **options)
+    # A fresh double read proves the staged bytes still exist. Reconciliation
+    # permits a NEW activation; the original uncertain request stays blocked.
+    options['session'] = session
+    options['opener'] = lambda _: ChipPort(chip)
+    readback = full_backup(tmp_path / 'reconcile', chip.flash)
+    tool.verify_dump(kit, readback, staged=True, session=session, reconcile=True)
+    assert tool.session_status(session)['phase'] == 'VERIFIED'
+    tool.run_write('activate', kit, 'COM5', token('activate'), operation_id='after-readback', **options)
+
+
+def test_port_exclusion_and_reset_guard(tmp_path):
+    with tool.PortGuard('COM5'):
+        with pytest.raises(RecoveryError) as error:
+            tool.read_flash('COM5', tmp_path / 'out')
+        assert error.value.code == 'PORT_LOCKED'
+    kit, chip, session, options, token = agent_fixture(tmp_path)
+    tool.run_write('stage', kit, 'COM5', token('stage'), **options)
+    with pytest.raises(RecoveryError, match='reset/halt is forbidden'):
+        tool.read_flash('COM5', tmp_path / 'out', halt=True)
+
+
+def test_reader_preserves_error_diagnostics(tmp_path, monkeypatch):
+    import subprocess
+    reader = tmp_path / 'reader.py'
+    reader.write_bytes(b'fixture')
+    monkeypatch.setattr(tool, 'READER_SHA256', tool.sha256(reader.read_bytes()))
+    def failed(command, **kwargs):
+        return subprocess.CompletedProcess(command, 7, stdout='No target response', stderr='link error')
+    with pytest.raises(RecoveryError) as error:
+        tool.read_flash('COM5', tmp_path / 'out', reader=reader, runner=failed)
+    assert error.value.code == 'READ_FAILED'
+    result = tool.read_json(tmp_path / 'out.json')
+    assert result['readerRuns'][0]['exitCode'] == 7
+    assert 'No target response' in Path(result['readerRuns'][0]['diagnostics']).read_text()
+
+
+def test_bseed_board_role_mismatch_is_rejected():
+    info = tool.check_image(make_image(image_type=65024))
+    with pytest.raises(RecoveryError, match='board/role'):
+        tool.check_device('bseed-ts011f', info, {'manifest': {'board': 'OUTLET_BSEED_TS011F'},
+                                               'roleMatrix': {'role': 'Router'}})
+    with pytest.raises(RecoveryError, match='guarded'):
+        tool.check_device('generic-tlsr8258', info, {'pinnedSha256': info['sha256']})

@@ -17,6 +17,18 @@ permissions:
   contents: read
 
 jobs:
+  windows-agent-contract:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest
+      - run: python -m pytest --noconftest tests/test_telink_swire_recovery.py -v
+
   swire-tool:
     runs-on: ubuntu-latest
     env:

@@ -37,12 +37,14 @@ import argparse
 import datetime
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import struct
 import subprocess
 import sys
 import time
+import uuid
 import zlib
 
 # Wire timing from pvvx USBCOMFlashTx.html v0.5 (TX-only). The SWS divider is
@@ -87,6 +89,8 @@ BUNDLE_IMAGE = 'image.bin'
 BUNDLE_PLAN = 'plan.json'
 BUNDLE_LOG = 'receipts.jsonl'
 SCHEMA = 2
+API_SCHEMA = 1
+STATE_ROOT = Path.home() / '.telink-swire'
 CHECKLIST = (
     'Board off mains; nothing mains-connected touches the board or the PC.',
     'Adapter in TTL mode; TXD idles at about 3.3 V (measured, not assumed).',
@@ -154,7 +158,19 @@ DEVICES = {
 
 
 class RecoveryError(Exception):
-    pass
+    def __init__(self, message, *, code='PRECONDITION_FAILED', details=None,
+                 side_effects=False, retry_safe=True, exit_code=2):
+        super().__init__(message)
+        self.code = code
+        self.details = details or {}
+        self.side_effects = side_effects
+        self.retry_safe = retry_safe
+        self.exit_code = exit_code
+
+
+class AgentParser(argparse.ArgumentParser):
+    def error(self, message):
+        raise RecoveryError(message, code='INVALID_ARGUMENT')
 
 
 def sha256(data):
@@ -229,6 +245,8 @@ def image_from_ota(ota):
 
 
 def check_manifest(manifest, ota, info):
+    if not re.fullmatch(r'[0-9a-f]{40}', manifest.get('sourceCommit', '')):
+        raise RecoveryError('manifest has no exact source commit')
     entry = manifest.get('artifacts', {}).get('forward.ota', {})
     if entry.get('sha256') != sha256(ota) or entry.get('bytes', len(ota)) != len(ota):
         raise RecoveryError('manifest does not describe this OTA file')
@@ -243,6 +261,8 @@ def check_manifest(manifest, ota, info):
 
 def check_role_matrix(matrix, ota_sha):
     """The checks of bseed_pm_boot.has_tc32_evidence, restated so the kit stays one file."""
+    if not re.fullmatch(r'[0-9a-f]{40}', matrix.get('sourceCommit', '')):
+        raise RecoveryError('role matrix has no exact source commit')
     if matrix.get('compiledBothRoles') is not True or matrix.get('reproducedBothRoles') is not True:
         raise RecoveryError('role matrix does not show both roles compiled and reproduced')
     artifacts = matrix.get('artifacts', [])
@@ -301,6 +321,8 @@ def check_device(device_id, info, source):
     device = DEVICES.get(device_id)
     if device is None:
         raise RecoveryError(f'unknown device {device_id!r}; use one of {", ".join(DEVICES)}')
+    if device_id == 'generic-tlsr8258' and info['manufacturerCode'] in (0x1141, 0x124F):
+        raise RecoveryError('recognized BSEED/Gledopto identity requires its guarded device profile')
     codes = device.get('manufacturerCodes')
     if codes and info['manufacturerCode'] not in codes:
         raise RecoveryError(f'image is for manufacturer {info["manufacturerCode"]:#06x}, '
@@ -315,6 +337,16 @@ def check_device(device_id, info, source):
     if device.get('requiresEvidence') and not (source.get('manifest') and source.get('roleMatrix')):
         raise RecoveryError(f'{device_id} needs --manifest and --role-matrix from the same CI run; '
                             'download a wired kit instead')
+    if device_id == 'bseed-ts011f':
+        expected = {43556: ('OUTLET_BSEED_PM_TS011F', 'Router'),
+                    65024: ('OUTLET_BSEED_PM_TS011F', 'EndDevice'),
+                    43555: ('OUTLET_BSEED_TS011F', 'Router'),
+                    65026: ('OUTLET_BSEED_TS011F', 'EndDevice')}[info['imageType']]
+        matrix = source['roleMatrix']
+        if (manifest.get('board'), matrix.get('role')) != expected:
+            raise RecoveryError('BSEED board/role does not match the native image identity')
+        if manifest.get('swBuildId') != matrix.get('build'):
+            raise RecoveryError('BSEED manifest and role matrix build IDs differ')
     images = device.get('images')
     if device_id == 'gledopto-gl-sd-301p' and info['sha256'] not in images:
         raise RecoveryError('Gledopto custom firmware remains quarantined; this profile permits stock recovery only')
@@ -364,6 +396,7 @@ class TxOnlyWriter:
         self.full_slot = full_slot
         self.hold = hold
         self.baseline_sha = None
+        self.attach_only = False
         self.port = port
         self.sleep = sleep
         self.clock = clock
@@ -429,6 +462,8 @@ class TxOnlyWriter:
             self.note('stop-cpu', powerCycle=True)
             self.power_on()
             seconds = POWER_CYCLE_SECONDS
+        elif self.attach_only:
+            self.note('attach-without-reset')
         elif self.power_on is None:
             self.restart()
             self.note('stop-cpu', powerCycle=False)
@@ -559,9 +594,10 @@ class _FileSink:
         pass
 
 
-def estimate_seconds(image, passes=PASSES):
+def estimate_seconds(image, passes=PASSES, *, slot='A', full_slot=False, hold=False):
     ticks = iter(range(0, 10 ** 9, 10 ** 6))
-    writer = TxOnlyWriter(_Sink(), sleep=lambda _: None, clock=lambda: next(ticks))
+    writer = TxOnlyWriter(_Sink(), sleep=lambda _: None, clock=lambda: next(ticks),
+                          slot=slot, full_slot=full_slot, hold=hold)
     writer.stage(image, passes)
     writer.activate()
     stops = writer.cpu_stops * STOP_CPU_SECONDS
@@ -669,7 +705,7 @@ def utc_now():
 
 
 def receipts(folder):
-    path = Path(folder) / BUNDLE_LOG
+    path = bundle_log(folder)
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines() if line.strip()]
@@ -686,7 +722,9 @@ def record(folder, action, port, image_sha, writer, result, passes, now=utc_now,
         'slot': writer.slot, 'fullSlot': writer.full_slot, 'hold': writer.hold,
         'baselineSha256': writer.baseline_sha,
     }
-    with (Path(folder) / BUNDLE_LOG).open('a', encoding='utf-8') as log:
+    path = bundle_log(folder)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open('a', encoding='utf-8') as log:
         log.write(json.dumps(entry) + '\n')
     return entry
 
@@ -698,8 +736,12 @@ def fresh_stage(folder, image_sha, port, now=utc_now, *, slot='A', full_slot=Fal
     nothing about the chip on the wires now.
     """
     for entry in reversed(receipts(folder)):
-        if entry.get('action') != 'stage' or entry.get('imageSha256') != image_sha:
+        if entry.get('action') == 'activate':
+            return False
+        if entry.get('action') != 'stage':
             continue
+        if entry.get('imageSha256') != image_sha:
+            return False
         if entry.get('slot', 'A') != slot or entry.get('fullSlot', False) != full_slot:
             return False
         if entry.get('baselineSha256') != baseline_sha:
@@ -768,6 +810,133 @@ def confirm(action, image_sha, provided, interactive):
         raise RecoveryError(f'{action} needs --confirm {token} when not run interactively')
     if ask(f'Type {token} to {action}: ').strip() != token:
         raise RecoveryError('cancelled')
+
+
+def confirmation_token(action, image_sha, slot='A', full_slot=False):
+    suffix = f'-{slot}-FULL' if full_slot else (f'-{slot}' if slot != 'A' else '')
+    return f'{action.upper()}{suffix}-{image_sha[:8]}'
+
+
+def selected_plan(plan, image, *, slot='A', full_slot=False, hold=False, passes=PASSES):
+    start = SLOTS[slot]
+    end = start + (SLOT_A_END if full_slot else erase_end(len(image)))
+    result = {k: v for k, v in plan.items() if k not in ('slotA', 'neverWritten', 'estimatedSeconds')}
+    result.update(apiSchema=API_SCHEMA, target={
+        'slot': slot, 'eraseStart': start, 'eraseEndExclusive': end, 'eraseBytes': end - start,
+        'programStart': start, 'programEndExclusive': start + len(image),
+        'markerAddress': start + MARKER_OFFSET, 'fullSlot': full_slot,
+        'preservedRanges': [[0, start], [end, 0x80000]], 'holdAfterActivation': hold},
+        confirmationTokens={a: confirmation_token(a, plan['image']['sha256'], slot, full_slot)
+                            for a in PHASES},
+        estimatedSeconds=estimate_seconds(image, passes, slot=slot, full_slot=full_slot, hold=hold),
+        requirements={'baselineRequired': slot == 'B', 'physicalTargetConfirmationRequired': True,
+                      'readWiring': 'bidirectional', 'writeWiring': 'TX-only',
+                      'verificationRequiredWhenBaselineSupplied': True}, bootVerified=False)
+    return result
+
+
+def atomic_json(path, value):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
+    try:
+        with temporary.open('x', encoding='utf-8') as stream:
+            json.dump(value, stream, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def port_key(port):
+    canonical = port.upper() if port.upper().startswith('COM') else str(Path(port).resolve())
+    return sha256(canonical.encode())[:24]
+
+
+def bundle_log(folder):
+    return STATE_ROOT / 'bundles' / sha256(str(Path(folder).resolve()).encode()) / BUNDLE_LOG
+
+
+def authority_path(port):
+    return STATE_ROOT / 'ports' / (port_key(port) + '.json')
+
+
+def default_session(port):
+    return STATE_ROOT / 'sessions' / (port_key(port) + '.json')
+
+
+class PortGuard:
+    """Cross-process exclusion. Crash residue is never silently discarded."""
+    def __init__(self, port):
+        self.path = STATE_ROOT / 'locks' / (port_key(port) + '.json')
+        self.owner = {'port': port, 'pid': os.getpid(), 'nonce': uuid.uuid4().hex,
+                      'utc': utc_now().isoformat()}
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with self.path.open('x', encoding='utf-8') as stream:
+                json.dump(self.owner, stream)
+        except FileExistsError as error:
+            raise RecoveryError('port has an active or abandoned tool lock; inspect status before unlocking',
+                                code='PORT_LOCKED', details={'lock': str(self.path)}, retry_safe=False) from error
+        return self
+
+    def __exit__(self, *_):
+        self.path.unlink(missing_ok=True)
+
+
+def session_status(path):
+    path = Path(path)
+    state = read_json(path)
+    steps = {'READY': ['stage'], 'STAGED': ['read', 'verify'], 'VERIFIED': ['activate'],
+             'HELD': ['read', 'verify'], 'ACTIVATED_VERIFIED': ['manual_bench_start'],
+             'BOOT_REQUESTED': ['live_device_acceptance'], 'NEEDS_RECONCILIATION': ['read', 'reconcile', 'close'],
+             'VERIFICATION_FAILED': ['read', 'reconcile', 'close'], 'CLOSED': ['new_session']}
+    result = dict(state, session=str(path), nextActions=steps.get(state['phase'], []),
+                  bootVerified=False, apiSchema=API_SCHEMA)
+    if state['phase'] == 'STAGED' and not state['context']['verificationRequired']:
+        result['nextActions'].append('activate_unverified')
+    lock = STATE_ROOT / 'locks' / (port_key(state['context']['port']) + '.json')
+    result['portLock'] = read_json(lock) if lock.exists() else None
+    return result
+
+
+def save_session(path, state):
+    state['updatedUtc'] = utc_now().isoformat()
+    atomic_json(path, state)
+    atomic_json(authority_path(state['context']['port']), {'session': str(Path(path).resolve()),
+                'phase': state['phase'], 'targetId': state['context']['targetId']})
+
+
+def prepare_session(path, context, action):
+    path = private_output(path)
+    authority = authority_path(context['port'])
+    if authority.exists():
+        owner = read_json(authority)
+        if owner['session'] != str(path) and owner['phase'] != 'CLOSED':
+            raise RecoveryError('another recovery session owns this port; resume or explicitly close it',
+                                code='SESSION_CONFLICT', details=owner, retry_safe=False)
+    if path.exists():
+        state = read_json(path)
+        if state.get('context') != context:
+            raise RecoveryError('session target/image/layout changed; do not reuse this session', code='SESSION_MISMATCH')
+        return path, state
+    if action == 'activate':
+        raise RecoveryError('activate needs a finished stage in this recovery session', code='STAGE_REQUIRED')
+    state = {'apiSchema': API_SCHEMA, 'id': uuid.uuid4().hex, 'context': context,
+             'phase': 'READY', 'operations': {}, 'createdUtc': utc_now().isoformat()}
+    save_session(path, state)
+    return path, state
+
+
+def session_context(folder, plan, port, slot, full_slot, baseline, target_id):
+    return {'bundle': str(Path(folder).resolve()), 'imageSha256': plan['image']['sha256'],
+            'port': port, 'slot': slot, 'fullSlot': full_slot, 'targetId': target_id,
+            'baseline': str(Path(baseline).resolve()) if baseline else None,
+            'baselineSha256': sha256(matched_backup(baseline, port=port)) if baseline else None,
+            'verificationRequired': bool(baseline)}
 
 
 def open_port(port, timeout=0.5):
@@ -845,86 +1014,127 @@ def dry_run(action, plan, image, passes, power_cycle, path, out, *, slot='A', fu
 
 def run_write(action, folder, port, provided, passes=PASSES, *, power_cycle=False, dry_run_path=None,
               opener=open_port, out=print, now=utc_now, interactive=None,
-              slot='A', full_slot=False, baseline=None, hold=False):
+              slot='A', full_slot=False, baseline=None, hold=False, session=None,
+              operation_id=None, target_id='operator-confirmed'):
     plan, image = load_bundle(folder)
     image_sha = plan['image']['sha256']
-    if passes not in SCHEDULES:
-        raise RecoveryError(f'passes must be one of {sorted(SCHEDULES)}')
-    if slot not in SLOTS:
-        raise RecoveryError('slot must be A or B')
+    if passes not in SCHEDULES or slot not in SLOTS:
+        raise RecoveryError('invalid passes or slot', code='INVALID_ARGUMENT')
     if slot == 'B' and not baseline:
         raise RecoveryError('slot B requires --baseline from a matching double read with slot A disabled')
-    baseline_sha = None
     if baseline:
         before = matched_backup(baseline, port=None if dry_run_path else port)
-        baseline_sha = sha256(before)
         if slot == 'B' and before[8:12] != b'\x00NLT':
             raise RecoveryError('slot A is not explicitly disabled; slot B cannot take boot priority. Stop and inspect')
-        if slot == 'B':
-            state = inspect_slots(baseline)
-            if not state['slots'][0]['validImage'] or state['legacyMarkers']:
-                raise RecoveryError('slot A has an unknown image or legacy layout marker; stop before writing B')
+        state_of_slots = inspect_slots(baseline)
+        enabled = [s for s in state_of_slots['slots'] if s['markerState'] == 'enabled']
+        if len(enabled) != 1 or enabled[0]['slot'] != slot or state_of_slots['legacyMarkers']:
+            raise RecoveryError('baseline does not establish this unique active slot; inspect before choosing a write target',
+                                code='SLOT_SELECTION_UNCONFIRMED')
+        if not full_slot:
+            raise RecoveryError('in-place recovery from a baseline requires --full-slot', code='FULL_SLOT_REQUIRED')
+        if slot == 'B' and (not state_of_slots['slots'][0]['validImage'] or state_of_slots['legacyMarkers']):
+            raise RecoveryError('slot A has an unknown image or legacy layout marker; stop before writing B')
+        if action == 'flash':
+            raise RecoveryError('a baseline selects verified recovery: use stage, read, verify, activate separately',
+                                code='VERIFICATION_REQUIRED')
     if dry_run_path:
         return dry_run(action, plan, image, passes, power_cycle, dry_run_path, out,
                        slot=slot, full_slot=full_slot, hold=hold)
     interactive = sys.stdin.isatty() if interactive is None else interactive
-    if action == 'activate' and not fresh_stage(folder, image_sha, port, now, slot=slot,
-                                               full_slot=full_slot, baseline_sha=baseline_sha):
-        raise RecoveryError(f'activate needs a finished stage of this image on {port} within the last '
-                            f'{STAGE_FRESH_SECONDS // 60} minutes; run flash instead')
-    if power_cycle and not interactive:
-        raise RecoveryError('--power-cycle needs a person at an interactive terminal to switch 3.3 V on '
-                            'when asked')
-    out(describe(plan, slot=slot, full_slot=full_slot))
-    end = SLOT_A_END if full_slot else erase_end(len(image))
-    out(f'Actual target: slot {slot}, {SLOTS[slot]:#07x}-{SLOTS[slot] + end:#07x} (end exclusive).')
-    out('Check before you continue:')
-    for line in CHECKLIST:
-        out(f'  - {line}')
-    out(f'  Device notes: wiring --device {plan["device"]["id"]}')
-    out('The chip does not answer. The only proof is the device starting afterwards.')
-    # Non-default layouts cannot reuse the default slot-A confirmation token.
-    confirm(action if slot == 'A' and not full_slot else f'{action}-{slot}-full' if full_slot else f'{action}-{slot}',
-            image_sha, provided, interactive)
-    if power_cycle:
-        out('Power-cycle mode: disconnect only the 3V3 lead (or switch the 3.3 V supply off). '
-            'Keep TXD and GND connected.')
-        ask('Press Enter when the board has no power: ')
-    entries = []
+    if power_cycle and (not interactive or action == 'activate'):
+        raise RecoveryError('--power-cycle requires an interactive stage/flash; activation never resets the chip')
+    if not re.fullmatch(r'(?:COM\d+|/dev/[A-Za-z0-9_./-]+)', port or '', re.IGNORECASE):
+        raise RecoveryError('invalid serial port', code='INVALID_ARGUMENT')
+    operation_id = operation_id or uuid.uuid4().hex
+    if not re.fullmatch(r'[A-Za-z0-9_.-]{1,96}', operation_id):
+        raise RecoveryError('operation ID must be 1-96 letters, numbers, dot, dash or underscore')
+    context = session_context(folder, plan, port, slot, full_slot, baseline, target_id)
+    path = Path(session) if session else default_session(port)
+    request = dict(context, action=action, passes=passes, hold=hold, powerCycle=power_cycle)
+    with PortGuard(port):
+        path, state = prepare_session(path, context, action)
+        previous = state['operations'].get(operation_id)
+        if previous:
+            if previous['request'] != request:
+                raise RecoveryError('operation ID was already used for different arguments', code='OPERATION_CONFLICT')
+            if previous['status'] == 'COMPLETED':
+                return dict(previous['result'], replayed=True)
+            raise RecoveryError('this operation started but did not complete; inspect and reconcile before writing',
+                                code='RECONCILIATION_REQUIRED', retry_safe=False,
+                                side_effects=True, details={'session': str(path), 'operationId': operation_id})
+        allowed = {'stage': {'READY'}, 'flash': {'READY'}, 'activate': {'STAGED', 'VERIFIED'}}
+        if state['phase'] not in allowed[action]:
+            raise RecoveryError(f'cannot {action} from {state["phase"]}; inspect status and reconcile or close',
+                                code='INVALID_PHASE', retry_safe=False, details={'session': str(path)})
+        if action == 'activate':
+            if context['verificationRequired'] and state['phase'] != 'VERIFIED':
+                raise RecoveryError('activate requires a successful staged readback verification in this session',
+                                    code='VERIFICATION_REQUIRED', details={'session': str(path)})
+            age = (now() - datetime.datetime.fromisoformat(state['stageUtc'])).total_seconds()
+            if not 0 <= age <= STAGE_FRESH_SECONDS:
+                raise RecoveryError('stage is no longer fresh; read and reconcile before activation', code='STAGE_EXPIRED')
+        out(describe(plan, slot=slot, full_slot=full_slot))
+        for line in CHECKLIST:
+            out(f'  - {line}')
+        token = confirmation_token(action, image_sha, slot, full_slot)
+        confirm(token.rsplit('-', 1)[0], image_sha, provided, interactive)
+        if power_cycle:
+            ask('Disconnect only 3.3 V, keep SWS/GND, then press Enter: ')
+        # Persist intent before opening the port: even a crash at open leaves a
+        # conservatively uncertain operation. A new operation ID cannot bypass it.
+        state['operations'][operation_id] = {'request': request, 'status': 'STARTED'}
+        state['phase'] = 'NEEDS_RECONCILIATION'
+        state['activeOperation'] = operation_id
+        save_session(path, state)
+        writer = None
+        entries = []
+        try:
+            with opener(port) as com:
+                def progress(number, total, address, end):
+                    state['progress'] = {'pass': number, 'passes': total, 'offset': address, 'end': end}
+                    save_session(path, state)
+                    out(f'pass {number}/{total}: {address:#x}/{end:#x}')
 
-    def power_on():
-        out(f'>>> Connect 3.3 V NOW. The chip is halted as it starts; you have '
-            f'{POWER_CYCLE_SECONDS:.0f} s. <<<')
-
-    def progress(number, total, address, end):
-        out(f'  pass {number} of {total}: {address:#07x} of {end:#07x} ({100 * address // end}%)')
-
-    with opener(port) as com:
-        writer = TxOnlyWriter(com, power_on=power_on if power_cycle else None, progress=progress,
-                              slot=slot, full_slot=full_slot, hold=hold)
-        writer.baseline_sha = baseline_sha
-        for phase in PHASES[action]:
-            # Written before sending, so an interrupted write still leaves a trace.
-            record(folder, phase, port, image_sha, writer, 'STARTED', passes, now, power_cycle)
-            out(f'{phase} started')
-            try:
-                run_phase(writer, phase, image, passes)
-            except BaseException as error:
-                record(folder, phase, port, image_sha, writer,
-                       f'INTERRUPTED: {type(error).__name__}', passes, now, power_cycle)
-                raise
-            entries.append(record(folder, phase, port, image_sha, writer, 'SENT_UNVERIFIED', passes,
-                                  now, power_cycle))
-    out(f'{action}: all bytes sent ({writer.uart_bytes:,} UART bytes). Not verified on the chip.')
-    if action == 'stage':
-        out(f'Slot {slot} start marker was sent inactive. Verify readback before activation when available.')
-    elif hold:
-        out('Activation sent; no restart requested. Verify full readback before the controlled bench start.')
-    else:
-        out('Chip restarted. Look for LED activity and a button response; then the Zigbee checks.')
-        out(f'If nothing happens: preserve evidence, check the leads and 3.3 V, then assess the incident fallback. '
-            f'See {GUIDE}.')
-    return entries
+                writer = TxOnlyWriter(com, power_on=(lambda: out('Connect 3.3 V NOW')) if power_cycle else None,
+                                      progress=progress, slot=slot, full_slot=full_slot, hold=hold)
+                writer.baseline_sha = context['baselineSha256']
+                # A separate activation must reassert HALT without software reset.
+                # Never infer observed target execution from an in-memory flag.
+                writer.attach_only = action == 'activate'
+                for phase in PHASES[action]:
+                    state['activePhase'] = phase
+                    save_session(path, state)
+                    record(folder, phase, port, image_sha, writer, 'STARTED', passes, now, power_cycle)
+                    try:
+                        run_phase(writer, phase, image, passes)
+                    except BaseException as error:
+                        record(folder, phase, port, image_sha, writer,
+                               f'INTERRUPTED: {type(error).__name__}', passes, now, power_cycle)
+                        raise
+                    entries.append(record(folder, phase, port, image_sha, writer, 'SENT_UNVERIFIED', passes,
+                                          now, power_cycle))
+                    if phase == 'stage':
+                        state['stageUtc'] = now().isoformat()
+            state['phase'] = 'STAGED' if action == 'stage' else ('HELD' if hold else 'BOOT_REQUESTED')
+            result = {'status': 'SENT_UNVERIFIED', 'action': action, 'session': str(path),
+                      'operationId': operation_id, 'targetId': target_id, 'slot': slot,
+                      'phase': state['phase'], 'receipts': entries, 'bootVerified': False,
+                      'flashVerified': False, 'retrySafe': True, 'replayed': False}
+            state['operations'][operation_id].update(status='COMPLETED', result=result)
+            save_session(path, state)
+            return result
+        except BaseException as error:
+            state['phase'] = 'NEEDS_RECONCILIATION'
+            state['operations'][operation_id].update(status='UNCERTAIN', error=type(error).__name__)
+            save_session(path, state)
+            raise RecoveryError(f'{action} did not finish; flash or debug state may have changed. Do not retry the write',
+                                code='INTERRUPTED' if isinstance(error, KeyboardInterrupt) else 'WRITE_UNCERTAIN',
+                                details={'session': str(path), 'operationId': operation_id,
+                                         'activePhase': state.get('activePhase'),
+                                         'lastOperation': writer.last if writer else None},
+                                side_effects=True, retry_safe=False,
+                                exit_code=130 if isinstance(error, KeyboardInterrupt) else 3) from error
 
 
 def list_ports():
@@ -950,7 +1160,16 @@ def private_output(path):
     return path
 
 
-def read_flash(port, output, *, address=0, size=FLASH_BYTES, reader=None,
+def read_flash(port, output, **kwargs):
+    with PortGuard(port):
+        authority = authority_path(port)
+        if kwargs.get('halt') and authority.exists() and read_json(authority)['phase'] != 'CLOSED':
+            raise RecoveryError('reset/halt is forbidden during an active recovery session; use a no-reset read',
+                                code='RESET_FORBIDDEN', retry_safe=False)
+        return _read_flash(port, output, **kwargs)
+
+
+def _read_flash(port, output, *, address=0, size=FLASH_BYTES, reader=None,
                halt=False, fetch=download, runner=subprocess.run):
     """Two independent rf invocations; never expose upstream erase/write commands.
 
@@ -967,7 +1186,8 @@ def read_flash(port, output, *, address=0, size=FLASH_BYTES, reader=None,
     output = private_output(output)
     second = output.with_name(output.name + '.second.bin')
     receipt = output.with_name(output.name + '.json')
-    if any(p.exists() for p in (output, second, receipt)):
+    logs = [output.with_name(output.name + f'.reader-{i}.log') for i in (1, 2)]
+    if any(p.exists() for p in (output, second, receipt, *logs)):
         raise RecoveryError('read output or receipt already exists; choose a new output')
     output.parent.mkdir(parents=True, exist_ok=True)
     if reader is None:
@@ -983,17 +1203,37 @@ def read_flash(port, output, *, address=0, size=FLASH_BYTES, reader=None,
         raise RecoveryError('reader must match the pinned pvvx source SHA-256')
     result = {'status': 'STARTED', 'address': address, 'bytes': size,
               'port': port, 'readerCommit': READER_COMMIT, 'halt': halt,
-              'utc': utc_now().isoformat(), 'reads': []}
+              'utc': utc_now().isoformat(), 'reads': [], 'readerRuns': [], 'receipt': str(receipt)}
+    atomic_json(receipt, result)
     try:
-        for target in (output, second):
+        for index, target in enumerate((output, second)):
             command = [sys.executable, str(reader), '-p', port, '-b', '921600']
             if halt:
                 command += ['-t', '3000']
             command += ['rf', hex(address), hex(size), str(target)]
-            completed = runner(command, capture_output=True, text=True, timeout=1800)
+            result['activeRead'] = index + 1
+            atomic_json(receipt, result)
+            stdout, stderr, return_code = '', '', None
+            try:
+                completed = runner(command, capture_output=True, text=True, timeout=1800)
+                stdout, stderr = getattr(completed, 'stdout', '') or '', getattr(completed, 'stderr', '') or ''
+                return_code = completed.returncode
+            except subprocess.TimeoutExpired as error:
+                stdout, stderr, return_code = error.stdout or '', error.stderr or '', None
+                raise RecoveryError('reader timed out; diagnostics and partial dump retained', code='READ_TIMEOUT',
+                                    retry_safe=False) from error
+            finally:
+                # Bounded, private diagnostics. Never send raw reader output to a
+                # public CI log or assume failure output is valid protocol JSON.
+                def as_text(value):
+                    return value.decode('utf-8', 'replace') if isinstance(value, bytes) else value
+                logs[index].write_text(as_text(locals().get('stdout', ''))[-32768:] + '\nSTDERR\n'
+                                       + as_text(locals().get('stderr', ''))[-32768:], encoding='utf-8')
+                result['readerRuns'].append({'read': index + 1, 'exitCode': locals().get('return_code'),
+                                             'diagnostics': str(logs[index])})
             if completed.returncode != 0:
                 raise RecoveryError('bidirectional read failed; check the pvvx circuit, voltage and contact. '
-                                    'No TX-only fallback or write was attempted')
+                                    'No TX-only fallback or write was attempted', code='READ_FAILED', retry_safe=False)
             data = target.read_bytes()
             if len(data) != size:
                 raise RecoveryError('short flash read; retained for diagnosis')
@@ -1002,12 +1242,15 @@ def read_flash(port, output, *, address=0, size=FLASH_BYTES, reader=None,
             raise RecoveryError('two flash reads differ; no trustworthy backup established')
         result['status'] = 'READ_MATCHED'
         return result
-    except BaseException:
+    except BaseException as error:
         result['status'] = 'READ_FAILED'
-        raise
+        result['errorCode'] = getattr(error, 'code', type(error).__name__)
+        raise RecoveryError(str(error), code=result['errorCode'], retry_safe=False,
+                            details={'receipt': str(receipt), 'readerRuns': result['readerRuns'],
+                                     'flashWriteAttempted': False, 'debugStateMayHaveChanged': True},
+                            exit_code=130 if isinstance(error, KeyboardInterrupt) else 2) from error
     finally:
-        with receipt.open('x', encoding='utf-8') as stream:
-            json.dump(result, stream, indent=2)
+        atomic_json(receipt, result)
 
 
 def matched_backup(path, *, port=None):
@@ -1089,8 +1332,12 @@ def inspect_slots(dump, references=(), *, replace=None, expect_other=None):
     return result
 
 
-def verify_dump(folder, dump, *, staged=False, baseline=None, slot='A', full_slot=False):
+def verify_dump(folder, dump, *, staged=False, baseline=None, slot='A', full_slot=False,
+                session=None, reconcile=False):
     """Offline comparison of a full readback; no device is opened or restarted."""
+    if session:
+        return verify_session(session, dump, folder=folder, staged=staged, baseline=baseline,
+                              slot=slot, full_slot=full_slot, reconcile=reconcile)
     plan, image = load_bundle(folder)
     data = Path(dump).read_bytes()
     if len(data) != FLASH_BYTES:
@@ -1114,12 +1361,125 @@ def verify_dump(folder, dump, *, staged=False, baseline=None, slot='A', full_slo
             'bootVerified': False}
 
 
+def verify_session(path, dump, *, folder, staged, baseline, slot, full_slot, reconcile=False):
+    state = read_json(path)
+    context = state['context']
+    with PortGuard(context['port']):
+        # Re-read under the lock, so a concurrent operation cannot change phase.
+        state = read_json(path)
+        expected = (context['bundle'], context['slot'], context['fullSlot'], context['baseline'])
+        actual = (str(Path(folder).resolve()), slot, full_slot,
+                  str(Path(baseline).resolve()) if baseline else None)
+        if actual != expected:
+            raise RecoveryError('verification arguments differ from the session', code='SESSION_MISMATCH')
+        if state['phase'] in ('CLOSED', 'READY', 'BOOT_REQUESTED'):
+            raise RecoveryError('session is not awaiting held-flash verification', code='INVALID_PHASE')
+        if state['phase'] == 'NEEDS_RECONCILIATION' and not reconcile:
+            raise RecoveryError('interrupted operation requires reconcile with a fresh read', code='RECONCILIATION_REQUIRED')
+        matched_backup(dump, port=context['port'])
+        evidence = read_json(Path(dump).with_name(Path(dump).name + '.json'))
+        threshold = state['updatedUtc'] if reconcile else state['stageUtc']
+        if (datetime.datetime.fromisoformat(evidence['utc']) < datetime.datetime.fromisoformat(threshold)
+                or evidence.get('halt')):
+            raise RecoveryError('use a fresh no-reset double read after the pending operation', code='STALE_EVIDENCE')
+        if context['baselineSha256'] and sha256(matched_backup(baseline, port=context['port'])) != context['baselineSha256']:
+            raise RecoveryError('original baseline changed', code='BASELINE_CHANGED')
+        try:
+            plan, _ = load_bundle(folder)
+            if plan['image']['sha256'] != context['imageSha256']:
+                raise RecoveryError('session image changed', code='SESSION_MISMATCH')
+            result = verify_dump(folder, dump, staged=staged, baseline=baseline, slot=slot, full_slot=full_slot)
+        except (RecoveryError, OSError, ValueError) as error:
+            state['phase'] = 'VERIFICATION_FAILED'
+            state['lastVerification'] = {'status': 'FAILED', 'error': str(error), 'dump': str(dump)}
+            save_session(path, state)
+            raise
+        if not staged and state['phase'] in ('STAGED', 'VERIFIED') and not reconcile:
+            raise RecoveryError('activation was not sent by this session; reconcile observed state explicitly', code='INVALID_PHASE')
+        if staged and state['phase'] in ('HELD', 'ACTIVATED_VERIFIED') and not reconcile:
+            raise RecoveryError('marker is unexpectedly inactive after activation; reconcile explicitly', code='INVALID_PHASE')
+        state['phase'] = 'VERIFIED' if staged else 'ACTIVATED_VERIFIED'
+        state['lastVerification'] = dict(result, dumpSha256=sha256(Path(dump).read_bytes()),
+                                         dump=str(Path(dump).resolve()), readReceipt=evidence)
+        if staged and reconcile:
+            state['stageUtc'] = utc_now().isoformat()
+        save_session(path, state)
+        return dict(result, session=str(path), phase=state['phase'], nextActions=session_status(path)['nextActions'])
+
+
+def close_session(path, confirmation, reason):
+    state = read_json(path)
+    if not reason or confirmation != 'CLOSE-' + state['id'][:8]:
+        raise RecoveryError('closing requires --reason and --confirm CLOSE-<session id prefix>', code='CONFIRMATION_REQUIRED')
+    with PortGuard(state['context']['port']):
+        owner = read_json(authority_path(state['context']['port']))
+        if owner['session'] != str(Path(path).resolve()):
+            raise RecoveryError('another session owns the port', code='SESSION_CONFLICT')
+        state = read_json(path)
+        state['phase'] = 'CLOSED'
+        state['closeReason'] = reason
+        state['closureIsHardwareAcceptance'] = False
+        save_session(path, state)
+    return session_status(path)
+
+
+def process_alive(pid):
+    if os.name == 'nt':
+        import ctypes
+        from ctypes import wintypes
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        handle = kernel.OpenProcess(0x1000, False, pid)
+        if not handle:
+            # Access denied is not evidence of a dead process.
+            return ctypes.get_last_error() != 87
+        try:
+            code = wintypes.DWORD()
+            kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+            return not kernel.GetExitCodeProcess(handle, ctypes.byref(code)) or code.value == 259
+        finally:
+            kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def unlock_port(port, confirmation):
+    path = STATE_ROOT / 'locks' / (port_key(port) + '.json')
+    owner = read_json(path)
+    if confirmation != 'UNLOCK-' + owner['nonce'] or process_alive(owner['pid']):
+        raise RecoveryError('unlock requires the exact lock token and a dead owner process', code='PORT_LOCKED')
+    # Preserve the abandoned lock. Session phase remains uncertain, so a new
+    # operation/session still cannot bypass readback reconciliation or close.
+    archive = path.with_name(path.stem + '.released-' + owner['nonce'])
+    path.rename(archive)
+    return {'status': 'LOCK_RELEASED', 'archive': str(archive), 'hardwareReconciled': False}
+
+
 def build_parser():
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument('--json', action='store_true', help='print one JSON result object on stdout')
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    common.add_argument('--json', action='store_true', default=argparse.SUPPRESS, help='one JSON result, never prompt')
+    common.add_argument('--non-interactive', action='store_true', default=argparse.SUPPRESS)
+    common.add_argument('--session', type=Path, default=argparse.SUPPRESS, help='private durable recovery session outside Git')
+    parser = AgentParser(description=__doc__, parents=[common], formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest='action', required=True)
     commands.add_parser('ports', parents=[common], help='list serial ports')
+    commands.add_parser('capabilities', parents=[common], help='machine-readable interface and safety contract')
+    status = commands.add_parser('status', parents=[common], help='read session or port state without opening hardware')
+    status.add_argument('--port')
+    status.add_argument('--read-receipt', type=Path)
+    close = commands.add_parser('close', parents=[common], help='explicitly stop a session; never claims recovery')
+    close.add_argument('--confirm', required=True)
+    close.add_argument('--reason', required=True)
+    unlock = commands.add_parser('unlock', parents=[common], help='archive a dead process lock without reconciling hardware')
+    unlock.add_argument('--port', required=True)
+    unlock.add_argument('--confirm', required=True)
     read = commands.add_parser('read', parents=[common], help='optional double flash read with pvvx bidirectional wiring')
     read.add_argument('--port', required=True)
     read.add_argument('--out', required=True, type=Path, help='private output outside Git; full flash by default')
@@ -1133,12 +1493,16 @@ def build_parser():
     inspect.add_argument('--replace', help='require a unique enabled slot matching this reference')
     inspect.add_argument('--expect-other', help='require the other disabled slot to match this reference')
     verify = commands.add_parser('verify', parents=[common], help='compare a full readback with a bundle')
-    verify.add_argument('--bundle', type=Path, required=True)
+    verify.add_argument('--bundle', type=Path)
     verify.add_argument('--dump', type=Path, required=True)
     verify.add_argument('--staged', action='store_true', help='expect inactive marker, before activation')
     verify.add_argument('--baseline', type=Path, help='pre-write full dump for preserved-region comparison')
-    verify.add_argument('--slot', choices=sorted(SLOTS), default='A')
-    verify.add_argument('--full-slot', action='store_true', help='verify erased tail to the end of the selected slot')
+    verify.add_argument('--slot', choices=sorted(SLOTS))
+    verify.add_argument('--full-slot', action='store_true', default=None, help='verify erased tail to the end of the selected slot')
+    reconcile = commands.add_parser('reconcile', parents=[common], help='resolve uncertain write from a fresh no-reset double read')
+    reconcile.add_argument('--dump', required=True, type=Path)
+    reconcile.add_argument('--staged', action='store_true')
+    reconcile.set_defaults(bundle=None, baseline=None, slot=None, full_slot=None)
     wire = commands.add_parser('wiring', parents=[common], help='how to connect a device')
     wire.add_argument('--device', choices=sorted(DEVICES))
     test = commands.add_parser('selftest', parents=[common],
@@ -1163,12 +1527,14 @@ def build_parser():
                        ('stage', 'write the selected slot with its start marker off'),
                        ('activate', 'switch the start marker on and restart')):
         write = commands.add_parser(name, parents=[common], help=text)
-        write.add_argument('--bundle', required=True, type=Path)
+        write.add_argument('--bundle', type=Path)
         write.add_argument('--port')
         write.add_argument('--confirm', help='ACTION-<first 8 hex digits of the image SHA-256>')
-        write.add_argument('--slot', choices=sorted(SLOTS), default='A', help='target application slot; B requires a double-read baseline')
-        write.add_argument('--full-slot', action='store_true', help='erase all 0x34000 bytes of this slot; never NVM')
-        write.add_argument('--baseline', type=Path, help='original matching full double read, required for slot B')
+        write.add_argument('--slot', choices=sorted(SLOTS), help='target application slot; B requires a double-read baseline')
+        write.add_argument('--full-slot', action='store_true', default=None, help='erase all 0x34000 bytes of this slot; never NVM')
+        write.add_argument('--baseline', type=Path, help='original matching full double read; selects required verification')
+        write.add_argument('--operation-id', help='stable unique ID for this request; required for JSON writes')
+        write.add_argument('--target-id', help='operator-confirmed exact target identity; required for a new JSON session')
         write.add_argument('--hold', action='store_true', help='keep CPU halted after activation for readback; no restart requested')
         write.add_argument('--power-cycle', action='store_true',
                            help='halt the chip while you switch 3.3 V on, instead of restarting it over SWS')
@@ -1180,92 +1546,139 @@ def build_parser():
     return parser
 
 
+def session_arguments(args):
+    state = read_json(args.session) if args.session and args.session.exists() else None
+    context = state['context'] if state else {}
+    for attribute, key, default in (('bundle', 'bundle', None), ('port', 'port', None),
+                                     ('slot', 'slot', 'A'), ('full_slot', 'fullSlot', False),
+                                     ('baseline', 'baseline', None), ('target_id', 'targetId', None)):
+        if getattr(args, attribute, None) is None:
+            setattr(args, attribute, context.get(key, default))
+    if not args.bundle:
+        raise RecoveryError('--bundle is required for a new session or standalone verification', code='INVALID_ARGUMENT')
+    return args
+
+
 def main(argv=None):
-    args = build_parser().parse_args(argv)
-    as_json = args.json
+    argv = list(sys.argv[1:] if argv is None else argv)
+    as_json = '--json' in argv
+    action = None
 
     def out(line):
-        print(line, file=sys.stderr if as_json else sys.stdout)
+        print(line, file=sys.stderr if as_json else sys.stdout, flush=True)
 
     def emit(result):
         if as_json:
-            print(json.dumps(result, indent=2))
+            print(json.dumps({'apiSchema': API_SCHEMA, **result}, indent=2))
 
     try:
-        if args.action == 'inspect':
+        args = build_parser().parse_args(argv)
+        if not hasattr(args, 'session'):
+            args.session = None
+        action = args.action
+        interactive = not (as_json or getattr(args, 'non_interactive', False)) and sys.stdin.isatty()
+        if action == 'capabilities':
+            result = {'status': 'OK', 'commands': ['prepare', 'plan', 'ports', 'wiring', 'selftest',
+                       'stage', 'read', 'inspect', 'verify', 'activate', 'flash', 'status', 'reconcile', 'close', 'unlock'],
+                      'jsonNeverPrompts': True, 'idempotentWrites': 'same session + operation ID + exact request',
+                      'readOptional': True, 'baselineRequiresVerification': True,
+                      'physicalTargetIdentification': 'operator-confirmed; TX-only cannot identify the chip',
+                      'successfulWriteProof': 'SENT_UNVERIFIED', 'bootVerified': False,
+                      'exitCodes': {'0': 'completed or safely replayed result; check status for proof level',
+                                    '1': 'selftest failure or internal error', '2': 'precondition/read/argument failure',
+                                    '3': 'uncertain write; do not retry', '130': 'interrupted; inspect sideEffectsPossible'},
+                      'stateRoot': str(STATE_ROOT)}
+        elif action == 'status':
+            if args.read_receipt:
+                result = read_json(args.read_receipt)
+            elif args.session:
+                result = dict(status='OK', **session_status(args.session))
+            elif args.port:
+                authority = authority_path(args.port)
+                lock = STATE_ROOT / 'locks' / (port_key(args.port) + '.json')
+                result = {'status': 'OK', 'authority': read_json(authority) if authority.exists() else None,
+                          'portLock': read_json(lock) if lock.exists() else None}
+            else:
+                raise RecoveryError('status needs --session, --port or --read-receipt', code='INVALID_ARGUMENT')
+        elif action == 'close':
+            if not args.session:
+                raise RecoveryError('close needs --session', code='INVALID_ARGUMENT')
+            result = dict(status='CLOSED', **close_session(args.session, args.confirm, args.reason))
+        elif action == 'unlock':
+            result = unlock_port(args.port, args.confirm)
+        elif action == 'inspect':
             result = inspect_slots(args.dump, args.reference, replace=args.replace, expect_other=args.expect_other)
             for slot in result['slots']:
-                out(f'Slot {slot["slot"]}: marker {slot["markerState"]}, valid image {slot["validImage"]}, '
-                    f'references {", ".join(slot["matches"]) or "none"}')
-            out(f'Replacement slot: {result["replaceSlot"] or "not established"}. Boot remains unverified.')
-            emit(result)
-        elif args.action == 'read':
-            out('Requires the documented pvvx bidirectional circuit. TX-only wiring cannot read.')
+                out(f'Slot {slot["slot"]}: {slot["markerState"]}, valid={slot["validImage"]}, matches={slot["matches"]}')
+            out(f'Replacement slot: {result["replaceSlot"] or "not established"}')
+        elif action == 'read':
             result = read_flash(args.port, args.out, address=args.address, size=args.size,
                                 reader=args.reader, halt=args.halt)
             out(f'Two reads match; private backup: {args.out}')
-            emit(result)
-        elif args.action == 'verify':
+        elif action in ('verify', 'reconcile'):
+            if action == 'reconcile' and not args.session:
+                raise RecoveryError('reconcile needs --session', code='INVALID_ARGUMENT')
+            args = session_arguments(args)
             result = verify_dump(args.bundle, args.dump, staged=args.staged, baseline=args.baseline,
-                                 slot=args.slot, full_slot=args.full_slot)
+                                 slot=args.slot, full_slot=args.full_slot, session=args.session,
+                                 reconcile=action == 'reconcile')
             out('Flash bytes match. Boot and Zigbee operation remain unverified.')
-            emit(result)
-        elif args.action == 'ports':
+        elif action == 'ports':
             found = list_ports()
             for port in found:
                 out(f'{port["device"]}\t{port["description"]}\t{port["hwid"]}')
-            if not found:
-                out('No serial ports found.')
-            emit({'status': 'OK', 'ports': found})
-        elif args.action == 'wiring':
+            result = {'status': 'OK', 'ports': found}
+        elif action == 'wiring':
             ids = [args.device] if args.device else list(DEVICES)
             for device_id in ids:
-                out(wiring(device_id) if args.device else f'{device_id:<22} {DEVICES[device_id]["name"]}')
-            if not args.device:
-                out('Run wiring --device <name> for the pads and checks.')
-            emit({'status': 'OK', 'devices': {i: DEVICES[i] for i in ids}})
-        elif args.action == 'selftest':
-            with open_port(args.port, timeout=0.2) as com:
-                passed, got, sent = selftest(com)
-            out(f'selftest {"PASS" if passed else "FAIL"}: {got} of {sent} bytes came back intact '
-                f'at {UART_BAUD} baud')
-            out('This checks the port, driver and baud rate only. Measure the TXD level separately.')
-            emit({'status': 'PASS' if passed else 'FAIL', 'received': got, 'sent': sent})
+                out(wiring(device_id) if args.device else f'{device_id}: {DEVICES[device_id]["name"]}')
+            result = {'status': 'OK', 'devices': {i: DEVICES[i] for i in ids}}
+        elif action == 'selftest':
+            with PortGuard(args.port):
+                authority = authority_path(args.port)
+                if authority.exists() and read_json(authority)['phase'] != 'CLOSED':
+                    raise RecoveryError('selftest is adapter-only and forbidden during an active device session', code='INVALID_PHASE')
+                with open_port(args.port, timeout=0.2) as com:
+                    passed, got, sent = selftest(com)
+            result = {'status': 'PASS' if passed else 'FAIL', 'received': got, 'sent': sent}
+            emit(result)
             return 0 if passed else 1
-        elif args.action == 'prepare':
+        elif action == 'prepare':
             plan = prepare(args.ota, args.out, device=args.device, image_path=args.image,
                            manifest=args.manifest, role_matrix=args.role_matrix,
                            expect_sha256=args.expect_sha256, expect_build=args.expect_build)
             out(describe(plan))
-            out(f'Bundle  {args.out}')
-            emit({'status': 'OK', 'bundle': str(args.out), 'plan': plan})
-        elif args.action == 'plan':
-            plan, _ = load_bundle(args.bundle)
+            result = {'status': 'OK', 'bundle': str(args.out), 'plan': plan}
+        elif action == 'plan':
+            plan, image = load_bundle(args.bundle)
+            runtime = selected_plan(plan, image, slot=args.slot, full_slot=args.full_slot)
             out(describe(plan, slot=args.slot, full_slot=args.full_slot))
-            log = receipts(args.bundle)
-            for entry in log:
-                last = entry.get('lastOperation') or {}
-                where = f', last {last.get("operation")} {last.get("address", "")}'.rstrip() if last else ''
-                out(f'Sent    {entry["utc"]} {entry["action"]} on {entry["port"]} ({entry["result"]}{where})')
-            emit({'status': 'OK', 'plan': plan, 'receipts': log})
+            result = {'status': 'OK', 'plan': runtime, 'receipts': receipts(args.bundle)}
         else:
+            args = session_arguments(args)
             if not args.dry_run and not args.port:
-                raise RecoveryError('--port is required unless --dry-run is given')
-            result = run_write(args.action, args.bundle, args.port, args.confirm,
-                               getattr(args, 'passes', PASSES), power_cycle=args.power_cycle,
-                               dry_run_path=args.dry_run, out=out, slot=args.slot,
-                               full_slot=args.full_slot, baseline=args.baseline, hold=args.hold)
-            emit(result if args.dry_run else {'status': 'SENT_UNVERIFIED', 'action': args.action,
-                                              'receipts': result})
-    except (RecoveryError, OSError, ValueError, KeyError, subprocess.TimeoutExpired) as error:
+                raise RecoveryError('--port is required unless --dry-run is given', code='INVALID_ARGUMENT')
+            if as_json and not args.dry_run and (not args.session or not args.operation_id or not args.target_id):
+                raise RecoveryError('JSON writes need --session, --operation-id and a confirmed --target-id for new sessions',
+                                    code='AGENT_CONTEXT_REQUIRED')
+            result = run_write(action, args.bundle, args.port, args.confirm, getattr(args, 'passes', PASSES),
+                               power_cycle=args.power_cycle, dry_run_path=args.dry_run, out=out,
+                               slot=args.slot, full_slot=args.full_slot, baseline=args.baseline, hold=args.hold,
+                               interactive=interactive, session=args.session, operation_id=args.operation_id,
+                               target_id=args.target_id or 'operator-confirmed')
+        emit(result)
+        return 0
+    except (RecoveryError, OSError, ValueError, KeyError, TypeError, AttributeError) as error:
         print(f'BLOCKED: {error}', file=sys.stderr)
-        emit({'status': 'BLOCKED', 'error': str(error)})
-        return 2
+        emit({'status': 'UNCERTAIN' if getattr(error, 'side_effects', False) else 'BLOCKED',
+              'action': action, 'errorCode': getattr(error, 'code', 'INVALID_DATA'), 'error': str(error),
+              'details': getattr(error, 'details', {}), 'retrySafe': getattr(error, 'retry_safe', True),
+              'sideEffectsPossible': getattr(error, 'side_effects', False), 'bootVerified': False})
+        return getattr(error, 'exit_code', 2)
     except KeyboardInterrupt:
-        print('BLOCKED: interrupted. The selected slot may be partly erased; preserve evidence before recovery.', file=sys.stderr)
-        emit({'status': 'INTERRUPTED', 'error': 'interrupted; selected slot may be partly erased'})
+        emit({'status': 'INTERRUPTED', 'action': action, 'errorCode': 'INTERRUPTED',
+              'retrySafe': False, 'sideEffectsPossible': False, 'bootVerified': False})
         return 130
-    return 0
 
 
 if __name__ == '__main__':
