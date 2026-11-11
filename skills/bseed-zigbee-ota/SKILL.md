@@ -19,11 +19,15 @@ observed. Exact-device live campaign checks and incident locks still apply.
 For a device that no longer starts, follow `docs/flashing/swire_recovery.md`
 and use `helper_scripts/telink_swire_recovery.py` with the
 `bseed-pm-wired-kit-<sha>` or `bseed-nonpm-wired-kit-<sha>` artifact of the
-role matrix run at the chosen commit. It rewrites slot A only and keeps NVM,
+role matrix run at the chosen commit. It rewrites the selected slot and keeps NVM,
 IEEE address and calibration. Never use "Erase All Flash" on a paired device.
 Flash the kit's `image.bin` (the finalized image inside `forward.ota`), not
 `forward.bin`. The method is TX-only: the receipts record bytes sent, not
-bytes written, so acceptance is the device's own fresh Zigbee evidence.
+bytes written, so acceptance is the device's own fresh Zigbee evidence. Optional
+read/inspect/verify commands establish flash contents. In-place recovery uses
+the matched full baseline, exact reference images and --slot A or B with
+--full-slot; B is refused unless the baseline proves A is disabled. Use --hold
+to defer restart until readback verification. Incident locks remain unchanged.
 
 ## Standing operator authorization — BSEED fleet (2026-11-03)
 

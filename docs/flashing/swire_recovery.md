@@ -1,7 +1,7 @@
 # Wired recovery over SWire
 
 Use this when a Telink TLSR8258 device no longer starts or cannot take an OTA
-update. It rewrites image slot A with a USB-UART adapter. The writer leaves the Zigbee network record, IEEE address, factory calibration
+update. It rewrites one selected image slot with a USB-UART adapter (A by default). The writer leaves the Zigbee network record, IEEE address, factory calibration
 and saved energy outside its write range. Rejoining and retained-state compatibility
 still need fresh device evidence.
 
@@ -126,17 +126,18 @@ until it prints that the chip restarted.
   It makes three passes: erase and write, erase and write again, then write
   only. Losing any one erase or page on the wire is repaired by a later
   pass. Reprogramming bytes that already arrived changes nothing.
-- `activate` writes the single byte `0x4B` at `0x08` without an erase,
+- `activate` writes the single byte `0x4B` at the selected slot start plus `0x08` without an erase,
   which turns the marker into `KNLT`, then restarts the chip. It refuses
   unless the latest `stage` of the same image, on the same port, finished
-  within the last 30 minutes. The same kit may be reused for several devices.
+  within the last 30 minutes. Slot, erase extent and baseline hash must also match.
+  `--hold` omits the final restart so readback can precede the controlled bench start.
 
 Each step appends a `STARTED` line to `receipts.jsonl` in the bundle folder
 before it sends anything. When it ends, it adds `SENT_UNVERIFIED` if all the
 bytes were sent, or `INTERRUPTED` otherwise. `SENT_UNVERIFIED` means the PC
 sent the bytes. It does not mean the chip received them.
 
-A new `flash` is another destructive write and requires an assessed recovery decision. It erases slot A again, so the slot stays
+A new `flash` is another destructive write and requires an assessed recovery decision. It erases the selected slot again, so the slot stays
 unbootable until the new activation.
 
 ## 5. Check the result
@@ -161,24 +162,29 @@ evidence from Zigbee2MQTT:
 
 | Range | Content | Tool |
 | --- | --- | --- |
-| `0x00000` to the end of the image, rounded up to 4 KiB, at least to `0x20FFF` | slot A | erased and written |
-| rest of slot A, up to `0x33FFF` | unused | left as is |
+| `0x00000`–`0x33FFF` | slot A | writable only when A is selected |
 | `0x34000`–`0x3FFFF` | Zigbee NVM: network key, bindings, energy | never written |
-| `0x40000`–`0x73FFF` | slot B | never written |
-| `0x76000`, `0x77000` | IEEE address, factory RF/ADC/voltage calibration | never written |
-| `0x78000`–`0x7FFFF` | install code, reset counter, second NVM area | never written |
+| `0x40000`–`0x73FFF` | slot B | writable only when B is selected |
+| `0x74000`–`0x7FFFF` | reserved, IEEE, factory calibration, install code, second NVM | never written |
 
-The erase always covers `0x8008` and `0x20008`, even for a short image. A
-stale start marker there would make the firmware treat the flash as a
-bootloader-mode or small-OTA layout and move it at startup.
-Those limits are hard-coded in the writer, not just in the plan. When slot B
-also holds a start marker, both the SDK's `mcuBootAddrGet()` and the tool
-assume slot A starts first. The next OTA update overwrites slot B and clears
-slot A's marker in the normal way.
+`--slot A` is the default. `--slot B` requires `--baseline` from an unchanged,
+matching full double read on the same serial port. The baseline must show a
+valid, explicitly disabled A image and no legacy layout markers. If A is enabled,
+it would take boot priority: the tool refuses to touch it as a side effect of
+writing B. Resolve that unexpected state separately.
+
+By default the writer erases to the image end rounded to 4 KiB, at least
+`0x21000` bytes from the slot start. `--full-slot` erases all `0x34000` bytes
+of the selected slot, including any old image tail. Bounds are enforced in
+the writer itself. No command can erase or program the other slot or NVM.
+
+In slot A the minimum erase clears stale layout markers at `0x8008` and
+`0x20008`. When targeting B, those addresses belong to A and are kept;
+any enabled legacy marker in the baseline blocks B recovery.
 
 ## Limits
 
-- **No readback.** With only TXD connected, the chip never answers. A
+- **TX-only has no readback.** With only TXD connected, the chip never answers. A
   flash memory read needs a bidirectional SWire adapter, such as pvvx's
   [TlsrComSwireWriter](https://github.com/pvvx/TlsrComSwireWriter) circuit
   or [TLSRPGM](https://github.com/pvvx/TLSRPGM).
@@ -190,8 +196,8 @@ slot A's marker in the normal way.
   The chip cannot report when it is busy, so the waits are fixed: 400 ms per
   sector erase, 10 ms per page and 50 ms per status write. Those are longer
   than pvvx's, to allow for slow flash chips.
-- **No slot B fallback.** If the recovered image does not start, the tool
-  does not fall back to slot B. Use only the device incident record's separately selected fallback image.
+- **No automatic fallback.** If the recovered image does not start, the tool
+  does not automatically switch slots or erase another image. Use only the device incident record's separately selected fallback image.
 
 ## How it is tested
 
@@ -220,8 +226,9 @@ owner authorizes for the specific device.
 Reading is optional. TX-only `stage`, `activate` and `flash` keep working without
 it. A device-specific incident procedure can still require reading; in particular,
 Table Left's r21/r22 handover requires identifying the failed slot and rewriting
-that slot. This tool's writer remains slot A only. Do not use it for that procedure
-when the failed slot is B or the flash state is unknown.
+that same slot. Use `inspect`, explicit `--slot A` or `--slot B`, `--full-slot`,
+and the original matched `--baseline` for that procedure. Unknown flash state
+is a stop condition, not permission to choose A by default.
 
 For reading, use the **bidirectional circuit** documented by
 [pvvx TlsrComSwireWriter](https://github.com/pvvx/TlsrComSwireWriter/blob/042613b1b47a1598856b0ff3e8a133f2918798a5/README.md).
@@ -279,3 +286,55 @@ image format does not lift a firmware deployment quarantine.
 structured output. `flash`, `stage` and `activate` accept `--dry-run FILE` to save
 the UART stream and operation trace without opening a port. `--power-cycle` gives
 an interactive low-voltage power-up window; it never controls mains power.
+
+
+## Identify and replace the failed image in place
+
+OTA alternates between two slots. A device name, cached Zigbee build or successful
+OTA transfer does not record which physical slot was activated. Read the full
+flash twice before writing, with the qualified bidirectional setup. Then supply
+known firmware files from their original hosted artifacts:
+
+```text
+python telink_swire_recovery.py inspect --dump C:/private/recovery/before.bin --reference r19=C:/private/images/r19.ota --reference r21=C:/private/images/r21.ota --replace r21 --expect-other r19 --json
+```
+
+`inspect` requires both matching dump files and their successful read receipt.
+For each slot it reports the real marker state, validates the declared size and
+CRC, and compares the whole image with each reference. OTA disables an old image
+by changing just byte 8 from `0x4B` to `0x00`; inspection restores that byte **in
+memory only** to compare its CRC/hash with the original firmware. A staged `0xFF`
+marker is reported separately. Reference inputs can be native OTA containers or
+finalized raw images; pre-packaging linker binaries are refused.
+
+`--replace r21 --expect-other r19` returns `replaceSlot: A` or `B` only when one
+slot contains the exact enabled r21 image and the other the exact disabled r19
+image. Two enabled markers, a partial/corrupt image, a different image, unknown
+marker or legacy layout marker stops this decision. The report identifies stored
+bytes and boot eligibility; it never proves the firmware executed.
+
+Use the returned slot for **every** subsequent command. The example below is
+only for an inspection result of **B**; substitute A throughout if A was found:
+
+```text
+python telink_swire_recovery.py plan --bundle router --slot B --full-slot
+python telink_swire_recovery.py stage --bundle router --port COM5 --slot B --full-slot --baseline C:/private/recovery/before.bin
+python telink_swire_recovery.py read --port COM5 --out C:/private/recovery/staged.bin
+python telink_swire_recovery.py verify --bundle router --dump C:/private/recovery/staged.bin --staged --slot B --full-slot --baseline C:/private/recovery/before.bin
+python telink_swire_recovery.py activate --bundle router --port COM5 --slot B --full-slot --baseline C:/private/recovery/before.bin --hold
+python telink_swire_recovery.py read --port COM5 --out C:/private/recovery/activated.bin
+python telink_swire_recovery.py verify --bundle router --dump C:/private/recovery/activated.bin --slot B --full-slot --baseline C:/private/recovery/before.bin
+```
+
+Keep the CPU halted between stage, reading and verification; do not power-cycle
+or ask the reader to reset it during those steps. After verified activation with
+`--hold`, perform the controlled low-voltage bench start from the incident guide.
+The activation receipt is tied to slot, erase extent, original baseline hash,
+image hash and serial port, and expires after 30 minutes. A different layout uses
+a different confirmation token, such as `STAGE-B-FULL-<hash prefix>`.
+
+The full-slot verifier checks the exact image, `0xFF` through the slot end,
+and **every byte outside the selected slot** against the baseline, including the
+entire other slot. This implements in-place recovery in either direction. Existing
+TX-only workflows can still use the default A without optional readback, except
+where a device-specific recovery procedure requires it.

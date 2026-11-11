@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Wired recovery of Telink TLSR8258 Zigbee devices with a USB-UART adapter.
 
-Writes a firmware image into image slot A (0x00000) of a 512 KiB TLSR8258
+Writes a firmware image into slot A (0x00000) or B (0x40000) of a 512 KiB TLSR8258
 without a bootloader. Only the adapter's TXD drives the chip's SWS pin
 (pvvx's TX-only SWire method), so the chip never answers: this tool cannot
 confirm that flash changed. Success is the device starting afterwards.
@@ -19,15 +19,16 @@ Commands
   prepare    make a recovery bundle from a Zigbee OTA file or a finalized image
   plan       check a bundle and show what it writes and what was sent before
   flash      stage, then activate, in one run
-  stage      erase slot A and write the image with its boot marker off
+  stage      erase the selected slot and write with its boot marker off
+  inspect    identify both slots from a matching full double read
   activate   switch the boot marker on (one byte, no erase) and restart
 
 flash, stage and activate take --dry-run FILE to save the exact byte stream
 and an operation trace instead of opening a port. Every command takes --json
 for one machine-readable result object on stdout.
 
-Never written: 0x34000 and above (Zigbee NVM, slot B, IEEE address,
-factory calibration, second NVM area). Needs pyserial for the commands
+Never written: the other slot, either NVM area, IEEE address or factory data.
+Default target is A; B requires a verified double-read baseline with A disabled. Needs pyserial for the commands
 that open a port: python -m pip install pyserial
 """
 from __future__ import annotations
@@ -60,7 +61,8 @@ PROGRESS_STEP = 0x8000
 
 SECTOR = 0x1000
 PAGE = 0x100
-SLOT_A_END = 0x34000              # Zigbee NVM base, SDK 3.7.2.0 drv_nv.h (512 KiB)
+SLOT_A_END = 0x34000              # size of either application slot; never includes NVM
+SLOTS = {'A': 0, 'B': 0x40000}
 MARKER_OFFSET = 0x08
 MARKER = b'KNLT'
 ACTIVATE_BYTE = b'K'              # 0xFF -> 0x4B only clears bits, so no erase
@@ -354,7 +356,14 @@ class TxOnlyWriter:
     """
 
     def __init__(self, port, *, sleep=time.sleep, clock=time.monotonic, power_on=None,
-                 progress=None, trace=None):
+                 progress=None, trace=None, slot='A', full_slot=False, hold=False):
+        if slot not in SLOTS:
+            raise RecoveryError('slot must be A or B')
+        self.slot = slot
+        self.base = SLOTS[slot]
+        self.full_slot = full_slot
+        self.hold = hold
+        self.baseline_sha = None
         self.port = port
         self.sleep = sleep
         self.clock = clock
@@ -412,6 +421,9 @@ class TxOnlyWriter:
         halted, so a later call only repeats the halt.
         """
         stop = swire_frame(0x0602, b'\x05')
+        if self.halted:
+            self.raw(stop)
+            return
         seconds = STOP_CPU_SECONDS
         if self.power_on is not None and not self.halted:
             self.note('stop-cpu', powerCycle=True)
@@ -442,8 +454,8 @@ class TxOnlyWriter:
             self.wait(STATUS_WAIT)
 
     def erase(self, address):
-        if address % SECTOR or not 0 <= address < SLOT_A_END:
-            raise RecoveryError(f'refusing to erase {address:#x}: outside slot A')
+        if address % SECTOR or not self.base <= address < self.base + SLOT_A_END:
+            raise RecoveryError(f'refusing to erase {address:#x}: outside slot {self.slot}')
         self.note('erase', address=f'{address:#07x}')
         self.command(0x06)
         self.sws(0x0D, b'\x00')
@@ -456,12 +468,13 @@ class TxOnlyWriter:
 
     def program(self, address, data, *, marker=False):
         if marker:
-            if (address, data) != (MARKER_OFFSET, ACTIVATE_BYTE):
-                raise RecoveryError('the marker write can only put 0x4B at 0x08')
-        elif (not data or address < 0 or address + len(data) > SLOT_A_END
+            if (address, data) != (self.base + MARKER_OFFSET, ACTIVATE_BYTE):
+                raise RecoveryError('the marker write can only enable the selected slot')
+        elif (not data or address < self.base or address + len(data) > self.base + SLOT_A_END
               or address // PAGE != (address + len(data) - 1) // PAGE):
             raise RecoveryError(f'refusing to program {len(data)} bytes at {address:#x}')
-        elif address <= MARKER_OFFSET < address + len(data) and data[MARKER_OFFSET - address] != 0xFF:
+        elif (address <= self.base + MARKER_OFFSET < address + len(data)
+              and data[self.base + MARKER_OFFSET - address] != 0xFF):
             raise RecoveryError('stage must leave the start marker off')
         self.note('program', address=f'{address:#07x}', bytes=len(data), marker=marker)
         self.command(0x06)
@@ -475,7 +488,7 @@ class TxOnlyWriter:
         self.wait(PAGE_WAIT)
 
     def stage(self, image, passes=PASSES):
-        """Erase slot A and write the image with the start marker left at 0xFF.
+        """Erase only the selected slot and write with the start marker left at 0xFF.
 
         See SCHEDULES for which passes erase. The erase always reaches
         MIN_ERASE_END so no stale start marker survives at 0x8008 or 0x20008.
@@ -485,7 +498,7 @@ class TxOnlyWriter:
         check_image(image)
         staged = bytearray(image)
         staged[MARKER_OFFSET] = 0xFF
-        end = erase_end(len(staged))
+        end = SLOT_A_END if self.full_slot else erase_end(len(staged))
         self.stop_cpu()
         self.unprotect()
         for number, erasing in enumerate(SCHEDULES[passes], 1):
@@ -494,18 +507,19 @@ class TxOnlyWriter:
                 if self.progress and address % PROGRESS_STEP == 0:
                     self.progress(number, passes, address, end)
                 if erasing and address % SECTOR == 0:
-                    self.erase(address)
+                    self.erase(self.base + address)
                 chunk = bytes(staged[address:address + PAGE])
                 if chunk and chunk.count(0xFF) != len(chunk):
-                    self.program(address, chunk)
+                    self.program(self.base + address, chunk)
         self.pass_no = None
 
     def activate(self):
         self.stop_cpu()
         self.unprotect()
-        self.program(MARKER_OFFSET, ACTIVATE_BYTE, marker=True)
-        self.restart()
-        self.halted = False
+        self.program(self.base + MARKER_OFFSET, ACTIVATE_BYTE, marker=True)
+        if not self.hold:
+            self.restart()
+            self.halted = False
 
 
 def swire_frame(address, data):
@@ -669,13 +683,15 @@ def record(folder, action, port, image_sha, writer, result, passes, now=utc_now,
         'uartBytes': writer.uart_bytes, 'swireFrames': writer.frames,
         'sectorsErased': len(writer.erased), 'pagesProgrammed': writer.pages,
         'lastOperation': writer.last,
+        'slot': writer.slot, 'fullSlot': writer.full_slot, 'hold': writer.hold,
+        'baselineSha256': writer.baseline_sha,
     }
     with (Path(folder) / BUNDLE_LOG).open('a', encoding='utf-8') as log:
         log.write(json.dumps(entry) + '\n')
     return entry
 
 
-def fresh_stage(folder, image_sha, port, now=utc_now):
+def fresh_stage(folder, image_sha, port, now=utc_now, *, slot='A', full_slot=False, baseline_sha=None):
     """True if the latest stage of this image finished, on this port, recently.
 
     The kit can be reused for several devices, so an old stage receipt says
@@ -684,6 +700,10 @@ def fresh_stage(folder, image_sha, port, now=utc_now):
     for entry in reversed(receipts(folder)):
         if entry.get('action') != 'stage' or entry.get('imageSha256') != image_sha:
             continue
+        if entry.get('slot', 'A') != slot or entry.get('fullSlot', False) != full_slot:
+            return False
+        if entry.get('baselineSha256') != baseline_sha:
+            return False
         if entry.get('result') != 'SENT_UNVERIFIED':
             return False
         age = (now() - datetime.datetime.fromisoformat(entry['utc'])).total_seconds()
@@ -691,7 +711,7 @@ def fresh_stage(folder, image_sha, port, now=utc_now):
     return False
 
 
-def describe(plan):
+def describe(plan, *, slot='A', full_slot=False):
     image, source = plan['image'], plan['source']
     matrix = source.get('roleMatrix') or {}
     board = (source.get('manifest') or {}).get('board')
@@ -706,8 +726,9 @@ def describe(plan):
         flags = ', '.join(f'{k}={build[k]}' for k in ('QUARANTINED_BUILD', 'DEPLOYABLE',
                                                        'FIRST_FLASHABLE_CANARY_ALLOWED') if k in build)
         lines.append(f'Build   {build.get("DEV_IDENTITY", "?")}; {flags}')
-    lines += [f'Writes  {plan["slotA"]["eraseFrom"]}-{plan["slotA"]["eraseTo"]} only; '
-              f'never {plan["neverWritten"]}',
+    start = SLOTS[slot]
+    end = start + (SLOT_A_END if full_slot else erase_end(image['bytes']))
+    lines += [f'Writes  slot {slot}: {start:#07x}-{end:#07x} only (end exclusive); all other flash kept',
               f'Time    about {plan["estimatedSeconds"]} s for flash']
     return '\n'.join(lines)
 
@@ -727,8 +748,8 @@ def wiring(device_id):
               '  4. The 3.3 V rail reads 3.2-3.4 V with the board connected.', '',
               'Notes:']
     lines += [f'  - {note}' for note in device['notes']]
-    lines += ['', 'If the device does not start after flash: check the leads and 3.3 V, then run flash '
-              'again with --power-cycle.', f'Troubleshooting: {GUIDE}']
+    lines += ['', 'If the device does not start after flash: preserve evidence, check the leads and 3.3 V, '
+              'then assess the incident fallback before another write.', f'Troubleshooting: {GUIDE}']
     return '\n'.join(lines)
 
 
@@ -792,7 +813,7 @@ def run_phase(writer, phase, image, passes):
         writer.activate()
 
 
-def dry_run(action, plan, image, passes, power_cycle, path, out):
+def dry_run(action, plan, image, passes, power_cycle, path, out, *, slot='A', full_slot=False, hold=False):
     """Write the exact UART stream and an operation trace to files instead of a port."""
     path = Path(path)
     trace_path = path.with_name(path.name + '.trace.jsonl')
@@ -802,12 +823,14 @@ def dry_run(action, plan, image, passes, power_cycle, path, out):
     with path.open('xb') as stream:
         sink = _FileSink(stream)
         writer = TxOnlyWriter(sink, sleep=lambda _: None, trace=trace,
-                              power_on=(lambda: None) if power_cycle else None)
+                              power_on=(lambda: None) if power_cycle else None,
+                              slot=slot, full_slot=full_slot, hold=hold)
         writer.clock = writer.elapsed           # the flood lasts as long as it would on the wire
         for phase in PHASES[action]:
             run_phase(writer, phase, image, passes)
     trace_path.write_text(''.join(json.dumps(entry) + '\n' for entry in trace), encoding='utf-8')
     result = {'status': 'DRY_RUN', 'action': action, 'imageSha256': plan['image']['sha256'],
+              'slot': slot, 'fullSlot': full_slot, 'hold': hold,
               'passes': passes, 'powerCycle': power_cycle, 'stream': str(path),
               'streamBytes': writer.uart_bytes, 'streamSha256': sink.digest.hexdigest(),
               'swireFrames': writer.frames, 'sectorsErased': len(writer.erased),
@@ -821,27 +844,48 @@ def dry_run(action, plan, image, passes, power_cycle, path, out):
 
 
 def run_write(action, folder, port, provided, passes=PASSES, *, power_cycle=False, dry_run_path=None,
-              opener=open_port, out=print, now=utc_now, interactive=None):
+              opener=open_port, out=print, now=utc_now, interactive=None,
+              slot='A', full_slot=False, baseline=None, hold=False):
     plan, image = load_bundle(folder)
     image_sha = plan['image']['sha256']
     if passes not in SCHEDULES:
         raise RecoveryError(f'passes must be one of {sorted(SCHEDULES)}')
+    if slot not in SLOTS:
+        raise RecoveryError('slot must be A or B')
+    if slot == 'B' and not baseline:
+        raise RecoveryError('slot B requires --baseline from a matching double read with slot A disabled')
+    baseline_sha = None
+    if baseline:
+        before = matched_backup(baseline, port=None if dry_run_path else port)
+        baseline_sha = sha256(before)
+        if slot == 'B' and before[8:12] != b'\x00NLT':
+            raise RecoveryError('slot A is not explicitly disabled; slot B cannot take boot priority. Stop and inspect')
+        if slot == 'B':
+            state = inspect_slots(baseline)
+            if not state['slots'][0]['validImage'] or state['legacyMarkers']:
+                raise RecoveryError('slot A has an unknown image or legacy layout marker; stop before writing B')
     if dry_run_path:
-        return dry_run(action, plan, image, passes, power_cycle, dry_run_path, out)
+        return dry_run(action, plan, image, passes, power_cycle, dry_run_path, out,
+                       slot=slot, full_slot=full_slot, hold=hold)
     interactive = sys.stdin.isatty() if interactive is None else interactive
-    if action == 'activate' and not fresh_stage(folder, image_sha, port, now):
+    if action == 'activate' and not fresh_stage(folder, image_sha, port, now, slot=slot,
+                                               full_slot=full_slot, baseline_sha=baseline_sha):
         raise RecoveryError(f'activate needs a finished stage of this image on {port} within the last '
                             f'{STAGE_FRESH_SECONDS // 60} minutes; run flash instead')
     if power_cycle and not interactive:
         raise RecoveryError('--power-cycle needs a person at an interactive terminal to switch 3.3 V on '
                             'when asked')
-    out(describe(plan))
+    out(describe(plan, slot=slot, full_slot=full_slot))
+    end = SLOT_A_END if full_slot else erase_end(len(image))
+    out(f'Actual target: slot {slot}, {SLOTS[slot]:#07x}-{SLOTS[slot] + end:#07x} (end exclusive).')
     out('Check before you continue:')
     for line in CHECKLIST:
         out(f'  - {line}')
     out(f'  Device notes: wiring --device {plan["device"]["id"]}')
     out('The chip does not answer. The only proof is the device starting afterwards.')
-    confirm(action, image_sha, provided, interactive)
+    # Non-default layouts cannot reuse the default slot-A confirmation token.
+    confirm(action if slot == 'A' and not full_slot else f'{action}-{slot}-full' if full_slot else f'{action}-{slot}',
+            image_sha, provided, interactive)
     if power_cycle:
         out('Power-cycle mode: disconnect only the 3V3 lead (or switch the 3.3 V supply off). '
             'Keep TXD and GND connected.')
@@ -856,7 +900,9 @@ def run_write(action, folder, port, provided, passes=PASSES, *, power_cycle=Fals
         out(f'  pass {number} of {total}: {address:#07x} of {end:#07x} ({100 * address // end}%)')
 
     with opener(port) as com:
-        writer = TxOnlyWriter(com, power_on=power_on if power_cycle else None, progress=progress)
+        writer = TxOnlyWriter(com, power_on=power_on if power_cycle else None, progress=progress,
+                              slot=slot, full_slot=full_slot, hold=hold)
+        writer.baseline_sha = baseline_sha
         for phase in PHASES[action]:
             # Written before sending, so an interrupted write still leaves a trace.
             record(folder, phase, port, image_sha, writer, 'STARTED', passes, now, power_cycle)
@@ -871,10 +917,12 @@ def run_write(action, folder, port, provided, passes=PASSES, *, power_cycle=Fals
                                   now, power_cycle))
     out(f'{action}: all bytes sent ({writer.uart_bytes:,} UART bytes). Not verified on the chip.')
     if action == 'stage':
-        out('Slot A start marker is still off. Run activate next.')
+        out(f'Slot {slot} start marker was sent inactive. Verify readback before activation when available.')
+    elif hold:
+        out('Activation sent; no restart requested. Verify full readback before the controlled bench start.')
     else:
         out('Chip restarted. Look for LED activity and a button response; then the Zigbee checks.')
-        out(f'If nothing happens: check the leads and 3.3 V, then flash again with --power-cycle. '
+        out(f'If nothing happens: preserve evidence, check the leads and 3.3 V, then assess the incident fallback. '
             f'See {GUIDE}.')
     return entries
 
@@ -962,7 +1010,86 @@ def read_flash(port, output, *, address=0, size=FLASH_BYTES, reader=None,
             json.dump(result, stream, indent=2)
 
 
-def verify_dump(folder, dump, *, staged=False, baseline=None):
+def matched_backup(path, *, port=None):
+    """Require the bytes and both files of the original successful full read."""
+    path = Path(path)
+    data = path.read_bytes()
+    second = path.with_name(path.name + '.second.bin').read_bytes()
+    receipt = read_json(path.with_name(path.name + '.json'))
+    digests = [entry.get('sha256') for entry in receipt.get('reads', [])]
+    if (len(data) != FLASH_BYTES or second != data or receipt.get('status') != 'READ_MATCHED'
+            or receipt.get('address') != 0 or receipt.get('bytes') != FLASH_BYTES
+            or digests != [sha256(data), sha256(data)]
+            or (port is not None and receipt.get('port') != port)):
+        raise RecoveryError('baseline must be an unchanged matching double read of full flash on this port')
+    return data
+
+
+def inspect_slots(dump, references=(), *, replace=None, expect_other=None):
+    """Identify bytes, not execution. A marker cannot prove firmware ever ran.
+
+    Disabled OTA images differ from the original at byte 8. Normalize that
+    one known marker byte for CRC and exact-image matching; record its real
+    state separately. Unknown markers, corruption and ambiguous selection
+    never produce an in-place replacement recommendation.
+    """
+    data = matched_backup(dump)
+    known = {}
+    for item in references:
+        label, separator, filename = item.partition('=')
+        if not separator or not label or label in known:
+            raise RecoveryError('--reference must be a unique NAME=FILE')
+        source = Path(filename).read_bytes()
+        if len(source) >= 4 and u32(source, 0) == OTA_MAGIC:
+            source, info = image_from_ota(source)
+        else:
+            info = check_image(source)
+        known[label] = info
+    if replace and replace not in known:
+        raise RecoveryError('--replace must name a supplied reference')
+    if expect_other and (not replace or expect_other not in known or expect_other == replace):
+        raise RecoveryError('--expect-other needs --replace and a different supplied reference')
+    slots = []
+    for name, base in SLOTS.items():
+        raw = data[base:base + SLOT_A_END]
+        marker = raw[8:12]
+        state = {MARKER: 'enabled', b'\x00NLT': 'disabled', b'\xffNLT': 'staged'}.get(marker, 'unknown')
+        entry = {'slot': name, 'address': base, 'markerHex': marker.hex(),
+                 'markerState': state, 'validImage': False, 'matches': []}
+        try:
+            if state == 'unknown':
+                raise RecoveryError('unrecognized marker')
+            length = u32(raw, SIZE_OFFSET)
+            if not 0x20 <= length < SLOT_A_END:
+                raise RecoveryError('invalid declared length')
+            image = bytearray(raw[:length])
+            image[8] = ACTIVATE_BYTE[0]
+            info = check_image(bytes(image))
+            entry.update(validImage=True, image=info,
+                         matches=[label for label, ref in known.items() if ref == info])
+        except RecoveryError as error:
+            entry['error'] = str(error)
+        slots.append(entry)
+    enabled = [s for s in slots if s['markerState'] == 'enabled']
+    legacy = [offset for offset in OTHER_START_MARKERS if data[offset:offset + 4] == MARKER]
+    result = {'status': 'INSPECTED', 'dumpSha256': sha256(data), 'slots': slots, 'legacyMarkers': legacy,
+              'bootCandidate': enabled[0]['slot'] if len(enabled) == 1 and not legacy else None,
+              'replaceSlot': None, 'bootVerified': False}
+    if replace:
+        if legacy:
+            raise RecoveryError('legacy boot-layout marker present; stop before selecting a replacement slot')
+        if len(enabled) != 1 or not enabled[0]['validImage'] or replace not in enabled[0]['matches']:
+            raise RecoveryError('no unique enabled slot matching the replacement reference; stop before writing')
+        other = next(s for s in slots if s is not enabled[0])
+        if other['markerState'] != 'disabled' or not other['validImage']:
+            raise RecoveryError('other slot is not a valid explicitly disabled image; stop before writing')
+        if expect_other and expect_other not in other['matches']:
+            raise RecoveryError('other slot does not match --expect-other; stop before writing')
+        result['replaceSlot'] = enabled[0]['slot']
+    return result
+
+
+def verify_dump(folder, dump, *, staged=False, baseline=None, slot='A', full_slot=False):
     """Offline comparison of a full readback; no device is opened or restarted."""
     plan, image = load_bundle(folder)
     data = Path(dump).read_bytes()
@@ -971,15 +1098,19 @@ def verify_dump(folder, dump, *, staged=False, baseline=None):
     expected = bytearray(image)
     if staged:
         expected[MARKER_OFFSET] = 0xFF
-    end = erase_end(len(image))
-    if data[:len(image)] != expected or data[len(image):end] != b'\xff' * (end - len(image)):
-        raise RecoveryError('slot A image or erased tail differs from the expected bytes')
+    if slot not in SLOTS:
+        raise RecoveryError('slot must be A or B')
+    start = SLOTS[slot]
+    end = start + (SLOT_A_END if full_slot else erase_end(len(image)))
+    if (data[start:start + len(image)] != expected
+            or data[start + len(image):end] != b'\xff' * (end - start - len(image))):
+        raise RecoveryError(f'slot {slot} image or erased tail differs from the expected bytes')
     if baseline:
         before = Path(baseline).read_bytes()
-        if len(before) != FLASH_BYTES or before[end:] != data[end:]:
+        if len(before) != FLASH_BYTES or before[:start] != data[:start] or before[end:] != data[end:]:
             raise RecoveryError('preserved flash differs from the baseline')
     return {'status': 'FLASH_MATCHED', 'imageSha256': plan['image']['sha256'],
-            'staged': staged, 'preservationVerified': bool(baseline),
+            'slot': slot, 'fullSlot': full_slot, 'staged': staged, 'preservationVerified': bool(baseline),
             'bootVerified': False}
 
 
@@ -996,11 +1127,18 @@ def build_parser():
     read.add_argument('--size', type=lambda v: int(v, 0), default=FLASH_BYTES)
     read.add_argument('--reader', type=Path, help='offline copy of the pinned TLSR825xComFlasher.py')
     read.add_argument('--halt', action='store_true', help='reset/halt CPU; upstream toggles RTS/DTR, see guide')
+    inspect = commands.add_parser('inspect', parents=[common], help='identify both slots from a matching full double read')
+    inspect.add_argument('--dump', type=Path, required=True)
+    inspect.add_argument('--reference', action='append', default=[], metavar='NAME=FILE', help='known finalized BIN or native OTA; repeat for each firmware')
+    inspect.add_argument('--replace', help='require a unique enabled slot matching this reference')
+    inspect.add_argument('--expect-other', help='require the other disabled slot to match this reference')
     verify = commands.add_parser('verify', parents=[common], help='compare a full readback with a bundle')
     verify.add_argument('--bundle', type=Path, required=True)
     verify.add_argument('--dump', type=Path, required=True)
     verify.add_argument('--staged', action='store_true', help='expect inactive marker, before activation')
     verify.add_argument('--baseline', type=Path, help='pre-write full dump for preserved-region comparison')
+    verify.add_argument('--slot', choices=sorted(SLOTS), default='A')
+    verify.add_argument('--full-slot', action='store_true', help='verify erased tail to the end of the selected slot')
     wire = commands.add_parser('wiring', parents=[common], help='how to connect a device')
     wire.add_argument('--device', choices=sorted(DEVICES))
     test = commands.add_parser('selftest', parents=[common],
@@ -1019,13 +1157,19 @@ def build_parser():
     prep.add_argument('--expect-build', help='for example 1.2.5-bseedr22')
     show = commands.add_parser('plan', parents=[common], help='check a bundle and show what it would write')
     show.add_argument('--bundle', required=True, type=Path)
+    show.add_argument('--slot', choices=sorted(SLOTS), default='A')
+    show.add_argument('--full-slot', action='store_true')
     for name, text in (('flash', 'stage and activate in one run'),
-                       ('stage', 'write slot A with the start marker off'),
+                       ('stage', 'write the selected slot with its start marker off'),
                        ('activate', 'switch the start marker on and restart')):
         write = commands.add_parser(name, parents=[common], help=text)
         write.add_argument('--bundle', required=True, type=Path)
         write.add_argument('--port')
         write.add_argument('--confirm', help='ACTION-<first 8 hex digits of the image SHA-256>')
+        write.add_argument('--slot', choices=sorted(SLOTS), default='A', help='target application slot; B requires a double-read baseline')
+        write.add_argument('--full-slot', action='store_true', help='erase all 0x34000 bytes of this slot; never NVM')
+        write.add_argument('--baseline', type=Path, help='original matching full double read, required for slot B')
+        write.add_argument('--hold', action='store_true', help='keep CPU halted after activation for readback; no restart requested')
         write.add_argument('--power-cycle', action='store_true',
                            help='halt the chip while you switch 3.3 V on, instead of restarting it over SWS')
         write.add_argument('--dry-run', type=Path, metavar='FILE',
@@ -1048,14 +1192,22 @@ def main(argv=None):
             print(json.dumps(result, indent=2))
 
     try:
-        if args.action == 'read':
+        if args.action == 'inspect':
+            result = inspect_slots(args.dump, args.reference, replace=args.replace, expect_other=args.expect_other)
+            for slot in result['slots']:
+                out(f'Slot {slot["slot"]}: marker {slot["markerState"]}, valid image {slot["validImage"]}, '
+                    f'references {", ".join(slot["matches"]) or "none"}')
+            out(f'Replacement slot: {result["replaceSlot"] or "not established"}. Boot remains unverified.')
+            emit(result)
+        elif args.action == 'read':
             out('Requires the documented pvvx bidirectional circuit. TX-only wiring cannot read.')
             result = read_flash(args.port, args.out, address=args.address, size=args.size,
                                 reader=args.reader, halt=args.halt)
             out(f'Two reads match; private backup: {args.out}')
             emit(result)
         elif args.action == 'verify':
-            result = verify_dump(args.bundle, args.dump, staged=args.staged, baseline=args.baseline)
+            result = verify_dump(args.bundle, args.dump, staged=args.staged, baseline=args.baseline,
+                                 slot=args.slot, full_slot=args.full_slot)
             out('Flash bytes match. Boot and Zigbee operation remain unverified.')
             emit(result)
         elif args.action == 'ports':
@@ -1089,7 +1241,7 @@ def main(argv=None):
             emit({'status': 'OK', 'bundle': str(args.out), 'plan': plan})
         elif args.action == 'plan':
             plan, _ = load_bundle(args.bundle)
-            out(describe(plan))
+            out(describe(plan, slot=args.slot, full_slot=args.full_slot))
             log = receipts(args.bundle)
             for entry in log:
                 last = entry.get('lastOperation') or {}
@@ -1101,7 +1253,8 @@ def main(argv=None):
                 raise RecoveryError('--port is required unless --dry-run is given')
             result = run_write(args.action, args.bundle, args.port, args.confirm,
                                getattr(args, 'passes', PASSES), power_cycle=args.power_cycle,
-                               dry_run_path=args.dry_run, out=out)
+                               dry_run_path=args.dry_run, out=out, slot=args.slot,
+                               full_slot=args.full_slot, baseline=args.baseline, hold=args.hold)
             emit(result if args.dry_run else {'status': 'SENT_UNVERIFIED', 'action': args.action,
                                               'receipts': result})
     except (RecoveryError, OSError, ValueError, KeyError, subprocess.TimeoutExpired) as error:
@@ -1109,8 +1262,8 @@ def main(argv=None):
         emit({'status': 'BLOCKED', 'error': str(error)})
         return 2
     except KeyboardInterrupt:
-        print('BLOCKED: interrupted. Slot A may be partly erased; run flash again.', file=sys.stderr)
-        emit({'status': 'INTERRUPTED', 'error': 'interrupted; slot A may be partly erased'})
+        print('BLOCKED: interrupted. The selected slot may be partly erased; preserve evidence before recovery.', file=sys.stderr)
+        emit({'status': 'INTERRUPTED', 'error': 'interrupted; selected slot may be partly erased'})
         return 130
     return 0
 

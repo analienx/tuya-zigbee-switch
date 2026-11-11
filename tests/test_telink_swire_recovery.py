@@ -241,7 +241,7 @@ def test_stage_then_activate_rewrites_only_slot_a():
     assert chip.divider == tool.SWS_DIVIDER and chip.status == [0]
     writer.activate()
     assert_recovered(chip, before, image)
-    assert not chip.stopped and chip.restarts == 3
+    assert not chip.stopped and chip.restarts == 2  # do not reset again between stage and activation
     assert chip.ignored == []
 
 
@@ -685,3 +685,138 @@ def test_inherited_cli_json_wiring_and_dry_run(tmp_path, capsys):
     assert result['status'] == 'DRY_RUN'
     assert result['streamSha256'] == tool.sha256(stream.read_bytes())
     assert not (kit / tool.BUNDLE_LOG).exists()
+
+
+def full_backup(path, data, port='COM5'):
+    path.write_bytes(data)
+    path.with_name(path.name + '.second.bin').write_bytes(data)
+    path.with_name(path.name + '.json').write_text(json.dumps({
+        'status': 'READ_MATCHED', 'address': 0, 'bytes': FLASH_SIZE, 'port': port,
+        'reads': [{'sha256': tool.sha256(data)}] * 2}))
+    return path
+
+
+def two_known_slots(active='B'):
+    data = bytearray(bricked_flash())
+    for offset in tool.OTHER_START_MARKERS:
+        data[offset:offset + 4] = b'\xff' * 4
+    images = {'r19': make_image(0x3120, seed=19, version=0x12053021),
+              'r21': make_image(0x3220, seed=21, version=0x12053023)}
+    for slot, base in tool.SLOTS.items():
+        image = images['r21' if slot == active else 'r19']
+        data[base:base + len(image)] = image
+        if slot != active:
+            data[base + 8] = 0
+    return data, images
+
+
+@pytest.mark.parametrize('slot', ['A', 'B'])
+@pytest.mark.parametrize('hold', [False, True])
+def test_full_slot_wire_model_in_both_directions(tmp_path, slot, hold):
+    before, _ = two_known_slots(slot)
+    image = make_image(0x5432)
+    chip = Chip(before)
+    writer = tool.TxOnlyWriter(ChipPort(chip), sleep=lambda _: None, clock=clock(),
+                               slot=slot, full_slot=True, hold=hold)
+    base = tool.SLOTS[slot]
+    writer.stage(image)
+    assert chip.flash[base + 8:base + 12] == b'\xffNLT'
+    writer.activate()
+    assert chip.flash[base:base + len(image)] == image
+    assert chip.flash[base + len(image):base + 0x34000] == b'\xff' * (0x34000 - len(image))
+    assert chip.flash[:base] == before[:base]
+    assert chip.flash[base + 0x34000:] == before[base + 0x34000:]
+    assert chip.erases == list(range(base, base + 0x34000, 0x1000)) * 2
+    assert chip.stopped == hold
+    assert chip.restarts == (1 if hold else 2)
+    ci_artifact(tmp_path, image)
+    prepare_from(tmp_path, tmp_path / 'kit')
+    dump, baseline = tmp_path / 'after', tmp_path / 'before'
+    dump.write_bytes(chip.flash)
+    baseline.write_bytes(before)
+    assert tool.verify_dump(tmp_path / 'kit', dump, slot=slot, full_slot=True,
+                            baseline=baseline)['preservationVerified']
+    # Mutations in the other slot, either NVM region and factory data must fail.
+    for address in (tool.SLOTS['B' if slot == 'A' else 'A'] + 20, 0x34000, 0x76000, 0x7a000):
+        corrupt = bytearray(chip.flash)
+        corrupt[address] ^= 1
+        dump.write_bytes(corrupt)
+        with pytest.raises(RecoveryError, match='preserved'):
+            tool.verify_dump(tmp_path / 'kit', dump, slot=slot, full_slot=True, baseline=baseline)
+
+
+def test_slot_b_writer_cannot_touch_slot_a_or_nvm():
+    writer = tool.TxOnlyWriter(ChipPort(Chip(bricked_flash())), slot='B')
+    for address in (0, 0x33000, 0x34000, 0x74000, 0x76000, 0x7a000):
+        with pytest.raises(RecoveryError):
+            writer.erase(address)
+        with pytest.raises(RecoveryError):
+            writer.program(address, b'\xff')
+    with pytest.raises(RecoveryError):
+        writer.program(8, b'K', marker=True)
+    with pytest.raises(RecoveryError):
+        writer.program(0x40000, b'\x00' * 12)
+
+
+@pytest.mark.parametrize('active', ['A', 'B'])
+def test_identify_failed_slot_by_exact_reference_with_disabled_marker(tmp_path, active):
+    before, images = two_known_slots(active)
+    dump = full_backup(tmp_path / 'dump', before)
+    refs = []
+    for name, image in images.items():
+        path = tmp_path / (name + '.ota')
+        path.write_bytes(make_ota(image))
+        refs.append(f'{name}={path}')
+    result = tool.inspect_slots(dump, refs, replace='r21', expect_other='r19')
+    assert result['replaceSlot'] == active and not result['bootVerified']
+    assert all(s['validImage'] for s in result['slots'])
+    assert {s['markerState'] for s in result['slots']} == {'enabled', 'disabled'}
+    # Each of these invalidates the expected incident pattern.
+    other = tool.SLOTS['B' if active == 'A' else 'A']
+    for address, value in ((other + 8, 0x4b), (tool.SLOTS[active] + 8, 0xff),
+                           (tool.SLOTS[active] + 0x100, before[tool.SLOTS[active] + 0x100] ^ 1)):
+        corrupt = bytearray(before)
+        corrupt[address] = value
+        full_backup(dump, corrupt)
+        with pytest.raises(RecoveryError, match='unique enabled'):
+            tool.inspect_slots(dump, refs, replace='r21', expect_other='r19')
+
+
+def test_slot_b_write_requires_baseline_and_slot_bound_receipt(tmp_path):
+    image = make_image()
+    ci_artifact(tmp_path, image)
+    kit = tmp_path / 'kit'
+    prepare_from(tmp_path, kit)
+    before, _ = two_known_slots('B')
+    dump = full_backup(tmp_path / 'baseline', before)
+    chip = Chip(before)
+    token = tool.sha256(image)[:8]
+    options = dict(slot='B', full_slot=True, hold=True, opener=lambda p: ChipPort(chip), out=lambda _: None)
+    with pytest.raises(RecoveryError, match='requires --baseline'):
+        tool.run_write('stage', kit, 'COM5', f'STAGE-B-FULL-{token}', **options)
+    # Wrong-layout confirmation cannot accidentally erase B.
+    with pytest.raises(RecoveryError, match='--confirm must'):
+        tool.run_write('stage', kit, 'COM5', f'STAGE-{token}', baseline=dump, **options)
+    tool.run_write('stage', kit, 'COM5', f'STAGE-B-FULL-{token}', baseline=dump, **options)
+    assert tool.fresh_stage(kit, tool.sha256(image), 'COM5', slot='B', full_slot=True,
+                            baseline_sha=tool.sha256(before))
+    assert not tool.fresh_stage(kit, tool.sha256(image), 'COM5', slot='B', full_slot=True)
+    assert not tool.fresh_stage(kit, tool.sha256(image), 'COM5')
+    tool.run_write('activate', kit, 'COM5', f'ACTIVATE-B-FULL-{token}', baseline=dump, **options)
+    assert chip.flash[0x40000:0x40000 + len(image)] == image
+    assert chip.stopped
+    assert chip.flash[:0x40000] == before[:0x40000]
+    before[8] = 0x4b
+    full_backup(dump, before)
+    with pytest.raises(RecoveryError, match='slot A is not explicitly disabled'):
+        tool.run_write('stage', kit, 'COM5', f'STAGE-B-FULL-{token}', baseline=dump, **options)
+
+
+def test_backup_validation_rejects_changed_evidence(tmp_path):
+    data, _ = two_known_slots()
+    dump = full_backup(tmp_path / 'dump', data)
+    with pytest.raises(RecoveryError, match='double read'):
+        tool.matched_backup(dump, port='COM7')
+    dump.with_name(dump.name + '.second.bin').write_bytes(bytes(FLASH_SIZE))
+    with pytest.raises(RecoveryError, match='double read'):
+        tool.inspect_slots(dump)
