@@ -664,3 +664,24 @@ def test_device_profiles_block_cross_device_and_quarantined_images():
         tool.check_device('gledopto-gl-sd-301p', info, {'buildManifest': {'DEPLOYABLE': '0'}})
     info['sha256'] = next(iter(tool.DEVICES['gledopto-gl-sd-301p']['images']))
     assert tool.check_device('gledopto-gl-sd-301p', info, {})
+
+
+@pytest.mark.parametrize('image_type', [43555, 43556, 65024, 65026])
+def test_bseed_four_native_identities(image_type):
+    info = tool.check_image(make_image(image_type=image_type))
+    assert tool.check_device('bseed-ts011f', info, {
+        'manifest': {'board': 'OUTLET_BSEED_PM_TS011F'}, 'roleMatrix': {'role': 'Router'}})
+
+
+def test_inherited_cli_json_wiring_and_dry_run(tmp_path, capsys):
+    ci_artifact(tmp_path, make_image())
+    kit = tmp_path / 'kit'
+    prepare_from(tmp_path, kit)
+    assert tool.main(['wiring', '--device', 'gledopto-gl-sd-301p', '--json']) == 0
+    assert 'gledopto-gl-sd-301p' in json.loads(capsys.readouterr().out)['devices']
+    stream = tmp_path / 'stream.uart'
+    assert tool.main(['flash', '--bundle', str(kit), '--dry-run', str(stream), '--json']) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result['status'] == 'DRY_RUN'
+    assert result['streamSha256'] == tool.sha256(stream.read_bytes())
+    assert not (kit / tool.BUNDLE_LOG).exists()

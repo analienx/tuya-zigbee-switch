@@ -98,7 +98,7 @@ DEVICES = {
     'bseed-ts011f': {
         'name': 'BSEED TS011F-BS / TS011F-BS-PM socket (Tuya ZTU module)',
         'manufacturerCodes': [0x1141],
-        'imageTypes': [43555, 43556, 65025, 65026],
+        'imageTypes': [43555, 43556, 65024, 65026],
         'boards': ['OUTLET_BSEED'],
         'requiresEvidence': True,
         'pads': [
