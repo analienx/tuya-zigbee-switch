@@ -129,10 +129,15 @@ until it prints that the chip restarted.
 - `activate` writes the single byte `0x4B` at the selected slot start plus `0x08` without an erase,
   which turns the marker into `KNLT`, then restarts the chip. It refuses
   unless the latest `stage` of the same image, on the same port, finished
-  within the last 30 minutes. Slot, erase extent and baseline hash must also match.
+  within the last 30 minutes in the same recovery session. Slot, erase extent,
+  target identity and baseline hash must also match. Activation consumes the staged
+  state. A separate activation attaches without issuing a software reset.
   `--hold` omits the final restart so readback can precede the controlled bench start.
+  Supplying `--baseline` selects a verified workflow: separate stage, read, verify
+  and activate steps are required, and `--full-slot` is mandatory.
 
-Each step appends a `STARTED` line to `receipts.jsonl` in the bundle folder
+Each step appends a `STARTED` line to a private `receipts.jsonl` under
+`~/.telink-swire/bundles/` (outside the bundle and Git checkout)
 before it sends anything. When it ends, it adds `SENT_UNVERIFIED` if all the
 bytes were sent, or `INTERRUPTED` otherwise. `SENT_UNVERIFIED` means the PC
 sent the bytes. It does not mean the chip received them.
@@ -267,7 +272,10 @@ This compares every image byte (with the inactive marker), the erased tail and
 all bytes outside the erase range, including the other slot and factory/NVM data.
 Omit `--staged` to compare an activated image; omit `--baseline` for image-only
 verification. `FLASH_MATCHED` is a byte comparison, never proof of boot. The read
-receipt independently establishes whether the two source reads matched.
+receipt independently establishes whether the two source reads matched. Standalone
+`verify` is only an offline byte comparison; use `--session` to advance a recovery
+transaction. Session verification requires a fresh matching double read and refuses
+an older readback after a later verification failure.
 
 ## Device profiles and repeat use
 
@@ -318,12 +326,12 @@ only for an inspection result of **B**; substitute A throughout if A was found:
 
 ```text
 python telink_swire_recovery.py plan --bundle router --slot B --full-slot
-python telink_swire_recovery.py stage --bundle router --port COM5 --slot B --full-slot --baseline C:/private/recovery/before.bin
+python telink_swire_recovery.py stage --bundle router --port COM5 --slot B --full-slot --baseline C:/private/recovery/before.bin --session C:/private/recovery/session.json
 python telink_swire_recovery.py read --port COM5 --out C:/private/recovery/staged.bin
-python telink_swire_recovery.py verify --bundle router --dump C:/private/recovery/staged.bin --staged --slot B --full-slot --baseline C:/private/recovery/before.bin
-python telink_swire_recovery.py activate --bundle router --port COM5 --slot B --full-slot --baseline C:/private/recovery/before.bin --hold
+python telink_swire_recovery.py verify --session C:/private/recovery/session.json --dump C:/private/recovery/staged.bin --staged
+python telink_swire_recovery.py activate --session C:/private/recovery/session.json --hold
 python telink_swire_recovery.py read --port COM5 --out C:/private/recovery/activated.bin
-python telink_swire_recovery.py verify --bundle router --dump C:/private/recovery/activated.bin --slot B --full-slot --baseline C:/private/recovery/before.bin
+python telink_swire_recovery.py verify --session C:/private/recovery/session.json --dump C:/private/recovery/activated.bin
 ```
 
 Keep the CPU halted between stage, reading and verification; do not power-cycle
@@ -338,3 +346,136 @@ and **every byte outside the selected slot** against the baseline, including the
 entire other slot. This implements in-place recovery in either direction. Existing
 TX-only workflows can still use the default A without optional readback, except
 where a device-specific recovery procedure requires it.
+
+
+## Agent interface and recovery logic
+
+Use `capabilities --json` to discover the protocol. API responses have
+`apiSchema: 1`. `--json` is accepted before or after the command and never prompts,
+even when the process has a terminal. Human `--help` remains normal help text.
+Use `--non-interactive` for prompt-free text mode.
+
+A JSON write requires a private `--session`, a stable `--operation-id` and an
+operator-confirmed `--target-id` when creating the session. The target ID can be
+an exact IEEE or an operator-maintained physical asset ID. It binds the workflow;
+**TX-only cannot electronically identify the attached chip**. Keep the same board
+and leads attached throughout the session. Hardware readiness and task authorization
+remain operator responsibilities; flags and confirmation strings do not establish them.
+
+The session binds bundle path, exact image SHA-256, target, port, slot, erase extent
+and original baseline hash. `status --session PATH --json` reports durable phase,
+progress, operation results and allowed next actions without opening a serial port.
+Human writes without `--session` use a private default session for that port.
+
+| Phase | Permitted next operation |
+| --- | --- |
+| `READY` | stage; or unverified combined flash when no baseline is supplied |
+| `STAGED` | no-reset read and staged verification; TX-only sessions may activate unverified |
+| `VERIFIED` | activate without software reset |
+| `HELD` | no-reset read and activated-image verification |
+| `ACTIVATED_VERIFIED` | operator-controlled low-voltage bench start |
+| `BOOT_REQUESTED` | independently collect live device acceptance |
+| `NEEDS_RECONCILIATION` / `VERIFICATION_FAILED` | fresh no-reset read, inspect, reconcile, or explicit stop |
+| `CLOSED` | new recovery session, after an assessed decision |
+
+Supplying a baseline requires verified recovery. The baseline must establish that
+the selected slot is the unique enabled slot and must have no legacy layout markers.
+This prevents an agent from accidentally overwriting the other image after inspection.
+The complete selected slot is erased; the entire other slot and NVM are retained.
+BSEED PM/non-PM and Router/Client manifest identities must agree with their native
+image type. The generic profile cannot bypass the BSEED/Gledopto profile gates.
+
+### Machine-driven in-place sequence
+
+First obtain the authorized, matching full backup and inspect it against the
+original r19/r21 references as described above. Prepare the candidate from the
+exact hosted artifact. If inspection selected B:
+
+```text
+python telink_swire_recovery.py plan --bundle router --slot B --full-slot --json
+```
+
+Use the response's `plan.target` numeric ranges and `plan.confirmationTokens`.
+The JSON describes B, including its marker at `0x40008`; it does not return the
+bundle's legacy default-A range. Tokens below are placeholders for those returned
+by this plan, not permission to choose a different image or target.
+
+```text
+python telink_swire_recovery.py stage --bundle router --port COM5 --slot B --full-slot --baseline C:/private/recovery/before.bin --session C:/private/recovery/session.json --target-id EXACT_CONFIRMED_TARGET --operation-id restore-stage-1 --confirm STAGE-B-FULL-HASH8 --json
+python telink_swire_recovery.py read --port COM5 --out C:/private/recovery/staged.bin --json
+python telink_swire_recovery.py verify --session C:/private/recovery/session.json --dump C:/private/recovery/staged.bin --staged --json
+python telink_swire_recovery.py activate --session C:/private/recovery/session.json --operation-id restore-activate-1 --hold --confirm ACTIVATE-B-FULL-HASH8 --json
+python telink_swire_recovery.py read --port COM5 --out C:/private/recovery/activated.bin --json
+python telink_swire_recovery.py verify --session C:/private/recovery/session.json --dump C:/private/recovery/activated.bin --json
+```
+
+The session supplies the exact bundle, port, target and layout on subsequent
+commands. Conflicting explicit arguments are refused. `read --halt` is forbidden
+during an active recovery because it would reset the chip; separate activation
+reasserts HALT and configures SWire without requesting reset. `--hold` additionally
+omits the final restart. None of these signals prove actual electrical delivery.
+
+For an explicitly selected TX-only recovery, omit the baseline. Reading stays
+optional; the state and result remain unverified. A combined `flash` may then be
+used with the same session/operation/target flags. No mode treats UART transmission
+or a matching flash image as proof of real boot or correct Zigbee operation.
+
+### Retries and interrupted operations
+
+Repeat an operation with the **same session, operation ID and exact arguments**
+when the caller lost the result. If it completed, the cached result is returned
+with `replayed: true` and no serial device is opened. Reusing the ID with changed
+arguments is refused. New IDs do not bypass an active, completed or uncertain phase.
+Completed or interrupted activation cannot reuse the earlier staged permission.
+
+Intent is persisted before opening the serial port. A partial write, timeout,
+interrupt or crash leaves an uncertain operation. Do not automatically repeat it,
+choose another work directory or drop the backup requirement. Obtain a new no-reset
+full double read; use `inspect` to determine the actual marker state. Then:
+
+```text
+python telink_swire_recovery.py reconcile --session C:/private/recovery/session.json --dump C:/private/recovery/new-read.bin --staged --json
+```
+
+Use `--staged` only when inspection shows the inactive marker. Otherwise compare
+as activated. Reconciliation performs no write. It requires the complete intended
+image and erased tail to match; where a baseline exists, all preserved bytes must
+also match. A reconciled staged image permits a **new** activation operation ID;
+the original uncertain ID remains blocked. An activated image permits verification
+and independent bench acceptance, not an automatic reset or another flash.
+
+If bytes do not match or readback is unavailable, stop and assess the incident's
+fallback. `close --session PATH --reason TEXT --confirm TOKEN --json` records that
+explicit decision; obtain the token from `status.closeConfirmationToken`. Closing
+neither changes hardware nor marks it recovered. A new session requires a new path.
+
+### Concurrency, evidence and errors
+
+The tool uses one cross-process port lock plus durable port ownership shared across
+all bundles and session paths under `~/.telink-swire`. Reads, writes and adapter
+selftests cannot run concurrently on the same port. A new session cannot bypass an
+unfinished one. Port aliases are normalized for lock identity.
+
+After a crash, inspect `status --port COM5 --json`. A stale lock is never silently
+removed. `unlock --port COM5 --confirm UNLOCK-NONCE --json` requires the exact nonce
+and a dead owner process, archives the abandoned lock, and leaves the recovery
+session uncertain. It never releases a live owner's lock or claims reconciliation.
+
+Read receipts are written before serial work begins and updated after completion.
+Reader exit codes and bounded stdout/stderr logs remain in private files next to
+the dump, including on timeout. Errors expose those paths; raw diagnostics are not
+printed into public CI logs. Private session/receipt paths are returned in JSON.
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | command completed or safely replayed; inspect the proof/status fields |
+| `1` | adapter selftest failure or unexpected internal error |
+| `2` | argument, precondition, evidence or read failure |
+| `3` | uncertain write; do not retry automatically |
+| `130` | interrupted; inspect side-effect and session information |
+
+Errors include `errorCode`, `details`, `retrySafe`, `sideEffectsPossible` and
+`bootVerified: false`. `retrySafe` on a cached successful write applies only to
+repeating that exact operation ID. `SENT_UNVERIFIED`, `FLASH_MATCHED` and real boot
+acceptance are separate evidence levels. Standalone byte verification does not
+advance a session; session verification requires fresh double-read evidence.

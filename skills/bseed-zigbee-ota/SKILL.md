@@ -27,7 +27,11 @@ bytes written, so acceptance is the device's own fresh Zigbee evidence. Optional
 read/inspect/verify commands establish flash contents. In-place recovery uses
 the matched full baseline, exact reference images and --slot A or B with
 --full-slot; B is refused unless the baseline proves A is disabled. Use --hold
-to defer restart until readback verification. Incident locks remain unchanged.
+to defer restart until readback verification. Supplying a baseline selects a
+verified session: stage -> read -> verify -> activate -> read -> verify. Agent
+JSON writes require a private --session, --operation-id and confirmed --target-id.
+Use status/reconcile for uncertain operations; never retry a write with a new ID
+or change work directories to bypass it. Incident OTA locks remain unchanged.
 
 ## Standing operator authorization — BSEED fleet (2026-11-03)
 

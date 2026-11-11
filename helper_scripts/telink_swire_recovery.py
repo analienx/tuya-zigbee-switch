@@ -805,9 +805,10 @@ def confirm(action, image_sha, provided, interactive):
     if provided == token:
         return
     if provided is not None:
-        raise RecoveryError(f'--confirm must be {token}')
+        raise RecoveryError(f'--confirm must be {token}', code='INVALID_CONFIRMATION', details={'confirmationToken': token})
     if not interactive:
-        raise RecoveryError(f'{action} needs --confirm {token} when not run interactively')
+        raise RecoveryError(f'{action} needs --confirm {token} when not run interactively',
+                            code='CONFIRMATION_REQUIRED', details={'confirmationToken': token})
     if ask(f'Type {token} to {action}: ').strip() != token:
         raise RecoveryError('cancelled')
 
@@ -831,7 +832,8 @@ def selected_plan(plan, image, *, slot='A', full_slot=False, hold=False, passes=
         estimatedSeconds=estimate_seconds(image, passes, slot=slot, full_slot=full_slot, hold=hold),
         requirements={'baselineRequired': slot == 'B', 'physicalTargetConfirmationRequired': True,
                       'readWiring': 'bidirectional', 'writeWiring': 'TX-only',
-                      'verificationRequiredWhenBaselineSupplied': True}, bootVerified=False)
+                      'verificationRequiredWhenBaselineSupplied': True,
+                      'holdRequiredWhenBaselineSupplied': True}, bootVerified=False)
     return result
 
 
@@ -892,10 +894,11 @@ def session_status(path):
     state = read_json(path)
     steps = {'READY': ['stage'], 'STAGED': ['read', 'verify'], 'VERIFIED': ['activate'],
              'HELD': ['read', 'verify'], 'ACTIVATED_VERIFIED': ['manual_bench_start'],
-             'BOOT_REQUESTED': ['live_device_acceptance'], 'NEEDS_RECONCILIATION': ['read', 'reconcile', 'close'],
-             'VERIFICATION_FAILED': ['read', 'reconcile', 'close'], 'CLOSED': ['new_session']}
+             'BOOT_REQUESTED': ['live_device_acceptance'], 'NEEDS_RECONCILIATION': ['read', 'inspect', 'reconcile', 'close'],
+             'VERIFICATION_FAILED': ['read', 'inspect', 'reconcile', 'close'], 'CLOSED': ['new_session']}
     result = dict(state, session=str(path), nextActions=steps.get(state['phase'], []),
-                  bootVerified=False, apiSchema=API_SCHEMA)
+                  bootVerified=False, apiSchema=API_SCHEMA, physicalIdentityVerified=False,
+                  closeConfirmationToken='CLOSE-' + state['id'][:8])
     if state['phase'] == 'STAGED' and not state['context']['verificationRequired']:
         result['nextActions'].append('activate_unverified')
     lock = STATE_ROOT / 'locks' / (port_key(state['context']['port']) + '.json')
@@ -1038,6 +1041,9 @@ def run_write(action, folder, port, provided, passes=PASSES, *, power_cycle=Fals
         if action == 'flash':
             raise RecoveryError('a baseline selects verified recovery: use stage, read, verify, activate separately',
                                 code='VERIFICATION_REQUIRED')
+        if action == 'activate' and not hold:
+            raise RecoveryError('verified in-place activation requires --hold for readback before bench start',
+                                code='HOLD_REQUIRED')
     if dry_run_path:
         return dry_run(action, plan, image, passes, power_cycle, dry_run_path, out,
                        slot=slot, full_slot=full_slot, hold=hold)
@@ -1244,8 +1250,9 @@ def _read_flash(port, output, *, address=0, size=FLASH_BYTES, reader=None,
         return result
     except BaseException as error:
         result['status'] = 'READ_FAILED'
-        result['errorCode'] = getattr(error, 'code', type(error).__name__)
+        result['errorCode'] = getattr(error, 'code', 'READ_INTERRUPTED' if isinstance(error, KeyboardInterrupt) else 'READ_FAILED')
         raise RecoveryError(str(error), code=result['errorCode'], retry_safe=False,
+                            side_effects=True,
                             details={'receipt': str(receipt), 'readerRuns': result['readerRuns'],
                                      'flashWriteAttempted': False, 'debugStateMayHaveChanged': True},
                             exit_code=130 if isinstance(error, KeyboardInterrupt) else 2) from error
@@ -1378,16 +1385,24 @@ def verify_session(path, dump, *, folder, staged, baseline, slot, full_slot, rec
             raise RecoveryError('interrupted operation requires reconcile with a fresh read', code='RECONCILIATION_REQUIRED')
         matched_backup(dump, port=context['port'])
         evidence = read_json(Path(dump).with_name(Path(dump).name + '.json'))
-        threshold = state['updatedUtc'] if reconcile else state['stageUtc']
-        if (datetime.datetime.fromisoformat(evidence['utc']) < datetime.datetime.fromisoformat(threshold)
-                or evidence.get('halt')):
-            raise RecoveryError('use a fresh no-reset double read after the pending operation', code='STALE_EVIDENCE')
         if context['baselineSha256'] and sha256(matched_backup(baseline, port=context['port'])) != context['baselineSha256']:
             raise RecoveryError('original baseline changed', code='BASELINE_CHANGED')
+        plan, _ = load_bundle(folder)
+        if plan['image']['sha256'] != context['imageSha256']:
+            raise RecoveryError('session image changed', code='SESSION_MISMATCH')
+        prior = state.get('lastVerification', {})
+        if (state['phase'] == ('VERIFIED' if staged else 'ACTIVATED_VERIFIED')
+                and prior.get('dump') == str(Path(dump).resolve())
+                and prior.get('dumpSha256') == sha256(Path(dump).read_bytes())
+                and prior.get('staged') == staged):
+            return dict(prior, session=str(path), phase=state['phase'], replayed=True,
+                        nextActions=session_status(path)['nextActions'])
+        threshold = max(datetime.datetime.fromisoformat(state['updatedUtc']),
+                        datetime.datetime.fromisoformat(state.get('stageUtc', state['createdUtc'])))
+        if (datetime.datetime.fromisoformat(evidence['utc']) < threshold
+                or evidence.get('halt')):
+            raise RecoveryError('use a fresh no-reset double read after the pending operation', code='STALE_EVIDENCE')
         try:
-            plan, _ = load_bundle(folder)
-            if plan['image']['sha256'] != context['imageSha256']:
-                raise RecoveryError('session image changed', code='SESSION_MISMATCH')
             result = verify_dump(folder, dump, staged=staged, baseline=baseline, slot=slot, full_slot=full_slot)
         except (RecoveryError, OSError, ValueError) as error:
             state['phase'] = 'VERIFICATION_FAILED'
@@ -1666,6 +1681,7 @@ def main(argv=None):
                                slot=args.slot, full_slot=args.full_slot, baseline=args.baseline, hold=args.hold,
                                interactive=interactive, session=args.session, operation_id=args.operation_id,
                                target_id=args.target_id or 'operator-confirmed')
+            out(f'{action}: {result["status"]}; phase={result.get("phase", "simulation")}; session={result.get("session", "none")}')
         emit(result)
         return 0
     except (RecoveryError, OSError, ValueError, KeyError, TypeError, AttributeError) as error:
@@ -1679,6 +1695,11 @@ def main(argv=None):
         emit({'status': 'INTERRUPTED', 'action': action, 'errorCode': 'INTERRUPTED',
               'retrySafe': False, 'sideEffectsPossible': False, 'bootVerified': False})
         return 130
+    except Exception as error:
+        print(f'INTERNAL ERROR: {type(error).__name__}: {error}', file=sys.stderr)
+        emit({'status': 'UNCERTAIN', 'action': action, 'errorCode': 'INTERNAL_ERROR',
+              'error': str(error), 'retrySafe': False, 'sideEffectsPossible': True, 'bootVerified': False})
+        return 1
 
 
 if __name__ == '__main__':

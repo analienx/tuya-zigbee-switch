@@ -906,11 +906,14 @@ def test_verified_session_requires_matching_readback_before_activation(tmp_path)
     kit, chip, session, options, token = agent_fixture(tmp_path, baseline=True)
     tool.run_write('stage', kit, 'COM5', token('stage'), operation_id='stage-1', **options)
     with pytest.raises(RecoveryError, match='requires a successful'):
-        tool.run_write('activate', kit, 'COM5', token('activate'), operation_id='activate-1', **options)
+        tool.run_write('activate', kit, 'COM5', token('activate'), operation_id='activate-1', hold=True, **options)
     readback = full_backup(tmp_path / 'staged', chip.flash)
     result = tool.verify_dump(kit, readback, staged=True, slot='B', full_slot=True,
                               baseline=options['baseline'], session=session)
     assert result['phase'] == 'VERIFIED'
+    repeated = tool.verify_dump(kit, readback, staged=True, slot='B', full_slot=True,
+                                baseline=options['baseline'], session=session)
+    assert repeated['replayed'] and repeated['phase'] == 'VERIFIED'
     tool.run_write('activate', kit, 'COM5', token('activate'), operation_id='activate-1', hold=True, **options)
     readback = full_backup(tmp_path / 'activated', chip.flash)
     result = tool.verify_dump(kit, readback, slot='B', full_slot=True, baseline=options['baseline'], session=session)
@@ -928,7 +931,7 @@ def test_failed_verification_blocks_activation(tmp_path):
         tool.verify_dump(kit, readback, staged=True, slot='B', full_slot=True,
                          baseline=options['baseline'], session=session)
     with pytest.raises(RecoveryError, match='cannot activate'):
-        tool.run_write('activate', kit, 'COM5', token('activate'), **options)
+        tool.run_write('activate', kit, 'COM5', token('activate'), hold=True, **options)
 
 
 def test_uncertain_activation_cannot_be_retried_or_bypassed(tmp_path):
@@ -989,3 +992,67 @@ def test_bseed_board_role_mismatch_is_rejected():
                                                'roleMatrix': {'role': 'Router'}})
     with pytest.raises(RecoveryError, match='guarded'):
         tool.check_device('generic-tlsr8258', info, {'pinnedSha256': info['sha256']})
+
+
+def test_stale_successful_read_cannot_undo_a_failed_verification(tmp_path):
+    kit, chip, session, options, token = agent_fixture(tmp_path, baseline=True)
+    tool.run_write('stage', kit, 'COM5', token('stage'), operation_id='stage-1', **options)
+    old_good = full_backup(tmp_path / 'old-good', chip.flash)
+    corrupted = bytearray(chip.flash)
+    corrupted[0x76000] ^= 1
+    bad = full_backup(tmp_path / 'new-bad', corrupted)
+    with pytest.raises(RecoveryError, match='preserved'):
+        tool.verify_dump(kit, bad, staged=True, slot='B', full_slot=True,
+                         baseline=options['baseline'], session=session)
+    with pytest.raises(RecoveryError) as error:
+        tool.verify_dump(kit, old_good, staged=True, slot='B', full_slot=True,
+                         baseline=options['baseline'], session=session)
+    assert error.value.code == 'STALE_EVIDENCE'
+
+
+def test_close_is_explicit_and_does_not_claim_hardware_acceptance(tmp_path):
+    kit, chip, session, options, token = agent_fixture(tmp_path)
+    tool.run_write('stage', kit, 'COM5', token('stage'), **options)
+    state = tool.session_status(session)
+    with pytest.raises(RecoveryError):
+        tool.close_session(session, 'wrong', 'stop')
+    snapshot = bytes(chip.flash), chip.restarts
+    closed = tool.close_session(session, state['closeConfirmationToken'], 'operator assessed fallback')
+    assert closed['phase'] == 'CLOSED' and not closed['closureIsHardwareAcceptance']
+    assert snapshot == (bytes(chip.flash), chip.restarts)
+
+
+def test_dead_lock_release_preserves_evidence_and_never_unlocks_live_owner(tmp_path, monkeypatch):
+    guard = tool.PortGuard('COM5')
+    guard.__enter__()  # represent a process that crashed without __exit__
+    confirmation = 'UNLOCK-' + guard.owner['nonce']
+    monkeypatch.setattr(tool, 'process_alive', lambda pid: True)
+    with pytest.raises(RecoveryError):
+        tool.unlock_port('COM5', confirmation)
+    monkeypatch.setattr(tool, 'process_alive', lambda pid: False)
+    result = tool.unlock_port('COM5', confirmation)
+    assert not guard.path.exists() and Path(result['archive']).exists()
+    assert not result['hardwareReconciled']
+
+
+def test_agent_status_and_capabilities_are_valid_json(tmp_path, capsys):
+    assert tool.main(['capabilities', '--json']) == 0
+    assert json.loads(capsys.readouterr().out)['jsonNeverPrompts']
+    kit, chip, session, options, token = agent_fixture(tmp_path)
+    tool.run_write('stage', kit, 'COM5', token('stage'), **options)
+    assert tool.main(['--session', str(session), 'status', '--json']) == 0
+    state = json.loads(capsys.readouterr().out)
+    assert state['phase'] == 'STAGED' and not state['physicalIdentityVerified']
+
+
+def test_in_place_mode_cannot_choose_other_slot_or_skip_full_erase(tmp_path):
+    kit, chip, session, options, token = agent_fixture(tmp_path, baseline=True)
+    options['slot'] = 'A'
+    with pytest.raises(RecoveryError) as error:
+        tool.run_write('stage', kit, 'COM5', token('stage'), **options)
+    assert error.value.code == 'SLOT_SELECTION_UNCONFIRMED'
+    options['slot'] = 'B'
+    options['full_slot'] = False
+    with pytest.raises(RecoveryError) as error:
+        tool.run_write('stage', kit, 'COM5', token('stage'), **options)
+    assert error.value.code == 'FULL_SLOT_REQUIRED'
