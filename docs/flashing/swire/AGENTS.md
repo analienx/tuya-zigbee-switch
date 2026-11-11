@@ -41,6 +41,19 @@ qualification, `test-link --phase target --device PROFILE` requires real target
 replies. Echo alone is never proof of SWire readback. The diagnostic neither
 resets nor halts the CPU and probes flash only when its control register reports
 exactly `0x05`. Its small reads do not replace a full backup or advance a session.
+Adapter tests run for five seconds by default; `--duration 10` selects a longer
+stress test and `--debug` shows each chunk or target divider attempt. Interpret
+`statistics` as measured verified echo throughput and chunk turnaround, separate
+from configured baud and firmware speed. Preserve partial metrics and the first
+byte-error details on failure. Live progress goes to stderr in JSON mode, while
+the private receipt retains a bounded structured event history.
+
+`read` automatically downloads and hash-verifies the pinned pvvx reader on first
+use and then uses its shared offline cache. `fetch-reader --json` prepares or
+verifies that cache without opening hardware. An explicit `--reader PATH` must
+match the same hash. A corrupt source or failed download stops before serial
+execution. Loopback/target diagnostics use the built-in limited protocol and do
+not require a pvvx download; no manual pvvx checkout is necessary.
 `--json` never prompts; stdout contains one JSON response and progress goes to
 stderr. Argument failures also return JSON. Human `--help` is ordinary text.
 

@@ -253,9 +253,20 @@ adapter/circuit first; do not attach RX using the TX-only wiring table above.
 python telink_swire_recovery.py read --port COM5 --out C:/private/recovery/before.bin --json
 ```
 
-The command downloads the pinned `TLSR825xComFlasher.py` next to the dump, checks
-its full SHA-256, and invokes only its `rf` command twice at 921600 baud. An offline
-copy can be provided with `--reader PATH`; it must match the same hash. It saves
+The command automatically downloads the required pinned `TLSR825xComFlasher.py`,
+checks its full SHA-256, and caches it under
+`~/.telink-swire/tools/pvvx/<commit>/`. Later reads reuse the verified cache
+without network access. It invokes only `rf`, twice at 921600 baud. An offline
+copy can be provided with `--reader PATH`; it must match the same hash. To prepare
+the cache in advance without opening any port, run
+`python telink_swire_recovery.py fetch-reader --json`. Download size and elapsed
+time, source commit, hash and cache path are reported. A failed or corrupt download
+never opens serial hardware or executes the source. A corrupt existing cache is
+reported rather than silently trusted or replaced. No floating `latest` checkout
+or manual pvvx repository clone is needed. The self-contained loopback and target
+diagnostics do not need this external reader, and remain available offline.
+
+The read command saves
 `before.bin`, `before.bin.second.bin` and `before.bin.json`. Outputs must be outside
 Git checkouts and must not already exist. Full dumps contain network keys: keep
 them private and never upload them as CI artifacts. A bounded diagnostic read is
@@ -570,9 +581,31 @@ Leave the SWS lead disconnected from the target. Keep the resistor/RX junction
 assembled, without a direct TXD-to-RXD jumper that would bypass the resistor:
 
 ```text
-python telink_swire_recovery.py test-link --phase adapter --port COM5 --out C:/private/recovery/adapter-921600.json --json
+python telink_swire_recovery.py test-link --phase adapter --port COM5 --duration 10 --out C:/private/recovery/adapter-921600.json
 python telink_swire_recovery.py test-link --phase adapter --port COM5 --baud 460800 --out C:/private/recovery/adapter-460800.json --json
 ```
+
+The adapter phase sends and checks repeated rotating 512-byte patterns for five
+seconds by default. Use `--duration 10` for a longer stress test (0.1..30 seconds).
+It displays progress every half second, including the configured baud, elapsed
+time, verified bytes, measured verified echo B/s, chunk turnaround in ms and byte
+errors. The final receipt includes min/mean/max chunk turnaround, accepted UART
+bytes, received and matching bytes, mismatch/missing counts, timeout count and
+the first bad byte's offset and expected/received value. A fault stops the test
+immediately and retains the measured partial results. `--debug` prints every
+chunk; it does not change the wire protocol or retry failures.
+
+Configured baud and measured speed are different quantities. The 8N1 UART ceiling
+is baud / 10 bytes per second; the measured figure counts verified echo bytes
+over actual wall time, including USB/driver overhead and chunk turnaround. It
+does not double-count TX and RX, measure resistor voltage, or predict firmware
+flash speed. Zero errors means only the observed test passed at that baud and
+duration. `--baud 460800` and the default 921600 can be compared in separate runs.
+
+Human progress is visible by default. With `--json`, progress goes to stderr and
+stdout remains exactly one JSON result. The private receipt contains statistics
+and up to 200 recent structured events. `selftest` remains the older short
+sanity check; use `test-link --phase adapter` for measured sustained testing.
 
 `ADAPTER_ECHO_OK` checks UART transport and echo through that junction at the
 selected baud. It proves neither a target response nor the electrical suitability
@@ -593,6 +626,11 @@ searches the bounded pvvx SWS divider range, and requires three consistent regis
 readbacks plus repeated CPU-control reads. A bare loopback, truncated response or
 bad framing cannot count as a target reply. `--baud 460800` is available as an
 explicit alternative; not every clock/divider combination supports that rate.
+Live progress names divider attempts, confirmed register replies, the actual
+CPU-control value, each slot-header comparison and final decoded/echo byte totals.
+Use `--debug` to show every divider attempt and its missing/framing response.
+The target byte rate includes discovery and protocol overhead; it is a diagnostic
+measurement, not bulk flash-read performance. `--duration` is adapter-only.
 
 It never requests reset or CPU halt. It changes volatile SWS and read-side SPI
 configuration, with no flash writes. Flash-controller access is allowed only when the CPU control register is exactly

@@ -63,7 +63,17 @@ jobs:
 
       - name: Verify pinned upstream reader provenance
         run: |
-          curl --fail --location -o "$RUNNER_TEMP/reader.py" https://raw.githubusercontent.com/pvvx/TlsrComSwireWriter/042613b1b47a1598856b0ff3e8a133f2918798a5/TLSR825xComFlasher.py
+          python helper_scripts/telink_swire_recovery.py fetch-reader --json > "$RUNNER_TEMP/reader-setup.json"
+          python helper_scripts/telink_swire_recovery.py fetch-reader --json > "$RUNNER_TEMP/reader-cached.json"
+          python - "$RUNNER_TEMP" <<'EOF'
+          import json, pathlib, shutil, sys
+          root = pathlib.Path(sys.argv[1])
+          first = json.loads((root / 'reader-setup.json').read_text())
+          cached = json.loads((root / 'reader-cached.json').read_text())
+          if cached['cacheStatus'] != 'CACHED' or first['reader'] != cached['reader']:
+              sys.exit('Reader setup did not reuse its verified cache')
+          shutil.copyfile(first['reader'], root / 'reader.py')
+          EOF
           echo "2ea1b7c5266821e5d384a263daa7916bb4020fcdfb8f1ec0bed5842dcb94ca18  $RUNNER_TEMP/reader.py" | sha256sum --check
 
       - name: Match diagnostic read frames and sampling against the pinned upstream implementation

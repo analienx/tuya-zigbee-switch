@@ -8,6 +8,7 @@ read, write, boot or electrical qualification is claimed by this record.
 
 | Finding | Repair | Regression coverage |
 | --- | --- | --- |
+| A short PASS gave no sustained reliability or measured speed; external-reader setup was opaque | Timed adapter echo stress with live byte/rate/latency/error metrics; target discovery events; automatic hash-verified reader cache and optional prefetch | Deterministic timing, rotating patterns, mismatch/timeout/short write, JSON stream separation, corrupt/offline download and real hosted download/cache reuse |
 | A CP2102 junction echo could be mistaken for a target reply | Separate adapter/target diagnostics; exact echoes, repeated register responses, halted-only small flash reads; no reset or flash-write commands | Echo-only, missing/partial replies, bad echo, changed CPU state and unstable flash responses |
 | Diagnostic evidence could collide across ports, or one cleanup error could skip FIFO cleanup | Exclusive receipt reservation before serial access; independent best-effort SPI cleanup steps; diagnostics never advance recovery phases | Concurrent output collision, cleanup failure and unchanged active session |
 | B/full-slot JSON plan returned default-A addresses | One selected runtime plan, numeric ranges, preserved ranges and confirmation tokens | JSON plan matches the actual B write bounds |

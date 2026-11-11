@@ -17,6 +17,7 @@ Commands
   wiring     pads, checks and notes for a device (all devices without --device)
   selftest   loopback test of the adapter alone (TXD jumpered to RXD)
   test-link  qualify a CP2102 resistor/RX junction, then actual target replies
+  fetch-reader  download/cache the pinned pvvx reader without accessing hardware
   prepare    make a recovery bundle from a Zigbee OTA file or a finalized image
   plan       check a bundle and show what it writes and what was sent before
   flash      stage, then activate, in one run
@@ -45,6 +46,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -1079,6 +1081,102 @@ def selftest(com, seconds=3.0, chunk=512):
     return echoed == pattern, len(echoed), len(pattern)
 
 
+def benchmark_echo(com, metrics, *, baud, duration=5.0, progress=None, debug=False,
+                   clock=time.monotonic):
+    """Adapter-only sustained echo test. Rates count verified bytes, not baud.
+
+    Stop at the first transport/data fault. Pattern excludes the SWire start
+    symbol 0x80; this is still only for a disconnected target.
+    """
+    progress = progress or (lambda *_args, **_kwargs: None)
+    started = clock()
+    pattern = bytes(value for value in range(256) if value != 0x80) * 4
+    chunk_size = 512
+    latencies = []
+    metrics.update(configuredBaud=baud, theoreticalUartBytesPerSecond=baud / 10,
+                   requestedDurationSeconds=duration, chunkBytes=chunk_size, chunksVerified=0,
+                   uartBytesAccepted=0, receivedBytes=0, verifiedBytes=0, mismatchedBytes=0,
+                   missingBytes=0, timeoutCount=0, firstMismatch=None, stoppedBy=None)
+
+    def snapshot():
+        elapsed = max(0.0, clock() - started)
+        metrics.update(elapsedSeconds=round(elapsed, 6),
+                       verifiedEchoBytesPerSecond=round(metrics['verifiedBytes'] / elapsed, 2) if elapsed else 0,
+                       chunkRoundTripMs={'min': round(min(latencies) * 1000, 3) if latencies else None,
+                                         'mean': round(sum(latencies) / len(latencies) * 1000, 3) if latencies else None,
+                                         'max': round(max(latencies) * 1000, 3) if latencies else None})
+        return metrics
+
+    com.reset_input_buffer()
+    next_update = started
+    progress('echo-start', f'Echo stress test: {baud:,} baud, 8N1, {duration:g} s, {chunk_size}-byte chunks',
+             baud=baud, durationSeconds=duration)
+    try:
+        while clock() - started < duration:
+            offset = metrics['uartBytesAccepted']
+            shift = metrics['chunksVerified'] % 255
+            expected = pattern[shift:shift + chunk_size]
+            chunk_started = clock()
+            written = com.write(expected)
+            metrics['uartBytesAccepted'] += written if isinstance(written, int) and 0 <= written <= chunk_size else 0
+            if written != chunk_size:
+                metrics['stoppedBy'] = 'UART_SHORT_WRITE'
+                raise RecoveryError(f'UART accepted {written!r} of {chunk_size} bytes at offset {offset}',
+                                    code='UART_SHORT_WRITE', retry_safe=False)
+            com.flush()
+            received = bytearray()
+            response_deadline = clock() + 0.5
+            while len(received) < chunk_size and clock() < response_deadline:
+                piece = com.read(chunk_size - len(received))
+                if len(piece) > chunk_size - len(received):
+                    metrics['stoppedBy'] = 'UART_RESPONSE_LENGTH'
+                    raise RecoveryError('adapter returned more bytes than requested', code='UART_RESPONSE_LENGTH')
+                received.extend(piece)
+                metrics['receivedBytes'] += len(piece)
+            latency = clock() - chunk_started
+            latencies.append(latency)
+            errors = [i for i, value in enumerate(received) if value != expected[i]]
+            missing = chunk_size - len(received)
+            metrics['mismatchedBytes'] += len(errors)
+            metrics['missingBytes'] += missing
+            metrics['verifiedBytes'] += len(received) - len(errors)
+            if errors or missing:
+                index = errors[0] if errors else len(received)
+                metrics['firstMismatch'] = {'offset': offset + index, 'expectedHex': f'{expected[index]:02x}',
+                                            'receivedHex': f'{received[index]:02x}' if index < len(received) else None}
+                metrics['timeoutCount'] += int(bool(missing))
+                metrics['stoppedBy'] = 'ADAPTER_ECHO_TIMEOUT' if missing else 'ADAPTER_ECHO_MISMATCH'
+                raise RecoveryError(f'Echo failed at byte {offset + index}: {len(errors)} mismatched, '
+                                    f'{missing} missing; check the resistor/RX junction and baud',
+                                    code=metrics['stoppedBy'], retry_safe=False)
+            metrics['chunksVerified'] += 1
+            now = clock()
+            if debug or now >= next_update:
+                current = snapshot()
+                progress('echo-progress', f'{current["elapsedSeconds"]:.2f} s: '
+                         f'{current["verifiedBytes"]:,} verified bytes, '
+                         f'{current["verifiedEchoBytesPerSecond"]:,.0f} B/s, '
+                         f'chunk {latency * 1000:.2f} ms, 0 errors',
+                         verifiedBytes=current['verifiedBytes'], bytesPerSecond=current['verifiedEchoBytesPerSecond'],
+                         chunkRoundTripMs=round(latency * 1000, 3))
+                next_update = now + 0.5
+        if not metrics['chunksVerified']:
+            raise RecoveryError('no echo chunks were verified', code='ADAPTER_NO_DATA')
+        metrics['stoppedBy'] = 'DURATION_COMPLETE'
+    except BaseException as error:
+        if metrics['stoppedBy'] is None:
+            metrics['stoppedBy'] = getattr(error, 'code', 'ADAPTER_INTERRUPTED' if isinstance(error, KeyboardInterrupt)
+                                           else 'ADAPTER_IO_FAILED')
+        raise
+    finally:
+        snapshot()
+        progress('echo-summary', f'Echo result: {metrics["verifiedBytes"]:,}/{metrics["uartBytesAccepted"]:,} bytes verified '
+                 f'in {metrics["elapsedSeconds"]:.2f} s, {metrics["verifiedEchoBytesPerSecond"]:,.0f} B/s; '
+                 f'{metrics["mismatchedBytes"]} mismatched, {metrics["missingBytes"]} missing, '
+                 f'{metrics["timeoutCount"]} timeouts; chunk mean '
+                 f'{metrics["chunkRoundTripMs"]["mean"]} ms', **metrics)
+
+
 def diagnostic_read_header(address):
     """pvvx read-by-address header, without data start or stop words."""
     header = bytearray(swire_frame(address, b'\0')[:50])
@@ -1108,6 +1206,8 @@ class SwireDiagnostic:
         self.response_timeout = response_timeout
         self.deadline = clock() + 25
         self.flash_access_safe = False
+        self.progress = lambda *_args, **_kwargs: None
+        self.debug = False
         self.stats = {'uartBytesSent': 0, 'echoBytesVerified': 0, 'targetBytesDecoded': 0, 'dividerAttempts': 0}
 
     def read_exact(self, size):
@@ -1177,13 +1277,21 @@ class SwireDiagnostic:
     def find_divider(self):
         low = round(16_000_000 * 2 / self.baud)
         high = min(127, round(48_000_000 * 2 / self.baud))
+        self.progress('divider-scan', f'Scanning SWire divider {low}..{high}; UART echo alone does not count',
+                      minimum=low, maximum=high)
         for divider in range(low, high + 1):
             self.stats['dividerAttempts'] += 1
+            if self.debug or self.stats['dividerAttempts'] == 1 or self.stats['dividerAttempts'] % 8 == 0:
+                self.progress('divider-attempt', f'Trying divider {divider} ({self.stats["dividerAttempts"]}/{high - low + 1})',
+                              divider=divider, attempt=self.stats['dividerAttempts'])
             self.write_register(0xB2, bytes([divider]))
             try:
                 result = self.read_register(0xB2)
             except RecoveryError as error:
                 if error.code in ('SWIRE_RESPONSE_TIMEOUT', 'SWIRE_FRAMING'):
+                    if self.debug:
+                        self.progress('divider-no-reply', f'Divider {divider}: {error.code}',
+                                      divider=divider, errorCode=error.code)
                     continue
                 raise
             if result == bytes([divider]):
@@ -1192,6 +1300,7 @@ class SwireDiagnostic:
                 for _ in range(2):
                     if self.read_register(0xB2) != result:
                         raise RecoveryError('unstable target register readback', code='UNSTABLE_SWIRE_READBACK', retry_safe=False)
+                self.progress('divider-found', f'Divider {divider}: three matching target register replies', divider=divider)
                 return divider
         raise RecoveryError('adapter echo is present but no consistent target SWire response was found',
                             code='NO_SWIRE_TARGET_RESPONSE', retry_safe=False)
@@ -1225,24 +1334,38 @@ def connection_spec(kind):
 
 
 def test_link(port, output, *, phase, device=None, baud=921600, require_flash_read=False,
-              opener=None, probe_factory=SwireDiagnostic):
+              duration=None, debug=False, out=None, opener=None, probe_factory=SwireDiagnostic,
+              benchmark=None):
     if phase not in ('adapter', 'target') or baud not in (460800, 921600):
         raise RecoveryError('invalid link test phase or baud', code='INVALID_ARGUMENT')
     if phase == 'target' and device not in DEVICES:
         raise RecoveryError('target testing needs an explicit supported --device profile', code='INVALID_ARGUMENT')
     if require_flash_read and phase != 'target':
         raise RecoveryError('--require-flash-read is only valid for the target phase', code='INVALID_ARGUMENT')
+    if duration is not None and (phase != 'adapter' or not math.isfinite(duration) or not 0.1 <= duration <= 30):
+        raise RecoveryError('--duration must be 0.1..30 seconds and is adapter-only', code='INVALID_ARGUMENT')
     if not re.fullmatch(r'(?:COM\d+|/dev/[A-Za-z0-9_./-]+)', port or '', re.IGNORECASE):
         raise RecoveryError('invalid serial port', code='INVALID_ARGUMENT')
     output = private_output(output)
     if output.exists():
         raise RecoveryError('diagnostic receipt already exists; choose a new path', code='EVIDENCE_EXISTS')
+    started = time.monotonic()
     result = {'status': 'STARTED', 'phase': phase, 'port': port, 'baud': baud, 'deviceProfile': device,
               'connection': connection_spec('cp2102-single-sws'), 'utc': utc_now().isoformat(),
               'flashWriteAttempted': False, 'cpuResetRequested': False, 'cpuHaltRequested': False,
               'volatileConfigurationMayHaveChanged': phase == 'target', 'flashWriteTested': False,
               'targetReplyVerified': False, 'fullBackupVerified': False, 'bootVerified': False,
-              'receipt': str(output), 'electricalMeasurementsVerified': False}
+              'receipt': str(output), 'electricalMeasurementsVerified': False, 'events': []}
+
+    def progress(event, message, **details):
+        elapsed = round(time.monotonic() - started, 6)
+        result['events'].append({'event': event, 'elapsedSeconds': elapsed, 'message': message, 'details': details})
+        # Bound private debug receipts, including per-chunk --debug output.
+        if len(result['events']) > 200:
+            result['events'].pop(1)
+        if out:
+            out(f'[{elapsed:6.2f}s] {message}')
+
     with PortGuard(port):
         authority = authority_path(port)
         if phase == 'adapter' and authority.exists() and read_json(authority)['phase'] != 'CLOSED':
@@ -1259,22 +1382,27 @@ def test_link(port, output, *, phase, device=None, baud=921600, require_flash_re
             raise RecoveryError('diagnostic receipt already exists; choose a new path', code='EVIDENCE_EXISTS') from error
         probe = None
         try:
+            progress('port-open', f'Opening {port}: {baud:,} baud, 8N1; phase={phase}', port=port, baud=baud)
             with (opener or (lambda p: open_port(p, timeout=0.02, baud=baud)))(port) as com:
                 if phase == 'adapter':
-                    passed, received, sent = selftest(com)
-                    result.update(receivedBytes=received, sentBytes=sent)
-                    if not passed:
-                        raise RecoveryError('adapter junction echo test failed; target must remain disconnected', code='ADAPTER_ECHO_FAILED')
+                    metrics = result.setdefault('statistics', {})
+                    (benchmark or benchmark_echo)(com, metrics, baud=baud, duration=duration if duration is not None else 5.0,
+                                                  progress=progress, debug=debug)
+                    result.update(receivedBytes=metrics['receivedBytes'], sentBytes=metrics['uartBytesAccepted'])
                     result.update(status='ADAPTER_ECHO_OK', proofLevel='adapter-echo-only',
                                   nextActions=['measure TTL/supply and qualify contacts', 'authorized target-phase test'])
                 else:
                     probe = probe_factory(com, baud)
+                    probe.progress, probe.debug = progress, debug
                     result['divider'] = probe.find_divider()
                     result['targetReplyVerified'] = True
                     controls = [probe.read_register(0x602)[0] for _ in range(2)]
                     if controls[0] != controls[1]:
                         raise RecoveryError('CPU control reads are unstable', code='UNSTABLE_SWIRE_READBACK')
                     stopped = controls[0] == 0x05
+                    progress('cpu-control', f'CPU control: 0x{controls[0]:02x} twice; '
+                             + ('already halted' if stopped else 'not known halted; flash probe skipped'),
+                             value=controls[0], halted=stopped)
                     result.update(cpuControl=controls[0], cpuObservedHalted=stopped,
                                   status='SWIRE_RESPONSE_OK', proofLevel='target-register-readback')
                     if not stopped:
@@ -1286,11 +1414,14 @@ def test_link(port, output, *, phase, device=None, baud=921600, require_flash_re
                         probe.flash_access_safe = True
                         headers = []
                         for name, address in SLOTS.items():
+                            progress('header-read', f'Slot {name} at 0x{address:05x}: reading 32 bytes twice', slot=name)
                             first, second = probe.flash_header(address), probe.flash_header(address)
                             if first != second:
                                 raise RecoveryError('repeated application-header reads differ', code='UNSTABLE_FLASH_READ')
                             headers.append({'slot': name, 'bytes': 32, 'sha256': sha256(first),
                                             'markerHex': first[8:12].hex(), 'erased': first == b'\xff' * 32})
+                            progress('header-matched', f'Slot {name}: both reads match, marker={first[8:12].hex()}, '
+                                     f'SHA-256={sha256(first)[:16]}...', slot=name, sha256=sha256(first))
                         result.update(status='FLASH_READ_PROBE_OK', proofLevel='registers-and-small-flash-reads',
                                       flashReadProbe='MATCHED_SLOT_HEADERS', headers=headers,
                                       nextActions=['full matching double read before verified recovery'])
@@ -1298,13 +1429,22 @@ def test_link(port, output, *, phase, device=None, baud=921600, require_flash_re
             return result
         except BaseException as error:
             result.update(status='LINK_TEST_FAILED', errorCode=getattr(error, 'code', 'LINK_TEST_IO_FAILED'), error=str(error))
+            progress('failure', f'{result["errorCode"]}: {error}', errorCode=result['errorCode'])
             raise RecoveryError(str(error), code=result['errorCode'], retry_safe=False,
                                 side_effects=phase == 'target', details={'receipt': str(output),
-                                'flashWriteAttempted': False, 'targetReplyVerified': result['targetReplyVerified']},
+                                'flashWriteAttempted': False, 'targetReplyVerified': result['targetReplyVerified'],
+                                'statistics': probe.stats if probe is not None else result.get('statistics', {})},
                                 exit_code=130 if isinstance(error, KeyboardInterrupt) else 2) from error
         finally:
+            result['elapsedSeconds'] = round(time.monotonic() - started, 6)
             if probe is not None:
+                probe.stats['elapsedSeconds'] = result['elapsedSeconds']
+                probe.stats['targetBytesPerSecond'] = round(probe.stats['targetBytesDecoded'] / max(result['elapsedSeconds'], 1e-9), 2)
                 result['statistics'] = probe.stats
+                progress('target-summary', f'{probe.stats["targetBytesDecoded"]} target bytes decoded; '
+                         f'{probe.stats["echoBytesVerified"]:,} echo bytes checked; '
+                         f'{probe.stats["dividerAttempts"]} divider attempts; '
+                         f'{result["elapsedSeconds"]:.2f} s total (diagnostic rate, not firmware speed)', **probe.stats)
             atomic_json(output, result)
 
 
@@ -1496,6 +1636,63 @@ READER_URL = ('https://raw.githubusercontent.com/pvvx/TlsrComSwireWriter/'
 FLASH_BYTES = 0x80000
 
 
+def ensure_reader(reader=None, *, fetch=download, out=None):
+    """Fetch only the required pinned pvvx source; verify before every use.
+
+    A verified shared cache allows subsequent reads to work offline. Explicit
+    reader files are checked in place and are never replaced or executed here.
+    """
+    explicit = reader is not None
+    path = Path(reader).resolve() if explicit else private_output(
+        STATE_ROOT / 'tools' / 'pvvx' / READER_COMMIT / 'TLSR825xComFlasher.py')
+    report = out or (lambda _: None)
+    cache_status = 'LOCAL' if explicit else 'CACHED'
+
+    def verified():
+        if path.stat().st_size > 256000 or sha256(path.read_bytes()) != READER_SHA256:
+            raise RecoveryError('reader must match the pinned pvvx source SHA-256; no serial access attempted',
+                                code='READER_HASH_MISMATCH', details={'reader': str(path), 'sha256': READER_SHA256})
+
+    if path.exists():
+        verified()
+        report(f'pvvx reader: verified {cache_status.lower()} source {READER_COMMIT[:12]} ({path})')
+    elif explicit:
+        raise RecoveryError(f'explicit reader does not exist: {path}', code='READER_NOT_FOUND')
+    else:
+        report(f'Downloading pinned pvvx reader {READER_COMMIT[:12]}; verifying SHA-256 before caching')
+        started = time.monotonic()
+        try:
+            data = fetch(READER_URL, 256000)
+        except Exception as error:
+            raise RecoveryError(f'pvvx reader download failed: {error}; retry online or supply --reader PATH',
+                                code='READER_DOWNLOAD_FAILED', retry_safe=True,
+                                details={'url': READER_URL, 'reader': str(path)}) from error
+        if len(data) > 256000 or sha256(data) != READER_SHA256:
+            raise RecoveryError('downloaded reader SHA-256 mismatch; nothing cached or executed', code='READER_HASH_MISMATCH')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
+        try:
+            with temporary.open('xb') as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+            # All normal concurrent publishers have verified the exact same
+            # bytes. Never execute a partial download, even after interruption.
+            if path.exists():
+                verified()
+            else:
+                os.replace(temporary, path)
+                cache_status = 'DOWNLOADED'
+        finally:
+            temporary.unlink(missing_ok=True)
+        verified()
+        report(f'pvvx reader ready: {len(data):,} bytes, SHA-256 verified, '
+               f'{time.monotonic() - started:.2f} s; cache={path}')
+    return {'status': 'READER_READY', 'reader': str(path), 'readerCommit': READER_COMMIT,
+            'readerSha256': READER_SHA256, 'readerUrl': READER_URL, 'cacheStatus': cache_status,
+            'bytes': path.stat().st_size, 'hardwareAccessed': False}
+
+
 def private_output(path):
     path = Path(path).resolve()
     if any((parent / '.git').exists() for parent in (path.parent, *path.parents)):
@@ -1513,7 +1710,7 @@ def read_flash(port, output, **kwargs):
 
 
 def _read_flash(port, output, *, address=0, size=FLASH_BYTES, reader=None,
-               halt=False, fetch=download, runner=subprocess.run):
+               halt=False, fetch=download, runner=subprocess.run, out=None):
     """Two independent rf invocations; never expose upstream erase/write commands.
 
     Requires the pvvx bidirectional circuit, NOT the TX-only hookup. Reading
@@ -1533,19 +1730,10 @@ def _read_flash(port, output, *, address=0, size=FLASH_BYTES, reader=None,
     if any(p.exists() for p in (output, second, receipt, *logs)):
         raise RecoveryError('read output or receipt already exists; choose a new output')
     output.parent.mkdir(parents=True, exist_ok=True)
-    if reader is None:
-        reader = output.parent / ('pvvx-reader-' + READER_COMMIT + '.py')
-        if not reader.exists():
-            data = fetch(READER_URL, 256000)
-            if sha256(data) != READER_SHA256:
-                raise RecoveryError('downloaded reader SHA-256 mismatch')
-            with reader.open('xb') as stream:
-                stream.write(data)
-    reader = Path(reader).resolve()
-    if sha256(reader.read_bytes()) != READER_SHA256:
-        raise RecoveryError('reader must match the pinned pvvx source SHA-256')
+    reader_setup = ensure_reader(reader, fetch=fetch, out=out)
+    reader = Path(reader_setup['reader'])
     result = {'status': 'STARTED', 'address': address, 'bytes': size,
-              'port': port, 'readerCommit': READER_COMMIT, 'halt': halt,
+              'port': port, 'readerCommit': READER_COMMIT, 'readerSetup': reader_setup, 'halt': halt,
               'utc': utc_now().isoformat(), 'reads': [], 'readerRuns': [], 'receipt': str(receipt)}
     atomic_json(receipt, result)
     try:
@@ -1833,7 +2021,11 @@ def build_parser():
                       help='adapter: target disconnected; target: real SWire responses, no reset/halt/flash write')
     link.add_argument('--device', choices=sorted(DEVICES), help='required for target phase')
     link.add_argument('--baud', type=int, choices=[460800, 921600], default=921600)
+    link.add_argument('--duration', type=float, help='adapter-only stress duration, 0.1..30 seconds (default 5)')
+    link.add_argument('--debug', action='store_true', help='show every echo chunk or target divider attempt')
     link.add_argument('--require-flash-read', action='store_true', help='fail if CPU is not already halted; never halt it automatically')
+    setup_reader = commands.add_parser('fetch-reader', parents=[common], help='prefetch/verify the pinned pvvx reader; no serial access')
+    setup_reader.add_argument('--reader', type=Path, help='verify an existing offline reader instead of downloading')
     commands.add_parser('capabilities', parents=[common], help='machine-readable interface and safety contract')
     status = commands.add_parser('status', parents=[common], help='read session or port state without opening hardware')
     status.add_argument('--port')
@@ -1943,13 +2135,18 @@ def main(argv=None):
         action = args.action
         interactive = not (as_json or getattr(args, 'non_interactive', False)) and sys.stdin.isatty()
         if action == 'capabilities':
-            result = {'status': 'OK', 'commands': ['prepare', 'plan', 'ports', 'wiring', 'selftest', 'test-link',
+            result = {'status': 'OK', 'commands': ['prepare', 'plan', 'ports', 'wiring', 'selftest', 'test-link', 'fetch-reader',
                        'stage', 'read', 'inspect', 'verify', 'activate', 'flash', 'status', 'reconcile', 'close', 'unlock'],
                       'jsonNeverPrompts': True, 'idempotentWrites': 'same session + operation ID + exact request',
                       'readOptional': True, 'baselineRequiresVerification': True,
                       'diagnostics': {'adapterEcho': 'not proof of target connection',
+                                      'adapterStressSeconds': {'default': 5, 'minimum': 0.1, 'maximum': 30},
+                                      'liveProgress': 'human progress on stderr in JSON mode; bounded events in receipt',
+                                      'speed': 'verified echo bytes/s and chunk turnaround; not flash throughput',
                                       'targetProbe': 'register readback; small flash reads only if CPU is already halted',
                                       'connection': connection_spec('cp2102-single-sws')},
+                      'pvvxReader': {'autoDownload': 'on first read or fetch-reader', 'commit': READER_COMMIT,
+                                     'sha256': READER_SHA256, 'offlineCache': True},
                       'physicalTargetIdentification': 'operator-confirmed; TX-only cannot identify the chip',
                       'successfulWriteProof': 'SENT_UNVERIFIED', 'bootVerified': False,
                       'exitCodes': {'0': 'completed or safely replayed result; check status for proof level',
@@ -1976,8 +2173,10 @@ def main(argv=None):
             result = unlock_port(args.port, args.confirm)
         elif action == 'test-link':
             result = test_link(args.port, args.out, phase=args.phase, device=args.device, baud=args.baud,
-                               require_flash_read=args.require_flash_read)
+                               require_flash_read=args.require_flash_read, duration=args.duration, debug=args.debug, out=out)
             out(f'Link test: {result["status"]}; proof={result["proofLevel"]}; receipt={args.out}')
+        elif action == 'fetch-reader':
+            result = ensure_reader(args.reader, out=out)
         elif action == 'inspect':
             result = inspect_slots(args.dump, args.reference, replace=args.replace, expect_other=args.expect_other)
             for slot in result['slots']:
@@ -1985,7 +2184,7 @@ def main(argv=None):
             out(f'Replacement slot: {result["replaceSlot"] or "not established"}')
         elif action == 'read':
             result = read_flash(args.port, args.out, address=args.address, size=args.size,
-                                reader=args.reader, halt=args.halt)
+                                reader=args.reader, halt=args.halt, out=out)
             out(f'Two reads match; private backup: {args.out}')
         elif action in ('verify', 'reconcile'):
             if action == 'reconcile' and not args.session:

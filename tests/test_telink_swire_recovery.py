@@ -1257,7 +1257,7 @@ def test_resistor_junction_echo_does_not_qualify_target(tmp_path):
         def __exit__(self, *_):
             pass
     echo = ContextLoopback()
-    result = tool.test_link('COM5', tmp_path / 'adapter.json', phase='adapter', opener=lambda _: echo)
+    result = tool.test_link('COM5', tmp_path / 'adapter.json', phase='adapter', duration=0.1, opener=lambda _: echo)
     assert result['status'] == 'ADAPTER_ECHO_OK' and not result['targetReplyVerified']
     assert not result['fullBackupVerified'] and not result['electricalMeasurementsVerified']
     assert result['connection']['targetContacts'] == ['SWS', '3V3', 'GND']
@@ -1415,3 +1415,154 @@ def test_target_diagnostic_never_advances_active_recovery_session(tmp_path):
     assert result['status'] == 'FLASH_READ_PROBE_OK'
     assert session.read_bytes() == before_session
     assert tool.authority_path('COM5').read_bytes() == before_authority
+
+
+class EchoTimer:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+
+class TimedEcho(Loopback):
+    def __init__(self, timer, *, corrupt=False, lose=0, short_write=False):
+        super().__init__(lose=lose)
+        self.timer, self.corrupt, self.short_write = timer, corrupt, short_write
+        self.transmitted = bytearray()
+
+    def write(self, data):
+        self.timer.now += 0.01
+        self.transmitted.extend(data)
+        count = super().write(data)
+        if self.corrupt:
+            self.buffer = bytes([self.buffer[0] ^ 1]) + self.buffer[1:]
+        return count - 1 if self.short_write else count
+
+    def read(self, size):
+        self.timer.now += 0.01
+        return super().read(size)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        pass
+
+
+def test_echo_benchmark_measures_verified_rate_and_chunk_latency():
+    timer = EchoTimer()
+    port = TimedEcho(timer)
+    metrics, events = {}, []
+    tool.benchmark_echo(port, metrics, baud=921600, duration=6,
+                        clock=timer, progress=lambda event, *_args, **_kwargs: events.append(event))
+    assert metrics['chunksVerified'] >= 255  # exercise the complete rotating pattern
+    assert metrics['verifiedBytes'] == metrics['chunksVerified'] * 512 == len(port.transmitted)
+    assert metrics['verifiedEchoBytesPerSecond'] == pytest.approx(25600)
+    assert metrics['chunkRoundTripMs'] == {'min': 20, 'mean': 20, 'max': 20}
+    assert metrics['theoreticalUartBytesPerSecond'] == 92160
+    assert metrics['missingBytes'] == metrics['mismatchedBytes'] == metrics['timeoutCount'] == 0
+    assert metrics['stoppedBy'] == 'DURATION_COMPLETE' and 0x80 not in port.transmitted
+    assert events[0] == 'echo-start' and events[-1] == 'echo-summary' and events.count('echo-progress') >= 10
+
+
+@pytest.mark.parametrize('options,code', [({'corrupt': True}, 'ADAPTER_ECHO_MISMATCH'),
+                                         ({'lose': 1}, 'ADAPTER_ECHO_TIMEOUT'),
+                                         ({'short_write': True}, 'UART_SHORT_WRITE')])
+def test_echo_benchmark_retains_failure_metrics_and_stops(options, code):
+    timer, metrics, events = EchoTimer(), {}, []
+    port = TimedEcho(timer, **options)
+    with pytest.raises(RecoveryError) as error:
+        tool.benchmark_echo(port, metrics, baud=460800, duration=5, clock=timer,
+                            progress=lambda event, *_args, **_kwargs: events.append(event))
+    assert error.value.code == metrics['stoppedBy'] == code
+    assert metrics['chunksVerified'] == 0 and len(port.transmitted) == 512
+    assert metrics['elapsedSeconds'] > 0 and events[-1] == 'echo-summary'
+    if code != 'UART_SHORT_WRITE':
+        assert metrics['firstMismatch']['offset'] == 0
+        assert metrics['mismatchedBytes'] or metrics['missingBytes']
+
+
+def test_json_cli_shows_live_debug_on_stderr_and_single_result_on_stdout(tmp_path, monkeypatch, capsys):
+    timer = EchoTimer()
+    port = TimedEcho(timer)
+    monkeypatch.setattr(tool, 'open_port', lambda *_args, **_kwargs: port)
+    original = tool.benchmark_echo
+    monkeypatch.setattr(tool, 'benchmark_echo', lambda *args, **kwargs: original(*args, **kwargs, clock=timer))
+    output = tmp_path / 'live-debug.json'
+    assert tool.main(['test-link', '--phase', 'adapter', '--port', 'COM5', '--duration', '0.1',
+                      '--debug', '--out', str(output), '--json']) == 0
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    assert result['status'] == 'ADAPTER_ECHO_OK' and result['statistics']['verifiedBytes'] > 0
+    assert 'B/s' in captured.err and 'chunk' in captured.err and '0 errors' in captured.err
+    assert tool.read_json(output)['statistics'] == result['statistics']
+    assert any(event['event'] == 'echo-progress' for event in result['events'])
+
+
+@pytest.mark.parametrize('duration', ['nan', 'inf', '-1', '0', '31'])
+def test_invalid_stress_duration_is_rejected_before_port_access(tmp_path, monkeypatch, capsys, duration):
+    monkeypatch.setattr(tool, 'open_port', lambda *_args, **_kwargs: pytest.fail('must not open'))
+    assert tool.main(['test-link', '--phase', 'adapter', '--port', 'COM5', '--duration', duration,
+                      '--out', str(tmp_path / 'invalid.json'), '--json']) == 2
+    assert json.loads(capsys.readouterr().out)['errorCode'] == 'INVALID_ARGUMENT'
+    assert not (tmp_path / 'invalid.json').exists()
+
+
+def test_target_progress_reports_scan_cpu_headers_and_summary(tmp_path):
+    messages = []
+    result = tool.test_link('COM5', tmp_path / 'target-debug.json', phase='target', device='bseed-ts011f',
+                            opener=lambda _: DiagnosticPort(), probe_factory=quick_probe,
+                            out=messages.append, debug=True)
+    assert any('three matching' in line for line in messages)
+    assert any('CPU control: 0x05' in line for line in messages)
+    assert sum('both reads match' in line for line in messages) == 2
+    assert result['statistics']['targetBytesPerSecond'] > 0 and result['elapsedSeconds'] > 0
+    assert len(result['events']) <= 200
+
+
+def test_reader_auto_download_is_verified_and_cache_works_offline(tmp_path, monkeypatch):
+    data, calls, messages = b'pinned reader fixture', [], []
+    monkeypatch.setattr(tool, 'READER_SHA256', tool.sha256(data))
+    def fetch(url, limit):
+        calls.append((url, limit))
+        return data
+    first = tool.ensure_reader(fetch=fetch, out=messages.append)
+    second = tool.ensure_reader(fetch=lambda *_: pytest.fail('cache must work offline'))
+    assert first['cacheStatus'] == 'DOWNLOADED' and second['cacheStatus'] == 'CACHED'
+    assert len(calls) == 1 and calls[0] == (tool.READER_URL, 256000)
+    assert Path(first['reader']).read_bytes() == data and not first['hardwareAccessed']
+    assert any('SHA-256 verified' in message for message in messages)
+    Path(first['reader']).write_bytes(b'corrupt cache')
+    with pytest.raises(RecoveryError) as error:
+        tool.ensure_reader(fetch=lambda *_: pytest.fail('must not silently replace corrupt cache'))
+    assert error.value.code == 'READER_HASH_MISMATCH'
+
+
+@pytest.mark.parametrize('fault', ['wrong-hash', 'oversize', 'offline'])
+def test_reader_download_failure_never_caches_unverified_source(monkeypatch, fault):
+    def fetch(*_):
+        if fault == 'offline':
+            raise OSError('network unavailable')
+        return b'x' * (256001 if fault == 'oversize' else 10)
+    with pytest.raises(RecoveryError) as error:
+        tool.ensure_reader(fetch=fetch)
+    assert error.value.code == ('READER_DOWNLOAD_FAILED' if fault == 'offline' else 'READER_HASH_MISMATCH')
+    assert not list(tool.STATE_ROOT.rglob('*.py')) and not list(tool.STATE_ROOT.rglob('*.tmp'))
+
+
+def test_read_automatically_fetches_reader_before_first_serial_process(tmp_path, monkeypatch):
+    import subprocess
+    source, events = b'verified reader fixture', []
+    monkeypatch.setattr(tool, 'READER_SHA256', tool.sha256(source))
+    def fetch(*_):
+        events.append('download')
+        return source
+    def run(command, **_kwargs):
+        events.append('read')
+        assert Path(command[1]).read_bytes() == source and 'rf' in command
+        Path(command[-1]).write_bytes(b'a' * 32)
+        return subprocess.CompletedProcess(command, 0)
+    result = tool.read_flash('COM5', tmp_path / 'automatic.bin', size=32, fetch=fetch, runner=run)
+    assert result['status'] == 'READ_MATCHED' and events == ['download', 'read', 'read']
+    assert result['readerSetup']['cacheStatus'] == 'DOWNLOADED'
