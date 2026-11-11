@@ -1209,8 +1209,10 @@ class SwireDiagnostic:
             self.write_register(0x0D, b'\x0a')
             return self.read_register(0x0C, 32)
         finally:
-            self.write_register(0x0D, b'\x01')
-            self.write_register(0xB3, b'\0')
+            try:
+                self.write_register(0x0D, b'\x01')
+            finally:
+                self.write_register(0xB3, b'\0')
 
 
 def connection_spec(kind):
@@ -1245,7 +1247,16 @@ def test_link(port, output, *, phase, device=None, baud=921600, require_flash_re
         authority = authority_path(port)
         if phase == 'adapter' and authority.exists() and read_json(authority)['phase'] != 'CLOSED':
             raise RecoveryError('adapter-only echo testing is forbidden during an active target session', code='INVALID_PHASE')
-        atomic_json(output, result)
+        # Port locks do not serialize a second port choosing the same output.
+        # Reserve the receipt exclusively before touching either target.
+        output.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with output.open('x', encoding='utf-8') as stream:
+                json.dump(result, stream, indent=2)
+                stream.flush()
+                os.fsync(stream.fileno())
+        except FileExistsError as error:
+            raise RecoveryError('diagnostic receipt already exists; choose a new path', code='EVIDENCE_EXISTS') from error
         probe = None
         try:
             with (opener or (lambda p: open_port(p, timeout=0.02, baud=baud)))(port) as com:

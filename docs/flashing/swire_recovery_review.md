@@ -9,6 +9,7 @@ read, write, boot or electrical qualification is claimed by this record.
 | Finding | Repair | Regression coverage |
 | --- | --- | --- |
 | A CP2102 junction echo could be mistaken for a target reply | Separate adapter/target diagnostics; exact echoes, repeated register responses, halted-only small flash reads; no reset or flash-write commands | Echo-only, missing/partial replies, bad echo, changed CPU state and unstable flash responses |
+| Diagnostic evidence could collide across ports, or one cleanup error could skip FIFO cleanup | Exclusive receipt reservation before serial access; independent best-effort SPI cleanup steps; diagnostics never advance recovery phases | Concurrent output collision, cleanup failure and unchanged active session |
 | B/full-slot JSON plan returned default-A addresses | One selected runtime plan, numeric ranges, preserved ranges and confirmation tokens | JSON plan matches the actual B write bounds |
 | Separate activation reset the CPU before HALT | No-reset attach reasserts HALT and configures SWire | Separate stage/activate reset count; held and unheld activation |
 | Stage receipt could authorize repeated or interrupted activation | Durable session phases; activation consumes stage permission | Completed replay opens no hardware; new IDs cannot bypass uncertain phases |

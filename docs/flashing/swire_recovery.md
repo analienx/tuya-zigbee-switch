@@ -8,6 +8,10 @@ update. It rewrites one selected image slot with a USB-UART adapter (A by defaul
 and saved energy outside its write range. Rejoining and retained-state compatibility
 still need fresh device evidence.
 
+For the CP2102 adapter-side TXD/resistor/RXD junction and one SWS hook, start
+with [the three-contact circuit and diagnostic](#test-the-cp2102-circuit-with-one-sws-contact).
+The basic wiring steps below describe TX-only operation.
+
 The tool is [`helper_scripts/telink_swire_recovery.py`](../../helper_scripts/telink_swire_recovery.py).
 It is one file that needs Python 3.8 or newer and `pyserial`.
 
@@ -19,8 +23,8 @@ It is one file that needs Python 3.8 or newer and `pyserial`.
 ## What you need
 
 - A USB-UART adapter that can put out 3.3 V TTL on TXD. CP2102, CH340 and
-  FT232 boards all work this way. The method needs only TXD, so the
-  adapter's RXD and RTS are not used.
+  FT232 boards can provide TX-only output. That route uses only TXD;
+  bidirectional reading needs the qualified resistor/RX circuit described below.
 - Three leads with test hooks, or soldered wires.
 - A Windows, Linux or macOS PC with Python and `python -m pip install pyserial`.
 - A multimeter for the continuity and voltage checks.
@@ -108,7 +112,8 @@ with everything unpowered:
   `GND | 3.3V | SWS`.
 
 Clips must hold by themselves and must not touch a neighbouring pad. The
-chip does not answer, so a clip that slips during the write goes unnoticed.
+writer does not receive acknowledgements, so a clip that slips during the write
+goes unnoticed even when RX remains at a qualified resistor junction.
 
 ## 4. Flash
 
@@ -589,8 +594,8 @@ readbacks plus repeated CPU-control reads. A bare loopback, truncated response o
 bad framing cannot count as a target reply. `--baud 460800` is available as an
 explicit alternative; not every clock/divider combination supports that rate.
 
-It never requests reset or CPU halt. It writes only volatile SWS configuration;
-flash-controller access is allowed only when the CPU control register is exactly
+It never requests reset or CPU halt. It changes volatile SWS and read-side SPI
+configuration, with no flash writes. Flash-controller access is allowed only when the CPU control register is exactly
 the expected halted value `0x05`. That value is checked again before each probe
 read. The only flash command the diagnostic allows is `0x03` READ, at the two
 application-slot starts. It reads 32 bytes from each slot twice and compares them.

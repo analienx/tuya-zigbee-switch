@@ -1364,3 +1364,54 @@ def test_serial_control_lines_are_configured_before_open(monkeypatch):
     monkeypatch.setitem(sys.modules, 'serial', types.SimpleNamespace(Serial=DeferredPort))
     tool.open_port('COM5', baud=921600)
     assert observed == {'port': 'COM5', 'rts': False, 'dtr': False, 'baud': 921600}
+
+
+def test_receipt_collision_after_initial_check_never_opens_port(tmp_path, monkeypatch):
+    output = tmp_path / 'contended.json'
+    class ContendedGuard:
+        def __init__(self, _):
+            pass
+
+        def __enter__(self):
+            output.write_text('other port evidence', encoding='utf-8')
+
+        def __exit__(self, *_):
+            pass
+    monkeypatch.setattr(tool, 'PortGuard', ContendedGuard)
+    with pytest.raises(RecoveryError) as error:
+        tool.test_link('COM5', output, phase='target', device='bseed-ts011f',
+                       opener=lambda _: pytest.fail('must not open'))
+    assert error.value.code == 'EVIDENCE_EXISTS'
+    assert output.read_text(encoding='utf-8') == 'other port evidence'
+
+
+def test_flash_probe_attempts_fifo_cleanup_after_chip_select_cleanup_error():
+    port = DiagnosticPort()
+    probe = quick_probe(port, 921600)
+    probe.find_divider()
+    probe.flash_access_safe = True
+    original = probe.write_register
+    attempted = []
+    def failing_cleanup(address, data):
+        attempted.append((address, data))
+        if address == 0x0D and data == b'\x01':
+            raise RecoveryError('simulated cleanup echo failure', code='UART_ECHO_MISMATCH')
+        return original(address, data)
+    probe.write_register = failing_cleanup
+    before = bytes(port.flash)
+    with pytest.raises(RecoveryError):
+        probe.flash_header(0)
+    assert attempted[-2:] == [(0x0D, b'\x01'), (0xB3, b'\0')]
+    assert not port.fifo and bytes(port.flash) == before
+
+
+def test_target_diagnostic_never_advances_active_recovery_session(tmp_path):
+    kit, _, session, options, token = agent_fixture(tmp_path)
+    tool.run_write('stage', kit, 'COM5', token('stage'), **options)
+    before_session = session.read_bytes()
+    before_authority = tool.authority_path('COM5').read_bytes()
+    result = tool.test_link('COM5', tmp_path / 'target-check.json', phase='target', device='bseed-ts011f',
+                            opener=lambda _: DiagnosticPort(), probe_factory=quick_probe)
+    assert result['status'] == 'FLASH_READ_PROBE_OK'
+    assert session.read_bytes() == before_session
+    assert tool.authority_path('COM5').read_bytes() == before_authority
