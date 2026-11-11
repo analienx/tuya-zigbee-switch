@@ -1,9 +1,9 @@
 # Wired recovery over SWire
 
 Use this when a Telink TLSR8258 device no longer starts or cannot take an OTA
-update. It rewrites image slot A with a USB-UART adapter. The Zigbee network
-record, IEEE address, factory calibration and energy total stay on the chip,
-so a recovered device rejoins its network without re-pairing.
+update. It rewrites image slot A with a USB-UART adapter. The writer leaves the Zigbee network record, IEEE address, factory calibration
+and saved energy outside its write range. Rejoining and retained-state compatibility
+still need fresh device evidence.
 
 The tool is [`helper_scripts/telink_swire_recovery.py`](../../helper_scripts/telink_swire_recovery.py).
 It is one file that needs Python 3.8 or newer and `pyserial`.
@@ -54,7 +54,7 @@ You can also make a bundle from any single-image Zigbee OTA file:
 
 ```text
 python telink_swire_recovery.py prepare --ota forward.ota --manifest manifest.json --role-matrix ROLE_MATRIX.json --out router --expect-build 1.2.5-bseedr22
-python telink_swire_recovery.py prepare --ota GL-SD-301P_V20851203_20251230.ota --out gledopto --expect-ota-sha256 16595a38ab9783d3afc4eb58ab4ec32625249bd569c1fa6dbaf468bddc76dd72
+python telink_swire_recovery.py prepare --device gledopto-gl-sd-301p --ota GL-SD-301P_V20851203_20251230.ota --out gledopto --expect-ota-sha256 16595a38ab9783d3afc4eb58ab4ec32625249bd569c1fa6dbaf468bddc76dd72
 ```
 
 `prepare` refuses an image with a bad CRC, a wrong size field, no start
@@ -136,7 +136,7 @@ before it sends anything. When it ends, it adds `SENT_UNVERIFIED` if all the
 bytes were sent, or `INTERRUPTED` otherwise. `SENT_UNVERIFIED` means the PC
 sent the bytes. It does not mean the chip received them.
 
-Running `flash` again is safe. It erases slot A again, so the slot stays
+A new `flash` is another destructive write and requires an assessed recovery decision. It erases slot A again, so the slot stays
 unbootable until the new activation.
 
 ## 5. Check the result
@@ -144,7 +144,7 @@ unbootable until the new activation.
 Right after `flash`, while still on the adapter's power, the device should
 show LED activity and respond to its button. The relay may not switch on
 3.3 V from an adapter. If nothing happens, check the clips, the TXD level
-and the 3.3 V rail under load, then run `flash` again.
+and the 3.3 V rail under load, then stop and assess the observed failure before another write.
 
 Then disconnect the adapter, reassemble the device completely, and only
 then connect it to mains. Treat the device as recovered only after fresh
@@ -184,15 +184,14 @@ slot A's marker in the normal way.
   or [TLSRPGM](https://github.com/pvvx/TLSRPGM).
 - **One loss at a time.** The three passes repair one lost erase or page.
   They do not repair losses in two of the passes at the same address, such
-  as a clip that keeps slipping. Run `flash` again if the device does not
-  start.
+  as a clip that keeps slipping. Stop and assess the physical setup if the device does not start.
 - **Fixed timing.** The SWire encoding (460800 baud, divider 55) is pvvx's
   [USBCOMFlashTx v0.5](https://github.com/pvvx/pvvx.github.io/blob/master/ATC_MiThermometer/USBCOMFlashTx.html).
   The chip cannot report when it is busy, so the waits are fixed: 400 ms per
   sector erase, 10 ms per page and 50 ms per status write. Those are longer
   than pvvx's, to allow for slow flash chips.
 - **No slot B fallback.** If the recovered image does not start, the tool
-  does not fall back to slot B. Run `flash` again with a known-good image.
+  does not fall back to slot B. Use only the device incident record's separately selected fallback image.
 
 ## How it is tested
 
@@ -214,3 +213,69 @@ For BSEED devices, the repository's flashing rules still apply. Read
 [the BSEED OTA skill](../../skills/bseed-zigbee-ota/SKILL.md) and the
 device's incident record first; a wired flash is a hardware action that the
 owner authorizes for the specific device.
+
+
+## Optional reading and verification
+
+Reading is optional. TX-only `stage`, `activate` and `flash` keep working without
+it. A device-specific incident procedure can still require reading; in particular,
+Table Left's r21/r22 handover requires identifying the failed slot and rewriting
+that slot. This tool's writer remains slot A only. Do not use it for that procedure
+when the failed slot is B or the flash state is unknown.
+
+For reading, use the **bidirectional circuit** documented by
+[pvvx TlsrComSwireWriter](https://github.com/pvvx/TlsrComSwireWriter/blob/042613b1b47a1598856b0ff3e8a133f2918798a5/README.md).
+An ordinary UART RX pin or a passed loopback is not proof of SWire read support.
+The upstream reader warns about RX LEDs and FTDI adapters. Establish the actual
+adapter/circuit first; do not attach RX using the TX-only wiring table above.
+
+```text
+python telink_swire_recovery.py read --port COM5 --out C:/private/recovery/before.bin --json
+```
+
+The command downloads the pinned `TLSR825xComFlasher.py` next to the dump, checks
+its full SHA-256, and invokes only its `rf` command twice at 921600 baud. An offline
+copy can be provided with `--reader PATH`; it must match the same hash. It saves
+`before.bin`, `before.bin.second.bin` and `before.bin.json`. Outputs must be outside
+Git checkouts and must not already exist. Full dumps contain network keys: keep
+them private and never upload them as CI artifacts. A bounded diagnostic read is
+available with `--address 0 --size 0x100`.
+
+Reading changes volatile debug/SPI registers; it is not passive Zigbee observation.
+By default no reset/halt is requested. `--halt` invokes upstream activation, which
+resets and halts the CPU **and toggles RTS/DTR**. Leave these pins disconnected unless
+their reset circuit is independently qualified. No restart is requested by `read`.
+Do not run the application between two preservation reads: live NVM writes can
+legitimately change the dump. Timeout, short read or disagreement fails the command
+and keeps the evidence. There is no automatic write or TX-only fallback.
+
+When a qualified setup can hold the CPU stopped, verify a staged slot before
+activation using a second full read and the original backup:
+
+```text
+python telink_swire_recovery.py verify --bundle router --dump C:/private/recovery/after.bin --staged --baseline C:/private/recovery/before.bin --json
+```
+
+This compares every image byte (with the inactive marker), the erased tail and
+all bytes outside the erase range, including the other slot and factory/NVM data.
+Omit `--staged` to compare an activated image; omit `--baseline` for image-only
+verification. `FLASH_MATCHED` is a byte comparison, never proof of boot. The read
+receipt independently establishes whether the two source reads matched.
+
+## Device profiles and repeat use
+
+`prepare --device bseed-ts011f` (the default) supports PM/non-PM Router and Client
+artifacts with their own manifest, role, build and exact-SHA role-matrix evidence.
+Use finalized OTA payloads, never pre-packaging `forward.bin`.
+
+`prepare --device gledopto-gl-sd-301p --out gledopto` downloads the hash-pinned
+vendor stock OTA and produces its finalized image. Local stock OTA or finalized
+stock BIN inputs are also accepted. The dedicated SWire workflow publishes a
+`gledopto-stock-wired-kit-<sha>` artifact containing image, plan, tool and guide.
+Quarantined Gledopto custom firmware is rejected by this profile. Supporting the
+image format does not lift a firmware deployment quarantine.
+
+`wiring --device NAME` supplies device-specific preparation notes. `--json` gives
+structured output. `flash`, `stage` and `activate` accept `--dry-run FILE` to save
+the UART stream and operation trace without opening a port. `--power-cycle` gives
+an interactive low-voltage power-up window; it never controls mains power.

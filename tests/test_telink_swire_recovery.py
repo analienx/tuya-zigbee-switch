@@ -584,3 +584,83 @@ def test_ci_publishes_a_wired_kit_for_every_socket_role():
         assert 'helper_scripts/telink_swire_recovery.py prepare' in text
         assert '--role-matrix' in text and 'for role in router client' in text
         assert 'wired-kit-${{ github.event.pull_request.head.sha || github.sha }}' in text
+
+
+@pytest.mark.parametrize('fault', [None, 'short', 'different', 'exit', 'timeout'])
+def test_optional_reader_double_read_and_fail_closed(tmp_path, monkeypatch, fault):
+    import subprocess
+    reader = tmp_path / 'reader.py'
+    reader.write_bytes(b'pinned source fixture')
+    monkeypatch.setattr(tool, 'READER_SHA256', tool.sha256(reader.read_bytes()))
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        assert command[1] == str(reader)
+        assert command[command.index('rf') + 1: -1] == ['0x0', '0x20']
+        assert not {'ea', 'es', 'wf', 'we', '-t', '-r'} & set(command)
+        if fault == 'timeout':
+            raise subprocess.TimeoutExpired(command, 1800)
+        data = b'a' * 32
+        if fault == 'short':
+            data = data[:-1]
+        if fault == 'different' and len(calls) == 2:
+            data = b'b' * 32
+        Path(command[-1]).write_bytes(data)
+        return subprocess.CompletedProcess(command, 1 if fault == 'exit' else 0)
+
+    target = tmp_path / 'flash.bin'
+    if fault:
+        with pytest.raises((RecoveryError, subprocess.TimeoutExpired)):
+            tool.read_flash('COM5', target, size=32, reader=reader, runner=run)
+        assert json.loads(target.with_name('flash.bin.json').read_text())['status'] == 'READ_FAILED'
+    else:
+        result = tool.read_flash('COM5', target, size=32, reader=reader, runner=run)
+        assert result['status'] == 'READ_MATCHED' and len(calls) == 2
+        with pytest.raises(RecoveryError, match='already exists'):
+            tool.read_flash('COM5', target, size=32, reader=reader, runner=run)
+
+
+def test_reader_rejects_untrusted_source_ranges_and_repository_outputs(tmp_path):
+    reader = tmp_path / 'untrusted.py'
+    reader.write_text('untrusted')
+    with pytest.raises(RecoveryError, match='pinned'):
+        tool.read_flash('COM5', tmp_path / 'dump', reader=reader)
+    with pytest.raises(RecoveryError, match='range'):
+        tool.read_flash('COM5', tmp_path / 'dump', address=0x7ffff, size=2)
+    (tmp_path / '.git').mkdir()
+    with pytest.raises(RecoveryError, match='outside'):
+        tool.read_flash('COM5', tmp_path / 'dump')
+
+
+def test_verify_staged_image_tail_and_protected_data(tmp_path):
+    image = make_image()
+    ci_artifact(tmp_path, image)
+    kit = tmp_path / 'kit'
+    prepare_from(tmp_path, kit)
+    before = bytes([0x55]) * tool.FLASH_BYTES
+    after = bytearray(before)
+    end = tool.erase_end(len(image))
+    after[:end] = b'\xff' * end
+    after[:len(image)] = image
+    after[8] = 0xff
+    baseline, dump = tmp_path / 'before', tmp_path / 'after'
+    baseline.write_bytes(before)
+    dump.write_bytes(after)
+    assert tool.verify_dump(kit, dump, staged=True, baseline=baseline)['preservationVerified']
+    with pytest.raises(RecoveryError, match='image'):
+        tool.verify_dump(kit, dump)
+    after[0x76000] ^= 1
+    dump.write_bytes(after)
+    with pytest.raises(RecoveryError, match='preserved'):
+        tool.verify_dump(kit, dump, staged=True, baseline=baseline)
+
+
+def test_device_profiles_block_cross_device_and_quarantined_images():
+    info = tool.check_image(make_image(manufacturer=0x124f, image_type=0x1416))
+    with pytest.raises(RecoveryError, match='manufacturer'):
+        tool.check_device('bseed-ts011f', info, {})
+    with pytest.raises(RecoveryError, match='quarantined'):
+        tool.check_device('gledopto-gl-sd-301p', info, {'buildManifest': {'DEPLOYABLE': '0'}})
+    info['sha256'] = next(iter(tool.DEVICES['gledopto-gl-sd-301p']['images']))
+    assert tool.check_device('gledopto-gl-sd-301p', info, {})

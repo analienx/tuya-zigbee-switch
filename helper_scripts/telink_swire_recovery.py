@@ -1,18 +1,30 @@
 #!/usr/bin/env python3
-"""Wired recovery of Telink TLSR825x Zigbee devices with a USB-UART adapter.
+"""Wired recovery of Telink TLSR8258 Zigbee devices with a USB-UART adapter.
 
 Writes a firmware image into image slot A (0x00000) of a 512 KiB TLSR8258
 without a bootloader. Only the adapter's TXD drives the chip's SWS pin
 (pvvx's TX-only SWire method), so the chip never answers: this tool cannot
 confirm that flash changed. Success is the device starting afterwards.
 
+Typical use
+  wiring --device gledopto-gl-sd-301p          how to connect, step by step
+  selftest --port COM5                         adapter check, TXD jumpered to RXD
+  prepare --device ... --out kit               make a bundle (offline, or the pinned download)
+  flash --bundle kit --port COM5               write it
+
 Commands
   ports      list serial ports
+  wiring     pads, checks and notes for a device (all devices without --device)
   selftest   loopback test of the adapter alone (TXD jumpered to RXD)
-  prepare    make a recovery bundle from a Zigbee OTA file (offline)
+  prepare    make a recovery bundle from a Zigbee OTA file or a finalized image
+  plan       check a bundle and show what it writes and what was sent before
   flash      stage, then activate, in one run
   stage      erase slot A and write the image with its boot marker off
   activate   switch the boot marker on (one byte, no erase) and restart
+
+flash, stage and activate take --dry-run FILE to save the exact byte stream
+and an operation trace instead of opening a port. Every command takes --json
+for one machine-readable result object on stdout.
 
 Never written: 0x34000 and above (Zigbee NVM, slot B, IEEE address,
 factory calibration, second NVM area). Needs pyserial for the commands
@@ -27,6 +39,7 @@ import json
 from pathlib import Path
 import re
 import struct
+import subprocess
 import sys
 import time
 import zlib
@@ -41,7 +54,9 @@ ERASE_WAIT = 0.400
 PAGE_WAIT = 0.010
 STATUS_WAIT = 0.050
 STOP_CPU_SECONDS = 3.0
+POWER_CYCLE_SECONDS = 10.0        # time to switch 3.3 V on while the halt is sent
 STAGE_FRESH_SECONDS = 1800
+PROGRESS_STEP = 0x8000
 
 SECTOR = 0x1000
 PAGE = 0x100
@@ -69,13 +84,71 @@ ACTIVATION_CASES = {'complete', 'partial', 'corrupt-crc'}
 BUNDLE_IMAGE = 'image.bin'
 BUNDLE_PLAN = 'plan.json'
 BUNDLE_LOG = 'receipts.jsonl'
-SCHEMA = 1
+SCHEMA = 2
 CHECKLIST = (
     'Board off mains; nothing mains-connected touches the board or the PC.',
     'Adapter in TTL mode; TXD idles at about 3.3 V (measured, not assumed).',
     'TXD -> SWS, GND -> GND, 3V3 -> 3V3 (or a separate 3.3 V supply). RXD unconnected. Never +5V.',
-    'Clips hold on their own; nothing bridges neighbouring pads.',
+    'Every lead proven by a continuity test; clips hold on their own; nothing bridges neighbouring pads.',
 )
+GUIDE = 'docs/flashing/swire_recovery.md'
+
+GLEDOPTO_STOCK_COMMIT = '895567036301d25da68161358f96a37971488a08'
+DEVICES = {
+    'bseed-ts011f': {
+        'name': 'BSEED TS011F-BS / TS011F-BS-PM socket (Tuya ZTU module)',
+        'manufacturerCodes': [0x1141],
+        'imageTypes': [43555, 43556, 65025, 65026],
+        'boards': ['OUTLET_BSEED'],
+        'requiresEvidence': True,
+        'pads': [
+            ('SWS', 'castellated pad on the ZTU module edge, silkscreen SWS (module pin 4)'),
+            ('GND', 'module pin 13, or a carrier-board GND pad that measures 0 ohm to it'),
+            ('3V3', 'module pin 14 (VCC), or the carrier-board 3V3 pad'),
+        ],
+        'notes': [
+            'Take the board out of the socket housing first. Never work on a socket that is plugged in.',
+            'The adapter 3V3 normally powers the module. The relay may not switch on 3.3 V; that is fine.',
+            'The Zigbee network record is kept, so the socket rejoins without pairing.',
+            'Use a kit from the BSEED PM or non-PM role matrix run; prepare refuses images without that CI evidence.',
+        ],
+    },
+    'gledopto-gl-sd-301p': {
+        'name': 'Gledopto GL-SD-301P dimmer (TLSR8258F512ET32)',
+        'manufacturerCodes': [0x124F],
+        'imageTypes': [0x1416],
+        'images': {
+            '7ba122f1ebc9f6ec419d9ea6b27676d55c2a2aad864a03e90b896546248c4b48':
+                'Gledopto stock V20851203 (20251230)',
+        },
+        'buildEvidence': 'gledopto',
+        'stockOta': {
+            'file': 'GL-SD-301P_V20851203_20251230.ota',
+            'url': ('https://raw.githubusercontent.com/analienx/gledopto/' + GLEDOPTO_STOCK_COMMIT
+                    + '/devices/gl-sd-301p/vendor-firmware/originals/GL-SD-301P_V20851203_20251230.ota'),
+            'bytes': 208946,
+            'sha256': '16595a38ab9783d3afc4eb58ab4ec32625249bd569c1fa6dbaf468bddc76dd72',
+        },
+        'pads': [
+            ('SWS', 'trace it to the TLSR8258 PA7/SWS pin; candidates are the small pads near the crystal'),
+            ('GND', 'a pad that measures 0 ohm to the TLSR8258 ground pad'),
+            ('3V3', 'the module 3.3 V rail, measured, not the mains power stage'),
+        ],
+        'notes': [
+            'The GND | 3.3V | SWS order seen in photos is a visual guess. Prove every pad by continuity.',
+            'Mini-hooks do not hold on flat pads. Solder thin temporary wires or use a pogo-pin fixture.',
+            'If the 3.3 V rail sags below 3.0 V under load, use a separate current-limited 3.3 V supply.',
+            'Only the pinned vendor stock image is admitted by this recovery profile. Custom builds remain quarantined.',
+            'Preserving flash does not prove the retained network record is compatible with stock firmware.',
+        ],
+    },
+    'generic-tlsr8258': {
+        'name': 'Other TLSR8258 512 KiB device (no profile)',
+        'requiresInputSha256': True,
+        'pads': [('SWS', 'the TLSR8258 SWS/PA7 pin'), ('GND', 'ground'), ('3V3', 'the 3.3 V rail')],
+        'notes': ['No device-specific checks. The flash layout must match the 512 KiB SDK layout.'],
+    },
+}
 
 
 class RecoveryError(Exception):
@@ -187,23 +260,125 @@ def check_role_matrix(matrix, ota_sha):
             'sourceCommit': matrix.get('sourceCommit')}
 
 
+def check_gledopto_build(folder, image_name, image, info):
+    """SHA256SUMS and manifest.txt of an analienx/gledopto wired-image CI artifact."""
+    sums_path, manifest_path = folder / 'SHA256SUMS', folder / 'manifest.txt'
+    if not sums_path.is_file() or not manifest_path.is_file():
+        raise RecoveryError('a Gledopto image needs SHA256SUMS and manifest.txt from the same CI '
+                            'artifact next to it')
+    sums = {}
+    for line in sums_path.read_text(encoding='utf-8').splitlines():
+        parts = line.split()
+        if len(parts) == 2:
+            sums[parts[1].lstrip('*')] = parts[0].lower()
+    if sums.get(image_name) != info['sha256']:
+        raise RecoveryError(f'SHA256SUMS does not list {image_name} with this SHA-256')
+    fields, digests = {}, {}
+    for line in manifest_path.read_text(encoding='utf-8').splitlines():
+        match = re.fullmatch(r'([A-Z0-9_a-z.-]+)=(.*)', line.strip())
+        if match:
+            fields[match.group(1)] = match.group(2)
+        match = re.fullmatch(r'([0-9a-f]{64})\s+\S*\.final\.bin', line.strip())
+        if match:
+            digests[match.group(1)] = True
+    if fields.get('FINAL_BINARY_SIZE') != str(len(image)):
+        raise RecoveryError('manifest.txt FINAL_BINARY_SIZE differs from the image')
+    if info['sha256'] not in digests:
+        raise RecoveryError('manifest.txt does not record this image as its final.bin')
+    identity = fields.get('DEV_IDENTITY', '')
+    version = re.search(r'FILE_VERSION_0x([0-9A-Fa-f]{8})', identity)
+    if not version or int(version.group(1), 16) != info['fileVersion']:
+        raise RecoveryError('manifest.txt DEV_IDENTITY file version differs from the image')
+    keep = ('DEV_IDENTITY', 'QUARANTINED_BUILD', 'DEPLOYABLE', 'FIRST_FLASHABLE_CANARY_ALLOWED',
+            'ZB_ED_ROLE', 'ZB_ROUTER_ROLE', 'STACK_NV')
+    return {key: fields[key] for key in keep if key in fields}
+
+
+def check_device(device_id, info, source):
+    """Make sure the image belongs to the device profile and carries the evidence it needs."""
+    device = DEVICES.get(device_id)
+    if device is None:
+        raise RecoveryError(f'unknown device {device_id!r}; use one of {", ".join(DEVICES)}')
+    codes = device.get('manufacturerCodes')
+    if codes and info['manufacturerCode'] not in codes:
+        raise RecoveryError(f'image is for manufacturer {info["manufacturerCode"]:#06x}, '
+                            f'not a {device["name"]}')
+    types = device.get('imageTypes')
+    if types and info['imageType'] not in types:
+        raise RecoveryError(f'image type {info["imageType"]:#06x} is not a {device["name"]} image')
+    boards = device.get('boards')
+    manifest = source.get('manifest') or {}
+    if boards and manifest and not any(str(manifest.get('board')).startswith(b) for b in boards):
+        raise RecoveryError(f'manifest board {manifest.get("board")} is not a {device["name"]}')
+    if device.get('requiresEvidence') and not (source.get('manifest') and source.get('roleMatrix')):
+        raise RecoveryError(f'{device_id} needs --manifest and --role-matrix from the same CI run; '
+                            'download a wired kit instead')
+    images = device.get('images')
+    if device_id == 'gledopto-gl-sd-301p' and info['sha256'] not in images:
+        raise RecoveryError('Gledopto custom firmware remains quarantined; this profile permits stock recovery only')
+    if images is not None and info['sha256'] not in images and not source.get('buildManifest'):
+        raise RecoveryError(f'image {info["sha256"][:12]} is not a known {device_id} image and has no '
+                            'CI build evidence (SHA256SUMS and manifest.txt next to it)')
+    if device.get('requiresInputSha256') and not source.get('pinnedSha256'):
+        raise RecoveryError(f'{device_id} needs --expect-sha256 of the input file')
+    return device
+
+
+def image_label(device_id, info, source):
+    images = DEVICES[device_id].get('images') or {}
+    manifest, matrix = source.get('manifest') or {}, source.get('roleMatrix') or {}
+    build = (source.get('buildManifest') or {}).get('DEV_IDENTITY')
+    return (images.get(info['sha256']) or manifest.get('swBuildId') or matrix.get('build') or build
+            or source.get('inputFile'))
+
+
 def read_json(path):
     return json.loads(Path(path).read_text(encoding='utf-8'))
 
 
-class TxOnlyWriter:
-    """Send-only SWire commands for the TLSR8258 flash controller. Never reads."""
+def download(url, limit):
+    if not url.startswith('https://raw.githubusercontent.com/'):
+        raise RecoveryError(f'refusing to download from {url}')
+    import urllib.request
+    with urllib.request.urlopen(url, timeout=60) as response:
+        return response.read(limit + 1)
 
-    def __init__(self, port, *, sleep=time.sleep, clock=time.monotonic):
+
+class TxOnlyWriter:
+    """Send-only SWire commands for the TLSR8258 flash controller. Never reads.
+
+    power_on: in power-cycle mode, called when the halt starts; the person
+    switches 3.3 V on then, and no restart is sent over SWS. progress is
+    called as stage moves through the image. trace, when a list, receives
+    every operation; last always holds the latest one, for receipts.
+    """
+
+    def __init__(self, port, *, sleep=time.sleep, clock=time.monotonic, power_on=None,
+                 progress=None, trace=None):
         self.port = port
         self.sleep = sleep
         self.clock = clock
+        self.power_on = power_on
+        self.progress = progress
+        self.trace = trace
+        self.halted = False
         self.uart_bytes = 0
         self.frames = 0
         self.waited = 0.0
         self.erased = []
         self.pages = 0
         self.cpu_stops = 0
+        self.pass_no = None
+        self.last = None
+
+    def elapsed(self):
+        """Time the bytes and waits so far take on the wire."""
+        return self.uart_bytes * 10 / UART_BAUD + self.waited
+
+    def note(self, operation, **fields):
+        self.last = {'operation': operation, 'pass': self.pass_no, **fields}
+        if self.trace is not None:
+            self.trace.append(dict(self.last, wireSeconds=round(self.elapsed(), 3)))
 
     def wait(self, seconds):
         self.waited += seconds
@@ -225,22 +400,40 @@ class TxOnlyWriter:
         self.sws(0x0C, bytes((spi_command, 1)))       # command, then chip select high
 
     def restart(self):
+        self.note('restart')
         self.sws(0x006F, b'\x20')
 
     def stop_cpu(self):
-        # Restart the chip, then keep asking it to halt while its ROM starts.
-        self.restart()
+        """Halt the CPU while its ROM starts, so it never runs the firmware.
+
+        Normally a restart over SWS starts the ROM. In power-cycle mode the
+        person switches 3.3 V on instead, which also works when the running
+        firmware has turned SWS off. A chip this writer already halted stays
+        halted, so a later call only repeats the halt.
+        """
         stop = swire_frame(0x0602, b'\x05')
+        seconds = STOP_CPU_SECONDS
+        if self.power_on is not None and not self.halted:
+            self.note('stop-cpu', powerCycle=True)
+            self.power_on()
+            seconds = POWER_CYCLE_SECONDS
+        elif self.power_on is None:
+            self.restart()
+            self.note('stop-cpu', powerCycle=False)
+        else:
+            self.note('stop-cpu', powerCycle=True, alreadyHalted=True)
         start = self.clock()
-        while self.clock() - start < STOP_CPU_SECONDS:
+        while self.clock() - start < seconds:
             self.raw(stop)
         self.sws(0x00B2, bytes((SWS_DIVIDER,)))
         self.raw(stop)
         self.command(0xAB)                            # release flash from power-down
         self.cpu_stops += 1
+        self.halted = True
 
     def unprotect(self):
         # pvvx v0.5 writes status 0 twice. Clears any block protection.
+        self.note('unprotect')
         for _ in range(2):
             self.command(0x06)
             self.sws(0x0D, b'\x00')
@@ -251,6 +444,7 @@ class TxOnlyWriter:
     def erase(self, address):
         if address % SECTOR or not 0 <= address < SLOT_A_END:
             raise RecoveryError(f'refusing to erase {address:#x}: outside slot A')
+        self.note('erase', address=f'{address:#07x}')
         self.command(0x06)
         self.sws(0x0D, b'\x00')
         self.sws(0x0C, b'\x20')
@@ -269,6 +463,7 @@ class TxOnlyWriter:
             raise RecoveryError(f'refusing to program {len(data)} bytes at {address:#x}')
         elif address <= MARKER_OFFSET < address + len(data) and data[MARKER_OFFSET - address] != 0xFF:
             raise RecoveryError('stage must leave the start marker off')
+        self.note('program', address=f'{address:#07x}', bytes=len(data), marker=marker)
         self.command(0x06)
         self.sws(0x0D, b'\x00')
         self.sws(0x00B3, b'\x80')                     # FIFO mode: all bytes to 0x0C
@@ -290,21 +485,27 @@ class TxOnlyWriter:
         check_image(image)
         staged = bytearray(image)
         staged[MARKER_OFFSET] = 0xFF
+        end = erase_end(len(staged))
         self.stop_cpu()
         self.unprotect()
-        for erasing in SCHEDULES[passes]:
-            for address in range(0, erase_end(len(staged)), PAGE):
+        for number, erasing in enumerate(SCHEDULES[passes], 1):
+            self.pass_no = number
+            for address in range(0, end, PAGE):
+                if self.progress and address % PROGRESS_STEP == 0:
+                    self.progress(number, passes, address, end)
                 if erasing and address % SECTOR == 0:
                     self.erase(address)
                 chunk = bytes(staged[address:address + PAGE])
                 if chunk and chunk.count(0xFF) != len(chunk):
                     self.program(address, chunk)
+        self.pass_no = None
 
     def activate(self):
         self.stop_cpu()
         self.unprotect()
         self.program(MARKER_OFFSET, ACTIVATE_BYTE, marker=True)
         self.restart()
+        self.halted = False
 
 
 def swire_frame(address, data):
@@ -330,6 +531,20 @@ class _Sink:
         pass
 
 
+class _FileSink:
+    def __init__(self, stream):
+        self.stream = stream
+        self.digest = hashlib.sha256()
+
+    def write(self, buf):
+        self.stream.write(buf)
+        self.digest.update(buf)
+        return len(buf)
+
+    def flush(self):
+        pass
+
+
 def estimate_seconds(image, passes=PASSES):
     ticks = iter(range(0, 10 ** 9, 10 ** 6))
     writer = TxOnlyWriter(_Sink(), sleep=lambda _: None, clock=lambda: next(ticks))
@@ -339,18 +554,53 @@ def estimate_seconds(image, passes=PASSES):
     return round(writer.uart_bytes * 10 / UART_BAUD + writer.waited + stops)
 
 
-def prepare(ota_path, out, *, manifest=None, role_matrix=None, expect_ota_sha256=None,
-            expect_build=None):
-    ota = Path(ota_path).read_bytes()
-    ota_sha = sha256(ota)
-    if expect_ota_sha256 and ota_sha != expect_ota_sha256.lower():
-        raise RecoveryError(f'OTA SHA-256 is {ota_sha}, expected {expect_ota_sha256}')
-    image, info = image_from_ota(ota)
-    source = {'otaFile': Path(ota_path).name, 'otaBytes': len(ota), 'otaSha256': ota_sha}
+def load_input(device_id, ota_path, image_path, expect_sha256, fetch):
+    """Read the OTA file or finalized image and return (image, info, source)."""
+    device = DEVICES.get(device_id)
+    if device is None:
+        raise RecoveryError(f'unknown device {device_id!r}; use one of {", ".join(DEVICES)}')
+    if ota_path and image_path:
+        raise RecoveryError('give --ota or --image, not both')
+    source = {}
+    if not ota_path and not image_path:
+        stock = device.get('stockOta')
+        if not stock:
+            raise RecoveryError(f'{device_id} needs --ota or --image')
+        data = fetch(stock['url'], stock['bytes'])
+        if sha256(data) != stock['sha256'] or len(data) != stock['bytes']:
+            raise RecoveryError(f'downloaded {stock["file"]} does not match its pinned SHA-256')
+        source.update(inputFile=stock['file'], inputUrl=stock['url'], pinnedSha256=stock['sha256'])
+        kind, path = 'ota', None
+    else:
+        kind, path = ('ota', Path(ota_path)) if ota_path else ('image', Path(image_path))
+        data = path.read_bytes()
+        source['inputFile'] = path.name
+    digest = sha256(data)
+    if expect_sha256:
+        if digest != expect_sha256.lower():
+            raise RecoveryError(f'{source["inputFile"]} SHA-256 is {digest}, expected {expect_sha256}')
+        source['pinnedSha256'] = digest
+    source.update(inputKind=kind, inputBytes=len(data), inputSha256=digest)
+    if kind == 'ota':
+        image, info = image_from_ota(data)
+    else:
+        image, info = data, check_image(data)
+        if device.get('buildEvidence') == 'gledopto' and info['sha256'] not in device.get('images', {}):
+            source['buildManifest'] = check_gledopto_build(path.parent, path.name, image, info)
+        elif device.get('requiresEvidence'):
+            raise RecoveryError(f'{device_id} images come as forward.ota with their CI evidence, '
+                                'not as a bare image')
+    return image, info, source, data
+
+
+def prepare(ota_path=None, out=None, *, device='bseed-ts011f', image_path=None, manifest=None, role_matrix=None,
+            expect_sha256=None, expect_build=None, fetch=download, expect_ota_sha256=None):
+    expect_sha256 = expect_sha256 or expect_ota_sha256
+    image, info, source, data = load_input(device, ota_path, image_path, expect_sha256, fetch)
     if manifest:
-        source['manifest'] = check_manifest(read_json(manifest), ota, info)
+        source['manifest'] = check_manifest(read_json(manifest), data, info)
     if role_matrix:
-        source['roleMatrix'] = check_role_matrix(read_json(role_matrix), ota_sha)
+        source['roleMatrix'] = check_role_matrix(read_json(role_matrix), source['inputSha256'])
     commits = {part['sourceCommit'] for part in (source.get('manifest'), source.get('roleMatrix'))
                if part and part.get('sourceCommit')}
     if len(commits) > 1:
@@ -362,14 +612,16 @@ def prepare(ota_path, out, *, manifest=None, role_matrix=None, expect_ota_sha256
             raise RecoveryError('--expect-build needs --manifest or --role-matrix')
         if builds != {expect_build}:
             raise RecoveryError(f'build is {sorted(map(str, builds))}, expected {expect_build}')
+    check_device(device, info, source)
     out = Path(out)
     if out.exists() and any(out.iterdir()):
         raise RecoveryError(f'{out} is not empty')
-    out.mkdir(parents=True, exist_ok=True)
     end = erase_end(len(image))
     plan = {
         'schema': SCHEMA,
         'createdUtc': utc_now().isoformat(timespec='seconds'),
+        'device': {'id': device, 'name': DEVICES[device]['name']},
+        'label': image_label(device, info, source),
         'source': source,
         'image': info,
         'slotA': {'eraseFrom': '0x00000', 'eraseTo': f'{end:#07x}', 'sectors': end // SECTOR,
@@ -378,6 +630,7 @@ def prepare(ota_path, out, *, manifest=None, role_matrix=None, expect_ota_sha256
         'transport': {'baud': UART_BAUD, 'chipFeedback': False, 'passes': PASSES},
         'estimatedSeconds': estimate_seconds(image),
     }
+    out.mkdir(parents=True, exist_ok=True)
     (out / BUNDLE_IMAGE).write_bytes(image)
     (out / BUNDLE_PLAN).write_text(json.dumps(plan, indent=2) + '\n', encoding='utf-8')
     return plan
@@ -387,10 +640,13 @@ def load_bundle(folder):
     folder = Path(folder)
     plan = read_json(folder / BUNDLE_PLAN)
     if plan.get('schema') != SCHEMA:
-        raise RecoveryError('unsupported bundle schema')
+        raise RecoveryError('bundle was made by another version of this tool; make it again with '
+                            'prepare, or download a new kit')
     image = (folder / BUNDLE_IMAGE).read_bytes()
-    if check_image(image) != plan.get('image'):
+    info = check_image(image)
+    if info != plan.get('image'):
         raise RecoveryError('image.bin does not match plan.json')
+    check_device(plan.get('device', {}).get('id'), info, plan.get('source', {}))
     return plan, image
 
 
@@ -405,13 +661,14 @@ def receipts(folder):
     return [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines() if line.strip()]
 
 
-def record(folder, action, port, image_sha, writer, result, passes, now=utc_now):
+def record(folder, action, port, image_sha, writer, result, passes, now=utc_now, power_cycle=False):
     entry = {
         'utc': now().isoformat(timespec='seconds'),
         'action': action, 'port': port, 'imageSha256': image_sha, 'result': result,
-        'passes': passes if action == 'stage' else None,
+        'passes': passes if action == 'stage' else None, 'powerCycle': power_cycle,
         'uartBytes': writer.uart_bytes, 'swireFrames': writer.frames,
         'sectorsErased': len(writer.erased), 'pagesProgrammed': writer.pages,
+        'lastOperation': writer.last,
     }
     with (Path(folder) / BUNDLE_LOG).open('a', encoding='utf-8') as log:
         log.write(json.dumps(entry) + '\n')
@@ -436,33 +693,64 @@ def fresh_stage(folder, image_sha, port, now=utc_now):
 
 def describe(plan):
     image, source = plan['image'], plan['source']
-    manifest, matrix = source.get('manifest') or {}, source.get('roleMatrix') or {}
-    name = manifest.get('swBuildId') or matrix.get('build') or source['otaFile']
-    role = matrix.get('role') or '?'
-    board = manifest.get('board') or '?'
-    return (f'Image   {name}, role {role}, board {board}\n'
-            f'        {image["bytes"]:,} bytes, SHA-256 {image["sha256"]}\n'
-            f'        file version {image["fileVersion"]:#010x}, image type {image["imageType"]}, '
-            f'manufacturer {image["manufacturerCode"]:#06x}\n'
-            f'Writes  {plan["slotA"]["eraseFrom"]}-{plan["slotA"]["eraseTo"]} only; '
-            f'never {plan["neverWritten"]}\n'
-            f'Time    about {plan["estimatedSeconds"]} s for flash')
+    matrix = source.get('roleMatrix') or {}
+    board = (source.get('manifest') or {}).get('board')
+    extra = ''.join(f', {k} {v}' for k, v in (('role', matrix.get('role')), ('board', board)) if v)
+    lines = [f'Device  {plan["device"]["name"]}',
+             f'Image   {plan["label"]}{extra}',
+             f'        {image["bytes"]:,} bytes, SHA-256 {image["sha256"]}',
+             f'        file version {image["fileVersion"]:#010x}, image type {image["imageType"]:#06x}, '
+             f'manufacturer {image["manufacturerCode"]:#06x}']
+    build = source.get('buildManifest')
+    if build:
+        flags = ', '.join(f'{k}={build[k]}' for k in ('QUARANTINED_BUILD', 'DEPLOYABLE',
+                                                       'FIRST_FLASHABLE_CANARY_ALLOWED') if k in build)
+        lines.append(f'Build   {build.get("DEV_IDENTITY", "?")}; {flags}')
+    lines += [f'Writes  {plan["slotA"]["eraseFrom"]}-{plan["slotA"]["eraseTo"]} only; '
+              f'never {plan["neverWritten"]}',
+              f'Time    about {plan["estimatedSeconds"]} s for flash']
+    return '\n'.join(lines)
 
 
-def confirm(action, image_sha, provided):
+def wiring(device_id):
+    device = DEVICES.get(device_id)
+    if device is None:
+        raise RecoveryError(f'unknown device {device_id!r}; use one of {", ".join(DEVICES)}')
+    lines = [device['name'], '',
+             'Connect (board off mains, everything unpowered while you measure):']
+    lines += [f'  {"TXD" if pad == "SWS" else pad:<4} -> {pad:<4} {where}' for pad, where in device['pads']]
+    lines += ['  RXD, RTS, DTR and +5V stay unconnected.', '',
+              'Before you write:',
+              '  1. Continuity: each lead to its pad, and no continuity between SWS, GND and 3V3.',
+              '  2. Adapter in 3.3 V TTL mode. TXD idles at about 3.3 V against GND.',
+              '  3. selftest --port COMx passes with TXD jumpered to RXD, the device not connected.',
+              '  4. The 3.3 V rail reads 3.2-3.4 V with the board connected.', '',
+              'Notes:']
+    lines += [f'  - {note}' for note in device['notes']]
+    lines += ['', 'If the device does not start after flash: check the leads and 3.3 V, then run flash '
+              'again with --power-cycle.', f'Troubleshooting: {GUIDE}']
+    return '\n'.join(lines)
+
+
+def ask(prompt):
+    print(prompt, end='', file=sys.stderr, flush=True)
+    return sys.stdin.readline()
+
+
+def confirm(action, image_sha, provided, interactive):
     token = f'{action.upper()}-{image_sha[:8]}'
     if provided == token:
         return
     if provided is not None:
         raise RecoveryError(f'--confirm must be {token}')
-    if not sys.stdin.isatty():
+    if not interactive:
         raise RecoveryError(f'{action} needs --confirm {token} when not run interactively')
-    if input(f'Type {token} to {action}: ').strip() != token:
+    if ask(f'Type {token} to {action}: ').strip() != token:
         raise RecoveryError('cancelled')
 
 
 def open_port(port, timeout=0.5):
-    if not re.fullmatch(r'(?:COM\d+|/dev/[A-Za-z0-9_./-]+)', port, re.IGNORECASE):
+    if not re.fullmatch(r'(?:COM\d+|/dev/[A-Za-z0-9_./-]+)', port or '', re.IGNORECASE):
         raise RecoveryError('port must look like COM5 or /dev/ttyUSB0')
     try:
         import serial
@@ -494,111 +782,335 @@ def selftest(com, seconds=3.0, chunk=512):
     return echoed == pattern, len(echoed), len(pattern)
 
 
-def run_write(action, folder, port, provided, passes=PASSES, *, opener=open_port, out=print,
-              now=utc_now):
+PHASES = {'stage': ('stage',), 'activate': ('activate',), 'flash': ('stage', 'activate')}
+
+
+def run_phase(writer, phase, image, passes):
+    if phase == 'stage':
+        writer.stage(image, passes)
+    else:
+        writer.activate()
+
+
+def dry_run(action, plan, image, passes, power_cycle, path, out):
+    """Write the exact UART stream and an operation trace to files instead of a port."""
+    path = Path(path)
+    trace_path = path.with_name(path.name + '.trace.jsonl')
+    if path.exists() or trace_path.exists():
+        raise RecoveryError(f'{path} or its trace already exists; choose a new file name')
+    trace = []
+    with path.open('xb') as stream:
+        sink = _FileSink(stream)
+        writer = TxOnlyWriter(sink, sleep=lambda _: None, trace=trace,
+                              power_on=(lambda: None) if power_cycle else None)
+        writer.clock = writer.elapsed           # the flood lasts as long as it would on the wire
+        for phase in PHASES[action]:
+            run_phase(writer, phase, image, passes)
+    trace_path.write_text(''.join(json.dumps(entry) + '\n' for entry in trace), encoding='utf-8')
+    result = {'status': 'DRY_RUN', 'action': action, 'imageSha256': plan['image']['sha256'],
+              'passes': passes, 'powerCycle': power_cycle, 'stream': str(path),
+              'streamBytes': writer.uart_bytes, 'streamSha256': sink.digest.hexdigest(),
+              'swireFrames': writer.frames, 'sectorsErased': len(writer.erased),
+              'pagesProgrammed': writer.pages, 'wireSeconds': round(writer.elapsed()),
+              'trace': str(trace_path), 'operations': len(trace)}
+    out(f'{action} dry run: {writer.uart_bytes:,} UART bytes, {len(writer.erased)} sector erases, '
+        f'{writer.pages} page writes, about {result["wireSeconds"]} s on the wire.')
+    out(f'Stream  {path} (SHA-256 {result["streamSha256"]})')
+    out(f'Trace   {trace_path}. Nothing was sent; no receipt was written.')
+    return result
+
+
+def run_write(action, folder, port, provided, passes=PASSES, *, power_cycle=False, dry_run_path=None,
+              opener=open_port, out=print, now=utc_now, interactive=None):
     plan, image = load_bundle(folder)
     image_sha = plan['image']['sha256']
+    if passes not in SCHEDULES:
+        raise RecoveryError(f'passes must be one of {sorted(SCHEDULES)}')
+    if dry_run_path:
+        return dry_run(action, plan, image, passes, power_cycle, dry_run_path, out)
+    interactive = sys.stdin.isatty() if interactive is None else interactive
     if action == 'activate' and not fresh_stage(folder, image_sha, port, now):
         raise RecoveryError(f'activate needs a finished stage of this image on {port} within the last '
                             f'{STAGE_FRESH_SECONDS // 60} minutes; run flash instead')
+    if power_cycle and not interactive:
+        raise RecoveryError('--power-cycle needs a person at an interactive terminal to switch 3.3 V on '
+                            'when asked')
     out(describe(plan))
     out('Check before you continue:')
     for line in CHECKLIST:
         out(f'  - {line}')
+    out(f'  Device notes: wiring --device {plan["device"]["id"]}')
     out('The chip does not answer. The only proof is the device starting afterwards.')
-    confirm(action, image_sha, provided)
-    if passes not in SCHEDULES:
-        raise RecoveryError(f'passes must be one of {sorted(SCHEDULES)}')
+    confirm(action, image_sha, provided, interactive)
+    if power_cycle:
+        out('Power-cycle mode: disconnect only the 3V3 lead (or switch the 3.3 V supply off). '
+            'Keep TXD and GND connected.')
+        ask('Press Enter when the board has no power: ')
     entries = []
-    phases = {'stage': ('stage',), 'activate': ('activate',), 'flash': ('stage', 'activate')}[action]
+
+    def power_on():
+        out(f'>>> Connect 3.3 V NOW. The chip is halted as it starts; you have '
+            f'{POWER_CYCLE_SECONDS:.0f} s. <<<')
+
+    def progress(number, total, address, end):
+        out(f'  pass {number} of {total}: {address:#07x} of {end:#07x} ({100 * address // end}%)')
+
     with opener(port) as com:
-        writer = TxOnlyWriter(com)
-        for phase in phases:
+        writer = TxOnlyWriter(com, power_on=power_on if power_cycle else None, progress=progress)
+        for phase in PHASES[action]:
             # Written before sending, so an interrupted write still leaves a trace.
-            record(folder, phase, port, image_sha, writer, 'STARTED', passes, now)
+            record(folder, phase, port, image_sha, writer, 'STARTED', passes, now, power_cycle)
+            out(f'{phase} started')
             try:
-                if phase == 'stage':
-                    writer.stage(image, passes)
-                else:
-                    writer.activate()
+                run_phase(writer, phase, image, passes)
             except BaseException as error:
                 record(folder, phase, port, image_sha, writer,
-                       f'INTERRUPTED: {type(error).__name__}', passes, now)
+                       f'INTERRUPTED: {type(error).__name__}', passes, now, power_cycle)
                 raise
-            entries.append(record(folder, phase, port, image_sha, writer, 'SENT_UNVERIFIED', passes, now))
+            entries.append(record(folder, phase, port, image_sha, writer, 'SENT_UNVERIFIED', passes,
+                                  now, power_cycle))
     out(f'{action}: all bytes sent ({writer.uart_bytes:,} UART bytes). Not verified on the chip.')
     if action == 'stage':
         out('Slot A start marker is still off. Run activate next.')
     else:
-        out('Chip restarted. Look for LED activity and a button response; then join checks.')
+        out('Chip restarted. Look for LED activity and a button response; then the Zigbee checks.')
+        out(f'If nothing happens: check the leads and 3.3 V, then flash again with --power-cycle. '
+            f'See {GUIDE}.')
     return entries
 
 
-def list_ports(out=print):
+def list_ports():
     try:
         from serial.tools import list_ports as ports
     except ImportError as error:
         raise RecoveryError('pyserial is required: python -m pip install pyserial') from error
-    found = sorted(ports.comports(), key=lambda p: p.device)
-    for port in found:
-        out(f'{port.device}\t{port.description}\t{port.hwid}')
-    if not found:
-        out('No serial ports found.')
+    return [{'device': p.device, 'description': p.description, 'hwid': p.hwid}
+            for p in sorted(ports.comports(), key=lambda p: p.device)]
 
 
-def main(argv=None):
+READER_COMMIT = '042613b1b47a1598856b0ff3e8a133f2918798a5'
+READER_SHA256 = '2ea1b7c5266821e5d384a263daa7916bb4020fcdfb8f1ec0bed5842dcb94ca18'
+READER_URL = ('https://raw.githubusercontent.com/pvvx/TlsrComSwireWriter/'
+              + READER_COMMIT + '/TLSR825xComFlasher.py')
+FLASH_BYTES = 0x80000
+
+
+def private_output(path):
+    path = Path(path).resolve()
+    if any((parent / '.git').exists() for parent in (path.parent, *path.parents)):
+        raise RecoveryError('flash dumps contain network keys; choose an output outside every Git checkout')
+    return path
+
+
+def read_flash(port, output, *, address=0, size=FLASH_BYTES, reader=None,
+               halt=False, fetch=download, runner=subprocess.run):
+    """Two independent rf invocations; never expose upstream erase/write commands.
+
+    Requires the pvvx bidirectional circuit, NOT the TX-only hookup. Reading
+    changes volatile SWire/SPI registers. --halt additionally resets/halts the
+    CPU via upstream -t, which also toggles RTS/DTR; leave those pins unwired
+    unless the reset circuit has been independently qualified. No CPU restart
+    is requested after reading. Partial and disagreeing dumps are retained.
+    """
+    if not 0 <= address < address + size <= FLASH_BYTES:
+        raise RecoveryError('read range must be nonempty and within 512 KiB flash')
+    if not re.fullmatch(r'(?:COM\d+|/dev/[A-Za-z0-9_./-]+)', port or '', re.IGNORECASE):
+        raise RecoveryError('invalid serial port')
+    output = private_output(output)
+    second = output.with_name(output.name + '.second.bin')
+    receipt = output.with_name(output.name + '.json')
+    if any(p.exists() for p in (output, second, receipt)):
+        raise RecoveryError('read output or receipt already exists; choose a new output')
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if reader is None:
+        reader = output.parent / ('pvvx-reader-' + READER_COMMIT + '.py')
+        if not reader.exists():
+            data = fetch(READER_URL, 256000)
+            if sha256(data) != READER_SHA256:
+                raise RecoveryError('downloaded reader SHA-256 mismatch')
+            with reader.open('xb') as stream:
+                stream.write(data)
+    reader = Path(reader).resolve()
+    if sha256(reader.read_bytes()) != READER_SHA256:
+        raise RecoveryError('reader must match the pinned pvvx source SHA-256')
+    result = {'status': 'STARTED', 'address': address, 'bytes': size,
+              'port': port, 'readerCommit': READER_COMMIT, 'halt': halt,
+              'utc': utc_now().isoformat(), 'reads': []}
+    try:
+        for target in (output, second):
+            command = [sys.executable, str(reader), '-p', port, '-b', '921600']
+            if halt:
+                command += ['-t', '3000']
+            command += ['rf', hex(address), hex(size), str(target)]
+            completed = runner(command, capture_output=True, text=True, timeout=1800)
+            if completed.returncode != 0:
+                raise RecoveryError('bidirectional read failed; check the pvvx circuit, voltage and contact. '
+                                    'No TX-only fallback or write was attempted')
+            data = target.read_bytes()
+            if len(data) != size:
+                raise RecoveryError('short flash read; retained for diagnosis')
+            result['reads'].append({'file': str(target), 'sha256': sha256(data)})
+        if result['reads'][0]['sha256'] != result['reads'][1]['sha256']:
+            raise RecoveryError('two flash reads differ; no trustworthy backup established')
+        result['status'] = 'READ_MATCHED'
+        return result
+    except BaseException:
+        result['status'] = 'READ_FAILED'
+        raise
+    finally:
+        with receipt.open('x', encoding='utf-8') as stream:
+            json.dump(result, stream, indent=2)
+
+
+def verify_dump(folder, dump, *, staged=False, baseline=None):
+    """Offline comparison of a full readback; no device is opened or restarted."""
+    plan, image = load_bundle(folder)
+    data = Path(dump).read_bytes()
+    if len(data) != FLASH_BYTES:
+        raise RecoveryError('verification requires a full 512 KiB readback')
+    expected = bytearray(image)
+    if staged:
+        expected[MARKER_OFFSET] = 0xFF
+    end = erase_end(len(image))
+    if data[:len(image)] != expected or data[len(image):end] != b'\xff' * (end - len(image)):
+        raise RecoveryError('slot A image or erased tail differs from the expected bytes')
+    if baseline:
+        before = Path(baseline).read_bytes()
+        if len(before) != FLASH_BYTES or before[end:] != data[end:]:
+            raise RecoveryError('preserved flash differs from the baseline')
+    return {'status': 'FLASH_MATCHED', 'imageSha256': plan['image']['sha256'],
+            'staged': staged, 'preservationVerified': bool(baseline),
+            'bootVerified': False}
+
+
+def build_parser():
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument('--json', action='store_true', help='print one JSON result object on stdout')
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest='action', required=True)
-    commands.add_parser('ports', help='list serial ports')
-    test = commands.add_parser('selftest', help='adapter loopback test, TXD jumpered to RXD, no device')
+    commands.add_parser('ports', parents=[common], help='list serial ports')
+    read = commands.add_parser('read', parents=[common], help='optional double flash read with pvvx bidirectional wiring')
+    read.add_argument('--port', required=True)
+    read.add_argument('--out', required=True, type=Path, help='private output outside Git; full flash by default')
+    read.add_argument('--address', type=lambda v: int(v, 0), default=0)
+    read.add_argument('--size', type=lambda v: int(v, 0), default=FLASH_BYTES)
+    read.add_argument('--reader', type=Path, help='offline copy of the pinned TLSR825xComFlasher.py')
+    read.add_argument('--halt', action='store_true', help='reset/halt CPU; upstream toggles RTS/DTR, see guide')
+    verify = commands.add_parser('verify', parents=[common], help='compare a full readback with a bundle')
+    verify.add_argument('--bundle', type=Path, required=True)
+    verify.add_argument('--dump', type=Path, required=True)
+    verify.add_argument('--staged', action='store_true', help='expect inactive marker, before activation')
+    verify.add_argument('--baseline', type=Path, help='pre-write full dump for preserved-region comparison')
+    wire = commands.add_parser('wiring', parents=[common], help='how to connect a device')
+    wire.add_argument('--device', choices=sorted(DEVICES))
+    test = commands.add_parser('selftest', parents=[common],
+                               help='adapter loopback test, TXD jumpered to RXD, no device')
     test.add_argument('--port', required=True)
-    prep = commands.add_parser('prepare', help='make a recovery bundle from a Zigbee OTA file')
-    prep.add_argument('--ota', required=True, type=Path, help='forward.ota from a CI artifact, or a stock OTA')
+    prep = commands.add_parser('prepare', parents=[common], help='make a recovery bundle')
+    prep.add_argument('--device', default='bseed-ts011f', choices=sorted(DEVICES))
     prep.add_argument('--out', required=True, type=Path, help='new or empty bundle folder')
-    prep.add_argument('--manifest', type=Path, help='manifest.json next to the OTA file')
+    prep.add_argument('--ota', type=Path, help='forward.ota from a CI artifact, or a stock OTA')
+    prep.add_argument('--image', type=Path,
+                      help='finalized image, such as glsd301p-ed_0x00000.bin from a Gledopto CI artifact')
+    prep.add_argument('--manifest', type=Path, help='manifest.json next to forward.ota')
     prep.add_argument('--role-matrix', type=Path, help='ROLE_MATRIX.json from the same CI artifact')
-    prep.add_argument('--expect-ota-sha256')
+    prep.add_argument('--expect-sha256', '--expect-ota-sha256', dest='expect_sha256',
+                      help='SHA-256 of the input file')
     prep.add_argument('--expect-build', help='for example 1.2.5-bseedr22')
-    show = commands.add_parser('plan', help='check a bundle and show what it would write')
+    show = commands.add_parser('plan', parents=[common], help='check a bundle and show what it would write')
     show.add_argument('--bundle', required=True, type=Path)
     for name, text in (('flash', 'stage and activate in one run'),
                        ('stage', 'write slot A with the start marker off'),
                        ('activate', 'switch the start marker on and restart')):
-        write = commands.add_parser(name, help=text)
+        write = commands.add_parser(name, parents=[common], help=text)
         write.add_argument('--bundle', required=True, type=Path)
-        write.add_argument('--port', required=True)
+        write.add_argument('--port')
         write.add_argument('--confirm', help='ACTION-<first 8 hex digits of the image SHA-256>')
+        write.add_argument('--power-cycle', action='store_true',
+                           help='halt the chip while you switch 3.3 V on, instead of restarting it over SWS')
+        write.add_argument('--dry-run', type=Path, metavar='FILE',
+                           help='save the byte stream and a trace instead of opening a port')
         if name != 'activate':
             write.add_argument('--passes', type=int, default=PASSES,
                                help='3 (default) survives one lost erase or page; 1 and 2 do not')
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    as_json = args.json
+
+    def out(line):
+        print(line, file=sys.stderr if as_json else sys.stdout)
+
+    def emit(result):
+        if as_json:
+            print(json.dumps(result, indent=2))
+
     try:
-        if args.action == 'ports':
-            list_ports()
+        if args.action == 'read':
+            out('Requires the documented pvvx bidirectional circuit. TX-only wiring cannot read.')
+            result = read_flash(args.port, args.out, address=args.address, size=args.size,
+                                reader=args.reader, halt=args.halt)
+            out(f'Two reads match; private backup: {args.out}')
+            emit(result)
+        elif args.action == 'verify':
+            result = verify_dump(args.bundle, args.dump, staged=args.staged, baseline=args.baseline)
+            out('Flash bytes match. Boot and Zigbee operation remain unverified.')
+            emit(result)
+        elif args.action == 'ports':
+            found = list_ports()
+            for port in found:
+                out(f'{port["device"]}\t{port["description"]}\t{port["hwid"]}')
+            if not found:
+                out('No serial ports found.')
+            emit({'status': 'OK', 'ports': found})
+        elif args.action == 'wiring':
+            ids = [args.device] if args.device else list(DEVICES)
+            for device_id in ids:
+                out(wiring(device_id) if args.device else f'{device_id:<22} {DEVICES[device_id]["name"]}')
+            if not args.device:
+                out('Run wiring --device <name> for the pads and checks.')
+            emit({'status': 'OK', 'devices': {i: DEVICES[i] for i in ids}})
         elif args.action == 'selftest':
             with open_port(args.port, timeout=0.2) as com:
                 passed, got, sent = selftest(com)
-            print(f'selftest {"PASS" if passed else "FAIL"}: {got} of {sent} bytes came back intact '
-                  f'at {UART_BAUD} baud')
-            print('This checks the port, driver and baud rate only. Measure the TXD level separately.')
+            out(f'selftest {"PASS" if passed else "FAIL"}: {got} of {sent} bytes came back intact '
+                f'at {UART_BAUD} baud')
+            out('This checks the port, driver and baud rate only. Measure the TXD level separately.')
+            emit({'status': 'PASS' if passed else 'FAIL', 'received': got, 'sent': sent})
             return 0 if passed else 1
         elif args.action == 'prepare':
-            plan = prepare(args.ota, args.out, manifest=args.manifest, role_matrix=args.role_matrix,
-                           expect_ota_sha256=args.expect_ota_sha256, expect_build=args.expect_build)
-            print(describe(plan))
-            print(f'Bundle  {args.out}')
+            plan = prepare(args.ota, args.out, device=args.device, image_path=args.image,
+                           manifest=args.manifest, role_matrix=args.role_matrix,
+                           expect_sha256=args.expect_sha256, expect_build=args.expect_build)
+            out(describe(plan))
+            out(f'Bundle  {args.out}')
+            emit({'status': 'OK', 'bundle': str(args.out), 'plan': plan})
         elif args.action == 'plan':
             plan, _ = load_bundle(args.bundle)
-            print(describe(plan))
-            for entry in receipts(args.bundle):
-                print(f'Sent    {entry["utc"]} {entry["action"]} on {entry["port"]} ({entry["result"]})')
+            out(describe(plan))
+            log = receipts(args.bundle)
+            for entry in log:
+                last = entry.get('lastOperation') or {}
+                where = f', last {last.get("operation")} {last.get("address", "")}'.rstrip() if last else ''
+                out(f'Sent    {entry["utc"]} {entry["action"]} on {entry["port"]} ({entry["result"]}{where})')
+            emit({'status': 'OK', 'plan': plan, 'receipts': log})
         else:
-            run_write(args.action, args.bundle, args.port, args.confirm, getattr(args, 'passes', PASSES))
-    except (RecoveryError, OSError, ValueError, KeyError) as error:
+            if not args.dry_run and not args.port:
+                raise RecoveryError('--port is required unless --dry-run is given')
+            result = run_write(args.action, args.bundle, args.port, args.confirm,
+                               getattr(args, 'passes', PASSES), power_cycle=args.power_cycle,
+                               dry_run_path=args.dry_run, out=out)
+            emit(result if args.dry_run else {'status': 'SENT_UNVERIFIED', 'action': args.action,
+                                              'receipts': result})
+    except (RecoveryError, OSError, ValueError, KeyError, subprocess.TimeoutExpired) as error:
         print(f'BLOCKED: {error}', file=sys.stderr)
+        emit({'status': 'BLOCKED', 'error': str(error)})
         return 2
     except KeyboardInterrupt:
         print('BLOCKED: interrupted. Slot A may be partly erased; run flash again.', file=sys.stderr)
+        emit({'status': 'INTERRUPTED', 'error': 'interrupted; slot A may be partly erased'})
         return 130
     return 0
 

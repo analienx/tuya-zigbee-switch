@@ -40,6 +40,11 @@ jobs:
       - name: Run the tool against the chip and flash model
         run: python3 -m pytest --noconftest tests/test_telink_swire_recovery.py -v
 
+      - name: Verify pinned upstream reader provenance
+        run: |
+          curl --fail --location -o "$RUNNER_TEMP/reader.py" https://raw.githubusercontent.com/pvvx/TlsrComSwireWriter/042613b1b47a1598856b0ff3e8a133f2918798a5/TLSR825xComFlasher.py
+          echo "2ea1b7c5266821e5d384a263daa7916bb4020fcdfb8f1ec0bed5842dcb94ca18  $RUNNER_TEMP/reader.py" | sha256sum --check
+
       - name: Prepare the GL-SD-301P stock OTA and match the Gledopto kit
         shell: bash
         run: |
@@ -47,7 +52,7 @@ jobs:
           curl --fail --location --retry 3 -o "$RUNNER_TEMP/stock.ota" \
             "https://raw.githubusercontent.com/analienx/gledopto/$GLEDOPTO_COMMIT/devices/gl-sd-301p/vendor-firmware/originals/GL-SD-301P_V20851203_20251230.ota"
           python3 helper_scripts/telink_swire_recovery.py prepare --ota "$RUNNER_TEMP/stock.ota" \
-            --out "$RUNNER_TEMP/gledopto-kit" --expect-ota-sha256 "$GLEDOPTO_OTA_SHA256"
+            --device gledopto-gl-sd-301p --out "$RUNNER_TEMP/gledopto-kit" --expect-ota-sha256 "$GLEDOPTO_OTA_SHA256"
           python3 - "$RUNNER_TEMP/gledopto-kit/plan.json" <<'EOF'
           import json, os, sys
           image = json.load(open(sys.argv[1]))['image']
@@ -56,3 +61,11 @@ jobs:
               sys.exit(f'GL-SD-301P image differs from the Gledopto kit: {image}')
           print('GL-SD-301P stock image matches the Gledopto kit:', image['sha256'])
           EOF
+      - name: Package stock recovery tool and guide
+        run: |
+          cp helper_scripts/telink_swire_recovery.py "$RUNNER_TEMP/gledopto-kit/"
+          cp docs/flashing/swire_recovery.md "$RUNNER_TEMP/gledopto-kit/README.md"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gledopto-stock-wired-kit-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/gledopto-kit/
