@@ -1133,9 +1133,13 @@ def run_write(action, folder, port, provided, passes=PASSES, *, power_cycle=Fals
             if context['verificationRequired'] and state['phase'] != 'VERIFIED':
                 raise RecoveryError('activate requires a successful staged readback verification in this session',
                                     code='VERIFICATION_REQUIRED', details={'session': str(path)})
-            age = (now() - datetime.datetime.fromisoformat(state['stageUtc'])).total_seconds()
+            # Double reads can take longer than the unverified stage window.
+            # Fresh matching evidence supersedes the old transmission timestamp;
+            # replaying a cached verification does not change updatedUtc.
+            fresh_since = state['updatedUtc'] if state['phase'] == 'VERIFIED' else state['stageUtc']
+            age = (now() - datetime.datetime.fromisoformat(fresh_since)).total_seconds()
             if not 0 <= age <= STAGE_FRESH_SECONDS:
-                raise RecoveryError('stage is no longer fresh; read and reconcile before activation', code='STAGE_EXPIRED')
+                raise RecoveryError('staged/verified evidence is no longer fresh; read and reconcile before activation', code='STAGE_EXPIRED')
         out(describe(plan, slot=slot, full_slot=full_slot))
         for line in CHECKLIST:
             out(f'  - {line}')

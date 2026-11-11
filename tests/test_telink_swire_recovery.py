@@ -1078,3 +1078,20 @@ def test_copied_session_cannot_steal_port_during_verification(tmp_path):
         tool.verify_dump(kit, readback, staged=True, session=copy)
     assert error.value.code == 'SESSION_CONFLICT'
     assert tool.read_json(tool.authority_path('COM5'))['session'] == str(session)
+
+
+def test_long_read_workflow_uses_fresh_verification_not_old_transmission_time(tmp_path):
+    kit, chip, session, options, token = agent_fixture(tmp_path, baseline=True)
+    tool.run_write('stage', kit, 'COM5', token('stage'), operation_id='stage-1', **options)
+    state = tool.read_json(session)
+    state['stageUtc'] = (tool.utc_now() - datetime.timedelta(hours=2)).isoformat()
+    tool.atomic_json(session, state)
+    readback = full_backup(tmp_path / 'long-read', chip.flash)
+    tool.verify_dump(kit, readback, staged=True, slot='B', full_slot=True,
+                     baseline=options['baseline'], session=session)
+    verified_time = tool.read_json(session)['updatedUtc']
+    tool.verify_dump(kit, readback, staged=True, slot='B', full_slot=True,
+                     baseline=options['baseline'], session=session)
+    assert tool.read_json(session)['updatedUtc'] == verified_time
+    tool.run_write('activate', kit, 'COM5', token('activate'), operation_id='activate-1', hold=True, **options)
+    assert tool.read_json(session)['phase'] == 'HELD'

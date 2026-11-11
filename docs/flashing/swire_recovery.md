@@ -338,7 +338,10 @@ Keep the CPU halted between stage, reading and verification; do not power-cycle
 or ask the reader to reset it during those steps. After verified activation with
 `--hold`, perform the controlled low-voltage bench start from the incident guide.
 The activation receipt is tied to slot, erase extent, original baseline hash,
-image hash and serial port, and expires after 30 minutes. A different layout uses
+image hash and serial port. Activation requires a stage sent within 30 minutes,
+or fresh successful staged verification within 30 minutes when readback is used.
+Long matching double reads can therefore establish fresh evidence even after
+the original transmission window. Replaying cached verification never extends it. A different layout uses
 a different confirmation token, such as `STAGE-B-FULL-<hash prefix>`.
 
 The full-slot verifier checks the exact image, `0xFF` through the slot end,
