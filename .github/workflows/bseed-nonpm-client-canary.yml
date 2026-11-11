@@ -91,7 +91,8 @@ jobs:
           kit=build/wired-kit
           mkdir -p "$kit"
           cp helper_scripts/telink_swire_recovery.py "$kit/"
-          sed "s|(\.\./\.\./|(https://github.com/analienx/tuya-zigbee-switch/blob/$(git rev-parse HEAD)/|g" docs/flashing/swire_recovery.md > "$kit/README.md"
+          sed "s|(\.\./\.\./|(https://github.com/analienx/tuya-zigbee-switch/blob/$(git rev-parse HEAD)/|g;s|(swire/AGENTS.md)|(AGENTS.md)|g" docs/flashing/swire_recovery.md > "$kit/README.md"
+          sed "s|(\.\./swire_recovery\.md)|(README.md)|g;s|(\.\./swire_recovery_review\.md)|(swire_recovery_review.md)|g;s|(\.\./\.\./\.\./|(https://github.com/analienx/tuya-zigbee-switch/blob/$(git rev-parse HEAD)/|g" docs/flashing/swire/AGENTS.md > "$kit/AGENTS.md"
           cp docs/flashing/swire_recovery_review.md "$kit/"
           for role in router client; do
             python3 helper_scripts/telink_swire_recovery.py prepare \

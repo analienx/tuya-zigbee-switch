@@ -82,7 +82,8 @@ jobs:
       - name: Package stock recovery tool and guide
         run: |
           cp helper_scripts/telink_swire_recovery.py "$RUNNER_TEMP/gledopto-kit/"
-          sed "s|(\.\./\.\./|(https://github.com/analienx/tuya-zigbee-switch/blob/$(git rev-parse HEAD)/|g" docs/flashing/swire_recovery.md > "$RUNNER_TEMP/gledopto-kit/README.md"
+          sed "s|(\.\./\.\./|(https://github.com/analienx/tuya-zigbee-switch/blob/$(git rev-parse HEAD)/|g;s|(swire/AGENTS.md)|(AGENTS.md)|g" docs/flashing/swire_recovery.md > "$RUNNER_TEMP/gledopto-kit/README.md"
+          sed "s|(\.\./swire_recovery\.md)|(README.md)|g;s|(\.\./swire_recovery_review\.md)|(swire_recovery_review.md)|g;s|(\.\./\.\./\.\./|(https://github.com/analienx/tuya-zigbee-switch/blob/$(git rev-parse HEAD)/|g" docs/flashing/swire/AGENTS.md > "$RUNNER_TEMP/gledopto-kit/AGENTS.md"
           cp docs/flashing/swire_recovery_review.md "$RUNNER_TEMP/gledopto-kit/"
       - name: Validate the original hosted r19 rollback artifact when requested
         if: github.event_name == 'workflow_dispatch' && inputs.r19_artifact_run != ''

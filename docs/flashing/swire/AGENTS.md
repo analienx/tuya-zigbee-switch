@@ -1,0 +1,127 @@
+# Agent instructions: wired Telink recovery
+
+This is the entry point for agents using `telink_swire_recovery.py`. It also ships
+as `AGENTS.md` at the root of each downloadable wired recovery kit.
+
+## Read first and establish scope
+
+1. Follow the repository [agent rules](../../../AGENTS.md), the
+   [BSEED maintenance skill](../../../skills/bseed-zigbee-ota/SKILL.md) where
+   applicable, and the latest device-specific incident handover.
+2. Read the [operator and protocol guide](../swire_recovery.md) and
+   [logic review](../swire_recovery_review.md). In a downloaded kit these are
+   `README.md` and `swire_recovery_review.md` beside this file.
+3. Hardware work needs authorization for the actual target and current physical
+   setup. Reuse authorization and physical facts already established in the task;
+   do not repeat the operator's standing device-loss acknowledgement. Never infer
+   isolation, voltage, secure contacts or an unloaded socket from a device name.
+4. Before live HA/Zigbee2MQTT access, load the canonical
+   [Home Assistant read-only skill](https://github.com/analienx/config/blob/main/skills/home-assistant-readonly/SKILL.md).
+   Do not copy credentials or helpers into this repository.
+
+Repository builds, tests, lint, offline dry-run verification, packaging and source
+acceptance must run on GitHub-hosted Actions from the exact candidate SHA. Do not
+run them on the workstation or WSL. The commands below describe the separately
+authorized hardware procedure; they are not permission to run local repository
+verification or to flash a device merely because CI passed.
+
+## Locate the tool and discover its contract
+
+In a kit, work from its root and use `python telink_swire_recovery.py`. In a
+checkout, the script is `helper_scripts/telink_swire_recovery.py`. Port access
+needs Python 3.8+ and pyserial in the approved runtime environment. Firmware
+images and bundles come from the chosen exact-SHA hosted artifacts.
+
+Use `capabilities --json` to discover commands and exit codes. Use `ports --json`
+to identify the actual adapter, and `wiring --device PROFILE --json` for notes.
+`--json` never prompts; stdout contains one JSON response and progress goes to
+stderr. Argument failures also return JSON. Human `--help` is ordinary text.
+
+| Profile | Allowed input |
+| --- | --- |
+| `bseed-ts011f` | PM/non-PM Router/Client finalized OTA with matching manifest and role-matrix evidence |
+| `gledopto-gl-sd-301p` | Exact pinned vendor stock image; custom builds remain quarantined |
+| `bseed-ts011f-pm-r19-recovery` | Exact pinned historical PM Router r19 incident fallback only |
+| `generic-tlsr8258` | Other explicitly qualified TLSR8258 512 KiB layouts with an input SHA pin; cannot bypass BSEED/Gledopto gates |
+
+Never flash `forward.bin`, an OTA container directly, a full-chip dump, a FORCE
+wrapper or a guessed board/role. Use the finalized image admitted by `prepare`
+or the prebuilt kit's validated bundle.
+
+## Choose the recovery route
+
+- **Verified in-place restore:** use a qualified bidirectional circuit to obtain
+  matching full double reads. `inspect` compares both slots with known original
+  firmware references. Use its `replaceSlot` only after the expected incident
+  pattern passes. Supplying a baseline requires the selected unique enabled slot,
+  `--full-slot`, staged verification, held activation and final verification.
+- **TX-only restore:** reading is optional only where the device handover permits
+  that route. Select it explicitly without a baseline. The default target is A;
+  B requires a matching baseline proving A is disabled. Transmission remains
+  unverified. A UART loopback does not establish bidirectional SWire capability.
+
+Do not guess Table Left's slot from the OTA history. Its handover requires the
+exact r21-enabled/r19-disabled readback pattern before replacing r21 in place.
+Unexpected markers, mismatched references, corruption or ambiguous slots mean stop.
+
+## Agent execution sequence
+
+1. Run `plan --bundle BUNDLE --slot SLOT --full-slot --json` for the chosen area.
+   Read numeric write/preserved ranges and `confirmationTokens` from that result.
+   Do not infer addresses or tokens from a filename or firmware version.
+2. Use a private `--session PATH`, a stable `--operation-id`, and the independently
+   confirmed `--target-id` for each new JSON write session. Keep the same physical
+   board attached. TX-only cannot electronically identify it.
+3. For verified recovery: `stage` with the original `--baseline`, then a new
+   no-reset full `read`, then `verify --session PATH --dump FILE --staged --json`.
+4. Only after phase `VERIFIED`, use `activate --session PATH --operation-id ID
+   --hold --confirm TOKEN --json`. Activation reasserts HALT without requesting a
+   software reset. The verified route requires `--hold`.
+5. Take a new no-reset full read and run `verify --session PATH --dump FILE
+   --json`. `ACTIVATED_VERIFIED` proves bytes, not boot. Follow the incident's
+   controlled low-voltage bench start, reassembly and independent Zigbee checks.
+6. For an expressly selected TX-only route, `flash` may combine stage/activation
+   without a baseline. Its result is `SENT_UNVERIFIED`, never hardware acceptance.
+
+Use the exact command examples in the operator guide. Placeholder targets, ports,
+paths and tokens must be replaced with established task facts. Keep dumps,
+sessions, logs and profiles private and outside Git. The default state directory
+is `~/.telink-swire`; no background service is required.
+
+## Resume safely
+
+- Poll `status --session PATH --json` for phase, progress and `nextActions`.
+  `status --port PORT --json` shows shared ownership and lock state.
+- After a lost response, repeat the **same session, operation ID and arguments**.
+  A completed operation returns `replayed: true` without opening hardware.
+  Do not invent a new operation ID to force the same write through.
+- An interrupted write or failed verification blocks activation. Take a fresh
+  no-reset full double read, inspect its actual marker, and use `reconcile` to
+  compare the complete staged or activated image and preserved regions. It does
+  not write. An old successful read cannot override a newer failed verification.
+- `read --halt`, adapter loopback selftests and power-cycle activation are not
+  part of a held recovery. Do not reset or reconnect the board between staged
+  verification and activation. Stop on lost contact or uncertain power state.
+- Never delete state files or change workdirs/session paths to bypass a stop.
+  `close` requires an assessed reason and the token returned by status. It records
+  a stop, changes no hardware and does not prove recovery. A fallback uses a new
+  session after that decision and any incident-required fresh backup.
+- A stale process lock requires explicit `unlock` with its nonce and a dead owner.
+  Unlock preserves evidence and does not reconcile hardware. Never kill an
+  unrelated process or remove a live owner's lock to continue.
+
+## Interpret results and finish
+
+Inspect `status`, `errorCode`, `details`, `retrySafe` and `sideEffectsPossible`.
+Exit 0 means completion at the stated proof level. Exit 2 is an argument/read/
+precondition failure; exit 3 means uncertain write; exit 130 means interruption.
+Preserve referenced private diagnostic files. Do not automatically repeat a write
+because an error is labelled retryable; completed-write replay is safe only with
+the exact same operation ID and request.
+
+Report the tool/image source SHA, exact target/profile/slot, private evidence
+locations and what was actually observed. Distinguish `SENT_UNVERIFIED`, matching
+flash bytes, and actual boot/relay/metering/network acceptance. Never infer boot
+from OTA 100%, an online flag, a marker or a passing model. Never erase all flash,
+factory reset, re-pair, toggle a load, publish OTA, retire a campaign lease or lift
+a firmware quarantine as an automatic consequence of this tool succeeding.

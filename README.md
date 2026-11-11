@@ -23,6 +23,7 @@ Exact device identity. Independent relay control. PM telemetry. Router and mains
 | Install an accepted public Router image | [Zigbee2MQTT update guide](docs/updating.md) |
 | Understand the latest stability improvements | [2026-11-02 candidate release notes](docs/releases/2026-11-02-link-policy-candidates.md) |
 | Run a controlled canary | [Single-device OTA runner](docs/bseed_targeted_ota_runner.md) |
+| Recover a Telink device by wire with an agent | [SWire agent runbook](docs/flashing/swire/AGENTS.md) and [operator guide](docs/flashing/swire_recovery.md) |
 | Understand the firmware and release architecture | [Documentation hub](docs/README.md) |
 
 ## Firmware availability

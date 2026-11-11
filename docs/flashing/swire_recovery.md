@@ -1,5 +1,8 @@
 # Wired recovery over SWire
 
+Agents should start with the [SWire agent runbook](swire/AGENTS.md). Downloaded
+kits include it as root `AGENTS.md`, alongside this guide as `README.md`.
+
 Use this when a Telink TLSR8258 device no longer starts or cannot take an OTA
 update. It rewrites one selected image slot with a USB-UART adapter (A by default). The writer leaves the Zigbee network record, IEEE address, factory calibration
 and saved energy outside its write range. Rejoining and retained-state compatibility
