@@ -32,7 +32,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install pytest
+      - run: python -m pip install pytest pyserial
       - run: python -m pytest --noconftest tests/test_telink_swire_recovery.py -v
 
   swire-tool:
@@ -52,8 +52,11 @@ jobs:
       - name: Prove exact candidate head
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
 
-      - name: Install pytest
-        run: sudo apt-get update && sudo apt-get install -y python3-pytest
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python-only diagnostic dependencies
+        run: python -m pip install pytest pyserial
 
       - name: Run the tool against the chip and flash model
         run: python3 -m pytest --noconftest tests/test_telink_swire_recovery.py -v
@@ -62,6 +65,26 @@ jobs:
         run: |
           curl --fail --location -o "$RUNNER_TEMP/reader.py" https://raw.githubusercontent.com/pvvx/TlsrComSwireWriter/042613b1b47a1598856b0ff3e8a133f2918798a5/TLSR825xComFlasher.py
           echo "2ea1b7c5266821e5d384a263daa7916bb4020fcdfb8f1ec0bed5842dcb94ca18  $RUNNER_TEMP/reader.py" | sha256sum --check
+
+      - name: Match diagnostic read frames and sampling against the pinned upstream implementation
+        run: |
+          python - "$RUNNER_TEMP/reader.py" <<'EOF'
+          import importlib.util, sys
+          sys.path.insert(0, 'helper_scripts')
+          import telink_swire_recovery as tool
+          spec = importlib.util.spec_from_file_location('pinned_pvvx', sys.argv[1])
+          reference = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(reference)
+          for address in (0xB2, 0x602, 0x0C):
+              if tool.diagnostic_read_header(address) != bytes(reference.sws_rd_addr(address)):
+                  sys.exit('Diagnostic read header differs from pvvx')
+          for value in range(256):
+              samples = bytes((0xFE & ~(0x20 if i == 0 else 0x10))
+                              if value & (1 << (7-i)) else 0xFE for i in range(8)) + b'\xfe'
+              if tool.diagnostic_decode(samples) != reference.sws_decode_blk(samples) or tool.diagnostic_decode(samples) != value:
+                  sys.exit('Diagnostic response decoder differs from pvvx')
+          print('Diagnostic read headers and all 256 response values match the pinned upstream implementation')
+          EOF
 
       - name: Prepare the GL-SD-301P stock OTA and match the Gledopto kit
         shell: bash

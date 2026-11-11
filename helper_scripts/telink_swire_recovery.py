@@ -16,6 +16,7 @@ Commands
   ports      list serial ports
   wiring     pads, checks and notes for a device (all devices without --device)
   selftest   loopback test of the adapter alone (TXD jumpered to RXD)
+  test-link  qualify a CP2102 resistor/RX junction, then actual target replies
   prepare    make a recovery bundle from a Zigbee OTA file or a finalized image
   plan       check a bundle and show what it writes and what was sent before
   flash      stage, then activate, in one run
@@ -101,7 +102,8 @@ STATE_ROOT = Path.home() / '.telink-swire'
 CHECKLIST = (
     'Board off mains; nothing mains-connected touches the board or the PC.',
     'Adapter in TTL mode; TXD idles at about 3.3 V (measured, not assumed).',
-    'TXD -> SWS, GND -> GND, 3V3 -> 3V3 (or a separate 3.3 V supply). RXD unconnected. Never +5V.',
+    'GND -> GND and approved 3V3 -> 3V3; never +5V. TX-only: TXD -> SWS, RXD unused. '
+    'Qualified bidirectional circuit: TXD through 1.2k to the shared RXD/SWS node.',
     'Every lead proven by a continuity test; clips hold on their own; nothing bridges neighbouring pads.',
 )
 GUIDE = 'docs/flashing/swire_recovery.md'
@@ -811,14 +813,27 @@ def describe(plan, *, slot='A', full_slot=False):
     return '\n'.join(lines)
 
 
-def wiring(device_id):
+def wiring(device_id, connection='tx-only'):
     device = DEVICES.get(device_id)
     if device is None:
         raise RecoveryError(f'unknown device {device_id!r}; use one of {", ".join(DEVICES)}')
     lines = [device['name'], '',
              'Connect (board off mains, everything unpowered while you measure):']
-    lines += [f'  {"TXD" if pad == "SWS" else pad:<4} -> {pad:<4} {where}' for pad, where in device['pads']]
-    lines += ['  RXD, RTS, DTR and +5V stay unconnected.', '',
+    lines += [f'  {("SWS node" if connection == "cp2102-single-sws" else "TXD") if pad == "SWS" else pad} -> {pad} {where}'
+              for pad, where in device['pads']]
+    if connection == 'cp2102-single-sws':
+        lines += ['', 'Bidirectional junction at the ADAPTER, not the target:',
+                  '  TXD --[1.2 kOhm]--+-- one lead -- SWS',
+                  '  RXD -------------+',
+                  '  3V3 -------------------------- 3V3',
+                  '  GND -------------------------- GND',
+                  'Exactly three target contacts: SWS, 3V3 and GND.',
+                  'Use a mechanically secure insulated junction; software cannot measure its contact or resistance.',
+                  'RTS, DTR, +5V, RS232 and RS485 stay unconnected.',
+                  'CP2102 RX LEDs/input loading can prevent target readback; a chip name is not qualification.']
+    else:
+        lines += ['  RXD, RTS, DTR and +5V stay unconnected.']
+    lines += ['',
               'Before you write:',
               '  1. Continuity: each lead to its pad, and no continuity between SWS, GND and 3V3.',
               '  2. Adapter in 3.3 V TTL mode. TXD idles at about 3.3 V against GND.',
@@ -1027,17 +1042,19 @@ def session_context(folder, plan, port, slot, full_slot, baseline, target_id):
             'verificationRequired': bool(baseline)}
 
 
-def open_port(port, timeout=0.5):
+def open_port(port, timeout=0.5, *, baud=UART_BAUD):
     if not re.fullmatch(r'(?:COM\d+|/dev/[A-Za-z0-9_./-]+)', port or '', re.IGNORECASE):
         raise RecoveryError('port must look like COM5 or /dev/ttyUSB0')
     try:
         import serial
     except ImportError as error:
         raise RecoveryError('pyserial is required: python -m pip install pyserial') from error
-    com = serial.Serial(port=port, baudrate=UART_BAUD, timeout=timeout, write_timeout=30,
+    com = serial.Serial(port=None, baudrate=baud, timeout=timeout, write_timeout=30,
                         rtscts=False, dsrdtr=False, xonxoff=False)
     com.rts = False
     com.dtr = False
+    com.port = port
+    com.open()
     return com
 
 
@@ -1047,7 +1064,9 @@ def selftest(com, seconds=3.0, chunk=512):
     Sends in small chunks and reads each back, so the driver's receive
     buffer never has to hold more than one chunk.
     """
-    pattern = swire_frame(0x0602, b'\x05') * 40 + bytes(range(256)) * 4
+    # Adapter only. Do not intentionally send a valid CPU-stop command as the
+    # old loopback pattern did. This still is not a target-safe test by itself.
+    pattern = bytes(v for v in range(256) if v != 0x80) * 8
     com.reset_input_buffer()
     echoed = b''
     deadline = time.monotonic() + seconds
@@ -1058,6 +1077,224 @@ def selftest(com, seconds=3.0, chunk=512):
         while len(echoed) < start + len(piece) and time.monotonic() < deadline:
             echoed += com.read(start + len(piece) - len(echoed))
     return echoed == pattern, len(echoed), len(pattern)
+
+
+def diagnostic_read_header(address):
+    """pvvx read-by-address header, without data start or stop words."""
+    header = bytearray(swire_frame(address, b'\0')[:50])
+    header[41] = 0x80  # read flag 0x80 instead of write flag 0x00
+    return bytes(header)
+
+
+def diagnostic_decode(word):
+    """pvvx response sampling at 460800/921600 baud (bit8mask=0x20)."""
+    if len(word) != 9 or word[8] & 0xFE != 0xFE:
+        raise RecoveryError('invalid SWire response word', code='SWIRE_FRAMING', retry_safe=False)
+    value = 0
+    for index in range(8):
+        value = (value << 1) | int(not (word[index] & (0x20 if index == 0 else 0x10)))
+    return value
+
+
+class SwireDiagnostic:
+    """Bounded bidirectional diagnostic; no reset, halt, flash unlock or write.
+
+    Only the SWS divider and read-side SPI/FIFO registers are writable. SPI
+    access additionally requires a fresh observed CPU stop value. All flash
+    addresses/lengths are fixed to the two 32-byte application-slot headers.
+    """
+    def __init__(self, port, baud, *, clock=time.monotonic, sleep=time.sleep, response_timeout=0.15):
+        self.port, self.baud, self.clock, self.sleep = port, baud, clock, sleep
+        self.response_timeout = response_timeout
+        self.deadline = clock() + 25
+        self.flash_access_safe = False
+        self.stats = {'uartBytesSent': 0, 'echoBytesVerified': 0, 'targetBytesDecoded': 0, 'dividerAttempts': 0}
+
+    def read_exact(self, size):
+        deadline = min(self.deadline, self.clock() + self.response_timeout)
+        result = bytearray()
+        while len(result) < size and self.clock() < deadline:
+            piece = self.port.read(size - len(result))
+            if len(piece) > size - len(result):
+                raise RecoveryError('unexpected extra serial data', code='UART_RESPONSE_LENGTH', retry_safe=False)
+            result.extend(piece)
+        if len(result) != size:
+            raise RecoveryError('missing or short serial response', code='SWIRE_RESPONSE_TIMEOUT', retry_safe=False,
+                                details={'expectedBytes': size, 'receivedBytes': len(result)})
+        return bytes(result)
+
+    def transmit(self, data):
+        if self.clock() >= self.deadline:
+            raise RecoveryError('SWire diagnostic deadline exceeded', code='LINK_TEST_TIMEOUT', retry_safe=False)
+        # pvvx keeps USB packets a multiple of ten UART bytes, at most 60.
+        for offset in range(0, len(data), 60):
+            piece = data[offset:offset + 60]
+            if self.port.write(piece) != len(piece):
+                raise RecoveryError('short UART write', code='UART_SHORT_WRITE', retry_safe=False)
+            self.port.flush()
+            self.stats['uartBytesSent'] += len(piece)
+
+    def echo(self, data):
+        self.transmit(data)
+        if self.read_exact(len(data)) != data:
+            raise RecoveryError('UART echo differs; check the RX junction, TTL mode and input loading',
+                                code='UART_ECHO_MISMATCH', retry_safe=False)
+        self.stats['echoBytesVerified'] += len(data)
+
+    def write_register(self, address, data):
+        data = bytes(data)
+        safe = address == 0xB2 and len(data) == 1 and 1 <= data[0] <= 127
+        if self.flash_access_safe:
+            safe |= address == 0xB3 and data in (b'\x80', b'\0')
+            safe |= address == 0x0D and data in (b'\0', b'\x0a', b'\x01')
+            safe |= (address == 0x0C and data in
+                     (b'\x03\x00\x00\x00\x00', b'\x03\x04\x00\x00\x00'))
+        if not safe:
+            raise RecoveryError('diagnostic register write is outside its read-only-flash allowlist',
+                                code='DIAGNOSTIC_WRITE_FORBIDDEN')
+        self.port.reset_input_buffer()
+        self.echo(swire_frame(address, data))
+
+    def read_register(self, address, size=1):
+        if not ((address in (0xB2, 0x602) and size == 1)
+                or (self.flash_access_safe and address == 0x0C and size == 32)):
+            raise RecoveryError('diagnostic register read is outside its allowlist', code='DIAGNOSTIC_READ_FORBIDDEN')
+        self.sleep(0.05)  # same settle interval as the pinned pvvx reader
+        self.port.reset_input_buffer()
+        self.echo(diagnostic_read_header(address))
+        result = bytearray()
+        try:
+            for _ in range(size):
+                self.transmit(b'\xfe')
+                result.append(diagnostic_decode(self.read_exact(9)))
+                self.stats['targetBytesDecoded'] += 1
+        finally:
+            self.sleep(0.01)
+            self.port.reset_input_buffer()
+            self.echo(b'\x80' * 9 + b'\xfe')  # terminate the SWire read; never a flash write
+        return bytes(result)
+
+    def find_divider(self):
+        low = round(16_000_000 * 2 / self.baud)
+        high = min(127, round(48_000_000 * 2 / self.baud))
+        for divider in range(low, high + 1):
+            self.stats['dividerAttempts'] += 1
+            self.write_register(0xB2, bytes([divider]))
+            try:
+                result = self.read_register(0xB2)
+            except RecoveryError as error:
+                if error.code in ('SWIRE_RESPONSE_TIMEOUT', 'SWIRE_FRAMING'):
+                    continue
+                raise
+            if result == bytes([divider]):
+                # Echo alone never supplies a nine-byte target response. Require
+                # repeated exact register values, not merely a received byte count.
+                for _ in range(2):
+                    if self.read_register(0xB2) != result:
+                        raise RecoveryError('unstable target register readback', code='UNSTABLE_SWIRE_READBACK', retry_safe=False)
+                return divider
+        raise RecoveryError('adapter echo is present but no consistent target SWire response was found',
+                            code='NO_SWIRE_TARGET_RESPONSE', retry_safe=False)
+
+    def flash_header(self, address):
+        if not self.flash_access_safe or address not in (0, 0x40000):
+            raise RecoveryError('header probe requires a halted CPU and a known application slot', code='DIAGNOSTIC_READ_FORBIDDEN')
+        if self.read_register(0x602)[0] != 0x05:
+            self.flash_access_safe = False
+            raise RecoveryError('CPU no longer reports halted; flash probe stopped', code='TARGET_STATE_CHANGED', retry_safe=False)
+        try:
+            self.write_register(0xB3, b'\x80')
+            self.write_register(0x0D, b'\0')
+            self.write_register(0x0C, bytes((0x03, address >> 16, (address >> 8) & 255, address & 255, 0)))
+            self.write_register(0x0D, b'\x0a')
+            return self.read_register(0x0C, 32)
+        finally:
+            self.write_register(0x0D, b'\x01')
+            self.write_register(0xB3, b'\0')
+
+
+def connection_spec(kind):
+    if kind == 'cp2102-single-sws':
+        return {'id': kind, 'adapter': 'CP2102 (operator-declared)', 'resistorNominalOhms': 1200,
+                'upstreamResistorRangeOhms': [1000, 1800], 'targetContacts': ['SWS', '3V3', 'GND'],
+                'junction': 'adapter-side: TXD through resistor to RXD and one SWS lead',
+                'unused': ['+5V', 'RTS', 'DTR', 'RS232', 'RS485'], 'electricallyVerified': False}
+    return {'id': 'tx-only', 'targetContacts': ['SWS', '3V3', 'GND'], 'rx': 'unused'}
+
+
+def test_link(port, output, *, phase, device=None, baud=921600, require_flash_read=False,
+              opener=None, probe_factory=SwireDiagnostic):
+    if phase not in ('adapter', 'target') or baud not in (460800, 921600):
+        raise RecoveryError('invalid link test phase or baud', code='INVALID_ARGUMENT')
+    if phase == 'target' and device not in DEVICES:
+        raise RecoveryError('target testing needs an explicit supported --device profile', code='INVALID_ARGUMENT')
+    if require_flash_read and phase != 'target':
+        raise RecoveryError('--require-flash-read is only valid for the target phase', code='INVALID_ARGUMENT')
+    if not re.fullmatch(r'(?:COM\d+|/dev/[A-Za-z0-9_./-]+)', port or '', re.IGNORECASE):
+        raise RecoveryError('invalid serial port', code='INVALID_ARGUMENT')
+    output = private_output(output)
+    if output.exists():
+        raise RecoveryError('diagnostic receipt already exists; choose a new path', code='EVIDENCE_EXISTS')
+    result = {'status': 'STARTED', 'phase': phase, 'port': port, 'baud': baud, 'deviceProfile': device,
+              'connection': connection_spec('cp2102-single-sws'), 'utc': utc_now().isoformat(),
+              'flashWriteAttempted': False, 'cpuResetRequested': False, 'cpuHaltRequested': False,
+              'volatileConfigurationMayHaveChanged': phase == 'target', 'flashWriteTested': False,
+              'targetReplyVerified': False, 'fullBackupVerified': False, 'bootVerified': False,
+              'receipt': str(output), 'electricalMeasurementsVerified': False}
+    with PortGuard(port):
+        authority = authority_path(port)
+        if phase == 'adapter' and authority.exists() and read_json(authority)['phase'] != 'CLOSED':
+            raise RecoveryError('adapter-only echo testing is forbidden during an active target session', code='INVALID_PHASE')
+        atomic_json(output, result)
+        probe = None
+        try:
+            with (opener or (lambda p: open_port(p, timeout=0.02, baud=baud)))(port) as com:
+                if phase == 'adapter':
+                    passed, received, sent = selftest(com)
+                    result.update(receivedBytes=received, sentBytes=sent)
+                    if not passed:
+                        raise RecoveryError('adapter junction echo test failed; target must remain disconnected', code='ADAPTER_ECHO_FAILED')
+                    result.update(status='ADAPTER_ECHO_OK', proofLevel='adapter-echo-only',
+                                  nextActions=['measure TTL/supply and qualify contacts', 'authorized target-phase test'])
+                else:
+                    probe = probe_factory(com, baud)
+                    result['divider'] = probe.find_divider()
+                    result['targetReplyVerified'] = True
+                    controls = [probe.read_register(0x602)[0] for _ in range(2)]
+                    if controls[0] != controls[1]:
+                        raise RecoveryError('CPU control reads are unstable', code='UNSTABLE_SWIRE_READBACK')
+                    stopped = controls[0] == 0x05
+                    result.update(cpuControl=controls[0], cpuObservedHalted=stopped,
+                                  status='SWIRE_RESPONSE_OK', proofLevel='target-register-readback')
+                    if not stopped:
+                        result.update(flashReadProbe='SKIPPED_CPU_NOT_HALTED',
+                                      nextActions=['qualified halt/entry procedure before flash reads; never automatic'])
+                        if require_flash_read:
+                            raise RecoveryError('target replies, but CPU is not halted; flash probe was not attempted', code='TARGET_NOT_HALTED')
+                    else:
+                        probe.flash_access_safe = True
+                        headers = []
+                        for name, address in SLOTS.items():
+                            first, second = probe.flash_header(address), probe.flash_header(address)
+                            if first != second:
+                                raise RecoveryError('repeated application-header reads differ', code='UNSTABLE_FLASH_READ')
+                            headers.append({'slot': name, 'bytes': 32, 'sha256': sha256(first),
+                                            'markerHex': first[8:12].hex(), 'erased': first == b'\xff' * 32})
+                        result.update(status='FLASH_READ_PROBE_OK', proofLevel='registers-and-small-flash-reads',
+                                      flashReadProbe='MATCHED_SLOT_HEADERS', headers=headers,
+                                      nextActions=['full matching double read before verified recovery'])
+                    result['statistics'] = probe.stats
+            return result
+        except BaseException as error:
+            result.update(status='LINK_TEST_FAILED', errorCode=getattr(error, 'code', 'LINK_TEST_IO_FAILED'), error=str(error))
+            raise RecoveryError(str(error), code=result['errorCode'], retry_safe=False,
+                                side_effects=phase == 'target', details={'receipt': str(output),
+                                'flashWriteAttempted': False, 'targetReplyVerified': result['targetReplyVerified']},
+                                exit_code=130 if isinstance(error, KeyboardInterrupt) else 2) from error
+        finally:
+            if probe is not None:
+                result['statistics'] = probe.stats
+            atomic_json(output, result)
 
 
 PHASES = {'stage': ('stage',), 'activate': ('activate',), 'flash': ('stage', 'activate')}
@@ -1578,6 +1815,14 @@ def build_parser():
     parser = AgentParser(description=__doc__, parents=[common], formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest='action', required=True)
     commands.add_parser('ports', parents=[common], help='list serial ports')
+    link = commands.add_parser('test-link', parents=[common], help='test adapter-side resistor/RX/SWS circuit without flashing')
+    link.add_argument('--port', required=True)
+    link.add_argument('--out', type=Path, required=True, help='new private diagnostic receipt outside Git')
+    link.add_argument('--phase', choices=['adapter', 'target'], required=True,
+                      help='adapter: target disconnected; target: real SWire responses, no reset/halt/flash write')
+    link.add_argument('--device', choices=sorted(DEVICES), help='required for target phase')
+    link.add_argument('--baud', type=int, choices=[460800, 921600], default=921600)
+    link.add_argument('--require-flash-read', action='store_true', help='fail if CPU is not already halted; never halt it automatically')
     commands.add_parser('capabilities', parents=[common], help='machine-readable interface and safety contract')
     status = commands.add_parser('status', parents=[common], help='read session or port state without opening hardware')
     status.add_argument('--port')
@@ -1613,6 +1858,7 @@ def build_parser():
     reconcile.set_defaults(bundle=None, baseline=None, slot=None, full_slot=None)
     wire = commands.add_parser('wiring', parents=[common], help='how to connect a device')
     wire.add_argument('--device', choices=sorted(DEVICES))
+    wire.add_argument('--connection', choices=['tx-only', 'cp2102-single-sws'], default='tx-only')
     test = commands.add_parser('selftest', parents=[common],
                                help='adapter loopback test, TXD jumpered to RXD, no device')
     test.add_argument('--port', required=True)
@@ -1686,10 +1932,13 @@ def main(argv=None):
         action = args.action
         interactive = not (as_json or getattr(args, 'non_interactive', False)) and sys.stdin.isatty()
         if action == 'capabilities':
-            result = {'status': 'OK', 'commands': ['prepare', 'plan', 'ports', 'wiring', 'selftest',
+            result = {'status': 'OK', 'commands': ['prepare', 'plan', 'ports', 'wiring', 'selftest', 'test-link',
                        'stage', 'read', 'inspect', 'verify', 'activate', 'flash', 'status', 'reconcile', 'close', 'unlock'],
                       'jsonNeverPrompts': True, 'idempotentWrites': 'same session + operation ID + exact request',
                       'readOptional': True, 'baselineRequiresVerification': True,
+                      'diagnostics': {'adapterEcho': 'not proof of target connection',
+                                      'targetProbe': 'register readback; small flash reads only if CPU is already halted',
+                                      'connection': connection_spec('cp2102-single-sws')},
                       'physicalTargetIdentification': 'operator-confirmed; TX-only cannot identify the chip',
                       'successfulWriteProof': 'SENT_UNVERIFIED', 'bootVerified': False,
                       'exitCodes': {'0': 'completed or safely replayed result; check status for proof level',
@@ -1714,6 +1963,10 @@ def main(argv=None):
             result = dict(status='CLOSED', **close_session(args.session, args.confirm, args.reason))
         elif action == 'unlock':
             result = unlock_port(args.port, args.confirm)
+        elif action == 'test-link':
+            result = test_link(args.port, args.out, phase=args.phase, device=args.device, baud=args.baud,
+                               require_flash_read=args.require_flash_read)
+            out(f'Link test: {result["status"]}; proof={result["proofLevel"]}; receipt={args.out}')
         elif action == 'inspect':
             result = inspect_slots(args.dump, args.reference, replace=args.replace, expect_other=args.expect_other)
             for slot in result['slots']:
@@ -1739,8 +1992,8 @@ def main(argv=None):
         elif action == 'wiring':
             ids = [args.device] if args.device else list(DEVICES)
             for device_id in ids:
-                out(wiring(device_id) if args.device else f'{device_id}: {DEVICES[device_id]["name"]}')
-            result = {'status': 'OK', 'devices': {i: DEVICES[i] for i in ids}}
+                out(wiring(device_id, args.connection) if args.device else f'{device_id}: {DEVICES[device_id]["name"]}')
+            result = {'status': 'OK', 'devices': {i: DEVICES[i] for i in ids}, 'connection': connection_spec(args.connection)}
         elif action == 'selftest':
             with PortGuard(args.port):
                 authority = authority_path(args.port)

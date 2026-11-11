@@ -1121,3 +1121,246 @@ def test_historical_rollback_rejects_unknown_ota_without_weakening_current_gate(
     source.write_bytes(make_ota(make_image()))
     with pytest.raises(RecoveryError, match='pinned original'):
         tool.prepare(source, tmp_path / 'bad-rollback', device='bseed-ts011f-pm-r19-recovery')
+
+
+class DiagnosticPort:
+    """Independent UART/SWire receive model, including self-echo and replies.
+
+    A bare TX/RX junction echoes only one byte for a read clock. A real target
+    extends that into nine UART samples. This distinction is essential here.
+    """
+    def __init__(self, *, target=True, cpu=5, corrupt_echo=False, changing_flash=False,
+                 changing_cpu=False, baud=921600, partial_response=False):
+        self.target, self.cpu, self.baud = target, cpu, baud
+        self.corrupt_echo, self.changing_flash = corrupt_echo, changing_flash
+        self.changing_cpu, self.partial_response = changing_cpu, partial_response
+        self.rx, self.words, self.packet = bytearray(), bytearray(), None
+        self.reading = None
+        self.divider = 0
+        self.writes, self.flash_reads = [], []
+        self.cpu_reads = 0
+        self.fifo, self.selected, self.auto_read = False, False, False
+        self.address, self.offset = 0, 0
+        self.flash = bytearray(b'\xff' * FLASH_SIZE)
+        for slot, base in tool.SLOTS.items():
+            self.flash[base:base + 32] = make_image(seed=1 if slot == 'A' else 2)[:32]
+
+    @staticmethod
+    def response_word(value):
+        result = bytearray()
+        for index in range(8):
+            mask = 0x20 if index == 0 else 0x10
+            result.append(0xFE & ~mask if value & (1 << (7 - index)) else 0xFE)
+        result.append(0xFE)
+        return bytes(result)
+
+    def value(self):
+        if self.reading == 0xB2:
+            return self.divider
+        if self.reading == 0x602:
+            self.cpu_reads += 1
+            return 0 if self.changing_cpu and self.cpu_reads > 2 else self.cpu
+        assert self.reading == 0x0C and self.fifo and self.selected and self.auto_read
+        value = self.flash[self.address + self.offset]
+        if self.changing_flash and self.offset == 0 and self.flash_reads.count(self.address) % 2 == 0:
+            value ^= 1
+        self.offset += 1
+        return value
+
+    def apply_write(self, address, data):
+        self.writes.append((address, data))
+        assert address not in (0x6F, 0x602), 'diagnostic must never reset or halt'
+        if address == 0xB2:
+            self.divider = data[0]
+        elif address == 0xB3:
+            self.fifo = data == b'\x80'
+        elif address == 0x0D:
+            self.selected = data != b'\x01'
+            self.auto_read = data == b'\x0a'
+        else:
+            assert address == 0x0C and self.fifo and self.selected and self.cpu == 5
+            assert len(data) == 5 and data[0] == 0x03 and data[-1] == 0, 'read command only'
+            self.address = int.from_bytes(data[1:4], 'big')
+            assert self.address in (0, 0x40000)
+            self.offset = 0
+            self.flash_reads.append(self.address)
+
+    def write(self, data):
+        data = bytes(data)
+        if data == b'\xfe' and self.reading is not None:
+            if self.target and self.divider == round(24_000_000 * 2 / self.baud):
+                word = self.response_word(self.value())
+                self.rx.extend(word[:4] if self.partial_response else word)
+            else:
+                self.rx.extend(data)  # bare echo is not a target reply
+            return len(data)
+        self.rx.extend(data if not self.corrupt_echo else bytes(b ^ 1 for b in data))
+        self.words.extend(data)
+        while len(self.words) >= 10:
+            word = bytes(self.words[:10])
+            del self.words[:10]
+            assert word[-1] == 0xFE and set(word) <= {0x80, 0xFE}
+            value = sum(1 << (7 - i) for i in range(8) if word[i + 1] == 0x80)
+            if word[0] == 0x80:
+                if value == 0xFF:
+                    if self.packet:
+                        address = int.from_bytes(bytes(self.packet[1:4]), 'big')
+                        assert self.packet[4] == 0
+                        self.apply_write(address, bytes(self.packet[5:]))
+                    self.packet, self.reading = None, None
+                else:
+                    assert value == 0x5A and self.packet is None
+                    self.packet = [value]
+            else:
+                assert self.packet is not None
+                self.packet.append(value)
+                if len(self.packet) == 5 and self.packet[4] == 0x80:
+                    self.reading = int.from_bytes(bytes(self.packet[1:4]), 'big')
+                    self.packet = None
+        return len(data)
+
+    def read(self, size):
+        result = bytes(self.rx[:size])
+        del self.rx[:size]
+        return result
+
+    def flush(self):
+        pass
+
+    def reset_input_buffer(self):
+        self.rx.clear()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        pass
+
+
+def quick_probe(port, baud):
+    return tool.SwireDiagnostic(port, baud, sleep=lambda _: None, response_timeout=0.0001)
+
+
+def test_diagnostic_decoder_for_every_byte():
+    for value in range(256):
+        assert tool.diagnostic_decode(DiagnosticPort.response_word(value)) == value
+    for word in (b'', b'\xfe' * 8, b'\xfe' * 8 + b'\x00'):
+        with pytest.raises(RecoveryError):
+            tool.diagnostic_decode(word)
+
+
+def test_resistor_junction_echo_does_not_qualify_target(tmp_path):
+    class ContextLoopback(Loopback):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+    echo = ContextLoopback()
+    result = tool.test_link('COM5', tmp_path / 'adapter.json', phase='adapter', opener=lambda _: echo)
+    assert result['status'] == 'ADAPTER_ECHO_OK' and not result['targetReplyVerified']
+    assert not result['fullBackupVerified'] and not result['electricalMeasurementsVerified']
+    assert result['connection']['targetContacts'] == ['SWS', '3V3', 'GND']
+    bare_echo = DiagnosticPort(target=False)
+    with pytest.raises(RecoveryError) as error:
+        tool.test_link('COM5', tmp_path / 'target.json', phase='target', device='gledopto-gl-sd-301p',
+                       opener=lambda _: bare_echo, probe_factory=quick_probe)
+    assert error.value.code == 'NO_SWIRE_TARGET_RESPONSE'
+    receipt = tool.read_json(tmp_path / 'target.json')
+    assert not receipt['targetReplyVerified'] and not bare_echo.flash_reads
+
+
+@pytest.mark.parametrize('device', ['bseed-ts011f', 'gledopto-gl-sd-301p'])
+@pytest.mark.parametrize('baud', [460800, 921600])
+def test_single_sws_target_and_flash_probe_without_flash_writes(tmp_path, device, baud):
+    port = DiagnosticPort(baud=baud)
+    before = bytes(port.flash)
+    result = tool.test_link('COM5', tmp_path / 'probe.json', phase='target', device=device, baud=baud,
+                            opener=lambda _: port, probe_factory=quick_probe, require_flash_read=True)
+    assert result['status'] == 'FLASH_READ_PROBE_OK' and result['targetReplyVerified']
+    assert not result['flashWriteAttempted'] and not result['flashWriteTested']
+    assert not result['cpuResetRequested'] and not result['cpuHaltRequested']
+    assert not result['fullBackupVerified'] and not result['bootVerified']
+    assert [h['slot'] for h in result['headers']] == ['A', 'B']
+    assert port.flash_reads == [0, 0, 0x40000, 0x40000]
+    assert bytes(port.flash) == before
+
+
+@pytest.mark.parametrize('cpu', [0, 0xFF, 7])
+def test_running_or_unknown_cpu_never_touches_flash_controller(tmp_path, cpu):
+    port = DiagnosticPort(cpu=cpu)
+    result = tool.test_link('COM5', tmp_path / 'registers.json', phase='target', device='bseed-ts011f',
+                            opener=lambda _: port, probe_factory=quick_probe)
+    assert result['status'] == 'SWIRE_RESPONSE_OK' and not result['cpuObservedHalted']
+    assert not port.flash_reads and all(address == 0xB2 for address, _ in port.writes)
+    with pytest.raises(RecoveryError) as error:
+        tool.test_link('COM5', tmp_path / 'strict.json', phase='target', device='bseed-ts011f',
+                       opener=lambda _: port, probe_factory=quick_probe, require_flash_read=True)
+    assert error.value.code == 'TARGET_NOT_HALTED'
+
+
+@pytest.mark.parametrize('fault,code', [('corrupt_echo', 'UART_ECHO_MISMATCH'),
+                                      ('changing_flash', 'UNSTABLE_FLASH_READ'),
+                                      ('changing_cpu', 'TARGET_STATE_CHANGED'),
+                                      ('partial_response', 'NO_SWIRE_TARGET_RESPONSE')])
+def test_probe_stops_on_bad_feedback(tmp_path, fault, code):
+    port = DiagnosticPort(**{fault: True})
+    with pytest.raises(RecoveryError) as error:
+        tool.test_link('COM5', tmp_path / 'fault.json', phase='target', device='bseed-ts011f',
+                       opener=lambda _: port, probe_factory=quick_probe)
+    assert error.value.code == code
+    assert tool.read_json(tmp_path / 'fault.json')['status'] == 'LINK_TEST_FAILED'
+    assert all(address not in (0x602, 0x6F) for address, _ in port.writes)
+
+
+def test_diagnostic_write_allowlist_cannot_program_flash_or_reset_cpu():
+    probe = quick_probe(DiagnosticPort(), 921600)
+    for safe in (False, True):
+        probe.flash_access_safe = safe
+        for address, data in [(0x602, b'\x05'), (0x6F, b'\x20'), (0x0C, b'\x06'),
+                              (0x0C, b'\x02\0\0\0\xff'), (0x0C, b'\x20\0\0\0'),
+                              (0x0C, b'\x60'), (0x0C, b'\x01\x00'), (0x40000, b'\0')]:
+            with pytest.raises(RecoveryError):
+                probe.write_register(address, data)
+
+
+def test_link_cli_validation_and_wiring_json(tmp_path, capsys):
+    assert tool.main(['test-link', '--phase', 'target', '--port', 'COM5', '--out', str(tmp_path / 'no-device'), '--json']) == 2
+    assert json.loads(capsys.readouterr().out)['errorCode'] == 'INVALID_ARGUMENT'
+    assert tool.main(['wiring', '--device', 'gledopto-gl-sd-301p', '--connection', 'cp2102-single-sws', '--json']) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result['connection']['resistorNominalOhms'] == 1200
+    assert len(result['connection']['targetContacts']) == 3
+
+
+def test_adapter_phase_cannot_run_against_active_recovery_session(tmp_path):
+    kit, _, session, options, token = agent_fixture(tmp_path)
+    tool.run_write('stage', kit, 'COM5', token('stage'), **options)
+    with pytest.raises(RecoveryError, match='adapter-only'):
+        tool.test_link('COM5', tmp_path / 'not-opened', phase='adapter', opener=lambda _: pytest.fail('must not open'))
+    assert not (tmp_path / 'not-opened').exists()
+
+
+def test_diagnostic_receipt_cannot_overwrite_previous_evidence(tmp_path):
+    output = tmp_path / 'existing.json'
+    output.write_text('retained evidence')
+    with pytest.raises(RecoveryError) as error:
+        tool.test_link('COM5', output, phase='target', device='bseed-ts011f',
+                       opener=lambda _: pytest.fail('must not open'))
+    assert error.value.code == 'EVIDENCE_EXISTS'
+    assert output.read_text() == 'retained evidence'
+
+
+def test_serial_control_lines_are_configured_before_open(monkeypatch):
+    import types
+    observed = {}
+    class DeferredPort:
+        def __init__(self, **kwargs):
+            assert kwargs['port'] is None
+            self.__dict__.update(kwargs)
+
+        def open(self):
+            observed.update(port=self.port, rts=self.rts, dtr=self.dtr, baud=self.baudrate)
+    monkeypatch.setitem(sys.modules, 'serial', types.SimpleNamespace(Serial=DeferredPort))
+    tool.open_port('COM5', baud=921600)
+    assert observed == {'port': 'COM5', 'rts': False, 'dtr': False, 'baud': 921600}

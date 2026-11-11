@@ -81,10 +81,10 @@ With nothing connected to the device:
    this. Leave `232T`, `232R`, `A` and `B` unconnected.
 2. `python telink_swire_recovery.py ports` lists the serial ports. Note
    the adapter's port, for example `COM5`.
-3. Put a jumper between TXD and RXD, then run
+3. For a conventional adapter-only loopback, put a jumper between TXD and RXD, then run
    `python telink_swire_recovery.py selftest --port COM5`. It must print
    `PASS`. This checks the driver and the 460800 baud rate, nothing more.
-4. Remove the jumper. Measure TXD against GND: it should idle at about
+4. Remove that direct jumper before connecting a target. For the resistor-junction circuit below, use its existing resistor/RX path instead of adding a bypass jumper. Measure TXD against GND: it should idle at about
    3.3 V. If it reads 5 V or swings negative, stop: the adapter is not in
    3.3 V TTL mode.
 
@@ -522,3 +522,100 @@ The run must belong to the pinned historical source commit, and both container
 and native hashes must match. That optional validation does not make routine
 future tests depend on an expiring Actions artifact. Retain the operator's
 original private fallback image and provenance outside Git.
+
+
+## Test the CP2102 circuit with one SWS contact
+
+The adapter-side junction below uses one lead and one hook on SWS, plus the
+3V3 and GND contacts. It does not require two hooks on the target's SWS pad:
+
+```text
+CP2102
+TXD --[1.2 kOhm]--+
+                  +------ one lead ------ SWS
+RXD --------------+
+3V3 ------------------------------------ 3V3
+GND ------------------------------------ GND
+```
+
+Keep RTS, DTR, +5V and the RS232/RS485 outputs disconnected. The supply must be
+the already qualified isolated 3.3 V source for the actual board. Join the two
+branches at the adapter using a secure insulated connection suitable for the
+actual thin conductors. The software cannot measure clamping, resistance,
+continuity, voltage or isolation. The resistor value in its report is nominal,
+not a measurement.
+
+The [pinned upstream schematic](https://github.com/pvvx/TlsrComSwireWriter/blob/042613b1b47a1598856b0ff3e8a133f2918798a5/schematicc.gif)
+shows 1–1.8 kOhm; 1.2 kOhm is within that reference range. This is a topology,
+not a guarantee for every adapter revision. The upstream
+[CP2102 discussion](https://github.com/pvvx/TlsrComSwireWriter/issues/3) describes
+RX LED/resistor loading that can prevent operation. Do not change hardware
+components or substitute a resistor merely because an echo test passed.
+
+Print the device-specific logical wiring:
+
+```text
+python telink_swire_recovery.py wiring --device gledopto-gl-sd-301p --connection cp2102-single-sws --json
+python telink_swire_recovery.py wiring --device bseed-ts011f --connection cp2102-single-sws --json
+```
+
+### 1. Test only the adapter-side junction
+
+Leave the SWS lead disconnected from the target. Keep the resistor/RX junction
+assembled, without a direct TXD-to-RXD jumper that would bypass the resistor:
+
+```text
+python telink_swire_recovery.py test-link --phase adapter --port COM5 --out C:/private/recovery/adapter-921600.json --json
+python telink_swire_recovery.py test-link --phase adapter --port COM5 --baud 460800 --out C:/private/recovery/adapter-460800.json --json
+```
+
+`ADAPTER_ECHO_OK` checks UART transport and echo through that junction at the
+selected baud. It proves neither a target response nor the electrical suitability
+of the circuit under target loading. Adapter-only testing is refused during an
+active device recovery session. Do not run it against a connected target.
+
+### 2. Test actual target replies
+
+After the authorized physical setup is qualified, connect the single SWS lead
+and the qualified supply/ground. Select the actual device profile:
+
+```text
+python telink_swire_recovery.py test-link --phase target --device gledopto-gl-sd-301p --port COM5 --out C:/private/recovery/target-link.json --json
+```
+
+Use `--device bseed-ts011f` for BSEED. The target test verifies every UART echo,
+searches the bounded pvvx SWS divider range, and requires three consistent register
+readbacks plus repeated CPU-control reads. A bare loopback, truncated response or
+bad framing cannot count as a target reply. `--baud 460800` is available as an
+explicit alternative; not every clock/divider combination supports that rate.
+
+It never requests reset or CPU halt. It writes only volatile SWS configuration;
+flash-controller access is allowed only when the CPU control register is exactly
+the expected halted value `0x05`. That value is checked again before each probe
+read. The only flash command the diagnostic allows is `0x03` READ, at the two
+application-slot starts. It reads 32 bytes from each slot twice and compares them.
+No flash unlock, erase, program, status write or boot-marker write is exposed.
+
+| Status | Established evidence |
+| --- | --- |
+| `ADAPTER_ECHO_OK` | Adapter/junction UART echo only; target reply remains unverified |
+| `SWIRE_RESPONSE_OK` | Actual repeated target register readback; flash read was skipped because CPU is not known halted |
+| `FLASH_READ_PROBE_OK` | Target register responses plus matching small header reads from both slots |
+| `LINK_TEST_FAILED` | Retained failure receipt; stop and diagnose the reported stage |
+
+Add `--require-flash-read` if a skipped flash probe must be treated as a failure.
+It reports `TARGET_NOT_HALTED` rather than halting the device automatically. Any
+halt/entry procedure is a separate authorized operation from the incident guide.
+Do not force a reset during a held recovery to make this diagnostic pass.
+
+The report identifies the selected nominal connection and three target contacts,
+not an electrically measured adapter revision. It records no reset/halt request,
+no flash write attempt and `fullBackupVerified: false`, `bootVerified: false`.
+A small header probe never replaces the full matching double read needed for
+in-place recovery, verifies no complete image CRC, and never advances a recovery
+session or authorizes activation. The TX-only writer may leave RX connected at a
+previously qualified resistor junction; it still cannot receive flash-write ACKs.
+
+Receipts must be new private files outside Git. The shared port lock prevents
+concurrent serial operations. A failed test never auto-retries a flash, changes
+power, retires a session/campaign lock or modifies the saved firmware image.

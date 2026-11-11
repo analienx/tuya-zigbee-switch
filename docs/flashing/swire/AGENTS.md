@@ -34,6 +34,13 @@ images and bundles come from the chosen exact-SHA hosted artifacts.
 
 Use `capabilities --json` to discover commands and exit codes. Use `ports --json`
 to identify the actual adapter, and `wiring --device PROFILE --json` for notes.
+For the adapter-side TX-resistor/RX junction with one SWS hook, select
+`wiring --connection cp2102-single-sws --device PROFILE --json`.
+Run `test-link --phase adapter` only with the target disconnected; after physical
+qualification, `test-link --phase target --device PROFILE` requires real target
+replies. Echo alone is never proof of SWire readback. The diagnostic neither
+resets nor halts the CPU and probes flash only when its control register reports
+exactly `0x05`. Its small reads do not replace a full backup or advance a session.
 `--json` never prompts; stdout contains one JSON response and progress goes to
 stderr. Argument failures also return JSON. Human `--help` is ordinary text.
 
