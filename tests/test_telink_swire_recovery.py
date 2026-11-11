@@ -1095,3 +1095,29 @@ def test_long_read_workflow_uses_fresh_verification_not_old_transmission_time(tm
     assert tool.read_json(session)['updatedUtc'] == verified_time
     tool.run_write('activate', kit, 'COM5', token('activate'), operation_id='activate-1', hold=True, **options)
     assert tool.read_json(session)['phase'] == 'HELD'
+
+
+def test_historical_rollback_accepts_only_its_exact_finalized_payload(tmp_path, monkeypatch):
+    image = make_image(version=0x12053021, seed=19)
+    ota = make_ota(image)
+    pin = dict(tool.R19_RECOVERY, sha256=tool.sha256(image), bytes=len(image), otaSha256=tool.sha256(ota))
+    monkeypatch.setitem(tool.DEVICES['bseed-ts011f-pm-r19-recovery'], 'historicalRecovery', pin)
+    source = tmp_path / 'r19.bin'
+    source.write_bytes(image)
+    plan = tool.prepare(out=tmp_path / 'rollback', device='bseed-ts011f-pm-r19-recovery', image_path=source)
+    assert plan['label'] == '1.2.5-bseedr19'
+    assert plan['source']['historicalRecovery'] == pin
+    assert tool.load_bundle(tmp_path / 'rollback')[1] == image
+    # The ordinary BSEED path still requires current exact-SHA matrix evidence.
+    with pytest.raises(RecoveryError, match='CI evidence'):
+        tool.prepare(out=tmp_path / 'ordinary', device='bseed-ts011f', image_path=source)
+    source.write_bytes(make_image(version=0x12053021, seed=20))
+    with pytest.raises(RecoveryError, match='exact pinned'):
+        tool.prepare(out=tmp_path / 'wrong', device='bseed-ts011f-pm-r19-recovery', image_path=source)
+
+
+def test_historical_rollback_rejects_unknown_ota_without_weakening_current_gate(tmp_path):
+    source = tmp_path / 'not-r19.ota'
+    source.write_bytes(make_ota(make_image()))
+    with pytest.raises(RecoveryError, match='pinned original'):
+        tool.prepare(source, tmp_path / 'bad-rollback', device='bseed-ts011f-pm-r19-recovery')

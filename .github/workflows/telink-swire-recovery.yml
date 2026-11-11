@@ -2,6 +2,11 @@ name: Telink SWire recovery tool
 
 on:
   workflow_dispatch:
+    inputs:
+      r19_artifact_run:
+        description: 'Optional original r19 PM matrix run to validate the historical rollback bytes'
+        required: false
+        default: ''
   push:
     paths:
       - 'helper_scripts/telink_swire_recovery.py'
@@ -15,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   windows-agent-contract:
@@ -78,6 +84,29 @@ jobs:
           cp helper_scripts/telink_swire_recovery.py "$RUNNER_TEMP/gledopto-kit/"
           sed "s|(\.\./\.\./|(https://github.com/analienx/tuya-zigbee-switch/blob/$(git rev-parse HEAD)/|g" docs/flashing/swire_recovery.md > "$RUNNER_TEMP/gledopto-kit/README.md"
           cp docs/flashing/swire_recovery_review.md "$RUNNER_TEMP/gledopto-kit/"
+      - name: Validate the original hosted r19 rollback artifact when requested
+        if: github.event_name == 'workflow_dispatch' && inputs.r19_artifact_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          R19_RUN: ${{ inputs.r19_artifact_run }}
+        run: |
+          set -euo pipefail
+          [[ "$R19_RUN" =~ ^[0-9]+$ ]]
+          test "$(gh api repos/analienx/tuya-zigbee-switch/actions/runs/$R19_RUN --jq .head_sha)" = 1cc08a92d4dd68ff3607dc224f707c3e757d4ec8
+          gh run download "$R19_RUN" --repo analienx/tuya-zigbee-switch -n bseed-pm-role-matrix-1cc08a92d4dd68ff3607dc224f707c3e757d4ec8 -D "$RUNNER_TEMP/r19-original"
+          python3 - "$RUNNER_TEMP/r19-original" "$RUNNER_TEMP/r19-kit" <<'EOF'
+          import hashlib, pathlib, sys
+          sys.path.insert(0, 'helper_scripts')
+          import telink_swire_recovery as tool
+          matches = [p for p in pathlib.Path(sys.argv[1]).rglob('forward.ota')
+                     if hashlib.sha256(p.read_bytes()).hexdigest() == tool.R19_RECOVERY['otaSha256']]
+          if len(matches) != 1:
+              sys.exit('Original artifact does not contain exactly one pinned r19 OTA')
+          plan = tool.prepare(matches[0], pathlib.Path(sys.argv[2]), device='bseed-ts011f-pm-r19-recovery')
+          if plan['image']['sha256'] != tool.R19_RECOVERY['sha256']:
+              sys.exit('Native r19 rollback SHA mismatch')
+          print('Original hosted r19 finalized payload matches the pinned rollback profile')
+          EOF
       - uses: actions/upload-artifact@v4
         with:
           name: gledopto-stock-wired-kit-${{ github.event.pull_request.head.sha || github.sha }}

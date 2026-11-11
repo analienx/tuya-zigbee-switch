@@ -15,6 +15,7 @@ read, write, boot or electrical qualification is claimed by this record.
 | Reader diagnostics were discarded | Private bounded logs, exit codes and a pre-work read receipt | Reader failure, timeout, mismatch and short reads |
 | Board and role checks could disagree with native BSEED identity | Exact PM/non-PM and Router/Client tuple checks; guarded profiles cannot be bypassed via generic | All four native identities and mismatch rejection |
 | In-place slot choice could contradict the backup | Baseline must establish the selected unique enabled slot; full-slot erase is required | Wrong area and partial erase rejected before hardware |
+| Historical r19 fallback was blocked by the modern evidence format | Separate explicit rollback profile pinned to original container, native bytes, source and identity; current candidate gate stays strict | Exact legacy payload acceptance, wrong images rejected and optional original-hosted-artifact cross-check |
 | Optional readback was not integrated into activation eligibility | A supplied baseline requires session verification; activation additionally requires hold | Activation blocked before verification and after a failed verification |
 | An old successful read could undo a newer failure | Evidence must postdate the latest phase; exact completed verification can be safely replayed | Old-good/new-bad regression; verification replay |
 | Separate work directories could bypass a previous operation | Shared per-port authority plus immutable session context | Different/copy session cannot take ownership or write |

@@ -107,6 +107,14 @@ CHECKLIST = (
 GUIDE = 'docs/flashing/swire_recovery.md'
 
 GLEDOPTO_STOCK_COMMIT = '895567036301d25da68161358f96a37971488a08'
+R19_RECOVERY = {
+    'sha256': '3789b565a81a518c197c895809cf10a4480d50bacd821f65359c44141115fb8b',
+    'bytes': 209604, 'fileVersion': 0x12053021, 'manufacturerCode': 0x1141, 'imageType': 43556,
+    'build': '1.2.5-bseedr19', 'board': 'OUTLET_BSEED_PM_TS011F', 'role': 'Router',
+    'sourceCommit': '1cc08a92d4dd68ff3607dc224f707c3e757d4ec8',
+    'otaSha256': 'd17571a1d996ff798f1b6334cac1d799fbc1c6125a0212741aca89446053fc95',
+    'qualification': 'historical rollback only; not a current release or fleet acceptance',
+}
 DEVICES = {
     'bseed-ts011f': {
         'name': 'BSEED TS011F-BS / TS011F-BS-PM socket (Tuya ZTU module)',
@@ -161,6 +169,12 @@ DEVICES = {
         'pads': [('SWS', 'the TLSR8258 SWS/PA7 pin'), ('GND', 'ground'), ('3V3', 'the 3.3 V rail')],
         'notes': ['No device-specific checks. The flash layout must match the 512 KiB SDK layout.'],
     },
+}
+DEVICES['bseed-ts011f-pm-r19-recovery'] = {
+    **DEVICES['bseed-ts011f'], 'name': 'BSEED PM Router r19 historical wired rollback',
+    'requiresEvidence': False, 'historicalRecovery': R19_RECOVERY,
+    'notes': ['Only the exact finalized r19 payload from the original hosted build is admitted.',
+              'Use only as the deliberately selected incident fallback, then stop and record hardware evidence.'],
 }
 
 
@@ -330,6 +344,16 @@ def check_device(device_id, info, source):
         raise RecoveryError(f'unknown device {device_id!r}; use one of {", ".join(DEVICES)}')
     if device_id == 'generic-tlsr8258' and info['manufacturerCode'] in (0x1141, 0x124F):
         raise RecoveryError('recognized BSEED/Gledopto identity requires its guarded device profile')
+    historical = device.get('historicalRecovery')
+    if historical:
+        if any(info.get(k) != historical[k] for k in ('sha256', 'bytes', 'fileVersion', 'manufacturerCode', 'imageType')):
+            raise RecoveryError('historical rollback profile only accepts the exact pinned PM Router r19 image')
+        if source.get('historicalRecovery') != historical:
+            raise RecoveryError('historical rollback provenance is missing or changed')
+        manifest = source.get('manifest')
+        if manifest and any(manifest.get(k) != historical[v] for k, v in (
+                ('sourceCommit', 'sourceCommit'), ('board', 'board'), ('swBuildId', 'build'))):
+            raise RecoveryError('historical rollback manifest contradicts the pinned original source')
     codes = device.get('manufacturerCodes')
     if codes and info['manufacturerCode'] not in codes:
         raise RecoveryError(f'image is for manufacturer {info["manufacturerCode"]:#06x}, '
@@ -369,7 +393,8 @@ def image_label(device_id, info, source):
     images = DEVICES[device_id].get('images') or {}
     manifest, matrix = source.get('manifest') or {}, source.get('roleMatrix') or {}
     build = (source.get('buildManifest') or {}).get('DEV_IDENTITY')
-    return (images.get(info['sha256']) or manifest.get('swBuildId') or matrix.get('build') or build
+    return (images.get(info['sha256']) or (source.get('historicalRecovery') or {}).get('build')
+            or manifest.get('swBuildId') or matrix.get('build') or build
             or source.get('inputFile'))
 
 
@@ -647,6 +672,10 @@ def load_input(device_id, ota_path, image_path, expect_sha256, fetch):
         elif device.get('requiresEvidence'):
             raise RecoveryError(f'{device_id} images come as forward.ota with their CI evidence, '
                                 'not as a bare image')
+    if device.get('historicalRecovery'):
+        source['historicalRecovery'] = device['historicalRecovery']
+        if kind == 'ota' and digest != device['historicalRecovery']['otaSha256']:
+            raise RecoveryError('historical rollback OTA differs from its pinned original container')
     return image, info, source, data
 
 

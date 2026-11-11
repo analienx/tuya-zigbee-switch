@@ -486,3 +486,36 @@ advance a session; session verification requires fresh double-read evidence.
 
 The [logic and agent-interface review](swire_recovery_review.md) records the
 repaired findings, protocol invariants, regression coverage and physical limits.
+
+
+## Historical PM Router r19 incident fallback
+
+The current BSEED profile deliberately requires modern exact-SHA role-matrix
+boot/activation evidence. The previously running PM Router r19 predates that
+format. Its incident fallback has a separate explicit profile:
+
+```text
+python telink_swire_recovery.py prepare --device bseed-ts011f-pm-r19-recovery --image C:/private/images/r19-native.bin --out r19-return
+```
+
+Only the exact finalized 209,604-byte payload with SHA-256
+`3789b565a81a518c197c895809cf10a4480d50bacd821f65359c44141115fb8b`
+is admitted. The original native OTA is also accepted, pinned separately to
+`d17571a1d996ff798f1b6334cac1d799fbc1c6125a0212741aca89446053fc95`.
+The source is `1cc08a92d4dd68ff3607dc224f707c3e757d4ec8`, build
+`1.2.5-bseedr19`, PM Router only. `forward.bin`, other builds, roles, boards and
+wrappers are refused. No newer candidate may use this profile to bypass its
+normal matrix gate. This is an incident return image, not a new release or
+fleet qualification.
+
+If the incident procedure calls for r19 after a failed candidate bench start,
+preserve that evidence, explicitly stop the old session, obtain the required
+new matching backup, then use a new session for the selected fallback. There is
+no automatic downgrade, retry, re-pair, energy reset or OTA lock retirement.
+
+The SWire workflow can validate this profile against an original hosted PM
+matrix artifact using the optional `r19_artifact_run` workflow-dispatch input.
+The run must belong to the pinned historical source commit, and both container
+and native hashes must match. That optional validation does not make routine
+future tests depend on an expiring Actions artifact. Retain the operator's
+original private fallback image and provenance outside Git.
