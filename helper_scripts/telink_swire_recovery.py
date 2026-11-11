@@ -868,6 +868,47 @@ def default_session(port):
     return STATE_ROOT / 'sessions' / (port_key(port) + '.json')
 
 
+class MetadataGate:
+    """Short OS-owned lock serializing port-lock create/remove/unlock races.
+
+    The stable gate file is never deleted; the OS releases its lock on crash.
+    The separate long-lived JSON lock still requires explicit crash recovery.
+    """
+    def __init__(self, port):
+        self.path = STATE_ROOT / 'locks' / (port_key(port) + '.gate')
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.stream = self.path.open('a+b')
+        if self.stream.seek(0, 2) == 0:
+            self.stream.write(b'\0')
+            self.stream.flush()
+        self.stream.seek(0)
+        try:
+            if os.name == 'nt':
+                import msvcrt
+                msvcrt.locking(self.stream.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self.stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            self.stream.close()
+            raise RecoveryError('port metadata is busy; no hardware was opened', code='PORT_METADATA_BUSY') from error
+        return self
+
+    def __exit__(self, *_):
+        try:
+            self.stream.seek(0)
+            if os.name == 'nt':
+                import msvcrt
+                msvcrt.locking(self.stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self.stream.fileno(), fcntl.LOCK_UN)
+        finally:
+            self.stream.close()
+
+
 class PortGuard:
     """Cross-process exclusion. Crash residue is never silently discarded."""
     def __init__(self, port):
@@ -876,17 +917,25 @@ class PortGuard:
                       'utc': utc_now().isoformat()}
 
     def __enter__(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            with self.path.open('x', encoding='utf-8') as stream:
-                json.dump(self.owner, stream)
-        except FileExistsError as error:
-            raise RecoveryError('port has an active or abandoned tool lock; inspect status before unlocking',
-                                code='PORT_LOCKED', details={'lock': str(self.path)}, retry_safe=False) from error
+        with MetadataGate(self.owner['port']):
+            try:
+                with self.path.open('x', encoding='utf-8') as stream:
+                    json.dump(self.owner, stream)
+            except FileExistsError as error:
+                raise RecoveryError('port has an active or abandoned tool lock; inspect status before unlocking',
+                                    code='PORT_LOCKED', details={'lock': str(self.path)}, retry_safe=False) from error
         return self
 
     def __exit__(self, *_):
-        self.path.unlink(missing_ok=True)
+        try:
+            with MetadataGate(self.owner['port']):
+                if read_json(self.path) != self.owner:
+                    raise RecoveryError('port lock ownership changed; do not delete another owner lock', code='PORT_LOCKED')
+                self.path.unlink()
+        except (RecoveryError, OSError, ValueError) as error:
+            raise RecoveryError('port lock cleanup did not finish; inspect saved operation result before retrying',
+                                code='PORT_LOCKED', side_effects=True, retry_safe=False,
+                                details={'port': self.owner['port'], 'lock': str(self.path)}) from error
 
 
 def session_status(path):
@@ -1372,6 +1421,9 @@ def verify_session(path, dump, *, folder, staged, baseline, slot, full_slot, rec
     state = read_json(path)
     context = state['context']
     with PortGuard(context['port']):
+        owner = read_json(authority_path(context['port']))
+        if owner['session'] != str(Path(path).resolve()):
+            raise RecoveryError('another session owns this port; copied sessions cannot take ownership', code='SESSION_CONFLICT')
         # Re-read under the lock, so a concurrent operation cannot change phase.
         state = read_json(path)
         expected = (context['bundle'], context['slot'], context['fullSlot'], context['baseline'])
@@ -1467,13 +1519,14 @@ def process_alive(pid):
 
 def unlock_port(port, confirmation):
     path = STATE_ROOT / 'locks' / (port_key(port) + '.json')
-    owner = read_json(path)
-    if confirmation != 'UNLOCK-' + owner['nonce'] or process_alive(owner['pid']):
-        raise RecoveryError('unlock requires the exact lock token and a dead owner process', code='PORT_LOCKED')
-    # Preserve the abandoned lock. Session phase remains uncertain, so a new
-    # operation/session still cannot bypass readback reconciliation or close.
-    archive = path.with_name(path.stem + '.released-' + owner['nonce'])
-    path.rename(archive)
+    with MetadataGate(port):
+        owner = read_json(path)
+        if confirmation != 'UNLOCK-' + owner['nonce'] or process_alive(owner['pid']):
+            raise RecoveryError('unlock requires the exact lock token and a dead owner process', code='PORT_LOCKED')
+        # Serialize against new owners; never rename a replacement lock after
+        # another agent has already released the abandoned one.
+        archive = path.with_name(path.stem + '.released-' + owner['nonce'])
+        path.rename(archive)
     return {'status': 'LOCK_RELEASED', 'archive': str(archive), 'hardwareReconciled': False}
 
 

@@ -1056,3 +1056,25 @@ def test_in_place_mode_cannot_choose_other_slot_or_skip_full_erase(tmp_path):
     with pytest.raises(RecoveryError) as error:
         tool.run_write('stage', kit, 'COM5', token('stage'), **options)
     assert error.value.code == 'FULL_SLOT_REQUIRED'
+
+
+def test_metadata_gate_prevents_unlock_replacement_races(tmp_path):
+    with tool.MetadataGate('COM5'):
+        with pytest.raises(RecoveryError) as error:
+            with tool.PortGuard('COM5'):
+                pytest.fail('must not create another owner while metadata is locked')
+        assert error.value.code == 'PORT_METADATA_BUSY'
+    with tool.PortGuard('COM5'):
+        pass
+
+
+def test_copied_session_cannot_steal_port_during_verification(tmp_path):
+    kit, chip, session, options, token = agent_fixture(tmp_path)
+    tool.run_write('stage', kit, 'COM5', token('stage'), **options)
+    copy = tmp_path / 'copied-session.json'
+    copy.write_bytes(session.read_bytes())
+    readback = full_backup(tmp_path / 'readback', chip.flash)
+    with pytest.raises(RecoveryError) as error:
+        tool.verify_dump(kit, readback, staged=True, session=copy)
+    assert error.value.code == 'SESSION_CONFLICT'
+    assert tool.read_json(tool.authority_path('COM5'))['session'] == str(session)

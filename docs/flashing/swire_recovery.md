@@ -378,7 +378,7 @@ Human writes without `--session` use a private default session for that port.
 | `NEEDS_RECONCILIATION` / `VERIFICATION_FAILED` | fresh no-reset read, inspect, reconcile, or explicit stop |
 | `CLOSED` | new recovery session, after an assessed decision |
 
-Supplying a baseline requires verified recovery. The baseline must establish that
+Supplying a baseline requires verified recovery and `--hold` on activation. The baseline must establish that
 the selected slot is the unique enabled slot and must have no legacy layout markers.
 This prevents an agent from accidentally overwriting the other image after inspection.
 The complete selected slot is erased; the entire other slot and NVM are retained.
@@ -479,3 +479,7 @@ Errors include `errorCode`, `details`, `retrySafe`, `sideEffectsPossible` and
 repeating that exact operation ID. `SENT_UNVERIFIED`, `FLASH_MATCHED` and real boot
 acceptance are separate evidence levels. Standalone byte verification does not
 advance a session; session verification requires fresh double-read evidence.
+
+
+The [logic and agent-interface review](swire_recovery_review.md) records the
+repaired findings, protocol invariants, regression coverage and physical limits.
