@@ -2,9 +2,9 @@
 """Wired recovery of Telink TLSR8258 Zigbee devices with a USB-UART adapter.
 
 Writes a firmware image into slot A (0x00000) or B (0x40000) of a 512 KiB TLSR8258
-without a bootloader. Only the adapter's TXD drives the chip's SWS pin
-(pvvx's TX-only SWire method), so the chip never answers: this tool cannot
-confirm that flash changed. Success is the device starting afterwards.
+without a bootloader. The writer uses pvvx's TX-only SWire method and cannot
+receive acknowledgements. Optional bidirectional readback verifies flash bytes;
+real device boot and Zigbee operation still require independent evidence.
 
 Typical use
   wiring --device gledopto-gl-sd-301p          how to connect, step by step
@@ -22,14 +22,21 @@ Commands
   stage      erase the selected slot and write with its boot marker off
   inspect    identify both slots from a matching full double read
   activate   switch the boot marker on (one byte, no erase) and restart
+  read       optional matching double read with a bidirectional SWire circuit
+  verify     compare readback and advance a verified recovery session
+  status     inspect durable session progress without opening hardware
+  reconcile  resolve uncertain writes using a fresh no-reset double read
+  capabilities  discover the machine contract, proof levels and exit codes
 
 flash, stage and activate take --dry-run FILE to save the exact byte stream
 and an operation trace instead of opening a port. Every command takes --json
 for one machine-readable result object on stdout.
 
 Never written: the other slot, either NVM area, IEEE address or factory data.
-Default target is A; B requires a verified double-read baseline with A disabled. Needs pyserial for the commands
-that open a port: python -m pip install pyserial
+Default target is A; B requires a matching baseline with A disabled. Pyserial
+is needed for port access: python -m pip install pyserial. Read README.md in a
+downloaded kit, or docs/flashing/swire_recovery.md in a checkout, for the complete
+agent protocol and close/unlock procedures. No command infers physical readiness.
 """
 from __future__ import annotations
 

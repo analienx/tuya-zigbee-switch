@@ -76,7 +76,8 @@ jobs:
       - name: Package stock recovery tool and guide
         run: |
           cp helper_scripts/telink_swire_recovery.py "$RUNNER_TEMP/gledopto-kit/"
-          cp docs/flashing/swire_recovery.md "$RUNNER_TEMP/gledopto-kit/README.md"
+          sed "s|(\.\./\.\./|(https://github.com/analienx/tuya-zigbee-switch/blob/$(git rev-parse HEAD)/|g" docs/flashing/swire_recovery.md > "$RUNNER_TEMP/gledopto-kit/README.md"
+          cp docs/flashing/swire_recovery_review.md "$RUNNER_TEMP/gledopto-kit/"
       - uses: actions/upload-artifact@v4
         with:
           name: gledopto-stock-wired-kit-${{ github.event.pull_request.head.sha || github.sha }}
