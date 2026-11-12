@@ -49,6 +49,8 @@ flowchart LR
 
 - [Updating over Zigbee2MQTT](updating.md) — exact model check, index and recovery limits
 - [Targeted OTA runner](bseed_targeted_ota_runner.md) — a bounded, one-device campaign
+- [Wired recovery over SWire](flashing/swire_recovery.md) — rewrite a device that no longer starts, keeping its network record and calibration
+- [SWire agent runbook](flashing/swire/AGENTS.md) — tool discovery, firmware selection, JSON sessions, retries and evidence requirements; also included as `AGENTS.md` in every wired kit
 - [Published vs candidate firmware](bseed_socket_release_status.md) — the authoritative human-readable status page
 - [Known issues](known_issues.md) and [support](../SUPPORT.md)
 
