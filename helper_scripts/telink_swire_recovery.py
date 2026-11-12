@@ -17,6 +17,7 @@ Commands
   wiring     pads, checks and notes for a device (all devices without --device)
   selftest   loopback test of the adapter alone (TXD jumpered to RXD)
   test-link  qualify a CP2102 resistor/RX junction, then actual target replies
+  watch-link bounded target probing with USB reconnect waiting and error backoff
   fetch-reader  download/cache the pinned pvvx reader without accessing hardware
   prepare    make a recovery bundle from a Zigbee OTA file or a finalized image
   boards     find a tuya-zigbee-switch board (Avatto, Moes, ...) in the released OTA index
@@ -1427,7 +1428,8 @@ class SwireDiagnostic:
         self.flash_access_safe = False
         self.progress = lambda *_args, **_kwargs: None
         self.debug = False
-        self.stats = {'uartBytesSent': 0, 'echoBytesVerified': 0, 'targetBytesDecoded': 0, 'dividerAttempts': 0}
+        self.stats = {'uartBytesSent': 0, 'echoBytesVerified': 0, 'targetBytesDecoded': 0, 'dividerAttempts': 0,
+                      'targetReadTimeouts': 0, 'echoOnlyReads': 0, 'lastTargetResponse': None}
 
     def read_exact(self, size):
         deadline = min(self.deadline, self.clock() + self.response_timeout)
@@ -1482,15 +1484,29 @@ class SwireDiagnostic:
         self.port.reset_input_buffer()
         self.echo(diagnostic_read_header(address))
         result = bytearray()
+        serial_failed = False
         try:
             for _ in range(size):
                 self.transmit(b'\xfe')
-                result.append(diagnostic_decode(self.read_exact(9)))
+                try:
+                    samples = self.read_exact(9)
+                except RecoveryError as error:
+                    if error.code == 'SWIRE_RESPONSE_TIMEOUT':
+                        self.stats['targetReadTimeouts'] += 1
+                        self.stats['lastTargetResponse'] = dict(error.details)
+                        self.stats['echoOnlyReads'] += int(error.details.get('receivedBytes') == 1)
+                    raise
+                result.append(diagnostic_decode(samples))
                 self.stats['targetBytesDecoded'] += 1
+        except OSError:
+            serial_failed = True
+            self.stats['cleanupSkippedAfterSerialFailure'] = True
+            raise
         finally:
-            self.sleep(0.01)
-            self.port.reset_input_buffer()
-            self.echo(b'\x80' * 9 + b'\xfe')  # terminate the SWire read; never a flash write
+            if not serial_failed:
+                self.sleep(0.01)
+                self.port.reset_input_buffer()
+                self.echo(b'\x80' * 9 + b'\xfe')  # terminate the SWire read; never a flash write
         return bytes(result)
 
     def find_divider(self):
@@ -1509,8 +1525,12 @@ class SwireDiagnostic:
             except RecoveryError as error:
                 if error.code in ('SWIRE_RESPONSE_TIMEOUT', 'SWIRE_FRAMING'):
                     if self.debug:
-                        self.progress('divider-no-reply', f'Divider {divider}: {error.code}',
-                                      divider=divider, errorCode=error.code)
+                        counts = error.details
+                        received, expected = counts.get('receivedBytes'), counts.get('expectedBytes')
+                        detail = (f'; {received}/{expected} UART samples'
+                                  + (' (adapter echo only)' if received == 1 and expected == 9 else '')) if counts else ''
+                        self.progress('divider-no-reply', f'Divider {divider}: {error.code}{detail}',
+                                      divider=divider, errorCode=error.code, **counts)
                     continue
                 raise
             if result == bytes([divider]):
@@ -1600,9 +1620,11 @@ def test_link(port, output, *, phase, device=None, baud=921600, require_flash_re
         except FileExistsError as error:
             raise RecoveryError('diagnostic receipt already exists; choose a new path', code='EVIDENCE_EXISTS') from error
         probe = None
+        failure_stage = 'serial-open'
         try:
             progress('port-open', f'Opening {port}: {baud:,} baud, 8N1; phase={phase}', port=port, baud=baud)
             with (opener or (lambda p: open_port(p, timeout=0.02, baud=baud)))(port) as com:
+                failure_stage = 'serial-probe'
                 if phase == 'adapter':
                     metrics = result.setdefault('statistics', {})
                     (benchmark or benchmark_echo)(com, metrics, baud=baud, duration=duration if duration is not None else 5.0,
@@ -1647,7 +1669,13 @@ def test_link(port, output, *, phase, device=None, baud=921600, require_flash_re
                     result['statistics'] = probe.stats
             return result
         except BaseException as error:
-            result.update(status='LINK_TEST_FAILED', errorCode=getattr(error, 'code', 'LINK_TEST_IO_FAILED'), error=str(error))
+            code = getattr(error, 'code', None) or ('LINK_TEST_INTERRUPTED' if isinstance(error, KeyboardInterrupt) else (
+                ('SERIAL_OPEN_FAILED' if failure_stage == 'serial-open' else 'SERIAL_IO_FAILED')
+                if isinstance(error, OSError) else 'LINK_TEST_IO_FAILED'))
+            result.update(status='LINK_TEST_FAILED', errorCode=code, error=str(error), failureStage=failure_stage,
+                          errorDetails={'exceptionType': type(error).__name__,
+                                        'errno': getattr(error, 'errno', None), 'winerror': getattr(error, 'winerror', None),
+                                        **getattr(error, 'details', {})})
             progress('failure', f'{result["errorCode"]}: {error}', errorCode=result['errorCode'])
             raise RecoveryError(str(error), code=result['errorCode'], retry_safe=False,
                                 side_effects=phase == 'target', details={'receipt': str(output),
@@ -1665,6 +1693,141 @@ def test_link(port, output, *, phase, device=None, baud=921600, require_flash_re
                          f'{probe.stats["dividerAttempts"]} divider attempts; '
                          f'{result["elapsedSeconds"]:.2f} s total (diagnostic rate, not firmware speed)', **probe.stats)
             atomic_json(output, result)
+
+
+def adapter_identity(row):
+    """USB adapter identity, never proof of the attached Zigbee board."""
+    fields = {key: row.get(key) for key in ('vid', 'pid', 'serialNumber', 'location')}
+    if fields['vid'] is not None and fields['pid'] is not None and (fields['serialNumber'] or fields['location']):
+        return fields
+    return {'port': port_key(row['device']), 'hwid': row.get('hwid')}
+
+
+def watch_link(port, output, *, device, seconds=180, baud=921600, debug=False, out=None,
+               inventory=None, probe=None, clock=time.monotonic, sleep=time.sleep):
+    """Bounded target diagnostics with USB readiness checks and fault backoff.
+
+    No adapter-only patterns, reset/halt, full read, recovery write or unlock.
+    Each test_link retains its normal port lock and immutable private receipt.
+    """
+    if device not in DEVICES or not isinstance(seconds, int) or not 1 <= seconds <= 600 or baud not in (460800, 921600):
+        raise RecoveryError('watch needs a supported device, baud and 1..600 seconds', code='INVALID_ARGUMENT')
+    if not re.fullmatch(r'(?:COM\d+|/dev/[A-Za-z0-9_./-]+)', port or '', re.IGNORECASE):
+        raise RecoveryError('invalid serial port', code='INVALID_ARGUMENT')
+    output = private_output(output)
+    try:
+        output.mkdir(parents=True, exist_ok=False)
+    except FileExistsError as error:
+        raise RecoveryError('watch output directory must be new', code='EVIDENCE_EXISTS') from error
+    inventory, probe = inventory or list_ports, probe or test_link
+    started, bound, fault_streak, not_before = clock(), None, 0, 0.0
+    summary_path = output / 'summary.json'
+    result = {'status': 'WATCH_STARTED', 'requestedPort': port, 'port': port, 'deviceProfile': device,
+              'seconds': seconds, 'baud': baud, 'summary': str(summary_path), 'adapterIdentity': None,
+              'attempts': [], 'events': [], 'targetReplyVerified': False, 'flashWriteAttempted': False,
+              'cpuResetRequested': False, 'cpuHaltRequested': False, 'bootVerified': False,
+              'nextActions': ['wait for the selected USB adapter and qualified target setup']}
+    last_notice, last_notice_at = None, -10.0
+
+    def report(state, message, **details):
+        nonlocal last_notice, last_notice_at
+        elapsed = clock() - started
+        if state != last_notice or elapsed - last_notice_at >= 5:
+            result['events'].append({'state': state, 'elapsedSeconds': round(elapsed, 3), 'message': message, **details})
+            result['events'] = result['events'][-200:]
+            if out:
+                out(f'[{elapsed:6.1f}/{seconds}s] {message}')
+            last_notice, last_notice_at = state, elapsed
+        result['state'] = state
+        result['elapsedSeconds'] = round(elapsed, 3)
+        atomic_json(summary_path, result)
+
+    report('WAITING_FOR_USB', f'Waiting for {port}; target tests only, no reset/halt/flash. Ctrl+C stops.')
+    try:
+        while clock() - started < seconds:
+            rows = inventory()
+            if bound is None:
+                candidates = [row for row in rows if row.get('device') and port_key(row['device']) == port_key(port)]
+            else:
+                candidates = [row for row in rows if row.get('device') and adapter_identity(row) == bound]
+            if len(candidates) > 1:
+                result['status'] = 'WATCH_BLOCKED'
+                report('ADAPTER_AMBIGUOUS', 'Multiple ports match the selected adapter; no port will be opened.')
+                break
+            if not candidates:
+                report('WAITING_FOR_USB', 'Selected USB adapter is absent. Waiting for reconnect; no SWire traffic.')
+                sleep(min(1, max(0, seconds - (clock() - started))))
+                continue
+            selected = candidates[0]
+            if bound is None:
+                bound = adapter_identity(selected)
+                result['adapterIdentity'] = bound
+                report('ADAPTER_IDENTIFIED', f'Adapter identified on {selected["device"]}; identity refers to USB, not the target.')
+            result['port'] = selected['device']
+            if clock() < not_before:
+                report('WAITING_FOR_USB_READY' if fault_streak else 'WAITING_FOR_TARGET',
+                       'USB/driver failure: waiting before a bounded reopen. Reconnect the adapter if needed.'
+                       if fault_streak else 'Waiting briefly before the next target probe.',
+                       retryInSeconds=round(not_before - clock(), 1))
+                sleep(max(0, min(1, not_before - clock(), seconds - (clock() - started))))
+                continue
+            if clock() - started >= seconds:
+                continue
+            receipt = output / f'attempt-{len(result["attempts"]) + 1:03d}.json'
+            result['activeReceipt'] = str(receipt)
+            report('PROBING_TARGET', f'Target probe {len(result["attempts"]) + 1} on {result["port"]}; '
+                   f'{seconds - (clock() - started):.0f}s left. Current bounded probe may finish after the window.')
+            try:
+                attempt = probe(result['port'], receipt, phase='target', device=device, baud=baud,
+                                debug=debug, out=out)
+            except RecoveryError as error:
+                attempt = read_json(receipt) if receipt.exists() else {'errorCode': error.code, 'error': str(error)}
+                attempt.setdefault('errorCode', error.code)
+            entry = {key: attempt.get(key) for key in ('status', 'errorCode', 'error', 'failureStage', 'statistics')}
+            entry.update(receipt=str(receipt), port=result['port'])
+            result['attempts'].append(entry)
+            if attempt.get('status') in ('SWIRE_RESPONSE_OK', 'FLASH_READ_PROBE_OK') and attempt.get('targetReplyVerified'):
+                result.update(status='TARGET_REPLIES_VERIFIED', targetReplyVerified=True,
+                              proofLevel=attempt.get('proofLevel'), successfulReceipt=str(receipt),
+                              nextActions=attempt.get('nextActions', []))
+                report('TARGET_REPLIES_VERIFIED', 'Verified target replies found; watch stopped. Boot remains unverified.')
+                break
+            code = attempt.get('errorCode')
+            if code == 'LINK_TEST_INTERRUPTED':
+                result['status'] = 'WATCH_INTERRUPTED'
+                report('WATCH_INTERRUPTED', 'Stopped by operator; no further probe will start.')
+                break
+            if code in ('SERIAL_OPEN_FAILED', 'SERIAL_IO_FAILED'):
+                fault_streak += 1
+                not_before = clock() + min(10, 2 ** min(fault_streak, 4))
+                report('WAITING_FOR_USB_READY', 'USB/driver failed, not a SWire timing result. Waiting for recovery.',
+                       errorCode=code, retryInSeconds=not_before - clock())
+            elif code in ('NO_SWIRE_TARGET_RESPONSE', 'SWIRE_RESPONSE_TIMEOUT', 'SWIRE_FRAMING',
+                          'UART_ECHO_MISMATCH', 'UNSTABLE_SWIRE_READBACK', 'UNSTABLE_FLASH_READ', 'LINK_TEST_TIMEOUT'):
+                fault_streak, not_before = 0, clock() + 1
+                report('NO_VERIFIED_TARGET_REPLY', 'No verified target reply yet. Adapter echo does not prove SWS contact or SWire entry.',
+                       errorCode=code)
+            else:
+                result['status'] = 'WATCH_BLOCKED'
+                report('WATCH_BLOCKED', f'Probe stopped: {code or "unclassified failure"}. No automatic unlock or write.')
+                break
+        else:
+            result['status'] = 'WATCH_TIMEOUT'
+            result['nextActions'] = ['inspect private receipts and USB readiness',
+                                     'qualify SWS contact, supply and entry state; never automatically reset or flash']
+            report('WATCH_TIMEOUT', 'Retry window ended without verified target replies.')
+    except KeyboardInterrupt:
+        result['status'] = 'WATCH_INTERRUPTED'
+        report('WATCH_INTERRUPTED', 'Stopped by operator; inspect the last probe receipt before resuming.')
+    except Exception as error:
+        result.update(status='WATCH_FAILED', error=str(error))
+        report('WATCH_FAILED', f'Watch stopped: {error}; private evidence retained.')
+        raise RecoveryError(str(error), code='WATCH_FAILED', retry_safe=False,
+                            details={'summary': str(summary_path)}) from error
+    finally:
+        result['elapsedSeconds'] = round(clock() - started, 3)
+        atomic_json(summary_path, result)
+    return result
 
 
 PHASES = {'stage': ('stage',), 'activate': ('activate',), 'flash': ('stage', 'activate')}
@@ -1844,7 +2007,8 @@ def list_ports():
         from serial.tools import list_ports as ports
     except ImportError as error:
         raise RecoveryError('pyserial is required: python -m pip install pyserial') from error
-    return [{'device': p.device, 'description': p.description, 'hwid': p.hwid}
+    return [{'device': p.device, 'description': p.description, 'hwid': p.hwid,
+             'vid': p.vid, 'pid': p.pid, 'serialNumber': p.serial_number, 'location': p.location}
             for p in sorted(ports.comports(), key=lambda p: p.device)]
 
 
@@ -2243,6 +2407,13 @@ def build_parser():
     link.add_argument('--duration', type=float, help='adapter-only stress duration, 0.1..30 seconds (default 5)')
     link.add_argument('--debug', action='store_true', help='show every echo chunk or target divider attempt')
     link.add_argument('--require-flash-read', action='store_true', help='fail if CPU is not already halted; never halt it automatically')
+    watch = commands.add_parser('watch-link', parents=[common], help='bounded target read diagnostics with USB reconnect/backoff')
+    watch.add_argument('--port', required=True)
+    watch.add_argument('--device', choices=sorted(DEVICES), required=True)
+    watch.add_argument('--out', type=Path, required=True, help='new private directory for summary and attempt receipts')
+    watch.add_argument('--seconds', type=int, default=180, help='retry window, 1..600 seconds (default 180)')
+    watch.add_argument('--baud', type=int, choices=[460800, 921600], default=921600)
+    watch.add_argument('--debug', action='store_true', help='show each divider and sample-count detail')
     setup_reader = commands.add_parser('fetch-reader', parents=[common], help='prefetch/verify the pinned pvvx reader; no serial access')
     setup_reader.add_argument('--reader', type=Path, help='verify an existing offline reader instead of downloading')
     commands.add_parser('capabilities', parents=[common], help='machine-readable interface and safety contract')
@@ -2362,7 +2533,7 @@ def main(argv=None):
         action = args.action
         interactive = not (as_json or getattr(args, 'non_interactive', False)) and sys.stdin.isatty()
         if action == 'capabilities':
-            result = {'status': 'OK', 'commands': ['prepare', 'boards', 'plan', 'ports', 'wiring', 'selftest', 'test-link', 'fetch-reader',
+            result = {'status': 'OK', 'commands': ['prepare', 'boards', 'plan', 'ports', 'wiring', 'selftest', 'test-link', 'watch-link', 'fetch-reader',
                        'stage', 'read', 'inspect', 'verify', 'activate', 'flash', 'status', 'reconcile', 'close', 'unlock'],
                       'jsonNeverPrompts': True, 'idempotentWrites': 'same session + operation ID + exact request',
                       'readOptional': True, 'baselineRequiresVerification': True,
@@ -2371,6 +2542,7 @@ def main(argv=None):
                                       'liveProgress': 'human progress on stderr in JSON mode; bounded events in receipt',
                                       'speed': 'verified echo bytes/s and chunk turnaround; not flash throughput',
                                       'targetProbe': 'register readback; small flash reads only if CPU is already halted',
+                                      'watch': 'target only; USB identity-bound reconnect, bounded backoff, no reset/halt/flash',
                                       'connection': connection_spec('cp2102-single-sws')},
                       'pvvxReader': {'autoDownload': 'on first read or fetch-reader', 'commit': READER_COMMIT,
                                      'sha256': READER_SHA256, 'offlineCache': True},
@@ -2402,6 +2574,12 @@ def main(argv=None):
             result = test_link(args.port, args.out, phase=args.phase, device=args.device, baud=args.baud,
                                require_flash_read=args.require_flash_read, duration=args.duration, debug=args.debug, out=out)
             out(f'Link test: {result["status"]}; proof={result["proofLevel"]}; receipt={args.out}')
+        elif action == 'watch-link':
+            result = watch_link(args.port, args.out, device=args.device, seconds=args.seconds,
+                                baud=args.baud, debug=args.debug, out=out)
+            out(f'Watch: {result["status"]}; summary={result["summary"]}')
+            emit(result)
+            return 0 if result['targetReplyVerified'] else (130 if result['status'] == 'WATCH_INTERRUPTED' else 2)
         elif action == 'fetch-reader':
             result = ensure_reader(args.reader, out=out)
         elif action == 'inspect':

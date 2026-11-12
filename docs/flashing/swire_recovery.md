@@ -603,6 +603,47 @@ original private fallback image and provenance outside Git.
 
 ## Test the CP2102 circuit with one SWS contact
 
+### Wait for connections and USB reconnects
+
+For a bounded target-connection test while finishing the qualified bench setup,
+use the built-in watcher instead of repeatedly spawning `test-link` yourself:
+
+```text
+python telink_swire_recovery.py watch-link --device gledopto-gl-sd-301p --port COM3 --seconds 180 --out C:/private/recovery/watch-001
+```
+
+`--out` is a **new directory**, holding `summary.json` and one immutable receipt
+per probe. The retry window defaults to 180 seconds (maximum 600); an active
+bounded probe may finish after the window. Ctrl+C stops without starting another
+probe. Nothing starts until the operator runs the command. `--debug` adds each
+divider attempt; without it, progress is condensed. `--json` keeps stdout as one
+result while progress goes to stderr.
+
+The watcher waits without SWire traffic when the selected USB adapter is absent.
+After identifying it, it follows the same available VID/PID/serial/location
+identity across COM-number changes, refusing ambiguous matches. Non-USB devices
+fall back to port and hardware ID. This identifies the **adapter**, never the
+attached Zigbee board. Keep the same physical target throughout the watch.
+
+Serial open/I/O failures have separate `SERIAL_OPEN_FAILED` / `SERIAL_IO_FAILED`
+codes, stage and exception details. A visible COM port does not prove its driver
+can open it. Reopens after those errors back off by 2, 4, 8 and then 10 seconds;
+they are not treated as failed SWire clock settings. The watch keeps waiting for
+USB recovery rather than flooding one open error per second. It never resets the
+USB adapter, kills another port owner, removes a lock or changes driver settings.
+
+`1/9 UART samples (adapter echo only)` means the read clock was echoed but no
+complete target response arrived. A normal echo count is not proof of SWS contact,
+CPU readiness or target replies. The watcher does not automatically halt/reset
+the chip to change that result. It stops on verified target replies, ownership/
+precondition failures, interruption or the elapsed window. It uses exactly the
+same no-reset/no-halt/flash-read-only allowlist as `test-link`, never an
+adapter-only loop pattern, firmware write, factory reset or automatic fallback.
+
+The changes address USB retry handling and evidence quality. They do not establish
+that a resistor value, pad connection or SWire entry procedure is electrically
+qualified, and do not guarantee a response from a running application.
+
 The adapter-side junction below uses one lead and one hook on SWS, plus the
 3V3 and GND contacts. It does not require two hooks on the target's SWS pad:
 

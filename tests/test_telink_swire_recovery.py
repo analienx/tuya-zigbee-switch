@@ -1850,3 +1850,157 @@ def test_index_entry_wrong_board_url_cannot_prepare_even_when_hash_matches(tmp_p
         tool.prepare(out=tmp_path / 'kit', device='tuya-zigbee-switch', board='MODULE_AVATTO_A_TS0001',
                      index=index, fetch=serve(ota))
     assert not (tmp_path / 'kit').exists()
+
+
+USB_ROW = {'device': 'COM5', 'description': 'fixture USB UART', 'hwid': 'fixture',
+           'vid': 1, 'pid': 2, 'serialNumber': 'fixture', 'location': 'fixture-location'}
+
+
+def watch_timer():
+    timer = EchoTimer()
+    def sleep(seconds):
+        timer.now += seconds
+    return timer, sleep
+
+
+@pytest.mark.parametrize('where,expected', [('open', 'SERIAL_OPEN_FAILED'), ('probe', 'SERIAL_IO_FAILED')])
+def test_serial_faults_are_distinct_from_target_timeouts(tmp_path, where, expected):
+    class BrokenPort(DiagnosticPort):
+        def write(self, data):
+            raise OSError(31, 'fixture device not functioning')
+    def opening(_):
+        if where == 'open':
+            raise OSError(31, 'fixture device not functioning')
+        return BrokenPort()
+    path = tmp_path / 'fault.json'
+    with pytest.raises(RecoveryError) as error:
+        tool.test_link('COM5', path, phase='target', device='gledopto-gl-sd-301p',
+                       opener=opening, probe_factory=quick_probe)
+    assert error.value.code == expected
+    result = tool.read_json(path)
+    assert result['errorCode'] == expected and result['errorDetails']['exceptionType'] == 'OSError'
+    assert not result['flashWriteAttempted'] and not result['cpuResetRequested']
+
+
+def test_echo_only_reads_explain_missing_target_samples(tmp_path):
+    path = tmp_path / 'echo-only.json'
+    messages = []
+    with pytest.raises(RecoveryError):
+        tool.test_link('COM5', path, phase='target', device='gledopto-gl-sd-301p', debug=True,
+                       out=messages.append, opener=lambda _: DiagnosticPort(target=False), probe_factory=quick_probe)
+    result = tool.read_json(path)
+    assert result['statistics']['targetBytesDecoded'] == 0
+    assert result['statistics']['echoOnlyReads'] > 0
+    assert result['statistics']['lastTargetResponse'] == {'expectedBytes': 9, 'receivedBytes': 1}
+    assert any('1/9 UART samples (adapter echo only)' in message for message in messages)
+
+
+def test_no_more_serial_cleanup_traffic_after_read_io_failure():
+    class BrokenRead(DiagnosticPort):
+        def read(self, size):
+            if size == 9:
+                raise OSError('fixture disconnected during response')
+            return super().read(size)
+    port = BrokenRead()
+    probe = quick_probe(port, 921600)
+    with pytest.raises(OSError, match='disconnected during response'):
+        probe.find_divider()
+    assert probe.stats['cleanupSkippedAfterSerialFailure']
+    assert port.reading == 0xB2  # no stop-word transmission attempted after the I/O fault
+
+
+def test_watch_waits_for_initial_usb_and_only_runs_target_probe(tmp_path):
+    timer, sleep = watch_timer()
+    calls, messages = [], []
+    port = DiagnosticPort()
+    before = bytes(port.flash)
+    def inventory():
+        return [USB_ROW] if timer.now >= 2 else []
+    def probe(name, receipt, **kwargs):
+        calls.append((timer.now, name, kwargs['phase']))
+        return tool.test_link(name, receipt, **kwargs, opener=lambda _: port, probe_factory=quick_probe)
+    result = tool.watch_link('COM5', tmp_path / 'watch', device='gledopto-gl-sd-301p', seconds=10,
+                             inventory=inventory, probe=probe, clock=timer, sleep=sleep, out=messages.append)
+    assert result['status'] == 'TARGET_REPLIES_VERIFIED'
+    assert calls == [(2, 'COM5', 'target')] and result['adapterIdentity']['serialNumber'] == 'fixture'
+    assert bytes(port.flash) == before and not result['flashWriteAttempted']
+    assert not result['cpuResetRequested'] and not result['cpuHaltRequested']
+    assert tool.read_json(tmp_path / 'watch/summary.json')['successfulReceipt']
+
+
+def test_watch_backoff_does_not_reopen_broken_driver_every_second(tmp_path):
+    timer, sleep = watch_timer()
+    calls = []
+    def probe(name, receipt, **kwargs):
+        calls.append(timer.now)
+        raise RecoveryError('fixture Windows error 31', code='SERIAL_OPEN_FAILED')
+    result = tool.watch_link('COM5', tmp_path / 'watch', device='gledopto-gl-sd-301p', seconds=30,
+                             inventory=lambda: [USB_ROW], probe=probe, clock=timer, sleep=sleep)
+    assert result['status'] == 'WATCH_TIMEOUT'
+    assert calls == [0, 2, 6, 14, 24]
+    assert len(result['events']) < 20 and not result['targetReplyVerified']
+
+
+def test_watch_follows_same_usb_after_renumbering_not_unrelated_com_port(tmp_path):
+    timer, sleep = watch_timer()
+    calls = []
+    def inventory():
+        if not calls:
+            return [USB_ROW]
+        if timer.now < 1:
+            return []
+        return [{**USB_ROW, 'serialNumber': 'unrelated'}, {**USB_ROW, 'device': 'COM7'}]
+    def probe(name, receipt, **kwargs):
+        calls.append(name)
+        if len(calls) == 1:
+            raise RecoveryError('fixture disappeared', code='SERIAL_IO_FAILED')
+        return {'status': 'SWIRE_RESPONSE_OK', 'targetReplyVerified': True, 'proofLevel': 'target-register-readback'}
+    result = tool.watch_link('COM5', tmp_path / 'watch', device='gledopto-gl-sd-301p', seconds=10,
+                             inventory=inventory, probe=probe, clock=timer, sleep=sleep)
+    assert calls == ['COM5', 'COM7'] and result['port'] == 'COM7'
+    assert result['status'] == 'TARGET_REPLIES_VERIFIED'
+
+
+@pytest.mark.parametrize('code', ['PORT_LOCKED', 'INVALID_PHASE', 'LINK_TEST_INTERRUPTED'])
+def test_watch_never_bypasses_lock_or_repeats_after_interrupt(tmp_path, code, monkeypatch):
+    timer, sleep = watch_timer()
+    calls = []
+    monkeypatch.setattr(tool, 'unlock_port', lambda *_: pytest.fail('must never unlock'))
+    def probe(name, receipt, **kwargs):
+        calls.append(name)
+        raise RecoveryError('fixture stop', code=code)
+    result = tool.watch_link('COM5', tmp_path / 'watch', device='gledopto-gl-sd-301p', seconds=10,
+                             inventory=lambda: [USB_ROW], probe=probe, clock=timer, sleep=sleep)
+    assert calls == ['COM5']
+    assert result['status'] == ('WATCH_INTERRUPTED' if code == 'LINK_TEST_INTERRUPTED' else 'WATCH_BLOCKED')
+
+
+def test_watch_ambiguous_adapter_never_opens_port(tmp_path):
+    timer, sleep = watch_timer()
+    result = tool.watch_link('COM5', tmp_path / 'watch', device='gledopto-gl-sd-301p', seconds=5,
+                             inventory=lambda: [USB_ROW, USB_ROW],
+                             probe=lambda *_args, **_kwargs: pytest.fail('must not open'), clock=timer, sleep=sleep)
+    assert result['status'] == 'WATCH_BLOCKED' and result['state'] == 'ADAPTER_AMBIGUOUS'
+
+
+def test_watch_absent_usb_honours_window_without_serial_access(tmp_path):
+    timer, sleep = watch_timer()
+    result = tool.watch_link('COM5', tmp_path / 'watch', device='gledopto-gl-sd-301p', seconds=5,
+                             inventory=lambda: [], probe=lambda *_args, **_kwargs: pytest.fail('must not open'),
+                             clock=timer, sleep=sleep)
+    assert result['status'] == 'WATCH_TIMEOUT' and timer.now == 5 and not result['attempts']
+
+
+def test_watch_json_cli_progress_is_stderr_and_output_directory_is_exclusive(tmp_path, monkeypatch, capsys):
+    timer, sleep = watch_timer()
+    original = tool.watch_link
+    def watch(*args, **kwargs):
+        return original(*args, **kwargs, inventory=lambda: [], clock=timer, sleep=sleep)
+    monkeypatch.setattr(tool, 'watch_link', watch)
+    command = ['watch-link', '--device', 'gledopto-gl-sd-301p', '--port', 'COM5', '--seconds', '2',
+               '--out', str(tmp_path / 'watch'), '--json']
+    assert tool.main(command) == 2
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)['status'] == 'WATCH_TIMEOUT' and 'Waiting' in captured.err
+    assert tool.main(command) == 2
+    assert json.loads(capsys.readouterr().out)['errorCode'] == 'EVIDENCE_EXISTS'
