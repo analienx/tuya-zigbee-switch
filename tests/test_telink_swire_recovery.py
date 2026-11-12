@@ -9,6 +9,7 @@ import hashlib
 import io
 import json
 import random
+import re
 import struct
 import sys
 from pathlib import Path
@@ -1566,3 +1567,286 @@ def test_read_automatically_fetches_reader_before_first_serial_process(tmp_path,
     result = tool.read_flash('COM5', tmp_path / 'automatic.bin', size=32, fetch=fetch, runner=run)
     assert result['status'] == 'READ_MATCHED' and events == ['download', 'read', 'read']
     assert result['readerSetup']['cacheStatus'] == 'DOWNLOADED'
+
+
+# ---- More devices: tuya-zigbee-switch boards (Avatto ...), BSEED TS0726, Gledopto ED-008 ----
+
+UPSTREAM = 'https://github.com/romasku/tuya-zigbee-switch/raw/0f2b99e5a0ebd72a2d7c3375cde69db4696e6f00'
+ED008_SHA = '8d90c745734e38c8686a8649bd859c77508bfc3c453aef43f3bf379e694837ff'
+
+
+def avatto_ota(**kwargs):
+    kwargs.setdefault('image_type', 43527)
+    kwargs.setdefault('version', 0x11023000)
+    return make_ota(make_image(0x5432, **kwargs))
+
+
+def index_fixture(tmp_path, ota, *, board='MODULE_AVATTO_A_TS0001', role='router', change=None):
+    """An OTA index shaped like zigbee2mqtt/ota/index_<role>.json, with its distractors."""
+    folder = board + ('_END_DEVICE' if role == 'end_device' else '')
+    manufacturer, image_type, version = struct.unpack_from('<HHI', ota, 10)   # OTA header, not the image
+    entry = {'fileName': 'tlc_switch-1.1.2-8542fc05.zigbee', 'fileVersion': version,
+             'fileSize': len(ota), 'url': f'{UPSTREAM}/bin/{role}/{folder}/tlc_switch-1.1.2-8542fc05.zigbee',
+             'imageType': image_type, 'manufacturerCode': manufacturer,
+             'sha512': hashlib.sha512(ota).hexdigest(), 'manufacturerName': ['_TZ3000_4rbqgcuv', '4rbqgcuv']}
+    if change:
+        change(entry)
+    stock = dict(entry, fileName='tlc_switch-1.1.2-8542fc05-from_tuya.zigbee', imageType=54179,
+                 fileVersion=0xFFFFFFFF, sha512='0' * 128)
+    other = dict(entry, url=entry['url'].replace(f'/{folder}/', '/MODULE_AVATTO_A_TS0002/'),
+                 sha512='1' * 128, manufacturerName=['_TZ3000_mtnpt6ws'])
+    path = tmp_path / f'index_{role}.json'
+    path.write_text(json.dumps([stock, entry, other]))
+    return path, entry
+
+
+def serve(ota, calls=None):
+    def fetch(url, limit):
+        if calls is not None:
+            calls.append((url, limit))
+        return ota
+    return fetch
+
+
+def test_avatto_board_resolves_the_released_image_from_the_index(tmp_path):
+    ota = avatto_ota()
+    index, entry = index_fixture(tmp_path, ota)
+    calls = []
+    plan = tool.prepare(out=tmp_path / 'kit', device='tuya-zigbee-switch', board='MODULE_AVATTO_A_TS0001',
+                        index=index, fetch=serve(ota, calls))
+    assert calls == [(entry['url'], len(ota))], 'downloads exactly the indexed file'
+    assert plan['source']['index']['board'] == 'MODULE_AVATTO_A_TS0001'
+    assert plan['source']['index']['sha512'] == entry['sha512']
+    assert plan['label'] == 'MODULE_AVATTO_A_TS0001 router, tlc_switch-1.1.2-8542fc05.zigbee'
+    loaded, image = tool.load_bundle(tmp_path / 'kit')
+    assert image == ota[62:] and loaded == plan
+    # Offline: the same file given locally is checked against the same SHA-512.
+    (tmp_path / 'local.ota').write_bytes(ota)
+    tool.prepare(tmp_path / 'local.ota', tmp_path / 'kit2', device='tuya-zigbee-switch',
+                 board='MODULE_AVATTO_A_TS0001', index=index, fetch=lambda *_: pytest.fail('must stay offline'))
+    # The bundle writes like any other: slot A rewritten, the rest of flash kept.
+    before = bricked_flash()
+    chip = Chip(before)
+    writer = writer_for(chip)
+    writer.stage(image)
+    writer.activate()
+    assert_recovered(chip, before, image)
+
+
+def test_end_device_boards_use_their_own_folder(tmp_path):
+    ota = avatto_ota(image_type=43537)
+    index, _ = index_fixture(tmp_path, ota, board='MODULE_AVATTO_TS0011', role='end_device')
+    plan = tool.prepare(out=tmp_path / 'kit', device='tuya-zigbee-switch', board='MODULE_AVATTO_TS0011',
+                        role='end_device', index=index, fetch=serve(ota))
+    assert plan['source']['index']['role'] == 'end_device'
+    with pytest.raises(RecoveryError, match='lists 0 released'):
+        tool.prepare(out=tmp_path / 'kit2', device='tuya-zigbee-switch', board='MODULE_AVATTO_TS0011',
+                     role='router', index=index, fetch=serve(ota))
+
+
+def flipped(ota):
+    data = bytearray(ota)
+    data[0x2000] ^= 1
+    return bytes(data)
+
+
+def foreign_ota():
+    body = bytearray(make_image(0x5432, image_type=43527))
+    body[6:8] = b'\0\0'                               # not a Telink image (e.g. an EFR32 board)
+    return make_ota(bytes(body))
+
+
+INDEX_FAULTS = {
+    'tampered_download': ({'fetch': lambda ota: serve(flipped(ota))}, 'SHA-512'),
+    'unknown_board': ({'board': 'MODULE_AVATTO_TS0011'}, 'lists 0 released'),
+    'bseed_socket': ({'board': 'OUTLET_BSEED_PM_TS011F_1'}, 'use --device bseed-ts011f'),
+    'ts0726_3gang': ({'board': 'SWITCH_BSEED_TS0726_3GANG'}, 'use --device bseed-ts0726'),
+    'bad_name': ({'board': '../MODULE_AVATTO_A_TS0001'}, '--board must'),
+    'no_board': ({'board': None}, '--board must'),
+    'bare_image': ({'image_path': 'image.bin'}, 'not --image'),
+    'bad_role': ({'role': 'coordinator'}, '--role must'),
+    'index_version': ({'change': lambda e: e.update(fileVersion=1)}, 'fileVersion'),
+    'index_size': ({'change': lambda e: e.update(fileSize=0)}, 'usable SHA-512'),
+    'foreign_chip': ({'ota': foreign_ota()}, 'Silicon Labs'),
+    'other_manufacturer': ({'ota': avatto_ota(manufacturer=0x124F)}, 'manufacturer'),
+}
+
+
+@pytest.mark.parametrize('fault', sorted(INDEX_FAULTS))
+def test_board_profile_refuses_anything_but_the_indexed_release(tmp_path, fault):
+    options, message = INDEX_FAULTS[fault]
+    ota = options.get('ota') or avatto_ota()
+    index, _ = index_fixture(tmp_path, ota, change=options.get('change'))
+    fetch = options['fetch'](ota) if 'fetch' in options else serve(ota)
+    (tmp_path / 'image.bin').write_bytes(ota[62:])
+    image_path = tmp_path / options['image_path'] if 'image_path' in options else None
+    with pytest.raises(RecoveryError, match=re.escape(message)):
+        tool.prepare(out=tmp_path / 'kit', device='tuya-zigbee-switch', image_path=image_path,
+                     board=options.get('board', 'MODULE_AVATTO_A_TS0001'), role=options.get('role'),
+                     index=index, fetch=fetch)
+    assert not (tmp_path / 'kit').exists()
+
+
+def bseed_index(tmp_path, ota):
+    info = tool.check_image(ota[62:])
+    base = 'https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/ota/bseed/'
+    entry = {'fileName': 'ts0726-v1102300a.ota', 'fileVersion': info['fileVersion'], 'fileSize': len(ota),
+             'url': base + 'ts0726-v1102300a.ota', 'imageType': info['imageType'],
+             'manufacturerCode': info['manufacturerCode'], 'sha512': hashlib.sha512(ota).hexdigest(),
+             'manufacturerName': ['iedhxgyi']}
+    entries = [entry, dict(entry, fileName='ts0726-v1102300a-from_tuya.ota', imageType=54179, sha512='0' * 128),
+               dict(entry, fileName='ts011f-pm-v12053007.ota', imageType=43556, sha512='1' * 128)]
+    path = tmp_path / 'index_bseed.json'
+    path.write_text(json.dumps(entries))
+    return path, entry
+
+
+def test_bseed_ts0726_three_gang_uses_the_fork_release(tmp_path):
+    ota = make_ota(make_image(0x5432, image_type=45577, version=0x1102300A))
+    index, entry = bseed_index(tmp_path, ota)
+    calls = []
+    plan = tool.prepare(out=tmp_path / 'kit', device='bseed-ts0726', index=index, fetch=serve(ota, calls))
+    assert calls == [(entry['url'], len(ota))]
+    assert plan['source']['index']['board'] == 'SWITCH_BSEED_TS0726_3GANG'
+    assert tool.load_bundle(tmp_path / 'kit')[1] == ota[62:]
+    with pytest.raises(RecoveryError, match='Router image only'):
+        tool.prepare(out=tmp_path / 'kit2', device='bseed-ts0726', role='end_device', index=index, fetch=serve(ota))
+    # The board, not the image type, names the firmware line: upstream reuses 45577 for
+    # another board, which the generic profile accepts, while the 3-gang name is refused.
+    info = tool.check_image(ota[62:])
+    assert tool.check_device('tuya-zigbee-switch', info,
+                             {'index': {**entry, 'board': 'MODULE_TUYA_NOVATO_QS_S05_TS0001',
+                                        'role': 'router', 'nativeSha256': info['sha256'],
+                                        'url': UPSTREAM + '/bin/router/MODULE_TUYA_NOVATO_QS_S05_TS0001/' + entry['fileName']}})
+    with pytest.raises(RecoveryError, match='use --device bseed-ts0726'):
+        tool.check_device('tuya-zigbee-switch', info, {'index': {**entry, 'board': 'SWITCH_BSEED_TS0726_3GANG'}})
+
+
+def test_bundle_with_edited_index_board_is_refused(tmp_path):
+    ota = avatto_ota()
+    index, _ = index_fixture(tmp_path, ota)
+    tool.prepare(out=tmp_path / 'kit', device='tuya-zigbee-switch', board='MODULE_AVATTO_A_TS0001',
+                 index=index, fetch=serve(ota))
+    plan_path = tmp_path / 'kit' / tool.BUNDLE_PLAN
+    plan = json.loads(plan_path.read_text())
+    plan['source']['index']['board'] = 'OUTLET_BSEED_PM_TS011F'
+    plan_path.write_text(json.dumps(plan))
+    with pytest.raises(RecoveryError, match='bseed-ts011f'):
+        tool.load_bundle(tmp_path / 'kit')
+    del plan['source']['index']
+    plan_path.write_text(json.dumps(plan))
+    with pytest.raises(RecoveryError, match='OTA index'):
+        tool.load_bundle(tmp_path / 'kit')
+
+
+def test_boards_search_by_zigbee_manufacturer_name(tmp_path, capsys):
+    index, _ = index_fixture(tmp_path, avatto_ota())
+    entries = json.loads(index.read_text())
+    assert [row['board'] for row in tool.board_list(entries, 'router', '4RBQGCUV')] == ['MODULE_AVATTO_A_TS0001']
+    assert [row['board'] for row in tool.board_list(entries, 'router')] == [
+        'MODULE_AVATTO_A_TS0001', 'MODULE_AVATTO_A_TS0002']
+    assert tool.board_list(entries, 'end_device') == []
+    assert tool.main(['boards', '--index', str(index), '--search', 'mtnpt6ws', '--json']) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert [row['board'] for row in result['boards']] == ['MODULE_AVATTO_A_TS0002']
+
+
+def test_index_options_only_apply_to_index_profiles(tmp_path, capsys):
+    ci_artifact(tmp_path, make_image())
+    assert tool.main(['prepare', '--ota', str(tmp_path / 'forward.ota'), '--out', str(tmp_path / 'kit'),
+                      '--board', 'MODULE_AVATTO_A_TS0001', '--json']) == 2
+    assert json.loads(capsys.readouterr().out)['errorCode'] == 'INVALID_ARGUMENT'
+
+
+def test_gledopto_ed008_is_admitted_only_by_its_exact_bytes():
+    info = tool.check_image(make_image(manufacturer=0x124F, image_type=0x1416, version=0x7F090001))
+    with pytest.raises(RecoveryError, match='quarantined'):
+        tool.check_device('gledopto-gl-sd-301p', info, {'buildManifest': {'DEV_IDENTITY': 'GLSD-ED-009'}})
+    info['sha256'] = ED008_SHA
+    assert tool.check_device('gledopto-gl-sd-301p', info, {})
+    assert tool.image_label('gledopto-gl-sd-301p', info, {}).startswith('GLSD-ED-008')
+    assert 'pair the dimmer again' in tool.wiring('gledopto-gl-sd-301p')
+
+
+def test_generic_profile_points_tuya_images_to_their_profile():
+    info = tool.check_image(make_image(image_type=43527))
+    with pytest.raises(RecoveryError, match='tuya-zigbee-switch --board'):
+        tool.check_device('generic-tlsr8258', info, {'pinnedSha256': info['sha256']})
+
+
+def test_downloads_are_limited_to_github_sources(monkeypatch):
+    import urllib.request
+
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    seen = []
+    monkeypatch.setattr(urllib.request, 'urlopen', lambda url, timeout: seen.append(url) or Response(b'abc'))
+    for url in (UPSTREAM + '/bin/router/X/a.zigbee', tool.INDEX_BASE + 'index_router.json'):
+        assert tool.download(url, 10) == b'abc'
+    for url in ('https://example.com/a.ota', 'http://raw.githubusercontent.com/a',
+                'https://github.com/romasku/tuya-zigbee-switch/raw/main/bin/a.zigbee'):
+        with pytest.raises(RecoveryError, match='refusing'):
+            tool.download(url, 10)
+    assert len(seen) == 2
+
+
+def test_every_device_profile_has_complete_wiring():
+    for device_id, device in tool.DEVICES.items():
+        assert [pad for pad, _ in device['pads']] == ['SWS', 'GND', '3V3'], device_id
+        text = tool.wiring(device_id)
+        assert device['name'] in text and 'Continuity' in text
+
+
+def test_ts0726_conflicting_board_is_refused_before_index_or_image_access(tmp_path):
+    with pytest.raises(RecoveryError, match='--board conflicts'):
+        tool.prepare(out=tmp_path / 'kit', device='bseed-ts0726', board='SWITCH_BSEED_TS0726_1GANG',
+                     fetch=lambda *_: pytest.fail('must refuse before fetching'))
+    assert not (tmp_path / 'kit').exists()
+
+
+@pytest.mark.parametrize('profile,change', [
+    ('tuya-zigbee-switch', {'board': 'MODULE_AVATTO_A_TS0002'}),
+    ('tuya-zigbee-switch', {'role': 'end_device'}),
+    ('tuya-zigbee-switch', {'url': UPSTREAM + '/bin/router/OUTLET_BSEED_PM_TS011F/other.ota'}),
+    ('tuya-zigbee-switch', {'fileName': 'other.ota'}),
+    ('tuya-zigbee-switch', {'nativeSha256': '0' * 64}),
+    ('tuya-zigbee-switch', {'url': 'https://example.com/bin/router/MODULE_AVATTO_A_TS0001/a.ota'}),
+    ('bseed-ts0726', {'board': 'SWITCH_BSEED_TS0726_1GANG'}),
+    ('bseed-ts0726', {'role': 'end_device'}),
+    ('bseed-ts0726', {'url': 'https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/'
+                              'zigbee2mqtt/ota/bseed/ts011f-other.ota', 'fileName': 'ts011f-other.ota'}),
+])
+def test_reopened_index_bundle_refuses_contradictory_board_role_and_provenance(tmp_path, profile, change):
+    if profile == 'bseed-ts0726':
+        ota = make_ota(make_image(0x5432, image_type=45577, version=0x1102300A))
+        index, _ = bseed_index(tmp_path, ota)
+        options = {}
+    else:
+        ota = avatto_ota()
+        index, _ = index_fixture(tmp_path, ota)
+        options = {'board': 'MODULE_AVATTO_A_TS0001'}
+    kit = tmp_path / 'kit'
+    tool.prepare(out=kit, device=profile, index=index, fetch=serve(ota), **options)
+    path = kit / tool.BUNDLE_PLAN
+    plan = tool.read_json(path)
+    plan['source']['index'].update(change)
+    path.write_text(json.dumps(plan))
+    with pytest.raises(RecoveryError):
+        tool.load_bundle(kit)
+
+
+def test_index_entry_wrong_board_url_cannot_prepare_even_when_hash_matches(tmp_path):
+    ota = avatto_ota()
+    index, _ = index_fixture(tmp_path, ota)
+    entries = tool.read_json(index)
+    entries[1]['fileName'] = 'other-native.ota'
+    index.write_text(json.dumps(entries))
+    with pytest.raises(RecoveryError, match='URL/fileName'):
+        tool.prepare(out=tmp_path / 'kit', device='tuya-zigbee-switch', board='MODULE_AVATTO_A_TS0001',
+                     index=index, fetch=serve(ota))
+    assert not (tmp_path / 'kit').exists()

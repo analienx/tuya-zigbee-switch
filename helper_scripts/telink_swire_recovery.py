@@ -19,6 +19,7 @@ Commands
   test-link  qualify a CP2102 resistor/RX junction, then actual target replies
   fetch-reader  download/cache the pinned pvvx reader without accessing hardware
   prepare    make a recovery bundle from a Zigbee OTA file or a finalized image
+  boards     find a tuya-zigbee-switch board (Avatto, Moes, ...) in the released OTA index
   plan       check a bundle and show what it writes and what was sent before
   flash      stage, then activate, in one run
   stage      erase the selected slot and write with its boot marker off
@@ -145,6 +146,12 @@ DEVICES = {
         'images': {
             '7ba122f1ebc9f6ec419d9ea6b27676d55c2a2aad864a03e90b896546248c4b48':
                 'Gledopto stock V20851203 (20251230)',
+            # Exact frozen candidate made available as a wired artifact. This
+            # format/provenance admission grants no live flash authorization.
+            # Exact bytes of glsd301p-ed_0x00000.bin from
+            # analienx/gledopto 1dec734c815fe7721958be818dfadf88bae944fe, run 42973182814.
+            '8d90c745734e38c8686a8649bd859c77508bfc3c453aef43f3bf379e694837ff':
+                'GLSD-ED-008 custom End Device (gledopto 1dec734)',
         },
         'buildEvidence': 'gledopto',
         'stockOta': {
@@ -163,8 +170,44 @@ DEVICES = {
             'The GND | 3.3V | SWS order seen in photos is a visual guess. Prove every pad by continuity.',
             'Mini-hooks do not hold on flat pads. Solder thin temporary wires or use a pogo-pin fixture.',
             'If the 3.3 V rail sags below 3.0 V under load, use a separate current-limited 3.3 V supply.',
-            'Only the pinned vendor stock image is admitted by this recovery profile. Custom builds remain quarantined.',
+            'Admitted images: the pinned vendor stock image and the pinned GLSD-ED-008 custom build. '
+            'Any other custom build is refused until its SHA-256 is added here.',
+            'GLSD-ED-008 clears the Zigbee stack state once at its first start: pair the dimmer again. '
+            'Returning to stock also needs a new pairing.',
             'Preserving flash does not prove the retained network record is compatible with stock firmware.',
+        ],
+    },
+    'tuya-zigbee-switch': {
+        'name': 'Board built by tuya-zigbee-switch (Avatto, MHCOZY, Moes, BSEED switches, ...)',
+        'manufacturerCodes': [0x1141],
+        'index': 'board',
+        # Boards with their own gated firmware line in this fork. Refused by
+        # name, not image type: upstream and fork image types collide (upstream
+        # MODULE_TUYA_NOVATO_QS_S05_TS0001 and the fork's TS0726 3-gang both use
+        # 45577), so the board folder in the index is the identity.
+        'refuseBoards': (('OUTLET_BSEED', 'bseed-ts011f'), ('SWITCH_BSEED_TS0726_3GANG', 'bseed-ts0726')),
+        'pads': None,
+        'notes': [
+            'Find the board name with: boards --search <part of the Zigbee manufacturer name>, '
+            'for example boards --search 4rbqgcuv for an AVATTO ZWSM16-1.',
+            'The image is the released one listed in the OTA index, checked against its SHA-512.',
+            'Stock-to-custom conversion may require reset and pairing under the device-specific '
+            'procedure; these are separate authorized actions, never automatic recovery steps.',
+            'No-neutral modules (for example AVATTO LZWSM16) run from the adapter 3.3 V while flashing.',
+            'Silicon Labs (EFR32) boards cannot be flashed over SWire; prepare refuses them.',
+        ],
+    },
+    'bseed-ts0726': {
+        'name': 'BSEED TS0726 3-gang Echo Click / Scale dimmer-switch (iedhxgyi, Tuya ZT3L module)',
+        'manufacturerCodes': [0x1141],
+        'imageTypes': [45577],
+        'index': 'bseed',
+        'pads': None,
+        'notes': [
+            "The image is this fork's released TS0726 build from index_bseed.json, checked against its SHA-512.",
+            'Only the 3-gang iedhxgyi board. The 1-, 2- and 4-gang TS0726 use their own images: '
+            'use --device tuya-zigbee-switch --board SWITCH_BSEED_TS0726_<n>GANG.',
+            'Switch the circuit off at the breaker and take the switch out of the wall box before opening it.',
         ],
     },
     'generic-tlsr8258': {
@@ -174,6 +217,18 @@ DEVICES = {
         'notes': ['No device-specific checks. The flash layout must match the 512 KiB SDK layout.'],
     },
 }
+TUYA_MODULE_PADS = [
+    ('SWS', 'pad labelled SWS on the Tuya module (ZTU: castellated pin 4; ZT3L: SWS on the module '
+            'silkscreen); confirm by continuity'),
+    ('GND', 'module GND (ZTU pin 13), or a board GND pad that measures 0 ohm to it'),
+    ('3V3', 'module VCC (ZTU pin 14), or the board 3.3 V rail after the regulator'),
+]
+for _profile in ('tuya-zigbee-switch', 'bseed-ts0726'):
+    DEVICES[_profile]['pads'] = TUYA_MODULE_PADS
+INDEX_BASE = 'https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/zigbee2mqtt/ota/'
+INDEX_FILES = {'router': 'index_router.json', 'end_device': 'index_end_device.json', 'bseed': 'index_bseed.json'}
+INDEX_LIMIT = 8 * 1024 * 1024
+ROLES = ('router', 'end_device')
 DEVICES['bseed-ts011f-pm-r19-recovery'] = {
     **DEVICES['bseed-ts011f'], 'name': 'BSEED PM Router r19 historical wired rollback',
     'requiresEvidence': False, 'historicalRecovery': R19_RECOVERY,
@@ -347,7 +402,20 @@ def check_device(device_id, info, source):
     if device is None:
         raise RecoveryError(f'unknown device {device_id!r}; use one of {", ".join(DEVICES)}')
     if device_id == 'generic-tlsr8258' and info['manufacturerCode'] in (0x1141, 0x124F):
-        raise RecoveryError('recognized BSEED/Gledopto identity requires its guarded device profile')
+        raise RecoveryError('recognized tuya-zigbee-switch, BSEED or Gledopto identity requires its guarded '
+                            'device profile (tuya-zigbee-switch --board, bseed-ts011f, bseed-ts0726 or '
+                            'gledopto-gl-sd-301p)')
+    if device.get('index'):
+        entry = source.get('index')
+        if not entry:
+            raise RecoveryError(f'{device_id} images come from the OTA index: use --board and --role '
+                                '(and --index FILE when offline)')
+        for key in ('imageType', 'manufacturerCode', 'fileVersion'):
+            if entry.get(key) != info[key]:
+                raise RecoveryError(f'OTA index {key} {entry.get(key)} differs from the image ({info[key]})')
+        if device['index'] == 'board':
+            check_board(device_id, entry.get('board'))
+        check_index_source(device_id, info, entry)
     historical = device.get('historicalRecovery')
     if historical:
         if any(info.get(k) != historical[k] for k in ('sha256', 'bytes', 'fileVersion', 'manufacturerCode', 'imageType')):
@@ -384,7 +452,8 @@ def check_device(device_id, info, source):
             raise RecoveryError('BSEED manifest and role matrix build IDs differ')
     images = device.get('images')
     if device_id == 'gledopto-gl-sd-301p' and info['sha256'] not in images:
-        raise RecoveryError('Gledopto custom firmware remains quarantined; this profile permits stock recovery only')
+        raise RecoveryError('Gledopto custom firmware remains quarantined except for the exact pinned '
+                            'ED-008 candidate; this profile permits only pinned stock or ED-008 bytes')
     if images is not None and info['sha256'] not in images and not source.get('buildManifest'):
         raise RecoveryError(f'image {info["sha256"][:12]} is not a known {device_id} image and has no '
                             'CI build evidence (SHA256SUMS and manifest.txt next to it)')
@@ -393,12 +462,107 @@ def check_device(device_id, info, source):
     return device
 
 
+def check_board(device_id, board):
+    if not isinstance(board, str) or not re.fullmatch(r'[A-Z0-9_]+', board):
+        raise RecoveryError('--board must be a device_db.yaml name such as MODULE_AVATTO_A_TS0001; '
+                            'find it with: boards --search <text>', code='INVALID_ARGUMENT')
+    for prefix, other in DEVICES[device_id].get('refuseBoards', ()):
+        if board.startswith(prefix):
+            raise RecoveryError(f'{board} has its own gated firmware line here; use --device {other}')
+
+
+def check_index_source(device_id, info, entry):
+    """Recheck board/role/URL and native bytes when reopening an indexed bundle.
+
+    An offline index is operator-supplied provenance, not a signed catalogue.
+    Refuse internally contradictory evidence; do not infer identity from an
+    image type alone because upstream and fork firmware lines reuse them.
+    """
+    from urllib.parse import urlsplit
+    board, role = entry.get('board'), entry.get('role')
+    url = urlsplit(str(entry.get('url', '')))
+    name = entry.get('fileName')
+    if (url.scheme != 'https' or url.netloc not in ('github.com', 'raw.githubusercontent.com')
+            or url.query or url.fragment or not isinstance(name, str) or '/' in name
+            or url.path.rsplit('/', 1)[-1] != name or 'from_tuya' in name or 'FORCE' in name):
+        raise RecoveryError('OTA index source URL/fileName is inconsistent with a native release')
+    if DEVICES[device_id]['index'] == 'bseed':
+        if board != 'SWITCH_BSEED_TS0726_3GANG' or role != 'router':
+            raise RecoveryError('bseed-ts0726 requires SWITCH_BSEED_TS0726_3GANG as router')
+        if (url.netloc != 'raw.githubusercontent.com'
+                or not re.fullmatch(r'/analienx/tuya-zigbee-switch/[^/]+/zigbee2mqtt/ota/bseed/ts0726-[^/]+', url.path)):
+            raise RecoveryError('TS0726 source must be the fork TS0726 release, not another firmware line')
+    else:
+        if role not in ROLES:
+            raise RecoveryError('OTA index source role is invalid')
+        folder = str(board) + ('_END_DEVICE' if role == 'end_device' else '')
+        match = re.fullmatch(r'/[A-Za-z0-9-]+/tuya-zigbee-switch/(?:raw/)?[0-9a-f]{40}'
+                             r'/bin/(router|end_device)/([A-Z0-9_]+)/([^/]+)', url.path)
+        if not match or match.group(1, 2) != (role, folder):
+            raise RecoveryError('OTA index board/role differs from its source URL')
+    if entry.get('nativeSha256') != info['sha256']:
+        raise RecoveryError('native image differs from the indexed bundle provenance')
+
+
+def index_entry(entries, device_id, board, role):
+    """The one released image for this board and role in a tuya-zigbee-switch OTA index."""
+    if not isinstance(entries, list):
+        raise RecoveryError('OTA index is not a list')
+    real = [e for e in entries if isinstance(e, dict) and 'from_tuya' not in str(e.get('fileName'))
+            and 'FORCE' not in str(e.get('fileName'))]
+    if DEVICES[device_id]['index'] == 'bseed':
+        found = [e for e in real if e.get('imageType') in DEVICES[device_id]['imageTypes']]
+        what = device_id
+    else:
+        folder = board + ('_END_DEVICE' if role == 'end_device' else '')
+        found = [e for e in real if f'/bin/{role}/{folder}/' in str(e.get('url'))]
+        what = f'{board} as {role}'
+    if len(found) != 1:
+        raise RecoveryError(f'the OTA index lists {len(found)} released images for {what}; '
+                            'check the board name and role with: boards --search <text>')
+    entry = found[0]
+    if (not re.fullmatch(r'[0-9a-f]{128}', str(entry.get('sha512')))
+            or not isinstance(entry.get('fileSize'), int) or not 0 < entry['fileSize'] <= 0x80000):
+        raise RecoveryError('OTA index entry has no usable SHA-512 and size')
+    return entry
+
+
+def board_list(entries, role, search=None):
+    """Boards with a released image in an index, optionally filtered by name text."""
+    rows = {}
+    for entry in entries if isinstance(entries, list) else []:
+        match = re.search(r'/bin/([a-z_]+)/([A-Z0-9_]+)/', str(entry.get('url')))
+        name = str(entry.get('fileName'))
+        if not match or match.group(1) != role or 'from_tuya' in name or 'FORCE' in name:
+            continue
+        board = match.group(2)
+        if role == 'end_device' and board.endswith('_END_DEVICE'):
+            board = board[:-len('_END_DEVICE')]
+        names = [str(n) for n in entry.get('manufacturerName') or []]
+        if search and search.lower() not in ' '.join([board] + names).lower():
+            continue
+        rows[board] = {'board': board, 'role': role, 'manufacturerNames': names,
+                       'imageType': entry.get('imageType'), 'fileVersion': entry.get('fileVersion')}
+    return [rows[key] for key in sorted(rows)]
+
+
+def load_index(name, index_path, fetch):
+    if index_path:
+        return read_json(index_path)
+    data = fetch(INDEX_BASE + INDEX_FILES[name], INDEX_LIMIT)
+    if len(data) > INDEX_LIMIT:
+        raise RecoveryError('OTA index is larger than expected')
+    return json.loads(data.decode('utf-8'))
+
+
 def image_label(device_id, info, source):
     images = DEVICES[device_id].get('images') or {}
     manifest, matrix = source.get('manifest') or {}, source.get('roleMatrix') or {}
     build = (source.get('buildManifest') or {}).get('DEV_IDENTITY')
+    entry = source.get('index') or {}
+    released = entry and f'{entry.get("board") or device_id} {entry.get("role")}, {entry.get("fileName")}'
     return (images.get(info['sha256']) or (source.get('historicalRecovery') or {}).get('build')
-            or manifest.get('swBuildId') or matrix.get('build') or build
+            or manifest.get('swBuildId') or matrix.get('build') or build or released
             or source.get('inputFile'))
 
 
@@ -407,7 +571,9 @@ def read_json(path):
 
 
 def download(url, limit):
-    if not url.startswith('https://raw.githubusercontent.com/'):
+    """Fetch one file; every caller checks a pinned hash before using it."""
+    if not (url.startswith('https://raw.githubusercontent.com/')
+            or re.match(r'https://github\.com/[A-Za-z0-9-]+/tuya-zigbee-switch/raw/[0-9a-f]{40}/', url)):
         raise RecoveryError(f'refusing to download from {url}')
     import urllib.request
     with urllib.request.urlopen(url, timeout=60) as response:
@@ -640,15 +806,64 @@ def estimate_seconds(image, passes=PASSES, *, slot='A', full_slot=False, hold=Fa
     return round(writer.uart_bytes * 10 / UART_BAUD + writer.waited + stops)
 
 
-def load_input(device_id, ota_path, image_path, expect_sha256, fetch):
+def load_indexed(device_id, ota_path, image_path, fetch, board, role, index_path):
+    """Resolve the released OTA for a board from the index and check it against its SHA-512."""
+    device = DEVICES[device_id]
+    if image_path:
+        raise RecoveryError(f'{device_id} flashes the released OTA file from the index; give --board, not --image')
+    if device['index'] == 'bseed':
+        if board not in (None, 'SWITCH_BSEED_TS0726_3GANG'):
+            raise RecoveryError('--board conflicts with bseed-ts0726: expected SWITCH_BSEED_TS0726_3GANG',
+                                code='INVALID_ARGUMENT')
+        if role not in (None, 'router'):
+            raise RecoveryError(f'{device_id} has a released Router image only')
+        role, board, index_name = 'router', 'SWITCH_BSEED_TS0726_3GANG', 'bseed'
+    else:
+        role = role or 'router'
+        if role not in ROLES:
+            raise RecoveryError(f'--role must be one of {", ".join(ROLES)}', code='INVALID_ARGUMENT')
+        check_board(device_id, board)
+        index_name = role
+    entry = index_entry(load_index(index_name, index_path, fetch), device_id, board, role)
+    if ota_path:
+        data, name = Path(ota_path).read_bytes(), Path(ota_path).name
+    else:
+        data, name = fetch(entry['url'], entry['fileSize']), entry['fileName']
+    if len(data) != entry['fileSize'] or hashlib.sha512(data).hexdigest() != entry['sha512']:
+        raise RecoveryError(f'{name} does not match the size and SHA-512 listed in the OTA index')
+    source = {
+        'inputFile': name, 'pinnedSha256': sha256(data),
+        'index': {'file': str(index_path) if index_path else INDEX_BASE + INDEX_FILES[index_name],
+                  'board': board, 'role': role,
+                  **{key: entry.get(key) for key in ('fileName', 'url', 'fileSize', 'sha512', 'imageType',
+                                                     'manufacturerCode', 'fileVersion')}},
+    }
+    if not ota_path:
+        source['inputUrl'] = entry['url']
+    try:
+        image_from_ota(data)
+    except RecoveryError as error:
+        raise RecoveryError(f'{board}: {error}. Only Telink TLSR825x boards can be flashed over SWire; '
+                            'Silicon Labs boards need SWD.') from error
+    return data, source
+
+
+def load_input(device_id, ota_path, image_path, expect_sha256, fetch, *, board=None, role=None,
+               index_path=None):
     """Read the OTA file or finalized image and return (image, info, source)."""
     device = DEVICES.get(device_id)
     if device is None:
         raise RecoveryError(f'unknown device {device_id!r}; use one of {", ".join(DEVICES)}')
     if ota_path and image_path:
         raise RecoveryError('give --ota or --image, not both')
+    if (board or index_path or role) and not device.get('index'):
+        raise RecoveryError('--board, --role and --index apply to tuya-zigbee-switch and bseed-ts0726 only',
+                            code='INVALID_ARGUMENT')
     source = {}
-    if not ota_path and not image_path:
+    if device.get('index'):
+        data, source = load_indexed(device_id, ota_path, image_path, fetch, board, role, index_path)
+        kind = 'ota'
+    elif not ota_path and not image_path:
         stock = device.get('stockOta')
         if not stock:
             raise RecoveryError(f'{device_id} needs --ota or --image')
@@ -676,6 +891,8 @@ def load_input(device_id, ota_path, image_path, expect_sha256, fetch):
         elif device.get('requiresEvidence'):
             raise RecoveryError(f'{device_id} images come as forward.ota with their CI evidence, '
                                 'not as a bare image')
+    if device.get('index'):
+        source['index']['nativeSha256'] = info['sha256']
     if device.get('historicalRecovery'):
         source['historicalRecovery'] = device['historicalRecovery']
         if kind == 'ota' and digest != device['historicalRecovery']['otaSha256']:
@@ -684,9 +901,11 @@ def load_input(device_id, ota_path, image_path, expect_sha256, fetch):
 
 
 def prepare(ota_path=None, out=None, *, device='bseed-ts011f', image_path=None, manifest=None, role_matrix=None,
-            expect_sha256=None, expect_build=None, fetch=download, expect_ota_sha256=None):
+            expect_sha256=None, expect_build=None, fetch=download, expect_ota_sha256=None,
+            board=None, role=None, index=None):
     expect_sha256 = expect_sha256 or expect_ota_sha256
-    image, info, source, data = load_input(device, ota_path, image_path, expect_sha256, fetch)
+    image, info, source, data = load_input(device, ota_path, image_path, expect_sha256, fetch,
+                                           board=board, role=role, index_path=index)
     if manifest:
         source['manifest'] = check_manifest(read_json(manifest), data, info)
     if role_matrix:
@@ -2076,6 +2295,14 @@ def build_parser():
     prep.add_argument('--expect-sha256', '--expect-ota-sha256', dest='expect_sha256',
                       help='SHA-256 of the input file')
     prep.add_argument('--expect-build', help='for example 1.2.5-bseedr22')
+    prep.add_argument('--board', help='tuya-zigbee-switch: device_db.yaml name, for example MODULE_AVATTO_A_TS0001')
+    prep.add_argument('--role', choices=ROLES, help='tuya-zigbee-switch: router (default) or end_device')
+    prep.add_argument('--index', type=Path, help='local copy of the OTA index JSON (default: download from main)')
+    boards = commands.add_parser('boards', parents=[common],
+                                 help='find a tuya-zigbee-switch board name by Zigbee manufacturer name or text')
+    boards.add_argument('--search', help='text in the board or Zigbee manufacturer name, for example 4rbqgcuv')
+    boards.add_argument('--role', choices=ROLES, default='router')
+    boards.add_argument('--index', type=Path, help='local copy of the OTA index JSON (default: download from main)')
     show = commands.add_parser('plan', parents=[common], help='check a bundle and show what it would write')
     show.add_argument('--bundle', required=True, type=Path)
     show.add_argument('--slot', choices=sorted(SLOTS), default='A')
@@ -2135,7 +2362,7 @@ def main(argv=None):
         action = args.action
         interactive = not (as_json or getattr(args, 'non_interactive', False)) and sys.stdin.isatty()
         if action == 'capabilities':
-            result = {'status': 'OK', 'commands': ['prepare', 'plan', 'ports', 'wiring', 'selftest', 'test-link', 'fetch-reader',
+            result = {'status': 'OK', 'commands': ['prepare', 'boards', 'plan', 'ports', 'wiring', 'selftest', 'test-link', 'fetch-reader',
                        'stage', 'read', 'inspect', 'verify', 'activate', 'flash', 'status', 'reconcile', 'close', 'unlock'],
                       'jsonNeverPrompts': True, 'idempotentWrites': 'same session + operation ID + exact request',
                       'readOptional': True, 'baselineRequiresVerification': True,
@@ -2217,9 +2444,19 @@ def main(argv=None):
         elif action == 'prepare':
             plan = prepare(args.ota, args.out, device=args.device, image_path=args.image,
                            manifest=args.manifest, role_matrix=args.role_matrix,
-                           expect_sha256=args.expect_sha256, expect_build=args.expect_build)
+                           expect_sha256=args.expect_sha256, expect_build=args.expect_build,
+                           board=args.board, role=args.role, index=args.index)
             out(describe(plan))
             result = {'status': 'OK', 'bundle': str(args.out), 'plan': plan}
+        elif action == 'boards':
+            found = board_list(load_index(args.role, args.index, download), args.role, args.search)
+            for row in found:
+                out(f'{row["board"]:<42} {", ".join(row["manufacturerNames"][:3])}')
+            if not found:
+                out('No board matches. Try part of the Zigbee manufacturer name, or --role end_device.')
+            else:
+                out(f'Then: prepare --device tuya-zigbee-switch --board <name> --role {args.role} --out <folder>')
+            result = {'status': 'OK', 'role': args.role, 'boards': found}
         elif action == 'plan':
             plan, image = load_bundle(args.bundle)
             runtime = selected_plan(plan, image, slot=args.slot, full_slot=args.full_slot)

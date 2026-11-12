@@ -60,9 +60,20 @@ stderr. Argument failures also return JSON. Human `--help` is ordinary text.
 | Profile | Allowed input |
 | --- | --- |
 | `bseed-ts011f` | PM/non-PM Router/Client finalized OTA with matching manifest and role-matrix evidence |
-| `gledopto-gl-sd-301p` | Exact pinned vendor stock image; custom builds remain quarantined |
+| `gledopto-gl-sd-301p` | Exact pinned vendor stock or GLSD-ED-008 candidate bytes; artifact publication and format admission do not authorize a live flash or lift incident holds |
+| `tuya-zigbee-switch` | `--board NAME --role router\|end_device`: the one released OTA for that board in `zigbee2mqtt/ota/index_<role>.json`, checked against its SHA-512 (Avatto, MHCOZY, Moes, BSEED switches, ...); BSEED sockets and the TS0726 3-gang are refused here |
+| `bseed-ts0726` | This fork's released TS0726 3-gang (`iedhxgyi`) Router image from `index_bseed.json`, checked against its SHA-512 |
 | `bseed-ts011f-pm-r19-recovery` | Exact pinned historical PM Router r19 incident fallback only |
-| `generic-tlsr8258` | Other explicitly qualified TLSR8258 512 KiB layouts with an input SHA pin; cannot bypass BSEED/Gledopto gates |
+| `generic-tlsr8258` | Other explicitly qualified TLSR8258 512 KiB layouts with an input SHA pin; cannot bypass the profiles above |
+
+`boards --search TEXT` finds a board name from part of its Zigbee manufacturer
+name, as Zigbee2MQTT shows it (for example `4rbqgcuv`). Indexed profiles download
+the index from `main` unless `--index FILE` is given; the image itself is
+always checked against the SHA-512 and size the index lists.
+An offline index is trusted operator-supplied provenance, not a signed catalogue.
+Reopening a bundle rechecks its board/role/source URL and native payload hash.
+The TS0726 profile rejects an explicit board other than the 3-gang instead of
+silently substituting it. Reset/pairing is a separately authorized device action.
 
 Never flash `forward.bin`, an OTA container directly, a full-chip dump, a FORCE
 wrapper or a guessed board/role. Use the finalized image admitted by `prepare`
