@@ -1715,7 +1715,9 @@ def test_bseed_ts0726_three_gang_uses_the_fork_release(tmp_path):
     # another board, which the generic profile accepts, while the 3-gang name is refused.
     info = tool.check_image(ota[62:])
     assert tool.check_device('tuya-zigbee-switch', info,
-                             {'index': {**entry, 'board': 'MODULE_TUYA_NOVATO_QS_S05_TS0001'}})
+                             {'index': {**entry, 'board': 'MODULE_TUYA_NOVATO_QS_S05_TS0001',
+                                        'role': 'router', 'nativeSha256': info['sha256'],
+                                        'url': UPSTREAM + '/bin/router/MODULE_TUYA_NOVATO_QS_S05_TS0001/' + entry['fileName']}})
     with pytest.raises(RecoveryError, match='use --device bseed-ts0726'):
         tool.check_device('tuya-zigbee-switch', info, {'index': {**entry, 'board': 'SWITCH_BSEED_TS0726_3GANG'}})
 
@@ -1798,3 +1800,53 @@ def test_every_device_profile_has_complete_wiring():
         assert [pad for pad, _ in device['pads']] == ['SWS', 'GND', '3V3'], device_id
         text = tool.wiring(device_id)
         assert device['name'] in text and 'Continuity' in text
+
+
+def test_ts0726_conflicting_board_is_refused_before_index_or_image_access(tmp_path):
+    with pytest.raises(RecoveryError, match='--board conflicts'):
+        tool.prepare(out=tmp_path / 'kit', device='bseed-ts0726', board='SWITCH_BSEED_TS0726_1GANG',
+                     fetch=lambda *_: pytest.fail('must refuse before fetching'))
+    assert not (tmp_path / 'kit').exists()
+
+
+@pytest.mark.parametrize('profile,change', [
+    ('tuya-zigbee-switch', {'board': 'MODULE_AVATTO_A_TS0002'}),
+    ('tuya-zigbee-switch', {'role': 'end_device'}),
+    ('tuya-zigbee-switch', {'url': UPSTREAM + '/bin/router/OUTLET_BSEED_PM_TS011F/other.ota'}),
+    ('tuya-zigbee-switch', {'fileName': 'other.ota'}),
+    ('tuya-zigbee-switch', {'nativeSha256': '0' * 64}),
+    ('tuya-zigbee-switch', {'url': 'https://example.com/bin/router/MODULE_AVATTO_A_TS0001/a.ota'}),
+    ('bseed-ts0726', {'board': 'SWITCH_BSEED_TS0726_1GANG'}),
+    ('bseed-ts0726', {'role': 'end_device'}),
+    ('bseed-ts0726', {'url': 'https://raw.githubusercontent.com/analienx/tuya-zigbee-switch/main/'
+                              'zigbee2mqtt/ota/bseed/ts011f-other.ota', 'fileName': 'ts011f-other.ota'}),
+])
+def test_reopened_index_bundle_refuses_contradictory_board_role_and_provenance(tmp_path, profile, change):
+    if profile == 'bseed-ts0726':
+        ota = make_ota(make_image(0x5432, image_type=45577, version=0x1102300A))
+        index, _ = bseed_index(tmp_path, ota)
+        options = {}
+    else:
+        ota = avatto_ota()
+        index, _ = index_fixture(tmp_path, ota)
+        options = {'board': 'MODULE_AVATTO_A_TS0001'}
+    kit = tmp_path / 'kit'
+    tool.prepare(out=kit, device=profile, index=index, fetch=serve(ota), **options)
+    path = kit / tool.BUNDLE_PLAN
+    plan = tool.read_json(path)
+    plan['source']['index'].update(change)
+    path.write_text(json.dumps(plan))
+    with pytest.raises(RecoveryError):
+        tool.load_bundle(kit)
+
+
+def test_index_entry_wrong_board_url_cannot_prepare_even_when_hash_matches(tmp_path):
+    ota = avatto_ota()
+    index, _ = index_fixture(tmp_path, ota)
+    entries = tool.read_json(index)
+    entries[1]['fileName'] = 'other-native.ota'
+    index.write_text(json.dumps(entries))
+    with pytest.raises(RecoveryError, match='URL/fileName'):
+        tool.prepare(out=tmp_path / 'kit', device='tuya-zigbee-switch', board='MODULE_AVATTO_A_TS0001',
+                     index=index, fetch=serve(ota))
+    assert not (tmp_path / 'kit').exists()

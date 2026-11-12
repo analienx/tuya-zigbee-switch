@@ -7,6 +7,10 @@ on:
         description: 'Optional original r19 PM matrix run to validate the historical rollback bytes'
         required: false
         default: ''
+      gledopto_artifact_run:
+        description: 'Optional original ED-008 hosted artifact run for exact candidate admission validation'
+        required: false
+        default: ''
   push:
     paths:
       - 'helper_scripts/telink_swire_recovery.py'
@@ -169,6 +173,30 @@ jobs:
               print('PROBLEM', problem)
           if problems or summary['bundled'] < 150:
               sys.exit(f'{len(problems)} unexpected results; {summary}')
+          EOF
+      - name: Validate original Gledopto ED-008 bytes when requested
+        if: github.event_name == 'workflow_dispatch' && inputs.gledopto_artifact_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ED008_RUN: ${{ inputs.gledopto_artifact_run }}
+        run: |
+          set -euo pipefail
+          test "$ED008_RUN" = 42973182814
+          test "$(gh api repos/analienx/gledopto/actions/runs/$ED008_RUN --jq .head_sha)" = 1dec734c815fe7721958be818dfadf88bae944fe
+          gh run download "$ED008_RUN" --repo analienx/gledopto \
+            -n glsd301p-ed-wired-1dec734c815fe7721958be818dfadf88bae944fe -D "$RUNNER_TEMP/ed008-original"
+          python3 - "$RUNNER_TEMP" <<'EOF'
+          import pathlib, sys
+          sys.path.insert(0, 'helper_scripts')
+          import telink_swire_recovery as tool
+          root = pathlib.Path(sys.argv[1])
+          image = root / 'ed008-original/glsd301p-ed_0x00000.bin'
+          plan = tool.prepare(image_path=image, out=root / 'ed008-checked', device='gledopto-gl-sd-301p')
+          if (plan['image']['sha256'] != '8d90c745734e38c8686a8649bd859c77508bfc3c453aef43f3bf379e694837ff'
+                  or plan['image']['bytes'] != 142820 or plan['image']['fileVersion'] != 0x7F090001):
+              sys.exit('Original ED-008 bytes do not match the admitted candidate')
+          tool.load_bundle(root / 'ed008-checked')
+          print('Original ED-008 candidate prepared and reopened; no live flash authorization implied')
           EOF
       - name: Package stock recovery tool and guide
         run: |

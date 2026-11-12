@@ -317,9 +317,11 @@ The same profile also admits one custom build, by its exact bytes: GLSD-ED-008
 (`glsd301p-ed_0x00000.bin`, 142,820 bytes, SHA-256
 `8d90c745734e38c8686a8649bd859c77508bfc3c453aef43f3bf379e694837ff`, file
 version `0x7F090001`), built by analienx/gledopto at `1dec734` in run
-42973182814. The owner decided on 2026-11-11 that this fixed build may be
-flashed over SWire. Any other custom build is still refused until its SHA-256
-is added to the profile.
+42973182814. The 2026-11-11 owner decision permits producing the wired artifact;
+it explicitly separates publication from live flash authorization. This profile
+admits its exact bytes for preparation and provenance checking. It does not lift
+the incident hold, establish hardware acceptance or authorize flashing, first-boot
+network clearing or pairing. Any other custom build remains refused.
 
 ```text
 gh run download 42973182814 --repo analienx/gledopto -n glsd301p-ed-wired-1dec734c815fe7721958be818dfadf88bae944fe -D ed008
@@ -348,9 +350,14 @@ Zigbee2MQTT shows, such as `_TZ3000_4rbqgcuv`. Add `--index FILE` (and `--ota
 FILE` for a file you already have) to work offline; the same SHA-512 check
 applies. BSEED sockets are refused here and keep their evidence-gated kits.
 Silicon Labs (EFR32) boards are refused because SWire is Telink-only.
+Treat an offline index as trusted operator-supplied release provenance, not as
+a signed catalogue. Do not edit a board name, URL or hash to force acceptance.
+Bundle loading rechecks board/role against the source URL and binds the native
+payload hash; a numeric OTA image type alone cannot identify a firmware line.
 
-A device coming from stock Tuya firmware still has the stock network record:
-factory-reset it with its button after the first start and pair it again.
+A device coming from stock Tuya firmware may require a reset/pairing procedure.
+Follow its device-specific conversion instructions and obtain that action's
+authorization; a prepared bundle does not automatically authorize a factory reset.
 
 ### BSEED TS0726 3-gang dimmer/switch
 

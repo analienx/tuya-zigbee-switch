@@ -146,8 +146,9 @@ DEVICES = {
         'images': {
             '7ba122f1ebc9f6ec419d9ea6b27676d55c2a2aad864a03e90b896546248c4b48':
                 'Gledopto stock V20851203 (20251230)',
-            # Owner decision 2026-11-11: the fixed custom End Device build may be
-            # flashed over SWire. Exact bytes of glsd301p-ed_0x00000.bin from
+            # Exact frozen candidate made available as a wired artifact. This
+            # format/provenance admission grants no live flash authorization.
+            # Exact bytes of glsd301p-ed_0x00000.bin from
             # analienx/gledopto 1dec734c815fe7721958be818dfadf88bae944fe, run 42973182814.
             '8d90c745734e38c8686a8649bd859c77508bfc3c453aef43f3bf379e694837ff':
                 'GLSD-ED-008 custom End Device (gledopto 1dec734)',
@@ -190,8 +191,8 @@ DEVICES = {
             'Find the board name with: boards --search <part of the Zigbee manufacturer name>, '
             'for example boards --search 4rbqgcuv for an AVATTO ZWSM16-1.',
             'The image is the released one listed in the OTA index, checked against its SHA-512.',
-            'Coming from stock Tuya firmware: after the first start, factory-reset the device with its '
-            'button and pair it again.',
+            'Stock-to-custom conversion may require reset and pairing under the device-specific '
+            'procedure; these are separate authorized actions, never automatic recovery steps.',
             'No-neutral modules (for example AVATTO LZWSM16) run from the adapter 3.3 V while flashing.',
             'Silicon Labs (EFR32) boards cannot be flashed over SWire; prepare refuses them.',
         ],
@@ -414,6 +415,7 @@ def check_device(device_id, info, source):
                 raise RecoveryError(f'OTA index {key} {entry.get(key)} differs from the image ({info[key]})')
         if device['index'] == 'board':
             check_board(device_id, entry.get('board'))
+        check_index_source(device_id, info, entry)
     historical = device.get('historicalRecovery')
     if historical:
         if any(info.get(k) != historical[k] for k in ('sha256', 'bytes', 'fileVersion', 'manufacturerCode', 'imageType')):
@@ -450,7 +452,8 @@ def check_device(device_id, info, source):
             raise RecoveryError('BSEED manifest and role matrix build IDs differ')
     images = device.get('images')
     if device_id == 'gledopto-gl-sd-301p' and info['sha256'] not in images:
-        raise RecoveryError('Gledopto custom firmware remains quarantined; this profile permits stock recovery only')
+        raise RecoveryError('Gledopto custom firmware remains quarantined except for the exact pinned '
+                            'ED-008 candidate; this profile permits only pinned stock or ED-008 bytes')
     if images is not None and info['sha256'] not in images and not source.get('buildManifest'):
         raise RecoveryError(f'image {info["sha256"][:12]} is not a known {device_id} image and has no '
                             'CI build evidence (SHA256SUMS and manifest.txt next to it)')
@@ -466,6 +469,39 @@ def check_board(device_id, board):
     for prefix, other in DEVICES[device_id].get('refuseBoards', ()):
         if board.startswith(prefix):
             raise RecoveryError(f'{board} has its own gated firmware line here; use --device {other}')
+
+
+def check_index_source(device_id, info, entry):
+    """Recheck board/role/URL and native bytes when reopening an indexed bundle.
+
+    An offline index is operator-supplied provenance, not a signed catalogue.
+    Refuse internally contradictory evidence; do not infer identity from an
+    image type alone because upstream and fork firmware lines reuse them.
+    """
+    from urllib.parse import urlsplit
+    board, role = entry.get('board'), entry.get('role')
+    url = urlsplit(str(entry.get('url', '')))
+    name = entry.get('fileName')
+    if (url.scheme != 'https' or url.netloc not in ('github.com', 'raw.githubusercontent.com')
+            or url.query or url.fragment or not isinstance(name, str) or '/' in name
+            or url.path.rsplit('/', 1)[-1] != name or 'from_tuya' in name or 'FORCE' in name):
+        raise RecoveryError('OTA index source URL/fileName is inconsistent with a native release')
+    if DEVICES[device_id]['index'] == 'bseed':
+        if board != 'SWITCH_BSEED_TS0726_3GANG' or role != 'router':
+            raise RecoveryError('bseed-ts0726 requires SWITCH_BSEED_TS0726_3GANG as router')
+        if (url.netloc != 'raw.githubusercontent.com'
+                or not re.fullmatch(r'/analienx/tuya-zigbee-switch/[^/]+/zigbee2mqtt/ota/bseed/ts0726-[^/]+', url.path)):
+            raise RecoveryError('TS0726 source must be the fork TS0726 release, not another firmware line')
+    else:
+        if role not in ROLES:
+            raise RecoveryError('OTA index source role is invalid')
+        folder = str(board) + ('_END_DEVICE' if role == 'end_device' else '')
+        match = re.fullmatch(r'/[A-Za-z0-9-]+/tuya-zigbee-switch/(?:raw/)?[0-9a-f]{40}'
+                             r'/bin/(router|end_device)/([A-Z0-9_]+)/([^/]+)', url.path)
+        if not match or match.group(1, 2) != (role, folder):
+            raise RecoveryError('OTA index board/role differs from its source URL')
+    if entry.get('nativeSha256') != info['sha256']:
+        raise RecoveryError('native image differs from the indexed bundle provenance')
 
 
 def index_entry(entries, device_id, board, role):
@@ -776,6 +812,9 @@ def load_indexed(device_id, ota_path, image_path, fetch, board, role, index_path
     if image_path:
         raise RecoveryError(f'{device_id} flashes the released OTA file from the index; give --board, not --image')
     if device['index'] == 'bseed':
+        if board not in (None, 'SWITCH_BSEED_TS0726_3GANG'):
+            raise RecoveryError('--board conflicts with bseed-ts0726: expected SWITCH_BSEED_TS0726_3GANG',
+                                code='INVALID_ARGUMENT')
         if role not in (None, 'router'):
             raise RecoveryError(f'{device_id} has a released Router image only')
         role, board, index_name = 'router', 'SWITCH_BSEED_TS0726_3GANG', 'bseed'
@@ -852,6 +891,8 @@ def load_input(device_id, ota_path, image_path, expect_sha256, fetch, *, board=N
         elif device.get('requiresEvidence'):
             raise RecoveryError(f'{device_id} images come as forward.ota with their CI evidence, '
                                 'not as a bare image')
+    if device.get('index'):
+        source['index']['nativeSha256'] = info['sha256']
     if device.get('historicalRecovery'):
         source['historicalRecovery'] = device['historicalRecovery']
         if kind == 'ota' and digest != device['historicalRecovery']['otaSha256']:
