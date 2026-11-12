@@ -167,6 +167,9 @@ jobs:
                       continue
                   if entry and str(entry.get('mcu_family')) != 'Telink':
                       problems.append(f'{role} {board} is not Telink but produced a bundle')
+                  if entry and plan['image']['imageType'] != entry.get('firmware_image_type'):
+                      problems.append(f'{role} {board}: image type {plan["image"]["imageType"]} '
+                                      f'differs from device_db.yaml {entry.get("firmware_image_type")}')
                   summary['bundled'] += 1
           print('Released index images:', summary)
           for problem in problems:
