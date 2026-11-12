@@ -18,6 +18,8 @@ sys.path.insert(0, str(ROOT / 'helper_scripts'))
 import analienx_release as release  # noqa: E402
 from analienx_release import ReleaseError  # noqa: E402
 
+from bseed_ota_identity import OTA_MAGIC  # noqa: E402
+
 DB = release.load_db()
 
 
@@ -118,7 +120,7 @@ def native_ota(expected, *, build=None, version=None, image_type=None, size=0x80
     record = bytes([len(build)]) + build + extra
     body[0x400:0x400 + len(record)] = record
     firmware = bytes(body) + struct.pack('<I', binascii.crc32(bytes(body)) ^ 0xFFFFFFFF)
-    header = struct.pack('<IHHHHHIH32sI', release.OTA_MAGIC, 0x100, 56, 0, expected['manufacturer'],
+    header = struct.pack('<IHHHHHIH32sI', OTA_MAGIC, 0x100, 56, 0, expected['manufacturer'],
                          expected['type'] if image_type is None else image_type,
                          expected['version'], 2, b'Telink OTA Image'.ljust(32, b'\0'),
                          56 + 6 + len(firmware))
