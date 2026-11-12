@@ -8,19 +8,31 @@ on:
       - 'VERSION'
       - 'NVM_MIGRATIONS_VERSION'
       - 'helper_scripts/analienx_release.py'
+      - 'helper_scripts/bseed_ota_identity.py'
+      - 'helper_scripts/bseed_pm_release.py'
       - 'helper_scripts/bseed_pm_boot.py'
       - 'helper_scripts/bseed_pm_ota_activation.py'
       - 'make_scripts/build_analienx_board.sh'
       - 'zigbee2mqtt/ota/index_router.json'
       - 'zigbee2mqtt/ota/index_end_device.json'
+      - 'zigbee2mqtt/ota/analienx_identity.json'
       - '.github/workflows/analienx-release.yml'
   push:
     branches: [main]
     paths:
       - 'src/**'
       - 'device_db.yaml'
+      - 'VERSION'
+      - 'NVM_MIGRATIONS_VERSION'
       - 'helper_scripts/analienx_release.py'
+      - 'helper_scripts/bseed_ota_identity.py'
+      - 'helper_scripts/bseed_pm_release.py'
+      - 'helper_scripts/bseed_pm_boot.py'
+      - 'helper_scripts/bseed_pm_ota_activation.py'
       - 'make_scripts/build_analienx_board.sh'
+      - 'zigbee2mqtt/ota/index_router.json'
+      - 'zigbee2mqtt/ota/index_end_device.json'
+      - 'zigbee2mqtt/ota/analienx_identity.json'
       - '.github/workflows/analienx-release.yml'
   workflow_dispatch:
 
@@ -59,7 +71,6 @@ jobs:
       - name: Checkout exact source
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Prove exact candidate head
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
@@ -161,13 +172,13 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json, os, sys
+          import hashlib, json, os, sys
           from pathlib import Path
           sys.path.insert(0, 'helper_scripts')
           import analienx_release as release
           head = os.environ['EXPECTED_HEAD']
           boards = release.validate(release.load_db())
-          rows, problems, hashes = [], [], {}
+          rows, problems, hashes, proposal = [], [], {}, {}
           for board in boards:
               folder = Path('release') / f'analienx-{board}-{head}'
               report_path = folder / 'BOOT_REPORT.json'
@@ -182,9 +193,17 @@ jobs:
               if report['otaSha256'] in hashes:
                   problems.append(f'{board}: same bytes as {hashes[report["otaSha256"]]}')
               hashes[report['otaSha256']] = board
+              ota = folder / 'forward.ota'
+              if ota.exists():
+                  proposal[board] = hashlib.sha512(ota.read_bytes()).hexdigest()
               rows.append({key: report[key] for key in ('board', 'live', 'build', 'version', 'imageType', 'otaSha256')})
           Path('RELEASE_SET.json').write_text(json.dumps({'sourceCommit': head, 'release': release.RELEASE,
                                                           'boards': rows}, indent=2) + '\n')
+          # Sealing is a reviewed commit to zigbee2mqtt/ota/analienx_identity.json,
+          # never automatic: this file only proposes the exact bytes of this run.
+          Path('SEAL_PROPOSAL.json').write_text(json.dumps({
+              'runs': {release.RELEASE['build']: {'sourceCommit': head, 'runId': os.environ['GITHUB_RUN_ID']}},
+              'sealed': {release.RELEASE['build']: proposal}}, indent=2) + '\n')
           for row in rows:
               print(f"{'LIVE ' if row['live'] else '     '}{row['board']:32} {row['imageType']} {row['otaSha256'][:16]}")
           if problems:
@@ -194,4 +213,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: analienx-release-set-${{ github.event.pull_request.head.sha || github.sha }}
-          path: RELEASE_SET.json
+          path: |
+            RELEASE_SET.json
+            SEAL_PROPOSAL.json

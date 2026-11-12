@@ -5,6 +5,7 @@ Real builds, TC32 starts and OTA self-activation run in
 """
 import binascii
 import copy
+import hashlib
 import json
 import struct
 import sys
@@ -28,11 +29,29 @@ def test_release_set_covers_live_boards_and_explains_every_exclusion():
     for board, reason in release.EXCLUDED.items():
         assert board in DB, board
         assert board not in boards and reason
-    expected = {name for name, entry in DB.items()
-                if name.startswith(release.FAMILY_PREFIXES) and name not in release.EXCLUDED
-                and str(entry.get('build')).lower() in ('yes', 'true')}
-    assert set(boards) == expected, 'every buildable AVATTO and TS0726 board is in the release'
-    assert len(boards) >= 18
+    buildable = {name for name, entry in DB.items()
+                 if name.startswith(release.FAMILY_PREFIXES) and name not in release.EXCLUDED
+                 and str(entry.get('build')).lower() in ('yes', 'true')}
+    routers = {name for name in buildable if release.role_of(name, DB[name]) == 'router'}
+    assert set(boards) == routers, 'every buildable AVATTO and TS0726 Router board is in the release'
+    assert set(release.end_device_boards(DB)) == buildable - routers
+    assert len(boards) == 12
+
+
+def test_end_device_boards_never_get_the_router_image(capsys):
+    # Same image type and version as upstream's End Device build: offering a
+    # Router image would silently change a no-neutral module's role.
+    boards = release.validate(DB)
+    for board in ('MODULE_AVATTO_TS0011', 'MODULE_AVATTO_TS0012', 'MODULE_AVATTO_TS0012_1',
+                  'MODULE_AVATTO_TS0013', 'SWITCH_BSEED_TS0726_2GANG', 'SWITCH_BSEED_TS0726_L_1GANG'):
+        assert DB[board]['device_type'] == 'end_device'
+        assert board not in boards
+        assert release.main(['vars', '--board', board]) == 2
+    assert 'Router-only' in capsys.readouterr().err
+    # The one End Device board admitted: its live unit runs the Router build.
+    assert release.OWNER_ROUTER_BOARDS == ('SWITCH_BSEED_TS0726_1GANG',)
+    assert DB['SWITCH_BSEED_TS0726_1GANG']['device_type'] == 'end_device'
+    assert 'SWITCH_BSEED_TS0726_1GANG' in boards
 
 
 def test_each_board_owns_its_image_type_and_version_is_new():
@@ -115,6 +134,32 @@ def corrupt(data, offset):
 def test_native_verifier_accepts_the_release_identity():
     expected = release.candidate(DB, 'MODULE_AVATTO_A_TS0001')
     assert release.verify_native_image(native_ota(expected), expected)['basicBuildIdVerified']
+    # Whole container exactly at the SDK limit is accepted; text right after the
+    # unterminated swBuildId is not mistaken for another build ID.
+    largest = native_ota(expected, size=release.OTA_MAX_BYTES - 62, extra=b'x7rodata')
+    assert len(largest) == release.OTA_MAX_BYTES
+    assert release.verify_native_image(largest, expected)
+
+
+def test_invalid_release_date_is_refused(monkeypatch):
+    monkeypatch.setitem(release.RELEASE, 'date', '20261399')
+    with pytest.raises(ReleaseError, match='real YYYYMMDD'):
+        release.validate(DB)
+
+
+def test_sealed_identity_refuses_other_bytes():
+    expected = release.candidate(DB, 'MODULE_AVATTO_A_TS0002')
+    data = native_ota(expected)
+    seals = {release.RELEASE['build']: {'MODULE_AVATTO_A_TS0002': hashlib.sha512(data).hexdigest()}}
+    sealed = release.candidate(DB, 'MODULE_AVATTO_A_TS0002', registry=seals)
+    assert release.verify_native_image(data, sealed)['sealed'] is True
+    with pytest.raises(ReleaseError, match='sealed with other bytes'):
+        release.verify_native_image(native_ota(expected, extra=b'\0changed'), sealed)
+    with pytest.raises(ReleaseError, match='not in the release'):
+        release.validate(DB, registry={release.RELEASE['build']: {'MODULE_AVATTO_TS0011': '0' * 128}})
+    with pytest.raises(ReleaseError, match='not a SHA-512'):
+        release.validate(DB, registry={'1.1.2-anx0': {'MODULE_AVATTO_A_TS0002': 'abc'}})
+    assert release.load_registry() == {}, 'nothing is sealed yet'
 
 
 @pytest.mark.parametrize('fault, message', [
@@ -123,9 +168,9 @@ def test_native_verifier_accepts_the_release_identity():
     ('crc', 'CRC'),
     ('build_id', 'Basic build ID'),
     ('stray', 'stray release build IDs'),
-    ('too_big', 'a slot holds'),
+    ('too_big', 'the SDK accepts at most'),
     ('second_marker', 'second start marker'),
-    ('total_size', 'total size'),
+    ('total_size', 'size field'),
 ])
 def test_native_verifier_refuses_wrong_bytes(fault, message):
     expected = release.candidate(DB, 'MODULE_AVATTO_A_TS0002')
@@ -135,7 +180,7 @@ def test_native_verifier_refuses_wrong_bytes(fault, message):
         'crc': lambda: corrupt(native_ota(expected), 62 + 0x2000),
         'build_id': lambda: native_ota(expected, build='1.1.2-anx2'),
         'stray': lambda: native_ota(expected, extra=b'\x0a1.1.2-anx0'),
-        'too_big': lambda: native_ota(expected, size=0x34000),
+        'too_big': lambda: native_ota(expected, size=release.OTA_MAX_BYTES - 61),
         'second_marker': lambda: None,
         'total_size': lambda: native_ota(expected) + b'\0',
     }[fault]()

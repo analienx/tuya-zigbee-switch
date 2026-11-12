@@ -1,0 +1,5 @@
+{
+  "$schema_note": "Sealed byte identities of the Analienx AVATTO / BSEED TS0726 Router release (helper_scripts/analienx_release.py). Keyed by Basic build ID, then board: the SHA-512 of forward.ota from the GitHub-hosted run named in 'runs'. Once a build ID is sealed, CI refuses other bytes under it; changed firmware needs a new build ID and file version. Copy entries only from that run's SEAL_PROPOSAL.json.",
+  "runs": {},
+  "sealed": {}
+}

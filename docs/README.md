@@ -55,7 +55,7 @@ flowchart LR
 ### Engineering and hardware
 
 - [BSEED unified V8 architecture](bseed_unified_v8.md) — what is shared, what remains target-specific
-- [Analienx AVATTO and BSEED TS0726 release](analienx_release.md) — one Router identity for every AVATTO and TS0726 board, built, started and self-activated per board
+- [Analienx AVATTO and BSEED TS0726 release](analienx_release.md) — one Router identity for every AVATTO and TS0726 Router board, built, started and self-activated per board
 - [Parent/route link policy](bseed_link_policy.md) — hysteresis, recovery priorities and diagnostics
 - [PM Router/Client verification](bseed_pm_variant_matrix.md) — exact-source role matrix
 - [PM end-to-end acceptance](bseed_pm_e2e_acceptance.md) — physical load and telemetry gates
