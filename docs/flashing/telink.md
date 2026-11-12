@@ -59,3 +59,7 @@ Plug the UART into your PC, then open pvvx's [web flasher](https://pvvx.github.i
 4. Click "Write to Flash" and wait until the process finishes.  
 
 If done correctly, the onboard LED will start flashing automatically. You can try joining the device to a Zigbee network to verify that it connects properly. Once confirmed, disconnect everything, unsolder the wires, and reassemble the case.  
+
+### Recovering a device that is already paired
+
+"Erase All Flash" also wipes the IEEE address, factory calibration and Zigbee network record. To recover a device that stopped starting without losing those, use [wired recovery over SWire](swire_recovery.md) instead: it rewrites only image slot A.

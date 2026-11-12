@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DOCS = (
     "README.md",
     "docs/README.md",
+    "docs/flashing/swire/AGENTS.md",
     "docs/bseed_socket_release_status.md",
     "docs/changelog_fw.md",
     "docs/contribute/release.md",

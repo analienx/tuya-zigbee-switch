@@ -14,6 +14,25 @@ Earlier documents requiring physical trials before source review or merge
 are superseded for this PR. Record hardware results as unmeasured until
 observed. Exact-device live campaign checks and incident locks still apply.
 
+## Wired SWire recovery (2026-11-10)
+
+For a device that no longer starts, follow `docs/flashing/swire_recovery.md`
+and use `helper_scripts/telink_swire_recovery.py` with the
+`bseed-pm-wired-kit-<sha>` or `bseed-nonpm-wired-kit-<sha>` artifact of the
+role matrix run at the chosen commit. It rewrites the selected slot and keeps NVM,
+IEEE address and calibration. Never use "Erase All Flash" on a paired device.
+Flash the kit's `image.bin` (the finalized image inside `forward.ota`), not
+`forward.bin`. The method is TX-only: the receipts record bytes sent, not
+bytes written, so acceptance is the device's own fresh Zigbee evidence. Optional
+read/inspect/verify commands establish flash contents. In-place recovery uses
+the matched full baseline, exact reference images and --slot A or B with
+--full-slot; B is refused unless the baseline proves A is disabled. Use --hold
+to defer restart until readback verification. Supplying a baseline selects a
+verified session: stage -> read -> verify -> activate -> read -> verify. Agent
+JSON writes require a private --session, --operation-id and confirmed --target-id.
+Use status/reconcile for uncertain operations; never retry a write with a new ID
+or change work directories to bypass it. Incident OTA locks remain unchanged.
+
 ## Standing operator authorization — BSEED fleet (2026-11-03)
 
 The current BSEED network operator has **already explicitly accepted the possibility of permanently losing a device during experimental firmware OTA**, and has instructed that this risk sentence **never be requested again** for this operator's BSEED device fleet. This acknowledgement covers all devices and subsequent updates managed under the same operator's deployment, not only a particular bedroom socket. **Do not ask for it again** during a new canary, resume, or follow-up. See [the visible repository-wide risk policy](../../docs/bseed_ota_operator_authorization.md) and the top-level README warning.
