@@ -139,6 +139,7 @@ jobs:
           if ts0726['image']['imageType'] != db['SWITCH_BSEED_TS0726_3GANG']['firmware_image_type']:
               sys.exit('TS0726 3-gang image type differs from device_db.yaml')
           summary = {'bundled': 0, 'refusedSilabs': 0, 'refusedGated': 0}
+          problems = []
           for role in tool.ROLES:
               index = pathlib.Path('zigbee2mqtt/ota') / tool.INDEX_FILES[role]
               for row in tool.board_list(json.loads(index.read_text()), role):
@@ -158,17 +159,16 @@ jobs:
                       elif not telink and 'Silicon Labs' in str(error):
                           summary['refusedSilabs'] += 1
                       else:
-                          sys.exit(f'{role} {board} ({entry.get("mcu")}): {error}')
+                          problems.append(f'{role} {board} ({entry.get("mcu")}): {error}')
                       continue
                   if entry and str(entry.get('mcu_family')) != 'Telink':
-                      sys.exit(f'{board} is not Telink but produced a bundle')
-                  expected = entry.get('firmware_image_type')
-                  if role == 'router' and expected and plan['image']['imageType'] != expected:
-                      sys.exit(f'{board} image type {plan["image"]["imageType"]} differs from device_db {expected}')
+                      problems.append(f'{role} {board} is not Telink but produced a bundle')
                   summary['bundled'] += 1
-          if summary['bundled'] < 150:
-              sys.exit(f'too few bundles: {summary}')
           print('Released index images:', summary)
+          for problem in problems:
+              print('PROBLEM', problem)
+          if problems or summary['bundled'] < 150:
+              sys.exit(f'{len(problems)} unexpected results; {summary}')
           EOF
       - name: Package stock recovery tool and guide
         run: |

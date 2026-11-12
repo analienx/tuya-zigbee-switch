@@ -179,9 +179,11 @@ DEVICES = {
     'tuya-zigbee-switch': {
         'name': 'Board built by tuya-zigbee-switch (Avatto, MHCOZY, Moes, BSEED switches, ...)',
         'manufacturerCodes': [0x1141],
-        'refuseImageTypes': [43555, 43556, 65024, 65026, 45577],
         'index': 'board',
-        # Boards with their own gated firmware line in this fork.
+        # Boards with their own gated firmware line in this fork. Refused by
+        # name, not image type: upstream and fork image types collide (upstream
+        # MODULE_TUYA_NOVATO_QS_S05_TS0001 and the fork's TS0726 3-gang both use
+        # 45577), so the board folder in the index is the identity.
         'refuseBoards': (('OUTLET_BSEED', 'bseed-ts011f'), ('SWITCH_BSEED_TS0726_3GANG', 'bseed-ts0726')),
         'pads': None,
         'notes': [
@@ -402,9 +404,6 @@ def check_device(device_id, info, source):
         raise RecoveryError('recognized tuya-zigbee-switch, BSEED or Gledopto identity requires its guarded '
                             'device profile (tuya-zigbee-switch --board, bseed-ts011f, bseed-ts0726 or '
                             'gledopto-gl-sd-301p)')
-    if info['imageType'] in device.get('refuseImageTypes', ()):
-        raise RecoveryError(f'image type {info["imageType"]} belongs to a gated BSEED profile '
-                            '(bseed-ts011f or bseed-ts0726)')
     if device.get('index'):
         entry = source.get('index')
         if not entry:

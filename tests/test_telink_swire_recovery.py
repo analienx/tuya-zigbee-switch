@@ -1668,7 +1668,6 @@ INDEX_FAULTS = {
     'index_version': ({'change': lambda e: e.update(fileVersion=1)}, 'fileVersion'),
     'index_size': ({'change': lambda e: e.update(fileSize=0)}, 'usable SHA-512'),
     'foreign_chip': ({'ota': foreign_ota()}, 'Silicon Labs'),
-    'bseed_image_type': ({'ota': avatto_ota(image_type=43556)}, 'gated BSEED'),
     'other_manufacturer': ({'ota': avatto_ota(manufacturer=0x124F)}, 'manufacturer'),
 }
 
@@ -1712,10 +1711,13 @@ def test_bseed_ts0726_three_gang_uses_the_fork_release(tmp_path):
     assert tool.load_bundle(tmp_path / 'kit')[1] == ota[62:]
     with pytest.raises(RecoveryError, match='Router image only'):
         tool.prepare(out=tmp_path / 'kit2', device='bseed-ts0726', role='end_device', index=index, fetch=serve(ota))
-    # The same image under the generic board profile is refused: it has its own gated line.
-    with pytest.raises(RecoveryError, match='gated BSEED'):
-        tool.check_device('tuya-zigbee-switch', tool.check_image(ota[62:]),
-                          {'index': {**entry, 'board': 'SWITCH_BSEED_TS0726_2GANG'}})
+    # The board, not the image type, names the firmware line: upstream reuses 45577 for
+    # another board, which the generic profile accepts, while the 3-gang name is refused.
+    info = tool.check_image(ota[62:])
+    assert tool.check_device('tuya-zigbee-switch', info,
+                             {'index': {**entry, 'board': 'MODULE_TUYA_NOVATO_QS_S05_TS0001'}})
+    with pytest.raises(RecoveryError, match='use --device bseed-ts0726'):
+        tool.check_device('tuya-zigbee-switch', info, {'index': {**entry, 'board': 'SWITCH_BSEED_TS0726_3GANG'}})
 
 
 def test_bundle_with_edited_index_board_is_refused(tmp_path):
