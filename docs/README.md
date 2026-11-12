@@ -12,6 +12,7 @@
 | Your task | Start here | Then read |
 | --- | --- | --- |
 | Identify a socket or dimmer | [Exact BSEED device identities](bseed_unified_v8.md) | [Firmware availability](bseed_socket_release_status.md) |
+| AVATTO modules or other BSEED TS0726 switches | [Analienx AVATTO and TS0726 release](analienx_release.md) | [Router reliability](router_reliability.md) |
 | Install an offered public image | [Installation and OTA precautions](updating.md) | [Known issues](known_issues.md) |
 | Evaluate the newest firmware | [Candidate release notes](releases/2026-11-02-link-policy-candidates.md) | [Acceptance and rollout gates](bseed_socket_release_status.md#promotion-gates-in-order) |
 | Run an authorized single-device canary | [Targeted OTA operator guide](bseed_targeted_ota_runner.md) | [PM hardware acceptance](bseed_pm_e2e_acceptance.md) |
@@ -54,6 +55,7 @@ flowchart LR
 ### Engineering and hardware
 
 - [BSEED unified V8 architecture](bseed_unified_v8.md) — what is shared, what remains target-specific
+- [Analienx AVATTO and BSEED TS0726 release](analienx_release.md) — one Router identity for every AVATTO and TS0726 board, built, started and self-activated per board
 - [Parent/route link policy](bseed_link_policy.md) — hysteresis, recovery priorities and diagnostics
 - [PM Router/Client verification](bseed_pm_variant_matrix.md) — exact-source role matrix
 - [PM end-to-end acceptance](bseed_pm_e2e_acceptance.md) — physical load and telemetry gates
