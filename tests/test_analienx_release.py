@@ -57,6 +57,18 @@ def test_shared_image_type_or_old_version_is_refused(tmp_path):
         release.validate(DB, indexes=(index,))
 
 
+def test_only_the_recorded_upstream_collision_is_accepted():
+    # ZWSM16-1 keeps its installed type 43527, which upstream also gives the
+    # dry-contact module; that board must never be built by this release.
+    assert release.ACCEPTED_SHARED_TYPES == {'MODULE_AVATTO_A_TS0001': ('MODULE_AVATTO_DRY_TS0001',)}
+    assert DB['MODULE_AVATTO_DRY_TS0001']['firmware_image_type'] == DB['MODULE_AVATTO_A_TS0001']['firmware_image_type']
+    assert 'MODULE_AVATTO_DRY_TS0001' in release.EXCLUDED
+    db = copy.deepcopy(DB)
+    db['MODULE_SOMETHING_ELSE'] = dict(db['MODULE_AVATTO_A_TS0001'])
+    with pytest.raises(ReleaseError, match='shared with MODULE_SOMETHING_ELSE'):
+        release.validate(db)
+
+
 def test_live_board_cannot_drop_out_of_the_release():
     db = copy.deepcopy(DB)
     db['SWITCH_BSEED_TS0726_1GANG']['build'] = 'no'

@@ -28,6 +28,14 @@ on upstream 1.1.2. [`helper_scripts/analienx_release.py`](../helper_scripts/anal
 holds the identity and the board set and refuses a board whose image type is
 shared with another board, or whose version is not above every released one.
 
+One upstream collision is recorded instead of refused: the ZWSM16-1
+(`MODULE_AVATTO_A_TS0001`, in use) and the dry-contact module share image
+type 43527. A device reports its installed type in every OTA query, so the
+ZWSM16-1 cannot move to a new type without an image-type migration. The
+dry-contact module is never built by this release, and an OTA index entry for
+the ZWSM16-1 must filter by its manufacturer name (`_TZ3000_4rbqgcuv`,
+`4rbqgcuv`) so that no dry-contact module is offered it.
+
 This replaces the never-released `1.1.2-avlp1` identity of PR #99.
 
 ### Why Router only

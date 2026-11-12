@@ -46,6 +46,14 @@ EXCLUDED = {
     'SWITCH_BSEED_TS0726_L_2GANG': 'shares image type 43633 with MODULE_NOUS_B1Z_TS0001',
     'SWITCH_BSEED_TS0726_L_3GANG_2': 'shares image type 47007 with MODULE_TUYA_COMMON_TS0001_2',
 }
+# Upstream image-type collisions a release board must live with. A device
+# reports its installed image type in every OTA query, so the live board
+# cannot move to a new type without an image-type migration. The other board
+# is never built by this release, and any OTA index entry for the release
+# board must filter by its Zigbee manufacturer name.
+ACCEPTED_SHARED_TYPES = {
+    'MODULE_AVATTO_A_TS0001': ('MODULE_AVATTO_DRY_TS0001',),
+}
 # Boards running in the owner's Home Assistant on 2026-11-12, all as Routers.
 LIVE = ('MODULE_AVATTO_A_TS0001', 'MODULE_AVATTO_A_TS0002', 'SWITCH_BSEED_TS0726_1GANG')
 
@@ -110,9 +118,12 @@ def validate(db, indexes=INDEXES):
             owners.setdefault(int(entry['firmware_image_type']), []).append(name)
     for name, entry in boards.items():
         image_type = int(entry['firmware_image_type'])
-        if owners[image_type] != [name]:
-            raise ReleaseError(f'{name}: image type {image_type} is shared with '
-                               f'{", ".join(o for o in owners[image_type] if o != name)}')
+        others = sorted(o for o in owners[image_type] if o != name)
+        unexpected = sorted(set(others) - set(ACCEPTED_SHARED_TYPES.get(name, ())))
+        if unexpected:
+            raise ReleaseError(f'{name}: image type {image_type} is shared with {", ".join(unexpected)}')
+        if any(other in boards for other in others):
+            raise ReleaseError(f'{name}: two release boards share image type {image_type}')
         if int(entry['stock_manufacturer_id']) != MANUFACTURER_CODE:
             raise ReleaseError(f'{name}: manufacturer code is not {MANUFACTURER_CODE}')
         newer = [v for v in released_versions(image_type, indexes) if v >= RELEASE['version']]
