@@ -108,8 +108,14 @@ with everything unpowered:
   module edge, labelled `SWS` on the silkscreen side. The ZTU datasheet puts
   SWS on pin 4, GND on pin 13 and VCC on pin 14. `3V3` and `GND` are marked
   on the carrier board; use a pad or via that measures as the same net.
-- **Gledopto GL-SD-301P.** A three-pad row next to the crystal, labelled
-  `GND | 3.3V | SWS`.
+- **Gledopto GL-SD-301P.** Candidate pads sit near the crystal. The
+  `GND | 3.3V | SWS` order seen in photos is a visual guess: trace SWS to the
+  TLSR8258 PA7/SWS pin and prove every pad by continuity. Mini-hooks do not hold
+  on these flat pads; solder thin temporary wires or use a pogo-pin fixture.
+- **Avatto and other Tuya modules (ZTU, ZT3L).** `SWS` is labelled on the
+  module silkscreen; on ZTU it is castellated pin 4, with GND on pin 13 and
+  VCC on pin 14. Take the module out of the wall box or housing first.
+  `wiring --device tuya-zigbee-switch` prints the checks.
 
 Clips must hold by themselves and must not touch a neighbouring pad. The
 writer does not receive acknowledgements, so a clip that slips during the write
@@ -306,8 +312,56 @@ Use finalized OTA payloads, never pre-packaging `forward.bin`.
 vendor stock OTA and produces its finalized image. Local stock OTA or finalized
 stock BIN inputs are also accepted. The dedicated SWire workflow publishes a
 `gledopto-stock-wired-kit-<sha>` artifact containing image, plan, tool and guide.
-Quarantined Gledopto custom firmware is rejected by this profile. Supporting the
-image format does not lift a firmware deployment quarantine.
+
+The same profile also admits one custom build, by its exact bytes: GLSD-ED-008
+(`glsd301p-ed_0x00000.bin`, 142,820 bytes, SHA-256
+`8d90c745734e38c8686a8649bd859c77508bfc3c453aef43f3bf379e694837ff`, file
+version `0x7F090001`), built by analienx/gledopto at `1dec734` in run
+42973182814. The owner decided on 2026-11-11 that this fixed build may be
+flashed over SWire. Any other custom build is still refused until its SHA-256
+is added to the profile.
+
+```text
+gh run download 42973182814 --repo analienx/gledopto -n glsd301p-ed-wired-1dec734c815fe7721958be818dfadf88bae944fe -D ed008
+python telink_swire_recovery.py prepare --device gledopto-gl-sd-301p --image ed008/glsd301p-ed_0x00000.bin --out gledopto-ed008
+```
+
+GLSD-ED-008 clears its Zigbee stack state once at first start, so pair the
+dimmer again afterwards. The Gledopto artifact expires on 2026-12-11; a manual
+run of its TC32 job publishes the same bytes again.
+
+### Avatto and other tuya-zigbee-switch boards
+
+Every board in `device_db.yaml` with a released image is covered by one profile.
+The tool takes the board's single released image from the committed OTA index
+(`zigbee2mqtt/ota/index_router.json` or `index_end_device.json`), downloads it
+and checks it against the SHA-512 and size the index lists:
+
+```text
+python telink_swire_recovery.py boards --search 4rbqgcuv
+python telink_swire_recovery.py prepare --device tuya-zigbee-switch --board MODULE_AVATTO_A_TS0001 --out avatto
+python telink_swire_recovery.py prepare --device tuya-zigbee-switch --board MODULE_AVATTO_TS0011 --role end_device --out avatto-ts0011
+```
+
+`boards --search` matches the board name or the Zigbee manufacturer name that
+Zigbee2MQTT shows, such as `_TZ3000_4rbqgcuv`. Add `--index FILE` (and `--ota
+FILE` for a file you already have) to work offline; the same SHA-512 check
+applies. BSEED sockets are refused here and keep their evidence-gated kits.
+Silicon Labs (EFR32) boards are refused because SWire is Telink-only.
+
+A device coming from stock Tuya firmware still has the stock network record:
+factory-reset it with its button after the first start and pair it again.
+
+### BSEED TS0726 3-gang dimmer/switch
+
+`prepare --device bseed-ts0726 --out ts0726` takes this fork's released 3-gang
+(`iedhxgyi`) Router image from `index_bseed.json` and checks its SHA-512. The
+1-, 2- and 4-gang TS0726 boards use their own images through
+`--device tuya-zigbee-switch --board SWITCH_BSEED_TS0726_<n>GANG`. Do not
+cross-flash them.
+
+Supporting an image format does not lift a firmware deployment quarantine, and
+no profile authorizes a write: each device still needs its owner's decision.
 
 `wiring --device NAME` supplies device-specific preparation notes. `--json` gives
 structured output. `flash`, `stage` and `activate` accept `--dry-run FILE` to save

@@ -60,9 +60,16 @@ stderr. Argument failures also return JSON. Human `--help` is ordinary text.
 | Profile | Allowed input |
 | --- | --- |
 | `bseed-ts011f` | PM/non-PM Router/Client finalized OTA with matching manifest and role-matrix evidence |
-| `gledopto-gl-sd-301p` | Exact pinned vendor stock image; custom builds remain quarantined |
+| `gledopto-gl-sd-301p` | Exact pinned vendor stock image, or the exact pinned GLSD-ED-008 custom build (owner decision 2026-11-11); any other custom build is refused |
+| `tuya-zigbee-switch` | `--board NAME --role router\|end_device`: the one released OTA for that board in `zigbee2mqtt/ota/index_<role>.json`, checked against its SHA-512 (Avatto, MHCOZY, Moes, BSEED switches, ...); BSEED sockets and the TS0726 3-gang are refused here |
+| `bseed-ts0726` | This fork's released TS0726 3-gang (`iedhxgyi`) Router image from `index_bseed.json`, checked against its SHA-512 |
 | `bseed-ts011f-pm-r19-recovery` | Exact pinned historical PM Router r19 incident fallback only |
-| `generic-tlsr8258` | Other explicitly qualified TLSR8258 512 KiB layouts with an input SHA pin; cannot bypass BSEED/Gledopto gates |
+| `generic-tlsr8258` | Other explicitly qualified TLSR8258 512 KiB layouts with an input SHA pin; cannot bypass the profiles above |
+
+`boards --search TEXT` finds a board name from part of its Zigbee manufacturer
+name, as Zigbee2MQTT shows it (for example `4rbqgcuv`). Indexed profiles download
+the index from `main` unless `--index FILE` is given; the image itself is
+always checked against the SHA-512 and size the index lists.
 
 Never flash `forward.bin`, an OTA container directly, a full-chip dump, a FORCE
 wrapper or a guessed board/role. Use the finalized image admitted by `prepare`

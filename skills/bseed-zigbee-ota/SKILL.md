@@ -19,7 +19,8 @@ observed. Exact-device live campaign checks and incident locks still apply.
 For a device that no longer starts, follow `docs/flashing/swire_recovery.md`
 and use `helper_scripts/telink_swire_recovery.py` with the
 `bseed-pm-wired-kit-<sha>` or `bseed-nonpm-wired-kit-<sha>` artifact of the
-role matrix run at the chosen commit. It rewrites the selected slot and keeps NVM,
+role matrix run at the chosen commit. The TS0726 3-gang uses
+`prepare --device bseed-ts0726` (released image from `index_bseed.json`). It rewrites the selected slot and keeps NVM,
 IEEE address and calibration. Never use "Erase All Flash" on a paired device.
 Flash the kit's `image.bin` (the finalized image inside `forward.ota`), not
 `forward.bin`. The method is TX-only: the receipts record bytes sent, not

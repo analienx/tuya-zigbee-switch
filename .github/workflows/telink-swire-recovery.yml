@@ -12,11 +12,15 @@ on:
       - 'helper_scripts/telink_swire_recovery.py'
       - 'tests/test_telink_swire_recovery.py'
       - '.github/workflows/telink-swire-recovery.yml'
+      - 'zigbee2mqtt/ota/index_*.json'
+      - 'device_db.yaml'
   pull_request:
     paths:
       - 'helper_scripts/telink_swire_recovery.py'
       - 'tests/test_telink_swire_recovery.py'
       - '.github/workflows/telink-swire-recovery.yml'
+      - 'zigbee2mqtt/ota/index_*.json'
+      - 'device_db.yaml'
 
 permissions:
   contents: read
@@ -56,7 +60,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install Python-only diagnostic dependencies
-        run: python -m pip install pytest pyserial
+        run: python -m pip install pytest pyserial pyyaml
 
       - name: Run the tool against the chip and flash model
         run: python3 -m pytest --noconftest tests/test_telink_swire_recovery.py -v
@@ -111,6 +115,60 @@ jobs:
           if image['sha256'] != os.environ['GLEDOPTO_IMAGE_SHA256']:
               sys.exit(f'GL-SD-301P image differs from the Gledopto kit: {image}')
           print('GL-SD-301P stock image matches the Gledopto kit:', image['sha256'])
+          EOF
+      - name: Prepare every released board image from the committed OTA index
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 helper_scripts/telink_swire_recovery.py boards --index zigbee2mqtt/ota/index_router.json \
+            --search 4rbqgcuv --json > "$RUNNER_TEMP/boards.json"
+          python3 helper_scripts/telink_swire_recovery.py prepare --device bseed-ts0726 \
+            --index zigbee2mqtt/ota/index_bseed.json --out "$RUNNER_TEMP/index-kits/bseed-ts0726" --json \
+            > "$RUNNER_TEMP/ts0726.json"
+          python3 - "$RUNNER_TEMP" <<'EOF'
+          import json, pathlib, sys
+          import yaml
+          sys.path.insert(0, 'helper_scripts')
+          import telink_swire_recovery as tool
+          root = pathlib.Path(sys.argv[1])
+          found = [row['board'] for row in json.loads((root / 'boards.json').read_text())['boards']]
+          if found != ['MODULE_AVATTO_A_TS0001']:
+              sys.exit(f'boards --search 4rbqgcuv found {found}')
+          db = yaml.safe_load(open('device_db.yaml', encoding='utf-8'))
+          ts0726 = json.loads((root / 'ts0726.json').read_text())['plan']
+          if ts0726['image']['imageType'] != db['SWITCH_BSEED_TS0726_3GANG']['firmware_image_type']:
+              sys.exit('TS0726 3-gang image type differs from device_db.yaml')
+          summary = {'bundled': 0, 'refusedSilabs': 0, 'refusedGated': 0}
+          for role in tool.ROLES:
+              index = pathlib.Path('zigbee2mqtt/ota') / tool.INDEX_FILES[role]
+              for row in tool.board_list(json.loads(index.read_text()), role):
+                  board = row['board']
+                  entry = db.get(board) or {}
+                  if not entry:
+                      print(f'note: {board} is in {index.name} but not in device_db.yaml')
+                  out = root / 'index-kits' / role / board
+                  try:
+                      plan = tool.prepare(out=out, device='tuya-zigbee-switch', board=board, role=role,
+                                          index=index)
+                  except tool.RecoveryError as error:
+                      telink = str(entry.get('mcu_family')) == 'Telink'
+                      gated = board.startswith(('OUTLET_BSEED', 'SWITCH_BSEED_TS0726_3GANG'))
+                      if gated and 'gated' in str(error):
+                          summary['refusedGated'] += 1
+                      elif not telink and 'Silicon Labs' in str(error):
+                          summary['refusedSilabs'] += 1
+                      else:
+                          sys.exit(f'{role} {board} ({entry.get("mcu")}): {error}')
+                      continue
+                  if entry and str(entry.get('mcu_family')) != 'Telink':
+                      sys.exit(f'{board} is not Telink but produced a bundle')
+                  expected = entry.get('firmware_image_type')
+                  if role == 'router' and expected and plan['image']['imageType'] != expected:
+                      sys.exit(f'{board} image type {plan["image"]["imageType"]} differs from device_db {expected}')
+                  summary['bundled'] += 1
+          if summary['bundled'] < 150:
+              sys.exit(f'too few bundles: {summary}')
+          print('Released index images:', summary)
           EOF
       - name: Package stock recovery tool and guide
         run: |
