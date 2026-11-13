@@ -390,11 +390,12 @@ def test_wired_install_receipt_must_belong_to_this_device_and_finished_write(fai
     if failure == 'other_device': session['context']['targetId'] = 'kitchen-0x00124b0000000001'
     if failure == 'running_session': session['phase'] = 'STAGED'
     if failure == 'not_completed': op['status'] = 'STARTED'
-    if failure == 'other_image_completed': op['request']['imageSha256'] = 'c' * 64
+    if failure == 'other_image_completed':
+        for receipt in op['result']['receipts']: receipt['imageSha256'] = 'c' * 64
     if failure == 'stage_only': op['result']['receipts'] = op['result']['receipts'][:1]
     if failure == 'receipt_other_image': op['result']['receipts'][1]['imageSha256'] = 'c' * 64
     if failure == 'no_receipts': op['result']['receipts'] = []
-    if failure == 'bad_time': op['result']['receipts'][0]['utc'] = 'yesterday'
+    if failure == 'bad_time': op['result']['receipts'][1]['utc'] = 'yesterday'  # the activate receipt
     if failure == 'longer_hex_id': session['context']['targetId'] = 'tableleft-' + kwargs['ieee'] + 'ab'
     if failure == 'later_other_write':
         session['operations']['flash-2'] = dict(request=dict(action='flash', imageSha256='c' * 64), status='COMPLETED',
