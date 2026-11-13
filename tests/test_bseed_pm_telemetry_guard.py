@@ -278,3 +278,181 @@ def test_uncertain_release_keeps_active_record(tmp_path, monkeypatch, failure):
     assert not list(active.parent.glob('PM_TELEMETRY_RELEASED_*'))
     assert len(bridge.requests) == (1 if failure == 'identity_changed' else 2)
     assert bridge.started == bridge.stopped == 2
+
+
+# --- release after a verified wired install superseded the campaign -------------
+
+WIRED_IMAGE = 'b' * 64
+NOW = dt.datetime(2026, 11, 13, 19, 0, tzinfo=dt.timezone.utc)
+
+
+def superseded_fixture():
+    """Table Left shape: the r21 campaign never ran; r22 was written by wire."""
+    p, record, _, lock = fixture()
+    p.update(postflash_build='r21', postflash_role='Router')
+    record.update(expected_build='r21', expected_role='Router', started='2026-11-06T08:13:31+00:00')
+    session = dict(
+        phase='CLOSED',
+        context=dict(imageSha256=WIRED_IMAGE, targetId='tableleft-' + p['ieee'], slot='A'),
+        operations={'flash-1': dict(status='COMPLETED', result=dict(imageSha256=WIRED_IMAGE, receipts=[
+            dict(utc='2026-11-13T13:26:12+00:00', action='stage'),
+            dict(utc='2026-11-13T13:26:13+00:00', action='activate')]))})
+    evidence = dict(at='2026-11-13T18:50:00+00:00', ieee=p['ieee'], result='metadata_refreshed', error=None,
+                    interview_ok=True, fresh_inventory_observed=True, live_zdo_after={'role': 'Router'},
+                    after=dict(ieee_address=p['ieee'], software_build_id='r22', type='Router'))
+    kwargs = dict(ieee=p['ieee'], build='r22', role='Router', now=NOW,
+                  reason='r21 never started; r22 was written by SWire and answers as r22')
+    return record, evidence, lock, session, kwargs
+
+
+def test_wired_install_supersedes_the_campaign_with_fresh_identity():
+    record, evidence, lock, session, kwargs = superseded_fixture()
+    install = guard.validate_superseded_release(record, evidence, lock, session, **kwargs)
+    assert install['image_sha256'] == WIRED_IMAGE
+    assert install['written_at'] == dt.datetime(2026, 11, 13, 13, 26, 13, tzinfo=dt.timezone.utc)
+    lock['phase'] = 'update_timeout_or_unconfirmed'
+    guard.validate_superseded_release(record, evidence, lock, session, **kwargs)
+
+
+@pytest.mark.parametrize('failure, message', [
+    ('campaign_build', 'normal release route'),
+    ('terminal_lock', 'not an unresolved update'),
+    ('other_lock', 'does not belong'),
+    ('guard_not_enabled', 'enabled guard'),
+    ('other_device_guard', 'enabled guard'),
+    ('short_reason', 'written reason'),
+    ('old_evidence', 'older than'),
+    ('predates_guard', 'predates telemetry quarantine'),
+    ('predates_install', 'predates the wired install'),
+    ('cached_inventory', 'fresh target interview'),
+    ('no_interview', 'fresh target interview'),
+    ('failed_metadata', 'still unconfirmed'),
+    ('error', 'reported an error'),
+    ('wrong_live_role', 'final live role'),
+    ('wrong_build', 'does not match the superseding'),
+    ('wrong_ieee_after', 'does not match the superseding'),
+    ('evidence_other_device', 'another device'),
+    ('naive_time', 'timezone'),
+])
+def test_superseded_release_needs_every_proof(failure, message):
+    record, evidence, lock, session, kwargs = superseded_fixture()
+    if failure == 'campaign_build': record['expected_build'] = 'r22'
+    if failure == 'terminal_lock': lock['phase'] = 'postflash_accepted'
+    if failure == 'other_lock': lock['token'] = 'campaign-2'
+    if failure == 'guard_not_enabled': record['phase'] = 'enabling'
+    if failure == 'other_device_guard': record['ieee'] = '0x0000000000000000'
+    if failure == 'short_reason': kwargs['reason'] = 'r22 is installed'
+    if failure == 'old_evidence': evidence['at'] = '2026-11-13T15:00:00+00:00'
+    if failure == 'predates_guard': evidence['at'] = '2026-11-01T00:00:00+00:00'
+    if failure == 'predates_install': evidence['at'] = '2026-11-13T13:00:00+00:00'; kwargs['now'] = dt.datetime(2026, 11, 13, 13, 5, tzinfo=dt.timezone.utc)
+    if failure == 'cached_inventory': evidence['fresh_inventory_observed'] = False
+    if failure == 'no_interview': evidence['interview_ok'] = False
+    if failure == 'failed_metadata': evidence['result'] = 'build_mismatch_after_interview'
+    if failure == 'error': evidence['error'] = 'RuntimeError: interview timed out'
+    if failure == 'wrong_live_role': evidence['live_zdo_after'] = {'role': 'EndDevice'}
+    if failure == 'wrong_build': evidence['after']['software_build_id'] = 'r21'
+    if failure == 'wrong_ieee_after': evidence['after']['ieee_address'] = '0x0000000000000000'
+    if failure == 'evidence_other_device': evidence['ieee'] = '0x0000000000000000'
+    if failure == 'naive_time': evidence['at'] = '2026-11-13T18:50:00'
+    with pytest.raises(ValueError, match=message):
+        guard.validate_superseded_release(record, evidence, lock, session, **kwargs)
+
+
+@pytest.mark.parametrize('failure, message', [
+    ('no_hash', 'SHA-256'),
+    ('other_device', 'not recorded for this device'),
+    ('running_session', 'finished phase'),
+    ('not_completed', 'no completed write'),
+    ('other_image_completed', 'no completed write'),
+    ('no_receipts', 'no completed write'),
+    ('bad_time', 'valid timestamp'),
+])
+def test_wired_install_receipt_must_belong_to_this_device_and_finished_write(failure, message):
+    _, _, _, session, kwargs = superseded_fixture()
+    op = session['operations']['flash-1']
+    if failure == 'no_hash': session['context']['imageSha256'] = 'abc'
+    if failure == 'other_device': session['context']['targetId'] = 'kitchen-0x00124b0000000001'
+    if failure == 'running_session': session['phase'] = 'STAGED'
+    if failure == 'not_completed': op['status'] = 'STARTED'
+    if failure == 'other_image_completed': op['result']['imageSha256'] = 'c' * 64
+    if failure == 'no_receipts': op['result']['receipts'] = []
+    if failure == 'bad_time': op['result']['receipts'][0]['utc'] = 'yesterday'
+    with pytest.raises(ValueError, match=message):
+        guard.validate_wired_install_receipt(session, kwargs['ieee'])
+
+
+def test_superseded_release_disables_only_the_quarantine_and_keeps_locks(tmp_path, monkeypatch):
+    record, evidence, lock, session, kwargs = superseded_fixture()
+    workdir = tmp_path / 'campaign'
+    workdir.mkdir()
+    profile = dict(ieee=kwargs['ieee'], device='TestSocket', workdir=str(workdir), broker='b', mqtt_config='m',
+                   require_pm=True)
+    (workdir / 'PM_TELEMETRY_GUARD.json').write_text(json.dumps(record))
+    (workdir / 'ACTIVE_LOCK.json').write_text(json.dumps(lock))
+    session_path, evidence_path = tmp_path / 'session.json', tmp_path / 'evidence.json'
+    session_path.write_text(json.dumps(session))
+    evidence['at'] = dt.datetime.now(dt.timezone.utc).isoformat()
+    evidence_path.write_text(json.dumps(evidence))
+
+    class Bridge:
+        state, requests, started, stopped = 'online', [], 0, 0
+        build = 'r22'
+        inventory = [dict(ieee_address=kwargs['ieee'], friendly_name='TestSocket', manufacturer='b28wrpvx',
+                          model_id='TS011F-BS-PM', type='Router', software_build_id='r22',
+                          definition={'options': [{'property': OPTION}]})]
+        def start(self): self.started += 1
+        def stop(self): self.stopped += 1
+        def request(self, operation, payload, *, full_response):
+            self.requests.append(payload)
+            return dict(status='ok', data=dict(id=kwargs['ieee'], to=payload['options'],
+                                               **{'from': {OPTION: True}}, restart_required=False))
+    bridge = Bridge()
+    monkeypatch.setattr(guard, 'bridge_for', lambda _profile: bridge)
+    guard.release_superseded(profile, evidence_path, session_path, build='r22', role='Router',
+                             reason=kwargs['reason'])
+    assert bridge.requests == [{'id': kwargs['ieee'], 'options': {OPTION: False}}]
+    assert bridge.started == bridge.stopped == 1
+    assert not (workdir / 'PM_TELEMETRY_GUARD.json').exists()
+    released = json.loads((workdir / 'PM_TELEMETRY_RELEASED_SUPERSEDED_campaign-1.json').read_text())
+    assert released['phase'] == 'released_superseded_by_wired_install'
+    assert released['superseding_build'] == 'r22' and released['superseding_image_sha256'] == WIRED_IMAGE
+    assert released['transport_phase_preserved'] == 'ota_transfer_ok_postflash_unverified'
+    assert json.loads((workdir / 'ACTIVE_LOCK.json').read_text()) == lock, 'campaign lock is untouched'
+
+
+def test_superseded_release_stops_before_any_change_when_identity_moved(tmp_path, monkeypatch):
+    record, evidence, lock, session, kwargs = superseded_fixture()
+    workdir = tmp_path / 'campaign'
+    workdir.mkdir()
+    profile = dict(ieee=kwargs['ieee'], device='TestSocket', workdir=str(workdir), broker='b', mqtt_config='m')
+    for name, data in (('PM_TELEMETRY_GUARD.json', record), ('ACTIVE_LOCK.json', lock)):
+        (workdir / name).write_text(json.dumps(data))
+    session_path, evidence_path = tmp_path / 'session.json', tmp_path / 'evidence.json'
+    session_path.write_text(json.dumps(session))
+    evidence['at'] = dt.datetime.now(dt.timezone.utc).isoformat()
+    evidence_path.write_text(json.dumps(evidence))
+
+    class Bridge:
+        state, requests = 'online', []
+        inventory = [dict(ieee_address=kwargs['ieee'], friendly_name='TestSocket', manufacturer='b28wrpvx',
+                          model_id='TS011F-BS-PM', type='Router', software_build_id='r23-other',
+                          definition={'options': [{'property': OPTION}]})]
+        def start(self): pass
+        def stop(self): pass
+        def request(self, *_args, **_kwargs): self.requests.append(1)
+    bridge = Bridge()
+    monkeypatch.setattr(guard, 'bridge_for', lambda _profile: bridge)
+    with pytest.raises(ValueError, match='identity changed'):
+        guard.release_superseded(profile, evidence_path, session_path, build='r22', role='Router',
+                                 reason=kwargs['reason'])
+    assert bridge.requests == [] and (workdir / 'PM_TELEMETRY_GUARD.json').exists()
+
+
+def test_cli_requires_exact_ieee_confirmation():
+    base = ['release-superseded', '--workdir', 'w', '--device', 'd', '--ieee', '0xa4c138cdf963eac3',
+            '--mqtt-config', 'm', '--broker', 'b', '--evidence', 'e', '--wired-install-session', 's',
+            '--superseding-build', 'r22', '--role', 'Router', '--reason', 'x' * 40]
+    with pytest.raises(SystemExit, match='exact IEEE confirmation'):
+        guard.main(base + ['--confirm-ieee', '0x0000000000000000'])
+    with pytest.raises(SystemExit):
+        guard.main(base)
