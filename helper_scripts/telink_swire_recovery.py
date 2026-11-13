@@ -2302,8 +2302,12 @@ def matched_backup(path, *, port=None):
     """Require the bytes and both files of the original successful full read."""
     path = Path(path)
     data = path.read_bytes()
-    second = path.with_name(path.name + '.second.bin').read_bytes()
     receipt = read_json(path.with_name(path.name + '.json'))
+    second_path = path.with_name(path.name + '.second.bin')
+    if receipt.get('status') != 'READ_MATCHED' or not second_path.is_file():
+        raise RecoveryError('baseline must be an unchanged matching double read of full flash on this port '
+                            f'(this read is {receipt.get("status")})')
+    second = second_path.read_bytes()
     digests = [entry.get('sha256') for entry in receipt.get('reads', [])]
     if (len(data) != FLASH_BYTES or second != data or receipt.get('status') != 'READ_MATCHED'
             or receipt.get('address') != 0 or receipt.get('bytes') != FLASH_BYTES
