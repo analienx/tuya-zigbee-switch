@@ -291,12 +291,17 @@ def superseded_fixture():
     p, record, _, lock = fixture()
     p.update(postflash_build='r21', postflash_role='Router')
     record.update(expected_build='r21', expected_role='Router', started='2026-11-06T08:13:31+00:00')
+    # Shape of a real `telink_swire_recovery.py` session after a TX-only flash.
     session = dict(
         phase='CLOSED',
         context=dict(imageSha256=WIRED_IMAGE, targetId='tableleft-' + p['ieee'], slot='A'),
-        operations={'flash-1': dict(status='COMPLETED', result=dict(imageSha256=WIRED_IMAGE, receipts=[
-            dict(utc='2026-11-13T13:26:12+00:00', action='stage'),
-            dict(utc='2026-11-13T13:26:13+00:00', action='activate')]))})
+        operations={'flash-1': dict(
+            request=dict(action='flash', imageSha256=WIRED_IMAGE, slot='A', targetId='tableleft-' + p['ieee']),
+            status='COMPLETED',
+            result=dict(status='SENT_UNVERIFIED', action='flash', phase='BOOT_REQUESTED', receipts=[
+                dict(utc='2026-11-13T13:26:12+00:00', action='stage', imageSha256=WIRED_IMAGE, result='SENT_UNVERIFIED'),
+                dict(utc='2026-11-13T13:26:13+00:00', action='activate', imageSha256=WIRED_IMAGE,
+                     result='SENT_UNVERIFIED')]))})
     evidence = dict(at='2026-11-13T18:50:00+00:00', ieee=p['ieee'], result='metadata_refreshed', error=None,
                     interview_ok=True, fresh_inventory_observed=True, live_zdo_after={'role': 'Router'},
                     after=dict(ieee_address=p['ieee'], software_build_id='r22', type='Router'))
@@ -367,6 +372,8 @@ def test_superseded_release_needs_every_proof(failure, message):
     ('running_session', 'finished phase'),
     ('not_completed', 'no completed write'),
     ('other_image_completed', 'no completed write'),
+    ('stage_only', 'no completed write'),
+    ('receipt_other_image', 'no completed write'),
     ('no_receipts', 'no completed write'),
     ('bad_time', 'valid timestamp'),
 ])
@@ -377,7 +384,9 @@ def test_wired_install_receipt_must_belong_to_this_device_and_finished_write(fai
     if failure == 'other_device': session['context']['targetId'] = 'kitchen-0x00124b0000000001'
     if failure == 'running_session': session['phase'] = 'STAGED'
     if failure == 'not_completed': op['status'] = 'STARTED'
-    if failure == 'other_image_completed': op['result']['imageSha256'] = 'c' * 64
+    if failure == 'other_image_completed': op['request']['imageSha256'] = 'c' * 64
+    if failure == 'stage_only': op['result']['receipts'] = op['result']['receipts'][:1]
+    if failure == 'receipt_other_image': op['result']['receipts'][1]['imageSha256'] = 'c' * 64
     if failure == 'no_receipts': op['result']['receipts'] = []
     if failure == 'bad_time': op['result']['receipts'][0]['utc'] = 'yesterday'
     with pytest.raises(ValueError, match=message):

@@ -338,11 +338,13 @@ def validate_wired_install_receipt(session, ieee):
         raise ValueError('wired-install session was not recorded for this device')
     if session.get('phase') not in WIRED_SESSION_PHASES:
         raise ValueError('wired-install session is not at a finished phase')
-    done = [op for op in (session.get('operations') or {}).values()
-            if isinstance(op, dict) and op.get('status') == 'COMPLETED'
-            and (op.get('result') or {}).get('imageSha256') == image]
+    # A flash is stage + activate; the activate receipt is the finished write.
     times = [_utc(receipt.get('utc'), 'wired-install receipt')
-             for op in done for receipt in (op.get('result') or {}).get('receipts', [])]
+             for op in (session.get('operations') or {}).values()
+             if isinstance(op, dict) and op.get('status') == 'COMPLETED'
+             and (op.get('request') or {}).get('imageSha256') == image
+             for receipt in (op.get('result') or {}).get('receipts', [])
+             if receipt.get('action') == 'activate' and receipt.get('imageSha256') == image]
     if not times:
         raise ValueError('wired-install session has no completed write of its image')
     return {'image_sha256': image, 'written_at': max(times)}
