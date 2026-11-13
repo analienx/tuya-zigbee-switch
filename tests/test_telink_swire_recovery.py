@@ -2184,3 +2184,32 @@ def test_read_refuses_to_overwrite_earlier_live_diagnostics(tmp_path, monkeypatc
         tool.read_flash('COM5', target, size=32, reader=reader, halt=False,
                         runner=lambda command, **_kw: subprocess.CompletedProcess(command, 0))
     assert target.with_name('flash.bin.reader-1.live.log').read_text() == 'earlier evidence'
+
+
+@pytest.mark.parametrize('code', ['UART_RESPONSE_LENGTH', 'UART_SHORT_WRITE'])
+def test_watch_keeps_going_after_stray_bytes_or_a_short_write(tmp_path, code):
+    timer, sleep = watch_timer()
+    calls = []
+    def probe(name, receipt, **kwargs):
+        calls.append(timer.now)
+        if len(calls) == 1:
+            raise RecoveryError('fixture glitch', code=code)
+        return {'status': 'SWIRE_RESPONSE_OK', 'targetReplyVerified': True, 'proofLevel': 'target-register-readback'}
+    result = tool.watch_link('COM5', tmp_path / 'watch', device='gledopto-gl-sd-301p', seconds=10,
+                             inventory=lambda: [USB_ROW], probe=probe, clock=timer, sleep=sleep)
+    assert len(calls) == 2 and result['status'] == 'TARGET_REPLIES_VERIFIED'
+
+
+def test_watch_survives_a_truncated_probe_receipt(tmp_path):
+    timer, sleep = watch_timer()
+    calls = []
+    def probe(name, receipt, **kwargs):
+        calls.append(name)
+        if len(calls) == 1:
+            Path(receipt).write_text('{"status": "LINK_TEST_FAIL')  # probe interrupted mid-write
+            raise RecoveryError('fixture interrupted write', code='SWIRE_RESPONSE_TIMEOUT')
+        return {'status': 'SWIRE_RESPONSE_OK', 'targetReplyVerified': True, 'proofLevel': 'target-register-readback'}
+    result = tool.watch_link('COM5', tmp_path / 'watch', device='gledopto-gl-sd-301p', seconds=10,
+                             inventory=lambda: [USB_ROW], probe=probe, clock=timer, sleep=sleep)
+    assert len(calls) == 2 and result['status'] == 'TARGET_REPLIES_VERIFIED'
+    assert result['attempts'][0]['errorCode'] == 'SWIRE_RESPONSE_TIMEOUT'

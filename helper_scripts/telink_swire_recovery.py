@@ -1706,6 +1706,13 @@ def adapter_identity(row):
     return {'port': port_key(row['device']), 'hwid': row.get('hwid')}
 
 
+# Transient link results that keep the watch going with a short backoff. Stray bytes and a short
+# UART write are as typical of the unreliable single-SWS divider as a timeout is.
+WATCH_RETRY_CODES = ('NO_SWIRE_TARGET_RESPONSE', 'SWIRE_RESPONSE_TIMEOUT', 'SWIRE_FRAMING', 'UART_ECHO_MISMATCH',
+                     'UNSTABLE_SWIRE_READBACK', 'UNSTABLE_FLASH_READ', 'LINK_TEST_TIMEOUT',
+                     'UART_RESPONSE_LENGTH', 'UART_SHORT_WRITE')
+
+
 def watch_link(port, output, *, device, seconds=180, baud=921600, debug=False, out=None,
                inventory=None, probe=None, clock=time.monotonic, sleep=time.sleep):
     """Bounded target diagnostics with USB readiness checks and fault backoff.
@@ -1784,7 +1791,10 @@ def watch_link(port, output, *, device, seconds=180, baud=921600, debug=False, o
                 attempt = probe(result['port'], receipt, phase='target', device=device, baud=baud,
                                 debug=debug, out=out)
             except RecoveryError as error:
-                attempt = read_json(receipt) if receipt.exists() else {'errorCode': error.code, 'error': str(error)}
+                try:
+                    attempt = read_json(receipt) if receipt.exists() else {'errorCode': error.code, 'error': str(error)}
+                except ValueError:  # a probe interrupted mid-write can leave a truncated receipt
+                    attempt = {'errorCode': error.code, 'error': str(error), 'receiptUnreadable': True}
                 attempt.setdefault('errorCode', error.code)
             entry = {key: attempt.get(key) for key in ('status', 'errorCode', 'error', 'failureStage', 'statistics')}
             entry.update(receipt=str(receipt), port=result['port'])
@@ -1805,8 +1815,7 @@ def watch_link(port, output, *, device, seconds=180, baud=921600, debug=False, o
                 not_before = clock() + min(10, 2 ** min(fault_streak, 4))
                 report('WAITING_FOR_USB_READY', 'USB/driver failed, not a SWire timing result. Waiting for recovery.',
                        errorCode=code, retryInSeconds=not_before - clock())
-            elif code in ('NO_SWIRE_TARGET_RESPONSE', 'SWIRE_RESPONSE_TIMEOUT', 'SWIRE_FRAMING',
-                          'UART_ECHO_MISMATCH', 'UNSTABLE_SWIRE_READBACK', 'UNSTABLE_FLASH_READ', 'LINK_TEST_TIMEOUT'):
+            elif code in WATCH_RETRY_CODES:
                 fault_streak, not_before = 0, clock() + 1
                 report('NO_VERIFIED_TARGET_REPLY', 'No verified target reply yet. Adapter echo does not prove SWS contact or SWire entry.',
                        errorCode=code)
