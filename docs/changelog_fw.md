@@ -7,6 +7,11 @@
 > [!IMPORTANT]
 > New firmware identities appearing in the changelog are **not** automatically safe to install. Only the checked-in [public BSEED OTA index](../zigbee2mqtt/ota/index_bseed.json) defines normal public availability. A clean build, sealed image or completed OTA is not a complete hardware acceptance.
 
+## 2026-11-13 · PM Router r22 restores Table Left; r21 cause confirmed (not publicly released)
+
+- **r21 (`1.2.5-bseedr21`) does not start.** A paused full read of Table Left, which went silent after its r21 OTA, shows the OTA transfer and slot switch worked: r21 sits intact and enabled, r19 cleanly disabled. The `-Os` build itself fails at startup ([record](bseed_tableleft_r21_r22_recovery_20261113.md)). Never install r21.
+- **r22 (`1.2.5-bseedr22`, `-Os -fno-jump-tables`) started on real hardware** for the first time: written by wire to Table Left, it ran, rejoined on its stored network record and reports r22 as a Router. Its OTA install, relay/metering acceptance and soak are still pending; it remains an unsealed draft.
+
 ## 2026-11-02 · Sealed link-policy candidate set (not publicly released)
 
 **Four distinct native images, all from one exact candidate source:** [`1cc08a92d4dd68ff3607dc224f707c3e757d4ec8`](https://github.com/analienx/tuya-zigbee-switch/commit/1cc08a92d4dd68ff3607dc224f707c3e757d4ec8).
