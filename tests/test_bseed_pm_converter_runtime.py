@@ -52,13 +52,11 @@ const select = (cs, endpointName) => cs.find(c =>
 def test_generated_converter_loads_and_pm_nonpm_contracts_stay_separate(tmp_path):
     converter = tmp_path / 'switch_custom.js'
     rendered = _render()
-    # The PM Client next version is reserved, not deployed. The generated
-    # converter must continue recognising the already sealed image; the
-    # unreleased candidate must never be misrepresented as deployed.
-    # Converter recognizes the approved sealed versions, not reserved
-    # Router r13 / Client cli16 pending hardware acceptance.
-    assert '"1.2.5-bseedr12"' in rendered
-    assert '"1.2.5-bseedcli14"' in rendered
+    # The converter recognises the BSEED PM build family (same scale
+    # contract), not a per-release list; tests/test_bseed_converter_family.py
+    # pins the bounds and the firmware scales.
+    assert r'const fixedScaleFamily = /^1\.2\.5-bseed(r|cli)(\d+)$/;' in rendered
+    assert 'knownBuilds' not in rendered
     converter.write_text(rendered)
     script = r'''
 const assert = require('node:assert/strict');
@@ -119,7 +117,7 @@ const assertSampled = (result, expected, watts) => {
 };
 (async () => {
     let sequence = 1;
-    for (const build of ['1.2.5-bseedcli6', '1.2.5-bseedcli12', '1.2.5-bseedr9']) {
+    for (const build of ['1.2.5-bseedcli6', '1.2.5-bseedcli12', '1.2.5-bseedr23']) {
       for (const staleCache of [false, true]) {
         const device = makeDevice(build), ep = device.endpoints[0];
         if (staleCache) ep.cache = {haElectricalMeasurement: {acVoltageDivisor: 1}, seMetering: {divisor: 100}};

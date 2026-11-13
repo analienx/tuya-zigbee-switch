@@ -13,6 +13,7 @@ import paho.mqtt.client as mqtt
 import yaml
 from bseed_zdo_live import read_node_descriptor
 from bseed_z2m_postota_reinterview import validate_campaign
+from bseed_z2m_state_refresh import add_refresh_arguments, collect as collect_state_refresh
 
 
 def evaluate(inventory, state, expected_ieee, expected_role, expected_build, live_node=None):
@@ -89,6 +90,9 @@ def arguments():
     p.add_argument('--preflash-lock', help='Same-role OTA lock with captured relay/energy baseline')
     p.add_argument('--expected-image-sha256', help='Required with --preflash-lock')
     p.add_argument('--relay-get-key',choices=['state','state_relay'],default='state')
+    p.add_argument('--skip-state-refresh', action='store_true',
+                   help='skip the standard post-update read of relay/PM values (not recommended)')
+    add_refresh_arguments(p, standalone=False)
     return p.parse_args()
 
 
@@ -167,6 +171,15 @@ def main():
         except (OSError,ValueError,TypeError,KeyError) as error:
             retention_issues=[type(error).__name__+': '+str(error)[:180]]
         problems.extend(retention_issues)
+    # Standard post-update step: replace cached pre-update values with fresh
+    # device reads, so stale relay/power/energy numbers never pass as current.
+    refresh = None
+    if not args.skip_state_refresh:
+        try:
+            refresh = collect_state_refresh(args)
+        except (ValueError, TimeoutError, OSError, KeyError, ImportError) as error:
+            refresh = {'result': 'failed', 'issues': [type(error).__name__ + ': ' + str(error)[:180]]}
+        problems.extend('state refresh: ' + issue for issue in refresh['issues'])
     if snapshot['bridge'] != 'online': problems.append('Zigbee2MQTT bridge not verified online')
     if node_error: problems.append('live ZDO probe failed: '+node_error)
     if snapshot['errors']: problems.append('target-related Zigbee2MQTT errors observed')
@@ -179,6 +192,7 @@ def main():
                 'pm_readiness': {'required': args.require_pm, 'issues': pm_issues},
                 'same_role_retention': {'required': bool(args.preflash_lock),
                     'issues':retention_issues,'physical_acceptance':False},
+                'state_refresh': refresh,
                 'live_node_descriptor': node, 'zdo_error': node_error,
                 'cached_inventory_role_disagrees_with_live_zdo': bool(target and node and target.get('type') != node['role']),
                 'fresh_mqtt_state_observed': snapshot['state'] is not None,

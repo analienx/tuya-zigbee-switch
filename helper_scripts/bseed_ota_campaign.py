@@ -253,6 +253,8 @@ def postflash_cmd(profile, evidence):
             '--mqtt-config', profile['mqtt_config'], '--broker', profile['broker'],
             '--output', str(evidence), '--observe-seconds', str(profile.get('observe_seconds', 20))]
     if profile.get('require_pm'): cmd.append('--require-pm')
+    if profile.get('deployed_converter'): cmd.extend(['--converter', str(profile['deployed_converter'])])
+    if profile.get('ota_version_check'): cmd.append('--ota-version-check')
     if profile['preflash_role']==profile['postflash_role']:
         cmd.extend(['--preflash-lock',str(Path(profile['workdir'])/'ACTIVE_LOCK.json'),
                     '--expected-image-sha256',str(profile['sha256']),

@@ -146,6 +146,16 @@ Inspect *device-side* `Upgrade End` status, the coordinator's effective block-re
 
 At the start of each future session read the latest `main`, this skill, the device-specific investigation, private `ACTIVE_LOCK.json` and the most recent postflash evidence. Commit reusable tools, tests and nonprivate diagnostics; keep private IPs, credentials, firmware binaries and local backups out of git.
 
+## Standard post-update state refresh
+
+Zigbee2MQTT republishes its cached values with every message, so after a wired flash or OTA it can show pre-update relay, power and energy numbers for hours: an idle socket has no reportable change. Table Left after its wired r22 restore (2026-11-13) still showed 2 W with no load, from a 2026-11-06 sample. `bseed_z2m_postflash_verify.py` (and therefore `--mode postflash`) now runs `helper_scripts/bseed_z2m_state_refresh.py` by default after its identity checks. It:
+
+- reads the relay key and `relay_physical_mode`, plus power/current/voltage/energy with `--require-pm`, straight from the device and records cached → fresh per field. Power is fresh only when the converter's `bseed_pm_sample_time_ms` stamp advances past the pre-request baseline;
+- with `--converter <copy of the deployed switch_custom.js>` (profile `deployed_converter`), fails if the deployed converter does not list the installed build: an unknown build gets generic scaling and is never stamped;
+- with `--ota-version-check` (profile `ota_version_check`), asks Zigbee2MQTT for a transaction-matched OTA *version check* so its update panel shows the installed file version. It never sends `ota_update/update`.
+
+Zigbee2MQTT republishes its whole cached state with every message, so a field being present proves nothing: only the power reading has a freshness proof (the converter's sample stamp advancing past the pre-request baseline, with a minute of clock-skew tolerance); every other field is recorded with `freshnessProof: none`. A missing field or a missing power stamp makes the refresh result `incomplete` (the standalone tool exits 2, and the postflash verifier then reports `unconfirmed`). After a wired flash run the same tool directly. `--skip-state-refresh` exists only for diagnosis. Fresh values are not physical acceptance.
+
 ## Mandatory metering gate for BSEED PM sockets
 
 A PM Client rejoin and successful interview do **not** establish working metering. For the private PM socket profile set `require_pm=true` and run `--mode postflash` with the strict PM gate. Verify endpoint-1 `activePower` min<=10 s/max<=60 s/change<=5 W, actual endpoint-1 coordinator binding, the target's read multiplier/divisor values, plausible fresh standard `power/current/voltage/energy` and a genuine device-originated unsolicited report. The `postflash_candidate` result is still not full hardware acceptance; use the independent loaded-to-zero test described in `docs/bseed_pm_e2e_acceptance.md`.

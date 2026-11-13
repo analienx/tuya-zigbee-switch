@@ -78,25 +78,21 @@ const bseedPmElectricityMeter = () => {
         voltage: {min: 5, max: 300, change: 5, multiplier: 1, divisor: 100},
         energy: {min: 10, max: 600, change: 1, multiplier: 1, divisor: 1000},
     });
-    const knownBuilds = new Set([
-        "1.2.5-bseedcli6", "1.2.5-bseedcli8", "1.2.5-bseedcli9",
-        "1.2.5-bseedcli10", "1.2.5-bseedcli11", "1.2.5-bseedr7", "1.2.5-bseedr8",
-        "1.2.5-bseedcli12", "1.2.5-bseedr9",
-        "1.2.5-bseedcli13", "1.2.5-bseedr11",
-        "1.2.5-bseedcli14", "1.2.5-bseedr12",
-        "1.2.5-bseedcli15", "1.2.5-bseedcli16", "1.2.5-bseedr13",
-        "1.2.5-bseedcli17", "1.2.5-bseedr14",
-        "1.2.5-bseedcli18", "1.2.5-bseedr15",
-        "1.2.5-bseedcli19", "1.2.5-bseedr16",
-        "1.2.5-bseedcli20", "1.2.5-bseedr17",
-        "1.2.5-bseedcli21", "1.2.5-bseedr18",
-        "1.2.5-bseedcli22", "1.2.5-bseedr19",
-        "1.2.5-bseedcli23", "1.2.5-bseedr20",
-        "1.2.5-bseedcli24", "1.2.5-bseedr21",
-        "1.2.5-bseedcli25", "1.2.5-bseedr22",
-    ]);
+    // Every BSEED PM build from cli6/r7 on uses the scale contract set in
+    // src/zigbee/electrical_measurement_cluster.c and metering_cluster.c, so the
+    // converter recognises the build family instead of a per-release list. A
+    // firmware that changes the scales must leave the 1.2.5-bseed family
+    // (tests/test_bseed_converter_family.py pins the firmware constants).
+    const fixedScaleFamily = /^1\.2\.5-bseed(r|cli)(\d+)$/;
+    const fixedScaleFirst = {r: 7, cli: 6};
+    const fixedScaleExcluded = new Set(["1.2.5-bseedr10", "1.2.5-bseedcli7"]);
+    const isFixedScaleBuild = build => {
+        const match = fixedScaleFamily.exec(build || "");
+        return Boolean(match) && Number(match[2]) >= fixedScaleFirst[match[1]] &&
+            !fixedScaleExcluded.has(build);
+    };
     const hasFixedScaleContract = device => device?.modelID === "TS011F-BS-PM" &&
-        device.manufacturerName === "b28wrpvx" && knownBuilds.has(device.softwareBuildID);
+        device.manufacturerName === "b28wrpvx" && isFixedScaleBuild(device.softwareBuildID);
     const scales = {
         haElectricalMeasurement: {acVoltageMultiplier: 1, acVoltageDivisor: 100,
             acCurrentMultiplier: 1, acCurrentDivisor: 1000, acPowerMultiplier: 1, acPowerDivisor: 1},
