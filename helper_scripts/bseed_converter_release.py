@@ -37,6 +37,28 @@ REQUIRED_PM_BUILDS = (
 )
 
 
+FAMILY_PATTERN = r"/^1\.2\.5-bseed(r|cli)(\d+)$/"
+
+
+def pm_build_family(text: str) -> dict:
+    """Read the converter's fixed-scale build family rule (no per-release list)."""
+    if "const fixedScaleFamily = " + FAMILY_PATTERN + ";" not in text:
+        raise ValueError("converter lacks the BSEED PM build family rule")
+    first = re.search(r"const fixedScaleFirst = \{r: (\d+), cli: (\d+)\};", text)
+    excluded = re.search(r"const fixedScaleExcluded = new Set\(\[(.*?)\]\);", text, re.S)
+    if not first or not excluded:
+        raise ValueError("converter lacks the BSEED PM build family bounds")
+    return {"pattern": FAMILY_PATTERN, "first": {"r": int(first.group(1)), "cli": int(first.group(2))},
+            "excluded": sorted(re.findall(r'"([^"]+)"', excluded.group(1)))}
+
+
+def family_accepts(family: dict, build: str) -> bool:
+    """Python mirror of the converter's isFixedScaleBuild."""
+    match = re.fullmatch(r"1\.2\.5-bseed(r|cli)(\d+)", build or "")
+    return (bool(match) and int(match.group(2)) >= family["first"][match.group(1)]
+            and build not in family["excluded"])
+
+
 def event_source_sha() -> str:
     event = os.environ.get("GITHUB_EVENT_PATH")
     if event and Path(event).is_file():
@@ -56,9 +78,8 @@ def build_manifest(code: bytes, source_sha: str) -> dict:
     for marker in REQUIRED_MARKERS:
         if marker not in text:
             raise ValueError(f"missing BSEED capability: {marker}")
-    start = text.index("const knownBuilds = new Set([")
-    end = text.index("]);", start)
-    builds = sorted(set(re.findall(r'"(1\.2\.5-bseed(?:cli|r)\d+)"', text[start:end])))
+    family = pm_build_family(text)
+    builds = sorted(b for b in REQUIRED_PM_BUILDS if family_accepts(family, b))
     missing = sorted(set(REQUIRED_PM_BUILDS) - set(builds))
     if missing:
         raise ValueError(f"unhandled PM release builds: {missing}")
@@ -72,6 +93,7 @@ def build_manifest(code: bytes, source_sha: str) -> dict:
         "size_bytes": len(code),
         "compatible_zigbee2mqtt_major_minor": SUPPORTED_Z2M_MAJOR_MINOR,
         "capabilities": list(REQUIRED_MARKERS),
+        "bseed_pm_build_family": family,
         "bseed_known_pm_builds": builds,
         "hardware_acceptance": False,
     }

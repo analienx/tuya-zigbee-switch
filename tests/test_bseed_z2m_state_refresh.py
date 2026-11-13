@@ -33,11 +33,11 @@ def test_new_stamp_replaces_stale_power_and_records_the_change():
     fresh = dict(STALE, power=0, current=0, voltage=233.4, energy=0.47,
                  bseed_pm_sample_time_ms=REQUEST_MS + 900, bseed_pm_sample_power_w=0)
     result = refresh.assess_refresh(STALE, fresh, keys=keys, expected_build=BUILD,
-                                    converter_builds={BUILD}, baseline_ms=STALE['bseed_pm_sample_time_ms'],
+                                    converter_ok=True, baseline_ms=STALE['bseed_pm_sample_time_ms'],
                                     request_ms=REQUEST_MS, received_ms=REQUEST_MS + 3000, require_pm=True)
     assert result['issues'] == []
     assert result['freshPmSample'] == {'power': 0, 'sample_time_ms': REQUEST_MS + 900}
-    assert result['fields']['power'] == {'cached': 2, 'fresh': 0, 'answered': True, 'changed': True}
+    assert result['fields']['power'] == {'cached': 2, 'fresh': 0, 'reported': True, 'changed': True}
     assert result['converterKnowsBuild'] is True
 
 
@@ -52,23 +52,29 @@ def test_unanswered_field_is_unconfirmed_not_shown_as_current():
     result = refresh.assess_refresh(STALE, {'state_relay': 'ON'}, keys=refresh.refresh_keys('state_relay', False),
                                     expected_build=BUILD)
     assert result['issues'] == ['no fresh value for relay_physical_mode']
-    assert result['fields']['relay_physical_mode']['answered'] is False
+    assert result['fields']['relay_physical_mode']['reported'] is False
 
 
 def test_deployed_converter_without_the_build_is_reported():
-    deployed = 'const knownBuilds = new Set([\n "1.2.5-bseedr20", "1.2.5-bseedr21",\n]);'
-    builds = refresh.converter_known_builds(deployed)
-    assert builds == {'1.2.5-bseedr20', '1.2.5-bseedr21'}
+    # The converter deployed on 2026-11-13 listed builds only up to r21.
+    deployed = 'const knownBuilds = new Set([
+ "1.2.5-bseedr20", "1.2.5-bseedr21",
+]);'
+    assert refresh.converter_known_builds(deployed) == {'1.2.5-bseedr20', '1.2.5-bseedr21'}
+    assert refresh.converter_accepts_build(deployed, '1.2.5-bseedr21')
+    ok = refresh.converter_accepts_build(deployed, BUILD)
     result = refresh.assess_refresh({}, {'state': 'ON', 'relay_physical_mode': 'x'},
                                     keys=refresh.refresh_keys('state', False),
-                                    expected_build=BUILD, converter_builds=builds)
-    assert result['converterKnowsBuild'] is False
-    assert any('does not list ' + BUILD in issue for issue in result['issues'])
+                                    expected_build=BUILD, converter_ok=ok)
+    assert result['converterKnowsBuild'] is False and result['cachedBaseline'] is False
+    assert result['fields']['state'] == {'cached': 'unknown', 'fresh': 'ON', 'reported': True, 'changed': None}
+    assert any('does not recognise ' + BUILD in issue for issue in result['issues'])
 
 
-def test_repository_converter_lists_every_template_build():
+def test_repository_converter_recognises_future_builds_without_a_list():
     text = (ROOT / 'zigbee2mqtt' / 'converters' / 'switch_custom.js').read_text(encoding='utf-8')
-    assert BUILD in refresh.converter_known_builds(text)
+    for build in (BUILD, '1.2.5-bseedr23', '1.2.5-bseedcli40'):
+        assert refresh.converter_accepts_build(text, build), build
 
 
 def test_ota_check_is_version_check_only():

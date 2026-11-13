@@ -39,9 +39,21 @@ def refresh_keys(relay_key, require_pm):
 
 
 def converter_known_builds(converter_text):
-    """Build IDs listed in the deployed converter's knownBuilds set."""
+    """Build IDs listed in an older deployed converter's knownBuilds set."""
     match = re.search(r'knownBuilds\s*=\s*new\s+Set\(\[(.*?)\]\)', converter_text or '', re.S)
     return set(re.findall(r'"([^"]+)"', match.group(1))) if match else set()
+
+
+def converter_accepts_build(converter_text, build):
+    """True when the deployed converter applies the fixed PM scales to this build.
+
+    Current converters recognise the build family; older ones list each build.
+    """
+    from bseed_converter_release import family_accepts, pm_build_family
+    try:
+        return family_accepts(pm_build_family(converter_text or ''), build)
+    except ValueError:
+        return build in converter_known_builds(converter_text)
 
 
 def fresh_pm_sample(state, *, baseline_ms, request_ms, received_ms):
@@ -55,15 +67,16 @@ def fresh_pm_sample(state, *, baseline_ms, request_ms, received_ms):
     return {'power': watts, 'sample_time_ms': stamp}
 
 
-def assess_refresh(cached, fresh, *, keys, expected_build, converter_builds=None,
+def assess_refresh(cached, fresh, *, keys, expected_build, converter_ok=None,
                    baseline_ms=None, request_ms=None, received_ms=None, require_pm=False):
     """Compare the pre-request cached state with fresh post-request device answers."""
     cached = cached if isinstance(cached, dict) else {}
     fresh = fresh if isinstance(fresh, dict) else {}
     issues, fields = [], {}
     for key in keys:
-        fields[key] = {'cached': cached.get(key), 'fresh': fresh.get(key),
-                       'answered': key in fresh, 'changed': key in fresh and fresh.get(key) != cached.get(key)}
+        fields[key] = {'cached': cached.get(key) if cached else 'unknown', 'fresh': fresh.get(key),
+                       'reported': key in fresh,
+                       'changed': (fresh.get(key) != cached.get(key)) if cached and key in fresh else None}
         if key not in fresh:
             issues.append('no fresh value for ' + key)
     pm_sample = None
@@ -72,14 +85,13 @@ def assess_refresh(cached, fresh, *, keys, expected_build, converter_builds=None
                                     received_ms=received_ms or 0)
         if pm_sample is None:
             issues.append('no newly stamped ZCL power reading; power/current/voltage/energy may still be cached')
-    converter = None
-    if converter_builds is not None:
-        converter = expected_build in converter_builds
+    converter = converter_ok
+    if converter is not None:
         if not converter:
-            issues.append('deployed converter does not list ' + expected_build +
+            issues.append('deployed converter does not recognise ' + expected_build +
                           '; it falls back to generic scaling and cannot stamp fresh PM readings')
     return {'fields': fields, 'freshPmSample': pm_sample, 'converterKnowsBuild': converter,
-            'issues': issues, 'physicalAcceptance': False}
+            'cachedBaseline': bool(cached), 'issues': issues, 'physicalAcceptance': False}
 
 
 def ota_check_result(response, device):
@@ -173,8 +185,8 @@ def collect(args):
     config = yaml.safe_load(Path(args.mqtt_config).read_text(encoding='utf8'))['mqtt']
     base = config.get('base_topic', 'zigbee2mqtt')
     keys = refresh_keys(args.relay_get_key, args.require_pm)
-    converter_builds = (converter_known_builds(Path(args.converter).read_text(encoding='utf8'))
-                        if args.converter else None)
+    converter_ok = (converter_accepts_build(Path(args.converter).read_text(encoding='utf8'), args.expect_build)
+                    if args.converter else None)
     snapshot = {'cached': None, 'inventory': None}
     inbox, changed, ready = Inbox(), threading.Event(), threading.Event()
     collecting = threading.Event()
@@ -225,7 +237,7 @@ def collect(args):
         client.loop_stop()
         client.disconnect()
     result = assess_refresh(cached, fresh, keys=keys, expected_build=args.expect_build,
-                            converter_builds=converter_builds,
+                            converter_ok=converter_ok,
                             baseline_ms=cached.get(PM_STAMP), request_ms=request_ms,
                             received_ms=received_ms, require_pm=args.require_pm)
     if args.ota_version_check:

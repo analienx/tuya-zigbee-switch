@@ -5,8 +5,9 @@ from helper_scripts.bseed_converter_release import build_manifest, REQUIRED_MARK
 
 def candidate():
     return ("const bseedPmElectricityMeter = 1;\n" +
-            "const knownBuilds = new Set([" +
-            ",".join('"' + b + '"' for b in REQUIRED_PM_BUILDS) + "]);\n" +
+            r"const fixedScaleFamily = /^1\.2\.5-bseed(r|cli)(\d+)$/;" + "\n" +
+            "const fixedScaleFirst = {r: 7, cli: 6};\n" +
+            'const fixedScaleExcluded = new Set(["1.2.5-bseedr10", "1.2.5-bseedcli7"]);\n' +
             "\n".join(REQUIRED_MARKERS) +
             "\nmodule.exports = [];\n").encode("utf-8")
 
@@ -29,9 +30,15 @@ def test_missing_stamp_or_quarantine_refuses_release(marker):
 
 
 @pytest.mark.parametrize("build", REQUIRED_PM_BUILDS)
-def test_missing_supported_new_pm_build_fails(build):
-    bad = candidate().replace(('"' + build + '"').encode(), b'"removed"', 1)
+def test_excluding_a_released_pm_build_fails(build):
+    bad = candidate().replace(b'"1.2.5-bseedr10"', ('"1.2.5-bseedr10", "' + build + '"').encode(), 1)
     with pytest.raises(ValueError, match="unhandled PM release"):
+        build_manifest(bad, "a" * 40)
+
+
+def test_converter_without_the_family_rule_is_refused():
+    bad = candidate().replace(b"fixedScaleFamily", b"knownBuilds", 1)
+    with pytest.raises(ValueError, match="build family rule"):
         build_manifest(bad, "a" * 40)
 
 
