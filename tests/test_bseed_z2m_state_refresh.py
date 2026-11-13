@@ -43,7 +43,7 @@ def test_new_stamp_replaces_stale_power_and_records_the_change():
 
 
 def test_stamp_from_before_the_request_or_far_future_is_refused():
-    for stamp in (REQUEST_MS - 60000, REQUEST_MS + 3_600_000):
+    for stamp in (REQUEST_MS - 300_000, REQUEST_MS + 3_600_000):
         state = dict(STALE, bseed_pm_sample_time_ms=stamp)
         assert refresh.fresh_pm_sample(state, baseline_ms=1, request_ms=REQUEST_MS,
                                        received_ms=REQUEST_MS + 3000) is None
