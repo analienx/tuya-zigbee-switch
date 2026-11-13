@@ -8,6 +8,7 @@ read, write, boot or electrical qualification is claimed by this record.
 
 | Finding | Repair | Regression coverage |
 | --- | --- | --- |
+| An external retry wrapper repeatedly reopened a failed Windows device and hid echo-only receive counts | Built-in bounded watch with identity-bound USB waiting, capped error backoff, serial-stage classification, per-attempt evidence and 1/9-sample diagnostics | Missing/reconnecting/renumbered USB, wrong/ambiguous adapters, persistent driver errors, Ctrl+C/lock stops, echo-only reads and no target flash/reset/halt |
 | Released-board CI checked the board database image type only for TS0726 | Compare each known board's prepared native image type with device_db.yaml while keeping MCU/gated refusals | Hosted real-image preparation of the complete committed release indexes |
 | New indexed profiles could silently substitute TS0726 boards or accept contradictory reopened provenance | Reject conflicting board arguments before fetching; bind native payload hash and recheck board, role, filename and source URL on prepare/load | Explicit wrong TS0726 board, altered ordinary board/role/URL/filename/hash and TS0726 firmware-line substitutions |
 | Gledopto artifact publication was described as live flash permission | Preserve exact candidate format admission while explicitly retaining device/incident authorization and first-boot state-change gates | Source-authority review against Gledopto commit 1dec734; no live hardware action |

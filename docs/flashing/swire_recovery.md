@@ -279,9 +279,18 @@ them private and never upload them as CI artifacts. A bounded diagnostic read is
 available with `--address 0 --size 0x100`.
 
 Reading changes volatile debug/SPI registers; it is not passive Zigbee observation.
-By default no reset/halt is requested. `--halt` invokes upstream activation, which
-resets and halts the CPU **and toggles RTS/DTR**. Leave these pins disconnected unless
-their reset circuit is independently qualified. No restart is requested by `read`.
+By default no reset/halt is requested. A running firmware may hold the SWS line,
+so a plain read can get no reply at all ("Chip sleep?"). `--halt` pauses the CPU
+over SWire with the pinned reader's activation and then **proves** the pause: CPU
+control register `0x602` must read `0x05` twice before any flash read starts. The
+activation also drives RTS/DTR, so leave those pins disconnected unless their reset
+circuit is independently qualified. `--retry-seconds N` (with `--halt`, up to 900)
+keeps trying for N seconds; switch the target's 3.3 V off and on meanwhile and an
+attempt catches the CPU as it starts. Only failures before any flash access are
+retried. Progress (bytes and rate) is printed every 5 seconds. `--single` takes one
+read (`READ_SINGLE`), enough to check bytes after a write; it is never accepted as
+a recovery baseline. No restart is requested by `read`; power-cycle the target
+afterwards.
 Do not run the application between two preservation reads: live NVM writes can
 legitimately change the dump. Timeout, short read or disagreement fails the command
 and keeps the evidence. There is no automatic write or TX-only fallback.
@@ -494,7 +503,9 @@ python telink_swire_recovery.py verify --session C:/private/recovery/session.jso
 
 The session supplies the exact bundle, port, target and layout on subsequent
 commands. Conflicting explicit arguments are refused. `read --halt` is forbidden
-during an active recovery because it would reset the chip; separate activation
+during an active recovery because it would reset the chip, except in `CLOSED` and
+`BOOT_REQUESTED` (the write finished and the CPU was already restarted, so a paused
+read is how its bytes are checked); separate activation
 reasserts HALT and configures SWire without requesting reset. `--hold` additionally
 omits the final restart. None of these signals prove actual electrical delivery.
 
@@ -602,6 +613,47 @@ original private fallback image and provenance outside Git.
 
 
 ## Test the CP2102 circuit with one SWS contact
+
+### Wait for connections and USB reconnects
+
+For a bounded target-connection test while finishing the qualified bench setup,
+use the built-in watcher instead of repeatedly spawning `test-link` yourself:
+
+```text
+python telink_swire_recovery.py watch-link --device gledopto-gl-sd-301p --port COM3 --seconds 180 --out C:/private/recovery/watch-001
+```
+
+`--out` is a **new directory**, holding `summary.json` and one immutable receipt
+per probe. The retry window defaults to 180 seconds (maximum 600); an active
+bounded probe may finish after the window. Ctrl+C stops without starting another
+probe. Nothing starts until the operator runs the command. `--debug` adds each
+divider attempt; without it, progress is condensed. `--json` keeps stdout as one
+result while progress goes to stderr.
+
+The watcher waits without SWire traffic when the selected USB adapter is absent.
+After identifying it, it follows the same available VID/PID/serial/location
+identity across COM-number changes, refusing ambiguous matches. Non-USB devices
+fall back to port and hardware ID. This identifies the **adapter**, never the
+attached Zigbee board. Keep the same physical target throughout the watch.
+
+Serial open/I/O failures have separate `SERIAL_OPEN_FAILED` / `SERIAL_IO_FAILED`
+codes, stage and exception details. A visible COM port does not prove its driver
+can open it. Reopens after those errors back off by 2, 4, 8 and then 10 seconds;
+they are not treated as failed SWire clock settings. The watch keeps waiting for
+USB recovery rather than flooding one open error per second. It never resets the
+USB adapter, kills another port owner, removes a lock or changes driver settings.
+
+`1/9 UART samples (adapter echo only)` means the read clock was echoed but no
+complete target response arrived. A normal echo count is not proof of SWS contact,
+CPU readiness or target replies. The watcher does not automatically halt/reset
+the chip to change that result. It stops on verified target replies, ownership/
+precondition failures, interruption or the elapsed window. It uses exactly the
+same no-reset/no-halt/flash-read-only allowlist as `test-link`, never an
+adapter-only loop pattern, firmware write, factory reset or automatic fallback.
+
+The changes address USB retry handling and evidence quality. They do not establish
+that a resistor value, pad connection or SWire entry procedure is electrically
+qualified, and do not guarantee a response from a running application.
 
 The adapter-side junction below uses one lead and one hook on SWS, plus the
 3V3 and GND contacts. It does not require two hooks on the target's SWS pad:

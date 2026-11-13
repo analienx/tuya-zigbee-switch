@@ -36,6 +36,15 @@ Use `capabilities --json` to discover commands and exit codes. Use `ports --json
 to identify the actual adapter, and `wiring --device PROFILE --json` for notes.
 For the adapter-side TX-resistor/RX junction with one SWS hook, select
 `wiring --connection cp2102-single-sws --device PROFILE --json`.
+For bounded repeated target discovery use `watch-link --device PROFILE --port PORT
+--seconds 180 --out NEW_PRIVATE_DIRECTORY --json`. The operator starts this command;
+do not start hardware access merely because a launcher was prepared. The watcher
+waits for the bound USB adapter, tracks its available identity through COM-number
+changes, and backs off serial open/I/O errors. Preserve its summary and each probe
+receipt. It never unlocks a port, resets/halts a target, sends adapter loop patterns
+to a target or advances a recovery session. Ctrl+C prevents further probes.
+`SERIAL_OPEN_FAILED`/`SERIAL_IO_FAILED` are USB/driver-stage failures, not evidence
+of an incorrect SWire divider. An echoed read clock alone is not a target reply.
 Run `test-link --phase adapter` only with the target disconnected; after physical
 qualification, `test-link --phase target --device PROFILE` requires real target
 replies. Echo alone is never proof of SWire readback. The diagnostic neither
@@ -130,6 +139,13 @@ is `~/.telink-swire`; no background service is required.
   no-reset full double read, inspect its actual marker, and use `reconcile` to
   compare the complete staged or activated image and preserved regions. It does
   not write. An old successful read cannot override a newer failed verification.
+- After a TX-only `flash` (phase `BOOT_REQUESTED`), re-wire for the bidirectional circuit that
+  `read` requires (for example `wiring --connection cp2102-single-sws`; the TX-only hookup
+  cannot read), then check the written bytes with
+  `read --halt --retry-seconds 300 --single --port PORT --out NEW_PRIVATE_FILE`:
+  the operator power-cycles the target while it retries, the pause is proven
+  before reading, and one read is enough to compare the slot with the image.
+  Report it as a single read; it never becomes a baseline.
 - `read --halt`, adapter loopback selftests and power-cycle activation are not
   part of a held recovery. Do not reset or reconnect the board between staged
   verification and activation. Stop on lost contact or uncertain power state.
