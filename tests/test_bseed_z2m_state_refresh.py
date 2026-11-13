@@ -57,9 +57,7 @@ def test_unanswered_field_is_unconfirmed_not_shown_as_current():
 
 def test_deployed_converter_without_the_build_is_reported():
     # The converter deployed on 2026-11-13 listed builds only up to r21.
-    deployed = 'const knownBuilds = new Set([
- "1.2.5-bseedr20", "1.2.5-bseedr21",
-]);'
+    deployed = 'const knownBuilds = new Set(["1.2.5-bseedr20", "1.2.5-bseedr21"]);'
     assert refresh.converter_known_builds(deployed) == {'1.2.5-bseedr20', '1.2.5-bseedr21'}
     assert refresh.converter_accepts_build(deployed, '1.2.5-bseedr21')
     ok = refresh.converter_accepts_build(deployed, BUILD)
