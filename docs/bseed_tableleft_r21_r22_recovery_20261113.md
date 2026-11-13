@@ -41,25 +41,36 @@ which is consistent with this.
 ## On the network
 
 Zigbee2MQTT shows the socket rejoined by itself (same IEEE, no pairing), was
-interviewed and reports build `1.2.5-bseedr22` as a Router.
+interviewed and reports build `1.2.5-bseedr22` as a Router; a fresh interview
+confirmed it again later with a live Router node descriptor.
 
-Two things are still open and are not firmware defects:
+The power reading stayed at a stale 2 W (a 2026-11-06 sample, taken before the
+r21 OTA) for hours. Two separate causes, both outside the firmware:
 
-- Zigbee2MQTT kept showing the 2026-11-06 power sample (2 W with no load). The
-  Home Assistant converter predates r22 and listed builds only up to r21, so r22
-  readings got generic scaling and were never stamped. The converter now
-  recognises the BSEED PM build family instead of a per-release list, and the
-  post-update step refreshes cached state (PR #122).
-- Zigbee2MQTT's update panel still showed r21's version number after a version
-  check.
+- The Home Assistant converter predated r22 and listed builds only up to r21.
+  It now recognises the whole BSEED PM build family instead of a per-release
+  list, so new releases no longer need a converter update (PR #122).
+- The r21 campaign had set `bseed_pm_telemetry_quarantine`, which makes
+  Zigbee2MQTT discard power, current, voltage and energy until the campaign
+  releases it. r21 never started, so nothing released it, and every release route
+  expected the campaign's own build. The new `release-superseded` route (PR #125)
+  releases it after a verified wired install, with fresh interview evidence, the
+  SWire install receipt and a written reason, and leaves the campaign and
+  network locks untouched.
+
+After the release, a state refresh read fresh values straight from the device,
+with a newly stamped power sample: 55 W, 0.30 A, 251.8 V, 0.54 kWh. The earlier
+2 W was the stale sample. Zigbee2MQTT's update panel now shows r22's file
+version.
 
 ## What this does and does not establish
 
-Established: r22 starts on a real TLSR8258 board and rejoins on its stored
-network record; the r21 failure was in the r21 image, not in the OTA path.
+Established: r22 starts on a real TLSR8258 board, rejoins on its stored
+network record and reports fresh, plausible metering after the stale quarantine
+was released; the r21 failure was in the r21 image, not in the OTA path.
 
-Not yet established: an over-the-air install of r22, relay and metering
-acceptance with fresh readings, behaviour across power cycles and a soak. r22
+Not yet established: an over-the-air install of r22, a loaded-to-zero metering
+check, behaviour across power cycles and a soak. r22
 remains an unsealed draft, not public. The TS0726 `rv5`/`lv5` `-Os` images may
 now be planned for one-device canaries, one at a time, after the r21 campaign
 lock and network lease are formally closed.
