@@ -6,6 +6,7 @@ they never imply a successful update and never permit an automatic reflash.
 import datetime as dt
 import json
 from pathlib import Path
+import re
 
 import yaml
 
@@ -312,6 +313,7 @@ SUPERSEDABLE_LOCK_PHASES = ('ota_transfer_ok_postflash_unverified', 'update_time
 WIRED_SESSION_PHASES = ('BOOT_REQUESTED', 'ACTIVATED_VERIFIED', 'CLOSED')
 MIN_REASON_CHARS = 30
 MAX_EVIDENCE_AGE_SECONDS = 3600
+MAX_CLOCK_SKEW_SECONDS = 300
 
 
 def _utc(value, what):
@@ -324,8 +326,8 @@ def _utc(value, what):
     return moment
 
 
-def validate_wired_install_receipt(session, ieee):
-    """The SWire session proves a different image was written to THIS device by wire.
+def validate_wired_install_receipt(session, ieee, image_sha256):
+    """The SWire session proves the stated image was the LAST thing written to THIS device by wire.
 
     It proves a write was sent, not that the image runs; the fresh identity
     evidence proves that. Returns the last write time and the image hash.
@@ -334,23 +336,27 @@ def validate_wired_install_receipt(session, ieee):
     image = context.get('imageSha256')
     if not (isinstance(image, str) and len(image) == 64 and all(c in '0123456789abcdef' for c in image)):
         raise ValueError('wired-install session lacks an image SHA-256')
-    if ieee.lower() not in str(context.get('targetId', '')).lower():
+    if image != image_sha256:
+        raise ValueError('wired-install session wrote a different image than the stated superseding image')
+    if not re.search('(?<![0-9a-f])' + re.escape(ieee.lower()) + '(?![0-9a-f])', str(context.get('targetId', '')).lower()):
         raise ValueError('wired-install session was not recorded for this device')
     if session.get('phase') not in WIRED_SESSION_PHASES:
         raise ValueError('wired-install session is not at a finished phase')
     # A flash is stage + activate; the activate receipt is the finished write.
-    times = [_utc(receipt.get('utc'), 'wired-install receipt')
-             for op in (session.get('operations') or {}).values()
-             if isinstance(op, dict) and op.get('status') == 'COMPLETED'
-             and (op.get('request') or {}).get('imageSha256') == image
-             for receipt in (op.get('result') or {}).get('receipts', [])
-             if receipt.get('action') == 'activate' and receipt.get('imageSha256') == image]
-    if not times:
+    writes = [(_utc(receipt.get('utc'), 'wired-install receipt'), receipt.get('imageSha256'))
+              for op in (session.get('operations') or {}).values()
+              if isinstance(op, dict) and op.get('status') == 'COMPLETED'
+              for receipt in (op.get('result') or {}).get('receipts', [])
+              if receipt.get('action') == 'activate']
+    if not any(sha == image for _, sha in writes):
         raise ValueError('wired-install session has no completed write of its image')
-    return {'image_sha256': image, 'written_at': max(times)}
+    written_at, last_image = max(writes, key=lambda item: item[0])
+    if last_image != image:
+        raise ValueError('a later wired write replaced the stated image')
+    return {'image_sha256': image, 'written_at': written_at}
 
 
-def validate_superseded_release(record, evidence, lock, session, *, ieee, build, role, reason,
+def validate_superseded_release(record, evidence, lock, session, *, ieee, build, role, reason, image_sha256,
                                 now=None, max_age=MAX_EVIDENCE_AGE_SECONDS):
     """Release the PM quarantine of a campaign that a verified wired install replaced.
 
@@ -370,13 +376,16 @@ def validate_superseded_release(record, evidence, lock, session, *, ieee, build,
         raise ValueError('campaign lock is not an unresolved update: %s' % lock.get('phase'))
     if len((reason or '').strip()) < MIN_REASON_CHARS:
         raise ValueError('a written reason of at least %d characters is required' % MIN_REASON_CHARS)
-    install = validate_wired_install_receipt(session, ieee)
+    install = validate_wired_install_receipt(session, ieee, image_sha256)
     observed = _utc(evidence.get('at') or evidence.get('observed_at'), 'identity evidence')
     if observed < _utc(record.get('started'), 'telemetry guard'):
         raise ValueError('identity evidence predates telemetry quarantine')
     if observed <= install['written_at']:
         raise ValueError('identity evidence predates the wired install')
-    if (now or dt.datetime.now(dt.timezone.utc)) - observed > dt.timedelta(seconds=max_age):
+    now = now or dt.datetime.now(dt.timezone.utc)
+    if observed > now + dt.timedelta(seconds=MAX_CLOCK_SKEW_SECONDS):
+        raise ValueError('identity evidence is dated in the future')
+    if now - observed > dt.timedelta(seconds=max_age):
         raise ValueError('identity evidence is older than %d seconds' % max_age)
     if evidence.get('result') not in ('metadata_refreshed', 'metadata_already_correct'):
         raise ValueError('identity is still unconfirmed; PM telemetry stays quarantined')
@@ -392,7 +401,7 @@ def validate_superseded_release(record, evidence, lock, session, *, ieee, build,
     return install
 
 
-def release_superseded(profile, evidence_path, session_path, *, build, role, reason):
+def release_superseded(profile, evidence_path, session_path, *, build, role, reason, image_sha256):
     """Release PM quarantine after a verified wired install replaced the campaign.
 
     Disables only this target's quarantine. The campaign and network locks are
@@ -404,14 +413,20 @@ def release_superseded(profile, evidence_path, session_path, *, build, role, rea
     evidence = json.loads(Path(evidence_path).read_text(encoding='utf8'))
     lock = json.loads((path.parent / 'ACTIVE_LOCK.json').read_text(encoding='utf8'))
     session = json.loads(Path(session_path).read_text(encoding='utf8'))
-    install = validate_superseded_release(record, evidence, lock, session, ieee=profile['ieee'],
-                                          build=build, role=role, reason=reason)
+    def validate():
+        return validate_superseded_release(record, evidence, lock, session, ieee=profile['ieee'],
+                                           build=build, role=role, reason=reason, image_sha256=image_sha256)
+    install = validate()
+    released = path.with_name('PM_TELEMETRY_RELEASED_SUPERSEDED_' + str(lock['token']) + '.json')
+    if released.exists():
+        raise ValueError('a superseded release record already exists for this campaign')
     bridge = bridge_for(profile)
     try:
         bridge.start()
         device = target(bridge, profile)
         if (device.get('software_build_id'), device.get('type')) != (build, role):
             raise ValueError('current identity changed since the identity evidence')
+        validate()  # the bridge may have been slow: the freshness window must still hold
         set_option(bridge, profile, False)
         record.update(
             phase='released_superseded_by_wired_install',
@@ -431,16 +446,17 @@ def main(argv=None):
     commands = parser.add_subparsers(dest='action', required=True)
     sup = commands.add_parser('release-superseded', help=release_superseded.__doc__.splitlines()[0])
     for key in ('workdir', 'device', 'ieee', 'confirm-ieee', 'mqtt-config', 'broker', 'evidence',
-                'wired-install-session', 'superseding-build', 'reason'):
+                'wired-install-session', 'superseding-build', 'superseding-image-sha256', 'reason'):
         sup.add_argument('--' + key, required=True)
     sup.add_argument('--role', choices=['Router', 'EndDevice'], required=True)
     args = parser.parse_args(argv)
-    if args.confirm_ieee != args.ieee or len(args.ieee) != 18 or not args.ieee.startswith('0x'):
-        raise SystemExit('exact IEEE confirmation required')
+    if args.confirm_ieee != args.ieee or not re.fullmatch('0x[0-9a-f]{16}', args.ieee):
+        raise SystemExit('exact IEEE confirmation required (0x and 16 lowercase hex digits, typed twice)')
     profile = {'workdir': args.workdir, 'device': args.device, 'ieee': args.ieee,
                'mqtt_config': args.mqtt_config, 'broker': args.broker, 'require_pm': True}
     release_superseded(profile, args.evidence, args.wired_install_session,
-                       build=args.superseding_build, role=args.role, reason=args.reason)
+                       build=args.superseding_build, role=args.role, reason=args.reason,
+                       image_sha256=args.superseding_image_sha256)
     print('PM telemetry quarantine released for %s; campaign locks unchanged.' % args.device)
 
 

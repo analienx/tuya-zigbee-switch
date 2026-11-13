@@ -305,7 +305,7 @@ def superseded_fixture():
     evidence = dict(at='2026-11-13T18:50:00+00:00', ieee=p['ieee'], result='metadata_refreshed', error=None,
                     interview_ok=True, fresh_inventory_observed=True, live_zdo_after={'role': 'Router'},
                     after=dict(ieee_address=p['ieee'], software_build_id='r22', type='Router'))
-    kwargs = dict(ieee=p['ieee'], build='r22', role='Router', now=NOW,
+    kwargs = dict(ieee=p['ieee'], build='r22', role='Router', now=NOW, image_sha256=WIRED_IMAGE,
                   reason='r21 never started; r22 was written by SWire and answers as r22')
     return record, evidence, lock, session, kwargs
 
@@ -340,6 +340,8 @@ def test_wired_install_supersedes_the_campaign_with_fresh_identity():
     ('wrong_ieee_after', 'does not match the superseding'),
     ('evidence_other_device', 'another device'),
     ('naive_time', 'timezone'),
+    ('future_evidence', 'dated in the future'),
+    ('other_image_stated', 'different image'),
 ])
 def test_superseded_release_needs_every_proof(failure, message):
     record, evidence, lock, session, kwargs = superseded_fixture()
@@ -362,6 +364,8 @@ def test_superseded_release_needs_every_proof(failure, message):
     if failure == 'wrong_ieee_after': evidence['after']['ieee_address'] = '0x0000000000000000'
     if failure == 'evidence_other_device': evidence['ieee'] = '0x0000000000000000'
     if failure == 'naive_time': evidence['at'] = '2026-11-13T18:50:00'
+    if failure == 'future_evidence': evidence['at'] = '2026-11-14T18:50:00+00:00'
+    if failure == 'other_image_stated': kwargs['image_sha256'] = 'c' * 64
     with pytest.raises(ValueError, match=message):
         guard.validate_superseded_release(record, evidence, lock, session, **kwargs)
 
@@ -376,6 +380,8 @@ def test_superseded_release_needs_every_proof(failure, message):
     ('receipt_other_image', 'no completed write'),
     ('no_receipts', 'no completed write'),
     ('bad_time', 'valid timestamp'),
+    ('longer_hex_id', 'not recorded for this device'),
+    ('later_other_write', 'later wired write replaced'),
 ])
 def test_wired_install_receipt_must_belong_to_this_device_and_finished_write(failure, message):
     _, _, _, session, kwargs = superseded_fixture()
@@ -389,8 +395,12 @@ def test_wired_install_receipt_must_belong_to_this_device_and_finished_write(fai
     if failure == 'receipt_other_image': op['result']['receipts'][1]['imageSha256'] = 'c' * 64
     if failure == 'no_receipts': op['result']['receipts'] = []
     if failure == 'bad_time': op['result']['receipts'][0]['utc'] = 'yesterday'
+    if failure == 'longer_hex_id': session['context']['targetId'] = 'tableleft-' + kwargs['ieee'] + 'ab'
+    if failure == 'later_other_write':
+        session['operations']['flash-2'] = dict(request=dict(action='flash', imageSha256='c' * 64), status='COMPLETED',
+            result=dict(receipts=[dict(utc='2026-11-13T14:00:00+00:00', action='activate', imageSha256='c' * 64)]))
     with pytest.raises(ValueError, match=message):
-        guard.validate_wired_install_receipt(session, kwargs['ieee'])
+        guard.validate_wired_install_receipt(session, kwargs['ieee'], WIRED_IMAGE)
 
 
 def test_superseded_release_disables_only_the_quarantine_and_keeps_locks(tmp_path, monkeypatch):
@@ -421,7 +431,7 @@ def test_superseded_release_disables_only_the_quarantine_and_keeps_locks(tmp_pat
     bridge = Bridge()
     monkeypatch.setattr(guard, 'bridge_for', lambda _profile: bridge)
     guard.release_superseded(profile, evidence_path, session_path, build='r22', role='Router',
-                             reason=kwargs['reason'])
+                             reason=kwargs['reason'], image_sha256=WIRED_IMAGE)
     assert bridge.requests == [{'id': kwargs['ieee'], 'options': {OPTION: False}}]
     assert bridge.started == bridge.stopped == 1
     assert not (workdir / 'PM_TELEMETRY_GUARD.json').exists()
@@ -430,6 +440,14 @@ def test_superseded_release_disables_only_the_quarantine_and_keeps_locks(tmp_pat
     assert released['superseding_build'] == 'r22' and released['superseding_image_sha256'] == WIRED_IMAGE
     assert released['transport_phase_preserved'] == 'ota_transfer_ok_postflash_unverified'
     assert json.loads((workdir / 'ACTIVE_LOCK.json').read_text()) == lock, 'campaign lock is untouched'
+
+    # A second release must stop before touching the live option.
+    (workdir / 'PM_TELEMETRY_GUARD.json').write_text(json.dumps(record))
+    bridge.requests.clear()
+    with pytest.raises(ValueError, match='already exists'):
+        guard.release_superseded(profile, evidence_path, session_path, build='r22', role='Router',
+                                 reason=kwargs['reason'], image_sha256=WIRED_IMAGE)
+    assert bridge.requests == []
 
 
 def test_superseded_release_stops_before_any_change_when_identity_moved(tmp_path, monkeypatch):
@@ -456,15 +474,19 @@ def test_superseded_release_stops_before_any_change_when_identity_moved(tmp_path
     monkeypatch.setattr(guard, 'bridge_for', lambda _profile: bridge)
     with pytest.raises(ValueError, match='identity changed'):
         guard.release_superseded(profile, evidence_path, session_path, build='r22', role='Router',
-                                 reason=kwargs['reason'])
+                                 reason=kwargs['reason'], image_sha256=WIRED_IMAGE)
     assert bridge.requests == [] and (workdir / 'PM_TELEMETRY_GUARD.json').exists()
 
 
 def test_cli_requires_exact_ieee_confirmation():
     base = ['release-superseded', '--workdir', 'w', '--device', 'd', '--ieee', '0xa4c138cdf963eac3',
             '--mqtt-config', 'm', '--broker', 'b', '--evidence', 'e', '--wired-install-session', 's',
-            '--superseding-build', 'r22', '--role', 'Router', '--reason', 'x' * 40]
+            '--superseding-build', 'r22', '--superseding-image-sha256', 'b' * 64,
+            '--role', 'Router', '--reason', 'x' * 40]
     with pytest.raises(SystemExit, match='exact IEEE confirmation'):
         guard.main(base + ['--confirm-ieee', '0x0000000000000000'])
+    upper = [a.replace('0xa4c138cdf963eac3', '0xA4C138CDF963EAC3') for a in base]
+    with pytest.raises(SystemExit, match='lowercase hex'):
+        guard.main(upper + ['--confirm-ieee', '0xA4C138CDF963EAC3'])
     with pytest.raises(SystemExit):
         guard.main(base)

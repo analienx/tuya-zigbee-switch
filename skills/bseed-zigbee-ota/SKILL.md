@@ -314,15 +314,15 @@ python helper_scripts/bseed_z2m_metadata_refresh.py ...            # one fresh i
 python helper_scripts/bseed_pm_telemetry_guard.py release-superseded \
   --workdir <campaign workdir> --device NAME --ieee 0x... --confirm-ieee 0x... \
   --mqtt-config <private yaml> --broker HOST --evidence <that evidence> \
-  --wired-install-session <SWire session.json> --superseding-build BUILD --role Router --reason "<why>"
+  --wired-install-session <SWire session.json> --superseding-build BUILD --superseding-image-sha256 <SHA-256 of the written image> --role Router --reason "<why>"
 ```
 
 It releases only when all of these hold, and stops before any change otherwise:
 
 - the guard is an `enabled` guard for this IEEE, and the campaign lock is an unresolved update (`ota_transfer_ok_postflash_unverified`, `update_timeout_or_unconfirmed`, or `ota_transfer_complete_recovery_deferred`, the owner-cancelled campaign that keeps the quarantine), not an accepted or abandoned phase;
 - the installed build differs from the campaign build (otherwise the normal release applies);
-- the identity evidence is one successful, transaction-matched target interview with fresh inventory and a live role, newer than the guard, newer than the wired install and at most one hour old, showing exactly the superseding IEEE, build and role;
-- the SWire session was recorded for this IEEE (`targetId`), is at a finished phase and holds a completed write of its image;
-- a written reason of at least 30 characters, and the exact IEEE twice.
+- the identity evidence is one successful, transaction-matched target interview with fresh inventory and a live role, newer than the guard, newer than the wired install, not dated in the future and at most one hour old (re-checked right before the change), showing exactly the superseding IEEE, build and role;
+- the SWire session was recorded for this IEEE (`targetId` must contain the full IEEE as its own token), is at a finished phase, and its last completed write is the image whose SHA-256 you state with `--superseding-image-sha256`;
+- a written reason of at least 30 characters, and the exact IEEE (`0x` plus 16 lowercase hex digits) twice.
 
-It disables only this device's quarantine, checks the live identity once more first, archives the guard as `PM_TELEMETRY_RELEASED_SUPERSEDED_<token>.json` with the evidence, session, image hash and reason, and leaves the campaign and network locks untouched: retiring those stays a separate owner decision through the mutation broker. It does not imply hardware acceptance; run the post-update state refresh afterwards.
+It disables only this device's quarantine, checks the live identity once more first, archives the guard as `PM_TELEMETRY_RELEASED_SUPERSEDED_<token>.json` (refusing to overwrite an existing record, and before the live change) with the evidence, session, image hash and reason, and leaves the campaign and network locks untouched: retiring those stays a separate owner decision through the mutation broker. It does not imply hardware acceptance; run the post-update state refresh afterwards.
