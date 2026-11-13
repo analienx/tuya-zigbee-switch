@@ -2004,3 +2004,212 @@ def test_watch_json_cli_progress_is_stderr_and_output_directory_is_exclusive(tmp
     assert json.loads(captured.out)['status'] == 'WATCH_TIMEOUT' and 'Waiting' in captured.err
     assert tool.main(command) == 2
     assert json.loads(capsys.readouterr().out)['errorCode'] == 'EVIDENCE_EXISTS'
+
+
+def halt_fixture(tmp_path, monkeypatch, *, outcomes):
+    """Pinned reader fixture plus a scripted CPU pause check (no hardware)."""
+    import subprocess
+    reader = tmp_path / 'reader.py'
+    reader.write_bytes(b'pinned source fixture')
+    monkeypatch.setattr(tool, 'READER_SHA256', tool.sha256(reader.read_bytes()))
+    events = []
+
+    def halt_check(port, path, _out):
+        events.append('halt')
+        outcome = outcomes.pop(0)
+        if outcome != 'paused':
+            raise RecoveryError('CPU pause not confirmed', code=outcome)
+        return {'divider': 52, 'cpuControls': [5, 5], 'haltVerified': True}
+
+    def run(command, **_kwargs):
+        events.append('read')
+        assert not {'-t', 'ea', 'es', 'wf', 'we', '-r'} & set(command)
+        Path(command[-1]).write_bytes(b'a' * 32)
+        return subprocess.CompletedProcess(command, 0)
+    return reader, events, halt_check, run
+
+
+def test_halt_read_proves_the_pause_before_each_read_and_never_passes_reset(tmp_path, monkeypatch):
+    reader, events, halt_check, run = halt_fixture(tmp_path, monkeypatch, outcomes=['paused', 'paused'])
+    result = tool.read_flash('COM5', tmp_path / 'flash.bin', size=32, reader=reader, halt=True,
+                             halt_check=halt_check, runner=run)
+    assert result['status'] == 'READ_MATCHED' and events == ['halt', 'read', 'halt', 'read']
+    assert [check['cpuControls'] for check in result['haltChecks']] == [[5, 5], [5, 5]]
+
+
+def test_single_read_after_a_write_is_never_a_baseline(tmp_path, monkeypatch):
+    reader, events, halt_check, run = halt_fixture(tmp_path, monkeypatch, outcomes=['paused'])
+    target = tmp_path / 'after.bin'
+    result = tool.read_flash('COM5', target, size=32, reader=reader, halt=True, reads=1,
+                             halt_check=halt_check, runner=run)
+    assert result['status'] == 'READ_SINGLE' and events == ['halt', 'read']
+    assert not target.with_name('after.bin.second.bin').exists()
+    with pytest.raises(RecoveryError, match='baseline must be'):
+        tool.matched_backup(target)
+
+
+def scripted_pause(*codes):
+    """A pause check that fails with the given codes, then (for 'paused') succeeds."""
+    codes = list(codes)
+    def check(*_args):
+        code = codes.pop(0) if len(codes) > 1 else codes[0]
+        if code != 'paused':
+            raise RecoveryError('no pause', code=code)
+        return {'divider': 52, 'cpuControls': [5, 5], 'haltVerified': True}
+    return check
+
+
+def test_pause_retries_through_a_power_cycle_then_gives_up():
+    clock, sleeps, messages = [0.0], [], []
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock[0] += seconds
+    timing = {'clock': lambda: clock[0], 'sleep': sleep}
+    record = tool.await_cpu_halted('COM5', Path('r.py'), retry_seconds=60, out=messages.append,
+                                   halt_check=scripted_pause('SWIRE_RESPONSE_TIMEOUT', 'TARGET_NOT_HALTED', 'paused'),
+                                   **timing)
+    assert record['attempts'] == 3 and sleeps == [10, 10]
+    assert any('off and on' in message for message in messages)
+    clock[0] = 0.0
+    with pytest.raises(RecoveryError) as error:
+        tool.await_cpu_halted('COM5', Path('r.py'), retry_seconds=15,
+                              halt_check=scripted_pause('TARGET_NOT_HALTED'), **timing)
+    assert error.value.code == 'TARGET_NOT_HALTED' and len(error.value.details['attempts']) == 2
+    with pytest.raises(RecoveryError) as error:
+        tool.await_cpu_halted('COM5', Path('r.py'), retry_seconds=300,
+                              halt_check=scripted_pause('PORT_LOCKED'), **timing)
+    assert error.value.code == 'PORT_LOCKED'
+
+
+def test_paused_read_allowed_after_a_finished_flash_but_not_while_staged(tmp_path, monkeypatch):
+    kit, chip, session, options, token = agent_fixture(tmp_path)
+    tool.run_write('stage', kit, 'COM5', token('stage'), **options)
+    with pytest.raises(RecoveryError, match='reset/halt is forbidden'):
+        tool.read_flash('COM5', tmp_path / 'staged.bin', halt=True)
+    assert 'BOOT_REQUESTED' in tool.HALT_READ_PHASES and 'STAGED' not in tool.HALT_READ_PHASES
+
+
+def test_cli_refuses_retry_without_halt(tmp_path, capsys):
+    code = tool.main(['read', '--json', '--port', 'COM5', '--out', str(tmp_path / 'x.bin'), '--retry-seconds', '60'])
+    assert code == 2
+    assert json.loads(capsys.readouterr().out)['errorCode'] == 'INVALID_ARGUMENT'
+
+
+def test_pause_retries_every_real_no_reply_code_and_a_failed_activation():
+    # find_divider raises NO_SWIRE_TARGET_RESPONSE when a powered-off board is silent:
+    # the exact case --retry-seconds exists for.
+    clock, sleeps = [0.0], []
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock[0] += seconds
+    codes = ('NO_SWIRE_TARGET_RESPONSE', 'SWIRE_FRAMING', 'UNSTABLE_SWIRE_READBACK', 'UART_ECHO_MISMATCH',
+             'LINK_TEST_TIMEOUT', 'HALT_ATTEMPT_FAILED')
+    assert set(codes) <= set(tool.HALT_RETRY_CODES)
+    record = tool.await_cpu_halted('COM5', Path('r.py'), retry_seconds=120, halt_check=scripted_pause(*codes, 'paused'),
+                                   clock=lambda: clock[0], sleep=sleep)
+    assert record['attempts'] == len(codes) + 1 and len(sleeps) == len(codes)
+
+
+def test_upstream_activation_faults_become_a_retryable_structured_error(tmp_path, monkeypatch):
+    import contextlib
+    class Port:
+        write_timeout = None
+    @contextlib.contextmanager
+    def fake_port(*_args, **_kwargs):
+        yield Port()
+    for fault in (SystemExit('Chip sleep? -> Use reset chip'), OSError('port vanished'), ValueError('upstream bug')):
+        class Pinned:
+            @staticmethod
+            def activate(*_args):
+                raise fault
+        monkeypatch.setattr(tool, 'load_pinned_reader', lambda _reader, pinned=Pinned: pinned)
+        monkeypatch.setattr(tool, 'open_port', fake_port)
+        with pytest.raises(RecoveryError) as error:
+            tool.verify_cpu_halted('COM5', tmp_path / 'reader.py')
+        assert error.value.code == 'HALT_ATTEMPT_FAILED' and error.value.retry_safe is True
+
+
+def test_pinned_reader_is_hash_checked_again_right_before_it_runs(tmp_path, monkeypatch):
+    reader = tmp_path / 'reader.py'
+    reader.write_text('raise SystemExit("must never run")')
+    with pytest.raises(RecoveryError) as error:
+        tool.load_pinned_reader(reader)
+    assert error.value.code == 'READER_HASH_MISMATCH'
+    monkeypatch.setattr(tool, 'READER_SHA256', tool.sha256(reader.read_bytes()))
+    reader.write_text('VALUE = 1')
+    monkeypatch.setattr(tool, 'READER_SHA256', tool.sha256(reader.read_bytes()))
+    assert tool.load_pinned_reader(reader).VALUE == 1
+
+
+def reader_command(script):
+    import sys as _sys
+    return [_sys.executable, '-c', script]
+
+
+def test_reader_progress_is_reported_and_a_slow_start_is_not_a_stall(tmp_path):
+    messages = []
+    script = ('import time\nfor a in (0, 256, 512):\n    print("Read from 0x%06x..." % a, flush=True)\n'
+              '    time.sleep(0.4)\n')
+    done = tool.run_reader_with_progress(reader_command(script), log_path=tmp_path / 'live.log', size=1024,
+                                         label='Read 1/1', out=messages.append, first_line_seconds=10, stall_seconds=5)
+    assert done.returncode == 0 and 'Read from 0x000200' in (tmp_path / 'live.log').read_text()
+    # A reader that prints nothing for longer than the stall window, but less than the
+    # first-line grace, is a slow start and is allowed to finish.
+    slow = 'import time\ntime.sleep(2.5)\nprint("Read from 0x000000...", flush=True)\n'
+    done = tool.run_reader_with_progress(reader_command(slow), log_path=tmp_path / 'slow.log', size=1024,
+                                         label='Read 1/1', first_line_seconds=10, stall_seconds=1)
+    assert done.returncode == 0
+
+
+@pytest.mark.parametrize('prints_first_line', [False, True])
+def test_reader_stall_is_stopped_with_its_log_kept(tmp_path, prints_first_line):
+    script = ('import time\n' + ('print("Read from 0x000000...", flush=True)\n' if prints_first_line else '') +
+              'time.sleep(60)\n')
+    with pytest.raises(RecoveryError) as error:
+        tool.run_reader_with_progress(reader_command(script), log_path=tmp_path / 'live.log', size=1024,
+                                      label='Read 1/1', first_line_seconds=1.5, stall_seconds=1.5)
+    assert error.value.code == 'READ_STALLED'
+    assert error.value.details['sawFirstAddress'] is prints_first_line
+    assert (tmp_path / 'live.log').is_file(), 'live log is kept for diagnosis'
+
+
+def test_read_refuses_to_overwrite_earlier_live_diagnostics(tmp_path, monkeypatch):
+    import subprocess
+    reader = tmp_path / 'reader.py'
+    reader.write_bytes(b'pinned source fixture')
+    monkeypatch.setattr(tool, 'READER_SHA256', tool.sha256(reader.read_bytes()))
+    target = tmp_path / 'flash.bin'
+    target.with_name('flash.bin.reader-1.live.log').write_text('earlier evidence')
+    with pytest.raises(RecoveryError, match='already exists'):
+        tool.read_flash('COM5', target, size=32, reader=reader, halt=False,
+                        runner=lambda command, **_kw: subprocess.CompletedProcess(command, 0))
+    assert target.with_name('flash.bin.reader-1.live.log').read_text() == 'earlier evidence'
+
+
+@pytest.mark.parametrize('code', ['UART_RESPONSE_LENGTH', 'UART_SHORT_WRITE'])
+def test_watch_keeps_going_after_stray_bytes_or_a_short_write(tmp_path, code):
+    timer, sleep = watch_timer()
+    calls = []
+    def probe(name, receipt, **kwargs):
+        calls.append(timer.now)
+        if len(calls) == 1:
+            raise RecoveryError('fixture glitch', code=code)
+        return {'status': 'SWIRE_RESPONSE_OK', 'targetReplyVerified': True, 'proofLevel': 'target-register-readback'}
+    result = tool.watch_link('COM5', tmp_path / 'watch', device='gledopto-gl-sd-301p', seconds=10,
+                             inventory=lambda: [USB_ROW], probe=probe, clock=timer, sleep=sleep)
+    assert len(calls) == 2 and result['status'] == 'TARGET_REPLIES_VERIFIED'
+
+
+def test_watch_survives_a_truncated_probe_receipt(tmp_path):
+    timer, sleep = watch_timer()
+    calls = []
+    def probe(name, receipt, **kwargs):
+        calls.append(name)
+        if len(calls) == 1:
+            Path(receipt).write_text('{"status": "LINK_TEST_FAIL')  # probe interrupted mid-write
+            raise RecoveryError('fixture interrupted write', code='SWIRE_RESPONSE_TIMEOUT')
+        return {'status': 'SWIRE_RESPONSE_OK', 'targetReplyVerified': True, 'proofLevel': 'target-register-readback'}
+    result = tool.watch_link('COM5', tmp_path / 'watch', device='gledopto-gl-sd-301p', seconds=10,
+                             inventory=lambda: [USB_ROW], probe=probe, clock=timer, sleep=sleep)
+    assert len(calls) == 2 and result['status'] == 'TARGET_REPLIES_VERIFIED'
+    assert result['attempts'][0]['errorCode'] == 'SWIRE_RESPONSE_TIMEOUT'

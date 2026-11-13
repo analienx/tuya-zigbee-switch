@@ -279,9 +279,18 @@ them private and never upload them as CI artifacts. A bounded diagnostic read is
 available with `--address 0 --size 0x100`.
 
 Reading changes volatile debug/SPI registers; it is not passive Zigbee observation.
-By default no reset/halt is requested. `--halt` invokes upstream activation, which
-resets and halts the CPU **and toggles RTS/DTR**. Leave these pins disconnected unless
-their reset circuit is independently qualified. No restart is requested by `read`.
+By default no reset/halt is requested. A running firmware may hold the SWS line,
+so a plain read can get no reply at all ("Chip sleep?"). `--halt` pauses the CPU
+over SWire with the pinned reader's activation and then **proves** the pause: CPU
+control register `0x602` must read `0x05` twice before any flash read starts. The
+activation also drives RTS/DTR, so leave those pins disconnected unless their reset
+circuit is independently qualified. `--retry-seconds N` (with `--halt`, up to 900)
+keeps trying for N seconds; switch the target's 3.3 V off and on meanwhile and an
+attempt catches the CPU as it starts. Only failures before any flash access are
+retried. Progress (bytes and rate) is printed every 5 seconds. `--single` takes one
+read (`READ_SINGLE`), enough to check bytes after a write; it is never accepted as
+a recovery baseline. No restart is requested by `read`; power-cycle the target
+afterwards.
 Do not run the application between two preservation reads: live NVM writes can
 legitimately change the dump. Timeout, short read or disagreement fails the command
 and keeps the evidence. There is no automatic write or TX-only fallback.
@@ -494,7 +503,9 @@ python telink_swire_recovery.py verify --session C:/private/recovery/session.jso
 
 The session supplies the exact bundle, port, target and layout on subsequent
 commands. Conflicting explicit arguments are refused. `read --halt` is forbidden
-during an active recovery because it would reset the chip; separate activation
+during an active recovery because it would reset the chip, except in `CLOSED` and
+`BOOT_REQUESTED` (the write finished and the CPU was already restarted, so a paused
+read is how its bytes are checked); separate activation
 reasserts HALT and configures SWire without requesting reset. `--hold` additionally
 omits the final restart. None of these signals prove actual electrical delivery.
 
