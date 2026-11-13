@@ -177,7 +177,7 @@ def main():
     if not args.skip_state_refresh:
         try:
             refresh = collect_state_refresh(args)
-        except (ValueError, TimeoutError, OSError) as error:
+        except (ValueError, TimeoutError, OSError, KeyError, ImportError) as error:
             refresh = {'result': 'failed', 'issues': [type(error).__name__ + ': ' + str(error)[:180]]}
         problems.extend('state refresh: ' + issue for issue in refresh['issues'])
     if snapshot['bridge'] != 'online': problems.append('Zigbee2MQTT bridge not verified online')

@@ -12,8 +12,11 @@ runs after every update:
 3. optionally asks Zigbee2MQTT for an OTA *version check* (never an update) so
    its update panel shows the installed file version instead of the old one.
 
-A field is only reported as fresh when the device answered; anything else is
-listed as unconfirmed rather than shown with its stale value. Refreshed values
+Zigbee2MQTT republishes its whole cached state with every message, so a key
+being present proves nothing. Only the power reading has a freshness proof: the
+converter's sample stamp must advance past the pre-request baseline. Every other
+field is recorded as `present` with `freshnessProof: none`, and a missing field or
+a missing power stamp makes the result incomplete. Refreshed values
 are not physical acceptance.
 """
 import argparse
@@ -29,6 +32,9 @@ import uuid
 RELAY_KEYS = ('state', 'state_relay')
 PM_KEYS = ('power', 'current', 'voltage', 'energy')
 PM_STAMP = 'bseed_pm_sample_time_ms'
+# The stamp comes from the Zigbee2MQTT host's clock, the request time from this host's.
+# A stale sample is hours or days old, so a minute of skew tolerance cannot hide one.
+CLOCK_TOLERANCE_MS = 60_000
 PM_STAMP_POWER = 'bseed_pm_sample_power_w'
 
 
@@ -62,7 +68,7 @@ def fresh_pm_sample(state, *, baseline_ms, request_ms, received_ms):
     watts = (state or {}).get(PM_STAMP_POWER)
     if not (type(stamp) in (int, float) and type(watts) in (int, float) and
             math.isfinite(stamp) and math.isfinite(watts) and stamp > (baseline_ms or 0) and
-            request_ms - 5000 <= stamp <= received_ms + 5000):
+            request_ms - CLOCK_TOLERANCE_MS <= stamp <= received_ms + CLOCK_TOLERANCE_MS):
         return None
     return {'power': watts, 'sample_time_ms': stamp}
 
@@ -73,9 +79,12 @@ def assess_refresh(cached, fresh, *, keys, expected_build, converter_ok=None,
     cached = cached if isinstance(cached, dict) else {}
     fresh = fresh if isinstance(fresh, dict) else {}
     issues, fields = [], {}
+    fresh_stamp = require_pm and fresh_pm_sample(fresh, baseline_ms=baseline_ms, request_ms=request_ms or 0,
+                                                 received_ms=received_ms or 0) is not None
     for key in keys:
         fields[key] = {'cached': cached.get(key) if cached else 'unknown', 'fresh': fresh.get(key),
-                       'reported': key in fresh,
+                       'present': key in fresh,
+                       'freshnessProof': 'converter-stamp' if key == 'power' and fresh_stamp else 'none',
                        'changed': (fresh.get(key) != cached.get(key)) if cached and key in fresh else None}
         if key not in fresh:
             issues.append('no fresh value for ' + key)

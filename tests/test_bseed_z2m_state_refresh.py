@@ -37,7 +37,8 @@ def test_new_stamp_replaces_stale_power_and_records_the_change():
                                     request_ms=REQUEST_MS, received_ms=REQUEST_MS + 3000, require_pm=True)
     assert result['issues'] == []
     assert result['freshPmSample'] == {'power': 0, 'sample_time_ms': REQUEST_MS + 900}
-    assert result['fields']['power'] == {'cached': 2, 'fresh': 0, 'reported': True, 'changed': True}
+    assert result['fields']['power'] == {'cached': 2, 'fresh': 0, 'present': True, 'freshnessProof': 'converter-stamp',
+                                              'changed': True}
     assert result['converterKnowsBuild'] is True
 
 
@@ -52,7 +53,7 @@ def test_unanswered_field_is_unconfirmed_not_shown_as_current():
     result = refresh.assess_refresh(STALE, {'state_relay': 'ON'}, keys=refresh.refresh_keys('state_relay', False),
                                     expected_build=BUILD)
     assert result['issues'] == ['no fresh value for relay_physical_mode']
-    assert result['fields']['relay_physical_mode']['reported'] is False
+    assert result['fields']['relay_physical_mode']['present'] is False
 
 
 def test_deployed_converter_without_the_build_is_reported():
@@ -65,7 +66,8 @@ def test_deployed_converter_without_the_build_is_reported():
                                     keys=refresh.refresh_keys('state', False),
                                     expected_build=BUILD, converter_ok=ok)
     assert result['converterKnowsBuild'] is False and result['cachedBaseline'] is False
-    assert result['fields']['state'] == {'cached': 'unknown', 'fresh': 'ON', 'reported': True, 'changed': None}
+    assert result['fields']['state'] == {'cached': 'unknown', 'fresh': 'ON', 'present': True,
+                                         'freshnessProof': 'none', 'changed': None}
     assert any('does not recognise ' + BUILD in issue for issue in result['issues'])
 
 
@@ -119,3 +121,26 @@ def test_postflash_verifier_runs_the_refresh_by_default():
 def test_unknown_relay_key_is_refused(key):
     with pytest.raises(ValueError):
         refresh.refresh_keys(key, False)
+
+
+def test_only_power_has_a_freshness_proof_and_republished_values_prove_nothing():
+    keys = refresh.refresh_keys('state_relay', True)
+    stale = dict(STALE)
+    result = refresh.assess_refresh(STALE, stale, keys=keys, expected_build=BUILD,
+                                    baseline_ms=STALE['bseed_pm_sample_time_ms'], request_ms=REQUEST_MS,
+                                    received_ms=REQUEST_MS + 3000, require_pm=True)
+    assert all(field['freshnessProof'] == 'none' for field in result['fields'].values())
+    assert result['freshPmSample'] is None and result['issues']
+    fresh = dict(STALE, bseed_pm_sample_time_ms=REQUEST_MS + 900)
+    result = refresh.assess_refresh(STALE, fresh, keys=keys, expected_build=BUILD,
+                                    baseline_ms=STALE['bseed_pm_sample_time_ms'], request_ms=REQUEST_MS,
+                                    received_ms=REQUEST_MS + 3000, require_pm=True)
+    assert result['fields']['power']['freshnessProof'] == 'converter-stamp'
+    assert result['fields']['voltage']['freshnessProof'] == 'none'
+
+
+def test_a_minute_of_clock_skew_still_accepts_a_fresh_stamp_but_not_an_old_one():
+    skewed = dict(STALE, bseed_pm_sample_time_ms=REQUEST_MS - 45_000)
+    assert refresh.fresh_pm_sample(skewed, baseline_ms=1, request_ms=REQUEST_MS, received_ms=REQUEST_MS + 3000)
+    old = dict(STALE, bseed_pm_sample_time_ms=REQUEST_MS - 3_600_000)
+    assert refresh.fresh_pm_sample(old, baseline_ms=1, request_ms=REQUEST_MS, received_ms=REQUEST_MS + 3000) is None

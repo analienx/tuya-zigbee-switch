@@ -1,6 +1,7 @@
 """A converter release must be immutable and advertise required PM features."""
 import pytest
-from helper_scripts.bseed_converter_release import build_manifest, REQUIRED_MARKERS, REQUIRED_PM_BUILDS
+from helper_scripts.bseed_converter_release import (build_manifest, REQUIRED_MARKERS, REQUIRED_PM_BUILDS,
+                                                    FAMILY_LOGIC_TOKENS)
 
 
 def candidate():
@@ -8,6 +9,7 @@ def candidate():
             r"const fixedScaleFamily = /^1\.2\.5-bseed(r|cli)(\d+)$/;" + "\n" +
             "const fixedScaleFirst = {r: 7, cli: 6};\n" +
             'const fixedScaleExcluded = new Set(["1.2.5-bseedr10", "1.2.5-bseedcli7"]);\n' +
+            "\n".join(FAMILY_LOGIC_TOKENS) + "\n" +
             "\n".join(REQUIRED_MARKERS) +
             "\nmodule.exports = [];\n").encode("utf-8")
 
@@ -46,3 +48,10 @@ def test_converter_without_the_family_rule_is_refused():
 def test_unpinned_build_ref_rejected(sha):
     with pytest.raises(ValueError, match="exact 40-char"):
         build_manifest(candidate(), sha)
+
+
+@pytest.mark.parametrize("token", FAMILY_LOGIC_TOKENS)
+def test_edited_family_logic_is_refused(token):
+    bad = candidate().replace(token.encode(), b"/* edited */", 1)
+    with pytest.raises(ValueError, match="differs from the reviewed one"):
+        build_manifest(bad, "a" * 40)

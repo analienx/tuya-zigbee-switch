@@ -38,12 +38,25 @@ REQUIRED_PM_BUILDS = (
 
 
 FAMILY_PATTERN = r"/^1\.2\.5-bseed(r|cli)(\d+)$/"
+# Tokens of the converter's isFixedScaleBuild / hasFixedScaleContract: the Python mirror
+# below only vouches for the converter when the JavaScript logic is the reviewed one.
+FAMILY_LOGIC_TOKENS = (
+    "const isFixedScaleBuild = build => {",
+    "const match = fixedScaleFamily.exec(build || \"\");",
+    "Number(match[2]) >= fixedScaleFirst[match[1]] &&",
+    "!fixedScaleExcluded.has(build);",
+    'device?.modelID === "TS011F-BS-PM" &&',
+    'device.manufacturerName === "b28wrpvx" && isFixedScaleBuild(device.softwareBuildID);',
+)
 
 
 def pm_build_family(text: str) -> dict:
     """Read the converter's fixed-scale build family rule (no per-release list)."""
     if "const fixedScaleFamily = " + FAMILY_PATTERN + ";" not in text:
         raise ValueError("converter lacks the BSEED PM build family rule")
+    for token in FAMILY_LOGIC_TOKENS:
+        if token not in text:
+            raise ValueError("converter's build family logic differs from the reviewed one: " + token)
     first = re.search(r"const fixedScaleFirst = \{r: (\d+), cli: (\d+)\};", text)
     excluded = re.search(r"const fixedScaleExcluded = new Set\(\[(.*?)\]\);", text, re.S)
     if not first or not excluded:

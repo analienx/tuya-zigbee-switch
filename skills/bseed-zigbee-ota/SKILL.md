@@ -154,7 +154,7 @@ Zigbee2MQTT republishes its cached values with every message, so after a wired f
 - with `--converter <copy of the deployed switch_custom.js>` (profile `deployed_converter`), fails if the deployed converter does not list the installed build: an unknown build gets generic scaling and is never stamped;
 - with `--ota-version-check` (profile `ota_version_check`), asks Zigbee2MQTT for a transaction-matched OTA *version check* so its update panel shows the installed file version. It never sends `ota_update/update`.
 
-Unanswered fields are reported as unconfirmed, not with their cached value, and make the result `unconfirmed`. After a wired flash run the same tool directly. `--skip-state-refresh` exists only for diagnosis. Fresh values are not physical acceptance.
+Zigbee2MQTT republishes its whole cached state with every message, so a field being present proves nothing: only the power reading has a freshness proof (the converter's sample stamp advancing past the pre-request baseline, with a minute of clock-skew tolerance); every other field is recorded with `freshnessProof: none`. A missing field or a missing power stamp makes the refresh result `incomplete` (the standalone tool exits 2, and the postflash verifier then reports `unconfirmed`). After a wired flash run the same tool directly. `--skip-state-refresh` exists only for diagnosis. Fresh values are not physical acceptance.
 
 ## Mandatory metering gate for BSEED PM sockets
 
