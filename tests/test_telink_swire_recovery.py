@@ -2004,3 +2004,92 @@ def test_watch_json_cli_progress_is_stderr_and_output_directory_is_exclusive(tmp
     assert json.loads(captured.out)['status'] == 'WATCH_TIMEOUT' and 'Waiting' in captured.err
     assert tool.main(command) == 2
     assert json.loads(capsys.readouterr().out)['errorCode'] == 'EVIDENCE_EXISTS'
+
+
+def halt_fixture(tmp_path, monkeypatch, *, outcomes):
+    """Pinned reader fixture plus a scripted CPU pause check (no hardware)."""
+    import subprocess
+    reader = tmp_path / 'reader.py'
+    reader.write_bytes(b'pinned source fixture')
+    monkeypatch.setattr(tool, 'READER_SHA256', tool.sha256(reader.read_bytes()))
+    events = []
+
+    def halt_check(port, path, _out):
+        events.append('halt')
+        outcome = outcomes.pop(0)
+        if outcome != 'paused':
+            raise RecoveryError('CPU pause not confirmed', code=outcome)
+        return {'divider': 52, 'cpuControls': [5, 5], 'haltVerified': True}
+
+    def run(command, **_kwargs):
+        events.append('read')
+        assert not {'-t', 'ea', 'es', 'wf', 'we', '-r'} & set(command)
+        Path(command[-1]).write_bytes(b'a' * 32)
+        return subprocess.CompletedProcess(command, 0)
+    return reader, events, halt_check, run
+
+
+def test_halt_read_proves_the_pause_before_each_read_and_never_passes_reset(tmp_path, monkeypatch):
+    reader, events, halt_check, run = halt_fixture(tmp_path, monkeypatch, outcomes=['paused', 'paused'])
+    result = tool.read_flash('COM5', tmp_path / 'flash.bin', size=32, reader=reader, halt=True,
+                             halt_check=halt_check, runner=run)
+    assert result['status'] == 'READ_MATCHED' and events == ['halt', 'read', 'halt', 'read']
+    assert [check['cpuControls'] for check in result['haltChecks']] == [[5, 5], [5, 5]]
+
+
+def test_single_read_after_a_write_is_never_a_baseline(tmp_path, monkeypatch):
+    reader, events, halt_check, run = halt_fixture(tmp_path, monkeypatch, outcomes=['paused'])
+    target = tmp_path / 'after.bin'
+    result = tool.read_flash('COM5', target, size=32, reader=reader, halt=True, reads=1,
+                             halt_check=halt_check, runner=run)
+    assert result['status'] == 'READ_SINGLE' and events == ['halt', 'read']
+    assert not target.with_name('after.bin.second.bin').exists()
+    with pytest.raises(RecoveryError, match='baseline must be'):
+        tool.matched_backup(target)
+
+
+def scripted_pause(*codes):
+    """A pause check that fails with the given codes, then (for 'paused') succeeds."""
+    codes = list(codes)
+    def check(*_args):
+        code = codes.pop(0) if len(codes) > 1 else codes[0]
+        if code != 'paused':
+            raise RecoveryError('no pause', code=code)
+        return {'divider': 52, 'cpuControls': [5, 5], 'haltVerified': True}
+    return check
+
+
+def test_pause_retries_through_a_power_cycle_then_gives_up():
+    clock, sleeps, messages = [0.0], [], []
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock[0] += seconds
+    timing = {'clock': lambda: clock[0], 'sleep': sleep}
+    record = tool.await_cpu_halted('COM5', Path('r.py'), retry_seconds=60, out=messages.append,
+                                   halt_check=scripted_pause('SWIRE_RESPONSE_TIMEOUT', 'TARGET_NOT_HALTED', 'paused'),
+                                   **timing)
+    assert record['attempts'] == 3 and sleeps == [10, 10]
+    assert any('off and on' in message for message in messages)
+    clock[0] = 0.0
+    with pytest.raises(RecoveryError) as error:
+        tool.await_cpu_halted('COM5', Path('r.py'), retry_seconds=15,
+                              halt_check=scripted_pause('TARGET_NOT_HALTED'), **timing)
+    assert error.value.code == 'TARGET_NOT_HALTED' and len(error.value.details['attempts']) == 2
+    with pytest.raises(RecoveryError) as error:
+        tool.await_cpu_halted('COM5', Path('r.py'), retry_seconds=300,
+                              halt_check=scripted_pause('PORT_LOCKED'), **timing)
+    assert error.value.code == 'PORT_LOCKED'
+
+
+def test_paused_read_allowed_after_a_finished_flash_but_not_while_staged(tmp_path, monkeypatch):
+    kit, chip, session, options, token = agent_fixture(tmp_path)
+    tool.run_write('stage', kit, 'COM5', token('stage'), **options)
+    with pytest.raises(RecoveryError, match='reset/halt is forbidden'):
+        tool.read_flash('COM5', tmp_path / 'staged.bin', halt=True)
+    assert 'BOOT_REQUESTED' in tool.HALT_READ_PHASES and 'STAGED' not in tool.HALT_READ_PHASES
+
+
+def test_cli_refuses_retry_without_halt(tmp_path, capsys):
+    code = tool.main(['read', '--json', '--port', 'COM5', '--out', str(tmp_path / 'x.bin'), '--retry-seconds', '60'])
+    assert code == 2
+    assert json.loads(capsys.readouterr().out)['errorCode'] == 'INVALID_ARGUMENT'

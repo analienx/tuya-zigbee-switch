@@ -139,6 +139,11 @@ is `~/.telink-swire`; no background service is required.
   no-reset full double read, inspect its actual marker, and use `reconcile` to
   compare the complete staged or activated image and preserved regions. It does
   not write. An old successful read cannot override a newer failed verification.
+- After a TX-only `flash` (phase `BOOT_REQUESTED`), check the written bytes with
+  `read --halt --retry-seconds 300 --single --port PORT --out NEW_PRIVATE_FILE`:
+  the operator power-cycles the target while it retries, the pause is proven
+  before reading, and one read is enough to compare the slot with the image.
+  Report it as a single read; it never becomes a baseline.
 - `read --halt`, adapter loopback selftests and power-cycle activation are not
   part of a held recovery. Do not reset or reconnect the board between staged
   verification and activation. Stop on lost contact or uncertain power state.
