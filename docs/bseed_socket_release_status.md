@@ -29,7 +29,7 @@ The six index entries consist of **three accepted custom Router images and their
 
 ## Draft shared-recovery TS011F candidates — 2026-11-05
 
-These fresh identities are defined in `helper_scripts/bseed_pm_release.py` and `helper_scripts/bseed_nonpm_release.py`. They are **unsealed**, their shared-recovery implementation is incomplete, and they must not be flashed. The earlier 2026-11-02 train remains documented in the [dated release notes](releases/2026-11-02-link-policy-candidates.md).
+These fresh identities are defined in `helper_scripts/bseed_pm_release.py` and `helper_scripts/bseed_nonpm_release.py`. Their shared-recovery implementation was completed and merged in PR #114 on 2026-11-10 and the images are built from that source. They are **unsealed** until a reviewed seal commit, they are not public, and they go only to single-device canary campaigns. The PM Router r22 was written by wire to Table Left on 2026-11-13 and started ([record](bseed_tableleft_r21_r22_recovery_20261113.md)); the PM mains Client cli25 is next, over the air to KitchenSocketLeft. The earlier 2026-11-02 train remains documented in the [dated release notes](releases/2026-11-02-link-policy-candidates.md).
 
 <!-- current-candidate-matrix:start -->
 | Board | Role | Current candidate | Native FILEVER | OTA image type | Publication / acceptance |
