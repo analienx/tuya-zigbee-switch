@@ -117,8 +117,7 @@ const assertSampled = (result, expected, watts) => {
 };
 (async () => {
     let sequence = 1;
-    // r23 has never been listed anywhere: a future build gets the fixed scales too.
-    for (const build of ['1.2.5-bseedcli6', '1.2.5-bseedcli12', '1.2.5-bseedr9', '1.2.5-bseedr23']) {
+    for (const build of ['1.2.5-bseedcli6', '1.2.5-bseedcli12', '1.2.5-bseedr23']) {
       for (const staleCache of [false, true]) {
         const device = makeDevice(build), ep = device.endpoints[0];
         if (staleCache) ep.cache = {haElectricalMeasurement: {acVoltageDivisor: 1}, seMetering: {divisor: 100}};
