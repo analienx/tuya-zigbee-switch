@@ -310,13 +310,15 @@ def test_wired_install_supersedes_the_campaign_with_fresh_identity():
     install = guard.validate_superseded_release(record, evidence, lock, session, **kwargs)
     assert install['image_sha256'] == WIRED_IMAGE
     assert install['written_at'] == dt.datetime(2026, 11, 13, 13, 26, 13, tzinfo=dt.timezone.utc)
-    lock['phase'] = 'update_timeout_or_unconfirmed'
-    guard.validate_superseded_release(record, evidence, lock, session, **kwargs)
+    for phase in ('update_timeout_or_unconfirmed', 'ota_transfer_complete_recovery_deferred'):
+        lock['phase'] = phase
+        guard.validate_superseded_release(record, evidence, lock, session, **kwargs)
 
 
 @pytest.mark.parametrize('failure, message', [
     ('campaign_build', 'normal release route'),
     ('terminal_lock', 'not an unresolved update'),
+    ('abandoned_lock', 'not an unresolved update'),
     ('other_lock', 'does not belong'),
     ('guard_not_enabled', 'enabled guard'),
     ('other_device_guard', 'enabled guard'),
@@ -338,6 +340,7 @@ def test_superseded_release_needs_every_proof(failure, message):
     record, evidence, lock, session, kwargs = superseded_fixture()
     if failure == 'campaign_build': record['expected_build'] = 'r22'
     if failure == 'terminal_lock': lock['phase'] = 'postflash_accepted'
+    if failure == 'abandoned_lock': lock['phase'] = 'source_unchanged_abandoned'
     if failure == 'other_lock': lock['token'] = 'campaign-2'
     if failure == 'guard_not_enabled': record['phase'] = 'enabling'
     if failure == 'other_device_guard': record['ieee'] = '0x0000000000000000'

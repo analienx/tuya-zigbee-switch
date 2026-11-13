@@ -303,8 +303,12 @@ def release(profile, evidence_path):
 
 
 # Campaign phases that are unresolved because the update never reached its goal.
-# A terminal phase has its own release route and is never superseded.
-SUPERSEDABLE_LOCK_PHASES = ('ota_transfer_ok_postflash_unverified', 'update_timeout_or_unconfirmed')
+# ota_transfer_complete_recovery_deferred is the owner-cancelled campaign: its
+# transport lock and network lease are already closed, and it deliberately
+# retains the quarantine ("not a PM-quarantine release"). Accepted-style
+# terminal phases have their own release routes and are never superseded.
+SUPERSEDABLE_LOCK_PHASES = ('ota_transfer_ok_postflash_unverified', 'update_timeout_or_unconfirmed',
+                            'ota_transfer_complete_recovery_deferred')
 WIRED_SESSION_PHASES = ('BOOT_REQUESTED', 'ACTIVATED_VERIFIED', 'CLOSED')
 MIN_REASON_CHARS = 30
 MAX_EVIDENCE_AGE_SECONDS = 3600

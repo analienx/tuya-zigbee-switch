@@ -319,7 +319,7 @@ python helper_scripts/bseed_pm_telemetry_guard.py release-superseded \
 
 It releases only when all of these hold, and stops before any change otherwise:
 
-- the guard is an `enabled` guard for this IEEE, and the campaign lock is an unresolved update (`ota_transfer_ok_postflash_unverified` or `update_timeout_or_unconfirmed`), not a terminal phase;
+- the guard is an `enabled` guard for this IEEE, and the campaign lock is an unresolved update (`ota_transfer_ok_postflash_unverified`, `update_timeout_or_unconfirmed`, or `ota_transfer_complete_recovery_deferred`, the owner-cancelled campaign that keeps the quarantine), not an accepted or abandoned phase;
 - the installed build differs from the campaign build (otherwise the normal release applies);
 - the identity evidence is one successful, transaction-matched target interview with fresh inventory and a live role, newer than the guard, newer than the wired install and at most one hour old, showing exactly the superseding IEEE, build and role;
 - the SWire session was recorded for this IEEE (`targetId`), is at a finished phase and holds a completed write of its image;
