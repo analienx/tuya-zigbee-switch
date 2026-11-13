@@ -71,6 +71,8 @@ was released; the r21 failure was in the r21 image, not in the OTA path.
 
 Not yet established: an over-the-air install of r22, a loaded-to-zero metering
 check, behaviour across power cycles and a soak. r22
-remains an unsealed draft, not public. The TS0726 `rv5`/`lv5` `-Os` images may
-now be planned for one-device canaries, one at a time, after the r21 campaign
-lock and network lease are formally closed.
+remains an unsealed draft, not public. The owner cancelled the r21 campaign on
+2026-11-13, which released the network-wide OTA lease (none is held now) and
+left the PM quarantine in place until the release described above. The TS0726
+`rv5`/`lv5` `-Os` images may now be planned for one-device canaries, one at a
+time.
