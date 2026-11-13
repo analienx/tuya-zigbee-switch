@@ -29,15 +29,15 @@ The six index entries consist of **three accepted custom Router images and their
 
 ## Draft shared-recovery TS011F candidates — 2026-11-05
 
-These fresh identities are defined in `helper_scripts/bseed_pm_release.py` and `helper_scripts/bseed_nonpm_release.py`. They are **unsealed**, their shared-recovery implementation is incomplete, and they must not be flashed. The earlier 2026-11-02 train remains documented in the [dated release notes](releases/2026-11-02-link-policy-candidates.md).
+These fresh identities are defined in `helper_scripts/bseed_pm_release.py` and `helper_scripts/bseed_nonpm_release.py`. Their shared-recovery implementation was completed and merged in PR #114 on 2026-11-10 and the images are built from that source. They were sealed on 2026-11-13 from exact-SHA CI at `720aa6b8` (sealing fixes the bytes, it is not hardware acceptance), they are not public, and they go only to single-device canary campaigns. The PM Router r22 was written by wire to Table Left on 2026-11-13 and started ([record](bseed_tableleft_r21_r22_recovery_20261113.md)); the PM mains Client cli25 is next, over the air to KitchenSocketLeft. The earlier 2026-11-02 train remains documented in the [dated release notes](releases/2026-11-02-link-policy-candidates.md).
 
 <!-- current-candidate-matrix:start -->
 | Board | Role | Current candidate | Native FILEVER | OTA image type | Publication / acceptance |
 | --- | --- | --- | --- | ---: | --- |
-| PM TS011F-BS-PM | Router | `1.2.5-bseedr22` | `0x12053024` | 43556 | **Unsealed draft** · not public · started on hardware 2026-11-13 ([wired restore](bseed_tableleft_r21_r22_recovery_20261113.md)) · OTA and hardware acceptance pending |
-| PM TS011F-BS-PM | mains Client | `1.2.5-bseedcli25` | `0x12053024` | 65024 | **Unsealed draft** · not public · hardware acceptance pending |
-| non-PM TS011F-BS | Router | `1.1.3-bseedr19` | `0x1102301E` | 43555 | **Unsealed draft** · not public · implementation and hardware acceptance pending |
-| non-PM TS011F-BS | mains Client | `1.1.3-bseedc17` | `0x1102301E` | 65026 | **Unsealed draft** · not public · implementation and hardware acceptance pending |
+| PM TS011F-BS-PM | Router | `1.2.5-bseedr22` | `0x12053024` | 43556 | **Sealed** `720aa6b8` · not public · started on hardware 2026-11-13 ([wired restore](bseed_tableleft_r21_r22_recovery_20261113.md)) · OTA and hardware acceptance pending |
+| PM TS011F-BS-PM | mains Client | `1.2.5-bseedcli25` | `0x12053024` | 65024 | **Sealed** `720aa6b8` · not public · OTA canary on KitchenSocketLeft pending · hardware acceptance pending |
+| non-PM TS011F-BS | Router | `1.1.3-bseedr19` | `0x1102301E` | 43555 | **Sealed** `720aa6b8` · not public · implementation and hardware acceptance pending |
+| non-PM TS011F-BS | mains Client | `1.1.3-bseedc17` | `0x1102301E` | 65026 | **Sealed** `720aa6b8` · not public · implementation and hardware acceptance pending |
 <!-- current-candidate-matrix:end -->
 
 The PM Router and Client deliberately share one board-wide version counter but have distinct OTA image types. The same principle applies to the non-PM pair. **Never cross-flash**, change Zigbee roles using the ordinary index, rebuild under a previously sealed identity or use a GitHub build alone as deployment approval.
