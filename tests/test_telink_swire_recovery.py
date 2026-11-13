@@ -2093,3 +2093,94 @@ def test_cli_refuses_retry_without_halt(tmp_path, capsys):
     code = tool.main(['read', '--json', '--port', 'COM5', '--out', str(tmp_path / 'x.bin'), '--retry-seconds', '60'])
     assert code == 2
     assert json.loads(capsys.readouterr().out)['errorCode'] == 'INVALID_ARGUMENT'
+
+
+def test_pause_retries_every_real_no_reply_code_and_a_failed_activation():
+    # find_divider raises NO_SWIRE_TARGET_RESPONSE when a powered-off board is silent:
+    # the exact case --retry-seconds exists for.
+    clock, sleeps = [0.0], []
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock[0] += seconds
+    codes = ('NO_SWIRE_TARGET_RESPONSE', 'SWIRE_FRAMING', 'UNSTABLE_SWIRE_READBACK', 'UART_ECHO_MISMATCH',
+             'LINK_TEST_TIMEOUT', 'HALT_ATTEMPT_FAILED')
+    assert set(codes) <= set(tool.HALT_RETRY_CODES)
+    record = tool.await_cpu_halted('COM5', Path('r.py'), retry_seconds=120, halt_check=scripted_pause(*codes, 'paused'),
+                                   clock=lambda: clock[0], sleep=sleep)
+    assert record['attempts'] == len(codes) + 1 and len(sleeps) == len(codes)
+
+
+def test_upstream_activation_faults_become_a_retryable_structured_error(tmp_path, monkeypatch):
+    import contextlib
+    class Port:
+        write_timeout = None
+    @contextlib.contextmanager
+    def fake_port(*_args, **_kwargs):
+        yield Port()
+    for fault in (SystemExit('Chip sleep? -> Use reset chip'), OSError('port vanished'), ValueError('upstream bug')):
+        class Pinned:
+            @staticmethod
+            def activate(*_args):
+                raise fault
+        monkeypatch.setattr(tool, 'load_pinned_reader', lambda _reader, pinned=Pinned: pinned)
+        monkeypatch.setattr(tool, 'open_port', fake_port)
+        with pytest.raises(RecoveryError) as error:
+            tool.verify_cpu_halted('COM5', tmp_path / 'reader.py')
+        assert error.value.code == 'HALT_ATTEMPT_FAILED' and error.value.retry_safe is True
+
+
+def test_pinned_reader_is_hash_checked_again_right_before_it_runs(tmp_path, monkeypatch):
+    reader = tmp_path / 'reader.py'
+    reader.write_text('raise SystemExit("must never run")')
+    with pytest.raises(RecoveryError) as error:
+        tool.load_pinned_reader(reader)
+    assert error.value.code == 'READER_HASH_MISMATCH'
+    monkeypatch.setattr(tool, 'READER_SHA256', tool.sha256(reader.read_bytes()))
+    reader.write_text('VALUE = 1')
+    monkeypatch.setattr(tool, 'READER_SHA256', tool.sha256(reader.read_bytes()))
+    assert tool.load_pinned_reader(reader).VALUE == 1
+
+
+def reader_command(script):
+    import sys as _sys
+    return [_sys.executable, '-c', script]
+
+
+def test_reader_progress_is_reported_and_a_slow_start_is_not_a_stall(tmp_path):
+    messages = []
+    script = ('import time\nfor a in (0, 256, 512):\n    print("Read from 0x%06x..." % a, flush=True)\n'
+              '    time.sleep(0.4)\n')
+    done = tool.run_reader_with_progress(reader_command(script), log_path=tmp_path / 'live.log', size=1024,
+                                         label='Read 1/1', out=messages.append, first_line_seconds=10, stall_seconds=5)
+    assert done.returncode == 0 and 'Read from 0x000200' in (tmp_path / 'live.log').read_text()
+    # A reader that prints nothing for longer than the stall window, but less than the
+    # first-line grace, is a slow start and is allowed to finish.
+    slow = 'import time\ntime.sleep(2.5)\nprint("Read from 0x000000...", flush=True)\n'
+    done = tool.run_reader_with_progress(reader_command(slow), log_path=tmp_path / 'slow.log', size=1024,
+                                         label='Read 1/1', first_line_seconds=10, stall_seconds=1)
+    assert done.returncode == 0
+
+
+@pytest.mark.parametrize('prints_first_line', [False, True])
+def test_reader_stall_is_stopped_with_its_log_kept(tmp_path, prints_first_line):
+    script = ('import time\n' + ('print("Read from 0x000000...", flush=True)\n' if prints_first_line else '') +
+              'time.sleep(60)\n')
+    with pytest.raises(RecoveryError) as error:
+        tool.run_reader_with_progress(reader_command(script), log_path=tmp_path / 'live.log', size=1024,
+                                      label='Read 1/1', first_line_seconds=1.5, stall_seconds=1.5)
+    assert error.value.code == 'READ_STALLED'
+    assert error.value.details['sawFirstAddress'] is prints_first_line
+    assert (tmp_path / 'live.log').is_file(), 'live log is kept for diagnosis'
+
+
+def test_read_refuses_to_overwrite_earlier_live_diagnostics(tmp_path, monkeypatch):
+    import subprocess
+    reader = tmp_path / 'reader.py'
+    reader.write_bytes(b'pinned source fixture')
+    monkeypatch.setattr(tool, 'READER_SHA256', tool.sha256(reader.read_bytes()))
+    target = tmp_path / 'flash.bin'
+    target.with_name('flash.bin.reader-1.live.log').write_text('earlier evidence')
+    with pytest.raises(RecoveryError, match='already exists'):
+        tool.read_flash('COM5', target, size=32, reader=reader, halt=False,
+                        runner=lambda command, **_kw: subprocess.CompletedProcess(command, 0))
+    assert target.with_name('flash.bin.reader-1.live.log').read_text() == 'earlier evidence'

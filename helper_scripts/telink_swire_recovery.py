@@ -2103,24 +2103,69 @@ def read_flash(port, output, **kwargs):
         return _read_flash(port, output, **kwargs)
 
 
+# Failures before any flash access that a power-cycle of the target can cure.
+HALT_RETRY_CODES = ('TARGET_NOT_HALTED', 'SWIRE_RESPONSE_TIMEOUT', 'NO_SWIRE_TARGET_RESPONSE', 'SWIRE_FRAMING',
+                    'UNSTABLE_SWIRE_READBACK', 'UART_RESPONSE_LENGTH', 'UART_ECHO_MISMATCH', 'LINK_TEST_TIMEOUT',
+                    'HALT_ATTEMPT_FAILED')
+
+
+def load_pinned_reader(reader):
+    """Load the pinned reader's module in-process; re-check its hash immediately before running it."""
+    data = Path(reader).read_bytes()
+    if sha256(data) != READER_SHA256:
+        raise RecoveryError('pinned reader changed after its SHA-256 check; nothing was executed',
+                            code='READER_HASH_MISMATCH', retry_safe=False)
+    spec = importlib.util.spec_from_file_location('pinned_pvvx_reader', reader)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class _Lines:
+    """File-like sink that forwards complete lines to a progress callback."""
+    def __init__(self, report):
+        self.report, self.pending = report, ''
+
+    def write(self, value):
+        self.pending += value
+        while '\n' in self.pending:
+            line, self.pending = self.pending.split('\n', 1)
+            if line.strip():
+                self.report('  pvvx: ' + line.rstrip('\r'))
+        return len(value)
+
+    def flush(self):
+        if self.pending.strip():
+            self.report('  pvvx: ' + self.pending.rstrip())
+        self.pending = ''
+
+
 def verify_cpu_halted(port, reader, out=None):
     """Pause the CPU over SWire and prove it: CPU control 0x602 must read 0x05 twice.
 
     Uses the pinned reader's own activation (it sends SWire stop commands; RTS
     and DTR stay unwired), then the bounded diagnostic for divider discovery and
-    two register reads. No flash access happens here.
+    two register reads. No flash access happens here. Faults of the serial link
+    or of the upstream activation are returned as a retryable RecoveryError.
     """
-    spec = importlib.util.spec_from_file_location('pinned_pvvx_reader', reader)
-    pinned = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(pinned)
-    with open_port(port, timeout=0.02, baud=921600) as control:
-        control.write_timeout = 2
-        sink = io.StringIO()
-        with contextlib.redirect_stdout(sink):
-            pinned.activate(control, 3000)
-        check = SwireDiagnostic(control, 921600)
-        divider = check.find_divider()
-        controls = [check.read_register(0x602)[0] for _ in range(2)]
+    report = out or (lambda _message: None)
+    pinned = load_pinned_reader(reader)
+    try:
+        with open_port(port, timeout=0.02, baud=921600) as control:
+            control.write_timeout = 2
+            sink = _Lines(report)
+            with contextlib.redirect_stdout(sink):
+                pinned.activate(control, 3000)
+            sink.flush()
+            report('  CPU stop requested; scanning for the target reply.')
+            check = SwireDiagnostic(control, 921600)
+            divider = check.find_divider()
+            controls = [check.read_register(0x602)[0] for _ in range(2)]
+    except RecoveryError:
+        raise
+    except (OSError, SystemExit, Exception) as error:  # upstream activation may sys.exit or raise serial errors
+        raise RecoveryError('CPU pause attempt failed: %s: %s' % (type(error).__name__, error),
+                            code='HALT_ATTEMPT_FAILED', retry_safe=True) from error
     record = {'divider': divider, 'cpuControls': controls, 'haltVerified': controls == [CPU_STOPPED] * 2,
               'statistics': dict(check.stats)}
     if not record['haltVerified']:
@@ -2134,8 +2179,9 @@ def await_cpu_halted(port, reader, *, retry_seconds=0, halt_check=verify_cpu_hal
                      clock=time.monotonic, sleep=time.sleep):
     """Retry the verified pause for up to retry_seconds, so a power-cycle can be caught.
 
-    Only failures before any flash access are retried: no echo, no target
-    reply, or a CPU that is still running. Each try sends stop commands only.
+    Only failures before any flash access are retried (HALT_RETRY_CODES): no
+    echo, no target reply, a failed activation or a CPU that is still running.
+    Each try sends stop commands only.
     """
     report = out or (lambda _message: None)
     deadline, attempts = clock() + max(0, retry_seconds), []
@@ -2147,8 +2193,7 @@ def await_cpu_halted(port, reader, *, retry_seconds=0, halt_check=verify_cpu_hal
                    f'{len(attempts)} attempt(s).')
             return dict(record, attempts=len(attempts))
         except RecoveryError as error:
-            if error.code not in ('TARGET_NOT_HALTED', 'SWIRE_RESPONSE_TIMEOUT', 'TARGET_NO_RESPONSE',
-                                  'UART_RESPONSE_LENGTH'):
+            if error.code not in HALT_RETRY_CODES:
                 raise
             attempts.append({'errorCode': error.code, 'error': str(error)})
             if clock() + HALT_RETRY_PAUSE > deadline:
@@ -2160,14 +2205,28 @@ def await_cpu_halted(port, reader, *, retry_seconds=0, halt_check=verify_cpu_hal
             sleep(HALT_RETRY_PAUSE)
 
 
+READER_FIRST_LINE_SECONDS = 180
+
+
+def log_tail(path, size=4096):
+    """Last bytes of a growing log without re-reading all of it."""
+    with Path(path).open('rb') as handle:
+        handle.seek(0, os.SEEK_END)
+        handle.seek(max(0, handle.tell() - size))
+        return handle.read().decode('utf-8', 'replace')
+
+
 def run_reader_with_progress(command, *, log_path, size, label, out=None, timeout=1800,
-                             stall_seconds=60):
-    """Run the pinned reader, reporting the address it prints as it goes."""
+                             stall_seconds=60, first_line_seconds=READER_FIRST_LINE_SECONDS):
+    """Run the pinned reader, reporting the address it prints as it goes.
+
+    A slow start is allowed first_line_seconds before its first address line;
+    after that, stall_seconds without a new address stops the read.
+    """
     report = out or (lambda _message: None)
-    target = Path(command[-1])
     started = time.monotonic()
-    last_change, last_address, last_report = started, -1, 0.0
-    with Path(log_path).open('w', encoding='utf-8') as log:
+    last_change, last_address, last_report, seen_line = started, -1, 0.0, False
+    with Path(log_path).open('x', encoding='utf-8') as log:
         child = subprocess.Popen([command[0], '-u', *command[1:]], stdout=log, stderr=subprocess.STDOUT,
                                  creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         try:
@@ -2175,14 +2234,16 @@ def run_reader_with_progress(command, *, log_path, size, label, out=None, timeou
                 now = time.monotonic()
                 if now - started > timeout:
                     raise subprocess.TimeoutExpired(command, timeout)
-                found = re.findall(r'Read from 0x([0-9a-fA-F]+)', Path(log_path).read_text(
-                    encoding='utf-8', errors='replace')[-4096:])
+                found = re.findall(r'Read from 0x([0-9a-fA-F]+)', log_tail(log_path))
                 address = int(found[-1], 16) if found else 0
+                if found:
+                    seen_line = True
                 if address > last_address:
                     last_change, last_address = now, address
-                if now - last_change > stall_seconds:
-                    raise RecoveryError(f'reader made no progress for {stall_seconds} s', code='READ_STALLED',
-                                        retry_safe=False)
+                if now - last_change > (stall_seconds if seen_line else first_line_seconds):
+                    raise RecoveryError(f'reader made no progress for {int(now - last_change)} s',
+                                        code='READ_STALLED', retry_safe=False,
+                                        details={'liveLog': str(log_path), 'sawFirstAddress': seen_line})
                 if now - last_report >= 5:
                     done = min(size, address)
                     report(f'{label}: {done:,}/{size:,} bytes ({done / size:.0%}), '
@@ -2224,7 +2285,8 @@ def _read_flash(port, output, *, address=0, size=FLASH_BYTES, reader=None,
     second = output.with_name(output.name + '.second.bin')
     receipt = output.with_name(output.name + '.json')
     logs = [output.with_name(output.name + f'.reader-{i}.log') for i in (1, 2)]
-    if any(p.exists() for p in (output, second, receipt, *logs)):
+    live_logs = [output.with_name(output.name + f'.reader-{i}.live.log') for i in (1, 2)]
+    if any(p.exists() for p in (output, second, receipt, *logs, *live_logs)):
         raise RecoveryError('read output or receipt already exists; choose a new output')
     output.parent.mkdir(parents=True, exist_ok=True)
     reader_setup = ensure_reader(reader, fetch=fetch, out=out)
@@ -2252,7 +2314,7 @@ def _read_flash(port, output, *, address=0, size=FLASH_BYTES, reader=None,
             try:
                 if runner is None:
                     completed = run_reader_with_progress(
-                        command, log_path=output.with_name(output.name + f'.reader-{index + 1}.live.log'),
+                        command, log_path=live_logs[index],
                         size=size, label=f'Read {index + 1}/{reads}', out=report)
                 else:
                     completed = runner(command, capture_output=True, text=True, timeout=1800)
@@ -2304,9 +2366,8 @@ def matched_backup(path, *, port=None):
     data = path.read_bytes()
     receipt = read_json(path.with_name(path.name + '.json'))
     second_path = path.with_name(path.name + '.second.bin')
-    if receipt.get('status') != 'READ_MATCHED' or not second_path.is_file():
-        raise RecoveryError('baseline must be an unchanged matching double read of full flash on this port '
-                            f'(this read is {receipt.get("status")})')
+    if not second_path.is_file():  # a single read has no second dump
+        raise RecoveryError('baseline must be an unchanged matching double read of full flash on this port')
     second = second_path.read_bytes()
     digests = [entry.get('sha256') for entry in receipt.get('reads', [])]
     if (len(data) != FLASH_BYTES or second != data or receipt.get('status') != 'READ_MATCHED'
