@@ -1,6 +1,6 @@
 # BSEED firmware availability
 
-**Latest reviewed source: 2026-11-03** · [Project README](../README.md) · [Candidate release notes](releases/2026-11-02-link-policy-candidates.md) · [Release process](contribute/release.md)
+**Status reviewed: 2026-11-14** · [Project README](../README.md) · [Candidate release notes](releases/2026-11-02-link-policy-candidates.md) · [Release process](contribute/release.md)
 
 > [!IMPORTANT]
 > **Only firmware explicitly listed in the [public BSEED OTA index](../zigbee2mqtt/ota/index_bseed.json) is published for normal Zigbee2MQTT discovery.** A newer candidate may be sealed and independently reproducible without being hardware-accepted or offered as a public update. Do not infer a fleet release from one successful canary.
@@ -27,15 +27,15 @@ These are the **unchanged public** custom Router builds. Exact stock-to-custom w
 
 The six index entries consist of **three accepted custom Router images and their three exact stock-conversion wrappers**. No TS011F Client image or Router↔Client role transition is published there. A GitHub *draft* release is not a public OTA image.
 
-## Draft shared-recovery TS011F candidates — 2026-11-05
+## Sealed shared-recovery TS011F candidates — 2026-11-14
 
-These fresh identities are defined in `helper_scripts/bseed_pm_release.py` and `helper_scripts/bseed_nonpm_release.py`. Their shared-recovery implementation was completed and merged in PR #114 on 2026-11-10 and the images are built from that source. They were sealed on 2026-11-13 from exact-SHA CI at `720aa6b8` (sealing fixes the bytes, it is not hardware acceptance), they are not public, and they go only to single-device canary campaigns. The PM Router r22 was written by wire to Table Left on 2026-11-13 and started ([record](bseed_tableleft_r21_r22_recovery_20261113.md)); the PM mains Client cli25 is next, over the air to KitchenSocketLeft. The earlier 2026-11-02 train remains documented in the [dated release notes](releases/2026-11-02-link-policy-candidates.md).
+These fresh identities are defined in `helper_scripts/bseed_pm_release.py` and `helper_scripts/bseed_nonpm_release.py`. Their shared-recovery implementation was completed and merged in PR #114 on 2026-11-10 and the images are built from that source. They were sealed on 2026-11-13 from exact-SHA CI at `720aa6b8` (sealing fixes the bytes, it is not hardware acceptance), they are not public, and they go only to single-device canary campaigns. The PM Router r22 was written by wire to Table Left on 2026-11-13 and started ([record](bseed_tableleft_r21_r22_recovery_20261113.md)). **The PM mains Client cli25 was installed over the air on KitchenSocketLeft on 2026-11-14 and is operator-confirmed working as expected for the current use case** ([canary evidence](bseed_kitchenleft_cli25_canary_20261114.md)); this is one-device operational confirmation, not general hardware acceptance or publication. The earlier 2026-11-02 train remains documented in the [dated release notes](releases/2026-11-02-link-policy-candidates.md).
 
 <!-- current-candidate-matrix:start -->
 | Board | Role | Current candidate | Native FILEVER | OTA image type | Publication / acceptance |
 | --- | --- | --- | --- | ---: | --- |
 | PM TS011F-BS-PM | Router | `1.2.5-bseedr22` | `0x12053024` | 43556 | **Sealed** `720aa6b8` · not public · started on hardware 2026-11-13 ([wired restore](bseed_tableleft_r21_r22_recovery_20261113.md)) · OTA and hardware acceptance pending |
-| PM TS011F-BS-PM | mains Client | `1.2.5-bseedcli25` | `0x12053024` | 65024 | **Sealed** `720aa6b8` · not public · OTA canary on KitchenSocketLeft pending · hardware acceptance pending |
+| PM TS011F-BS-PM | mains Client | `1.2.5-bseedcli25` | `0x12053024` | 65024 | **Sealed** `720aa6b8` · not public · [KitchenSocketLeft OTA and postflash canary confirmed operational 2026-11-14](bseed_kitchenleft_cli25_canary_20261114.md) · full hardware/soak acceptance pending |
 | non-PM TS011F-BS | Router | `1.1.3-bseedr19` | `0x1102301E` | 43555 | **Sealed** `720aa6b8` · not public · implementation and hardware acceptance pending |
 | non-PM TS011F-BS | mains Client | `1.1.3-bseedc17` | `0x1102301E` | 65026 | **Sealed** `720aa6b8` · not public · implementation and hardware acceptance pending |
 <!-- current-candidate-matrix:end -->
