@@ -126,6 +126,38 @@ def _verify_recovery(profile, *, confirm_unloaded=False,
         return {'ieee': profile['ieee'],
                 'method': 'non-invasive exact Entrance Router v8-to-r18 canary',
                 'recovery_available': False}
+    # Operator-authorized, one-time exact canary: after explicit direction on
+    # 2026-11-14 to initiate the two workroom flashes despite the disclosed
+    # missing SWire readback, accept irreversible brick risk ONLY for this
+    # precise already-custom, same-role Router r18 -> r19 pair.
+    # This is not a claim that a programmer has ever read/recovered this chip.
+    if (not transition and roles == ('Router', 'Router') and
+            not profile.get('recovery_evidence') and
+            (profile.get('device'), profile.get('ieee'),
+             profile.get('preflash_build'), profile.get('postflash_build'),
+             profile.get('sha256')) == (
+                'WRSocketEntrance', '0xa4c1387b13e9436d',
+                '1.1.3-bseedr18', '1.1.3-bseedr19',
+                '3a85623ab51e535b38384e41bedc13cf961721e36b62bb462419ce1b318b5f71') and
+            profile.get('parallel_ota_max') == 2 and
+            profile.get('concurrent_ota_ieees') == ['0xa4c138c5f07ee732'] and
+            profile.get('source_rejoin_strategy') == 'none' and
+            profile.get('block_bytes') == 32 and
+            profile.get('response_delay_ms', 0) >= 1800 and
+            profile.get('preflash_relay_physical_mode') == 'follow_state' and
+            profile.get('expect_relay') == 'OFF' and
+            profile.get('relay_get_key') == 'state_relay' and
+            profile.get('require_pm') is False and
+            profile.get('force_test_transition') is False):
+        return {
+            'ieee': profile['ieee'],
+            'method': 'explicit same-role r18-to-r19 non-invasive operator risk canary',
+            'recovery_available': False,
+            'readback_verified': False,
+            'operator_risk_accepted': True,
+            'hardware_acceptance': False,
+            'warning': 'No full chip readback. Loss of socket recoverability is possible.',
+        }
     evidence = _private_file(profile.get('recovery_evidence'), 'Recovery evidence')
     record = json.loads(evidence.read_text(encoding='utf8'))
     if record.get('schema') != 1 or record.get('target_ieee') != profile['ieee']:
