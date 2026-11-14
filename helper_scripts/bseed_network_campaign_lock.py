@@ -63,9 +63,13 @@ def _lease_group(path):
     match = _SLOT_RE.fullmatch(path.name)
     if match:
         return path.with_name(match.group(1) + '.json'), match.group(2)
-    if re.fullmatch(r'bseed-zigbee-[0-9a-f]{32}[.]json', path.name):
+    # The legacy single-owner API also accepts operator/test-owned *.json
+    # paths (e.g. network-lock.json); it always has. Preserve that contract.
+    # Strict canonical coordinator IDs are enforced at profile resolution,
+    # and ONLY canonical names can enter the new parallel-slot mode.
+    if path.suffix == '.json' and '.slot-' not in path.stem:
         return path, None
-    raise ValueError('Network lease path is not a known authoritative format')
+    raise ValueError('Network lease path is not a valid singleton or canonical dual-slot path')
 
 
 @contextlib.contextmanager

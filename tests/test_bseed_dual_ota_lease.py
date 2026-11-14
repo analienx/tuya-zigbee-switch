@@ -221,3 +221,19 @@ def test_terminal_update_release_race_never_resurrects_owner(tmp_path):
             assert released.result(timeout=8) is True
             assert updated.result(timeout=8) in (True, False)
         assert not path.exists(), "An update resurrected a released network lease"
+
+
+def test_legacy_arbitrary_json_network_lock_names_still_supported(tmp_path):
+    # Existing source reconciliation and closure tests used these paths;
+    # refusing them caused 9 Linux CI regressions even though live is canonical.
+    for name in ('network-lock.json', 'network.json'):
+        path = tmp_path / name
+        acquire(path, network_id=NET, token=name, device='LegacySocket',
+                ieee=A, image_sha256='2' * 64)
+        update(path, name, 'preflight_abort')
+        assert release_preflight_abort(path, name)
+        assert not path.exists()
+    with pytest.raises(ValueError, match='valid singleton'):
+        acquire(tmp_path / 'network.slot-not-an-ieee.json',
+                network_id=NET, token='bad', device='BadSlot',
+                ieee=A, image_sha256='2' * 64)
