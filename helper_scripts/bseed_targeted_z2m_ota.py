@@ -634,6 +634,9 @@ def main():
             device=args.device,
             ieee=args.ieee,
             image_sha256=args.sha256,
+            parallel_allowed_ieees=(
+                source_profile.get('concurrent_ota_ieees')
+                if source_profile.get('parallel_ota_max', 1) == 2 else None),
         )
         network_lock_owned = True
 

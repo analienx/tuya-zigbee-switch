@@ -583,6 +583,22 @@ def resume_transition(profile_path: Path, confirm_ieee: str, *,
     return record
 
 
+def dual_ota_reentry_blocked(profile, work_lock):
+    return profile.get("parallel_ota_max", 1) == 2 and work_lock is not None
+
+
+def validate_dual_ota_supervisor_policy(profile, max_attempts):
+    """No blind retries, permit-join or parent repairs while a peer OTA owns a slot."""
+    if profile.get("parallel_ota_max", 1) != 2:
+        return
+    if max_attempts != 1:
+        raise ValueError("Two-slot OTA requires --max-attempts 1; manual reconciliation after peer finishes")
+    if profile.get("source_rejoin_strategy") != "none":
+        raise ValueError("Two-slot OTA requires source_rejoin_strategy=none (no live rejoin)")
+    if profile.get("allow_join_all_fallback", False) is not False:
+        raise ValueError("Two-slot OTA cannot open permit-join-all")
+
+
 @exclusive_supervisor
 def resume_same_role(
     profile_path: Path,
@@ -602,6 +618,7 @@ def resume_same_role(
         raise ValueError("load-unplugged confirmation required for same-role resume")
     if max_attempts < 1:
         raise ValueError("max_attempts must be at least 1")
+    validate_dual_ota_supervisor_policy(profile, max_attempts)
 
     work = Path(profile["workdir"])
     work.mkdir(parents=True, exist_ok=True)
@@ -648,6 +665,17 @@ def resume_same_role(
     while launched < max_attempts:
         lock = read_json(work / "ACTIVE_LOCK.json")
         phase = lock.get("phase") if lock else None
+
+        # A second invocation must not silently enter the standard supervisor's
+        # auto-reconcile path, which hard-codes join_strategy="auto". In a
+        # two-slot trial, any previous work lock needs peer-free manual review
+        # and a NEW private workdir/profile before another OTA.
+        if dual_ota_reentry_blocked(profile, lock):
+            return persist(
+                "parallel_prior_campaign_requires_manual_reconciliation",
+                phase=phase,
+                reason="Two-slot OTA refuses all existing work locks and automatic rejoin/retry",
+            )
 
         if phase in ("postflash_candidate", "postflash_accepted"):
             return persist("installed", phase=phase)
