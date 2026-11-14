@@ -550,12 +550,15 @@ def main():
             power = None
             load_proof = 'physically_unloaded_confirmed' if args.mode == 'flash' else 'requires_physical_confirmation_at_flash'
         else:
-            from bseed_nonpm_relay_policy import exact_same_role_nonpm_router_admission
             power = validate_metering_preflight(meter_input, non_pm=args.non_pm, model=args.model,
                 manufacturer=args.manufacturer, role=args.role, max_reported_watts=args.max_reported_watts,
                 nonpm_router_transition=(args.role == 'Router' and
                     (cross_role or (campaign is not None and
-                     exact_same_role_nonpm_router_admission(campaign)))),
+                     campaign.get('non_pm') is True and
+                     campaign.get('preflash_role') == 'Router' and
+                     campaign.get('postflash_role') == 'Router' and
+                     campaign.get('manufacturer') == 'o1jzcxou' and
+                     campaign.get('model') == 'TS011F-BS'))),
                 ts0726=getattr(args, 'ts0726', False))
             load_proof = 'fresh_pm' if campaign and campaign.get('require_pm') is True else 'board_specific_nonpm'
         if not (not (relay.get('update') or {}).get('state') == 'updating'):
@@ -634,6 +637,9 @@ def main():
             device=args.device,
             ieee=args.ieee,
             image_sha256=args.sha256,
+            parallel_allowed_ieees=(
+                source_profile.get('concurrent_ota_ieees')
+                if source_profile.get('parallel_ota_max', 1) == 2 else None),
         )
         network_lock_owned = True
 
