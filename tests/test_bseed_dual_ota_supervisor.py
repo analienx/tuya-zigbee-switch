@@ -34,3 +34,16 @@ def test_existing_dual_campaign_never_enters_rejoin_or_retry_path():
                   "ota_transfer_ok_postflash_unverified","postflash_candidate"):
         assert dual_ota_reentry_blocked(first,{"phase":phase}) is True
     assert dual_ota_reentry_blocked({"parallel_ota_max":1},{"phase":"update_error"}) is False
+
+
+def test_custom_nonpm_router_meter_exception_is_board_scoped():
+    from bseed_targeted_z2m_ota import validate_metering_preflight
+    kwargs=dict(non_pm=True,model="TS011F-BS",manufacturer="o1jzcxou",
+                role="Router",max_reported_watts=1.0,nonpm_router_transition=True)
+    assert validate_metering_preflight({"state_relay":"OFF"},**kwargs) is None
+    with pytest.raises(AssertionError,match="Non-PM exception"):
+        validate_metering_preflight({"state_relay":"OFF"},**{**kwargs,"manufacturer":"_TZ3000_b28wrpvx"})
+    with pytest.raises(AssertionError,match="Non-PM preflight unexpectedly"):
+        validate_metering_preflight({"power":0, "state_relay":"OFF"},**kwargs)
+    with pytest.raises(AssertionError,match="Non-PM exception"):
+        validate_metering_preflight({"state_relay":"OFF"},**{**kwargs,"nonpm_router_transition":False})
