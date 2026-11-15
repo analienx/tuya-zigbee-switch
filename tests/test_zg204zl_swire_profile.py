@@ -28,7 +28,12 @@ def test_zg204zl_wiring_exposes_exact_pvvx_connector_and_stop_warning():
     text = swire.wiring("zg-204zl", "cp2102-single-sws")
     assert "pin 3 = TLSR8253 PA7/SWS" in text
     assert "pin 2 = GND" in text
-    assert "pin 1 = +Vbat INPUT" in text
+    assert "pin 1 = battery INPUT" in text
+    assert "EXTERNAL SUPPLY -------------- +Vbat" in text
+    assert "GPIO supply" in text
+    assert "1.2 kOhm alone is NOT a level shifter" in text
+    assert "Before you connect:" in text
+    assert "The 3.3 V rail reads 3.2-3.4 V" not in text
     assert "TXD --[1.2 kOhm]--+-- one lead -- SWS" in text
     assert "inspection-only" in text
     assert "Do not use prepare, flash, stage" in text
