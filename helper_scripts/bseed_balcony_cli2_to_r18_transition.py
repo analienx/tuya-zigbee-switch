@@ -64,8 +64,8 @@ def exact_transition(profile, *, check_age=True):
         "require_pm": False,
         "expect_relay": "OFF",
         "relay_get_key": "state_relay",
-        "parallel_ota_max": 1,
-        "concurrent_ota_ieees": [],
+        "parallel_ota_max": 2 if profile.get("parallel_role_change_pair") == "bedroom-balcony-doorR-crossrole-20261115" else 1,
+        "concurrent_ota_ieees": ["0xa4c1386e4892f726"] if profile.get("parallel_role_change_pair") == "bedroom-balcony-doorR-crossrole-20261115" else [],
         "source_rejoin_strategy": "scoped",
         "join_via": "BedroomSocketCabinetL",
         "join_seconds": 120,
@@ -125,7 +125,7 @@ def exact_transition(profile, *, check_age=True):
     meta = _load_pinned(meta_path,risk["source_interview_sha256"])
     ota = _load_pinned(ota_path,risk["source_ota_check_sha256"])
     if not (meta.get("device")=="BedroomSocketBalcony" and meta.get("ieee")==IEEE and
-        meta.get("result")=="metadata_refreshed" and meta.get("interview_ok") is True and
+        meta.get("result") in ("metadata_refreshed", "metadata_already_correct") and meta.get("interview_ok") is True and
         meta.get("fresh_inventory_observed") is True and
         (meta.get("live_zdo_after") or {}).get("role")=="EndDevice" and
         meta.get("inventory_role_after")=="EndDevice" and

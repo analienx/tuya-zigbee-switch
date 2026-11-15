@@ -48,6 +48,44 @@ def authority_path(network_lock_dir, network_id):
 _SLOT_RE = re.compile(r'^(bseed-zigbee-[0-9a-f]{32})[.]slot-(0x[0-9a-f]{16})[.]json$')
 _IEEE_RE = re.compile(r'^0x[0-9a-f]{16}$')
 
+# One explicitly approved concurrent role-transition experiment, never a
+# fleet-wide policy relaxation. Every field is pinned to immutable OTA bytes.
+EXACT_ROLE_CHANGE_PAIR_ID = 'bedroom-balcony-doorR-crossrole-20261115'
+EXACT_ROLE_CHANGE_PAIR = {
+    '0xa4c138ac993cc245': {
+        'device': 'BedroomSocketBalcony',
+        'sha256': '347a27e8fc53053f56d83c77227df87dc7397e1a77d23a4c9ecb6d078668dafe',
+        'preflash_role': 'EndDevice', 'postflash_role': 'Router',
+        'preflash_build': '1.1.2-bseedcli2', 'postflash_build': '1.1.3-bseedr18',
+        'source_rejoin_strategy': 'scoped',
+    },
+    '0xa4c1386e4892f726': {
+        'device': 'BedroomSocketDoorR',
+        'sha256': 'e5c32d4476a2ca70a3c4f440545a5ca8c10d44222a5c70d311bb6629757698e8',
+        'preflash_role': 'Router', 'postflash_role': 'EndDevice',
+        'preflash_build': None, 'postflash_build': '1.2.5-bseedcli25',
+        'source_rejoin_strategy': 'scoped',
+    },
+}
+
+
+def exact_pair_entry(profile):
+    if profile.get('parallel_role_change_pair') != EXACT_ROLE_CHANGE_PAIR_ID:
+        return None
+    ieee = str(profile.get('ieee', '')).lower()
+    data = EXACT_ROLE_CHANGE_PAIR.get(ieee)
+    if data is None or any(profile.get(key) != expected for key, expected in data.items()):
+        raise ValueError('Exact two-device cross-role authorization differs from pinned image or source')
+    peer = [other for other in EXACT_ROLE_CHANGE_PAIR if other != ieee][0]
+    if (profile.get('concurrent_ota_ieees') != [peer] or
+            profile.get('force_test_transition') is not False or
+            profile.get('allow_join_all_fallback') is not False or
+            profile.get('join_via') != 'BedroomSocketCabinetL' or
+            profile.get('join_seconds') != 120):
+        raise ValueError('Role-change pair requires exact peer and scoped rejoin policy')
+    return data
+
+
 
 def dual_slot_path(base, ieee):
     """Private per-IEEE lease in the same authoritative coordinator directory."""
@@ -134,12 +172,14 @@ def require_profile_authority(profile):
     if not _IEEE_RE.fullmatch(ieee):
         raise ValueError('Two-slot campaign must pin the device IEEE')
     _validate_dual_peers(ieee, profile.get('concurrent_ota_ieees'))
-    if profile.get('preflash_role') != profile.get('postflash_role'):
-        raise ValueError('Two-slot pilot permits only same-role updates')
-    if profile.get('force_test_transition') is True:
-        raise ValueError('Two-slot pilot refuses FORCE/role transitions')
-    if profile.get('source_rejoin_strategy') != 'none':
-        raise ValueError('Two-slot pilot refuses any source-rejoin automation')
+    pair_entry = exact_pair_entry(profile)
+    if pair_entry is None:
+        if profile.get('preflash_role') != profile.get('postflash_role'):
+            raise ValueError('Two-slot pilot permits only same-role updates')
+        if profile.get('force_test_transition') is True:
+            raise ValueError('Two-slot pilot refuses FORCE/role transitions')
+        if profile.get('source_rejoin_strategy') != 'none':
+            raise ValueError('Two-slot pilot refuses any source-rejoin automation')
     if profile.get('allow_join_all_fallback', False) is not False:
         raise ValueError('Two-slot pilot refuses permit-join-all')
     if profile.get('block_bytes') != 32:
@@ -235,7 +275,7 @@ def ownership_diagnosis(record):
 
 
 def acquire(path, *, network_id, token, device, ieee, image_sha256,
-            parallel_allowed_ieees=None):
+            parallel_allowed_ieees=None, role_change_pair=None):
     """Acquire a single or opt-in two-slot lease atomically per coordinator.
 
     In two-slot mode both participants must explicitly allowlist each other.
@@ -254,6 +294,13 @@ def acquire(path, *, network_id, token, device, ieee, image_sha256,
     if not dual and parallel_allowed_ieees:
         raise ValueError('Legacy single-slot lease cannot allow concurrent peers')
     peers = _validate_dual_peers(target, parallel_allowed_ieees) if dual else []
+    if role_change_pair is not None:
+        if not dual or role_change_pair != EXACT_ROLE_CHANGE_PAIR_ID:
+            raise ValueError('Role-change pair requires matching two-slot admission')
+        pair = EXACT_ROLE_CHANGE_PAIR.get(target)
+        if (pair is None or image_sha256 != pair['sha256'] or device != pair['device']
+                or peers != [next(x for x in EXACT_ROLE_CHANGE_PAIR if x != target)]):
+            raise ValueError('Exact role-change pair target/image/peer mismatch')
     record = {
         'schema': SCHEMA,
         'network_id': network_id,
@@ -268,6 +315,11 @@ def acquire(path, *, network_id, token, device, ieee, image_sha256,
     }
     if dual:
         record.update(parallel_ota_max=2, allowed_peer_ieees=peers)
+        if role_change_pair is not None:
+            pair = EXACT_ROLE_CHANGE_PAIR[target]
+            record.update(exact_role_change_pair=role_change_pair,
+                          source_role=pair['preflash_role'],
+                          target_role=pair['postflash_role'])
     with _coordinator_mutex(base):
         slots = _active_slots(base)
         if dual:
@@ -285,6 +337,12 @@ def acquire(path, *, network_id, token, device, ieee, image_sha256,
                     raise RuntimeError('Two-slot campaigns require reciprocal exact-IEEE peer allowlists')
                 if peer.get('phase') != 'ota_running':
                     raise RuntimeError('Second OTA slot requires its reciprocal peer to be actively updating')
+                if role_change_pair is not None or peer.get('exact_role_change_pair') is not None:
+                    if (role_change_pair != EXACT_ROLE_CHANGE_PAIR_ID or
+                            peer.get('exact_role_change_pair') != role_change_pair or
+                            peer.get('image_sha256') != EXACT_ROLE_CHANGE_PAIR[peers[0]]['sha256'] or
+                            peer.get('device') != EXACT_ROLE_CHANGE_PAIR[peers[0]]['device']):
+                        raise RuntimeError('Role-changing OTA pairing must match both exact image hashes')
         else:
             if slots:
                 raise RuntimeError('Two-slot OTA ownership exists; legacy single-slot admission refused')

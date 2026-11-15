@@ -41,10 +41,15 @@ def validate_pm_mode(data):
     proof = data.get('pm_preflash_load_proof', 'meter')
     if proof not in ('meter', 'physically_unloaded'):
         raise ValueError('PM preflash load proof must be meter or physically_unloaded')
-    if proof == 'physically_unloaded' and not (custom and board == 'b28wrpvx' and
+    if proof == 'physically_unloaded':
+        custom_pm = (custom and board == 'b28wrpvx' and
             model == 'TS011F-BS-PM' and data.get('require_pm') is True and
-            data.get('non_pm') is not True):
-        raise ValueError('Physical PM preflash load proof only for exact custom PM socket')
+            data.get('non_pm') is not True)
+        stock_exact = (not custom and board == 'b28wrpvx' and
+            model == 'TS011F' and data.get('direct_stock_client_one_device') is True and
+            data.get('require_pm') is True and data.get('non_pm') is not True)
+        if not (custom_pm or stock_exact):
+            raise ValueError('Physical PM preflight only for exact custom PM or DoorR stock->Client')
     if custom and board == 'b28wrpvx':
         if model != 'TS011F-BS-PM' or data.get('require_pm') is not True or data.get('non_pm') is True:
             raise ValueError('Custom PM campaign b28wrpvx/TS011F-BS-PM requires matching board/model,'

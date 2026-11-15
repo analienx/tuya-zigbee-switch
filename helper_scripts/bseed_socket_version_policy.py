@@ -95,6 +95,16 @@ def require_increasing(profile, registry=None):
         raise IdentityError('ambiguous wrapper/native identity needs explicit sealed payload role metadata')
     gate_image(payload, registry, profile['postflash_build'], target_type, native['file_version'])
 
+    if stock_prefix is not None and profile.get('direct_stock_client_one_device') is True:
+        from bseed_door_right_stock_to_cli25 import verify_exact
+        try:
+            proof = verify_exact(profile)
+        except (OSError, ValueError) as error:
+            raise IdentityError('Exact stock-to-Client exception refused: ' + str(error)) from error
+        return {'board': board, 'source': 'stock',
+                'source_role': source_role, 'target_role': target_role,
+                'target_version': native['file_version'],
+                'exact_client_conversion': proof}
     if stock_prefix is not None:
         # Stock versions use a different numbering scheme. Stock conversion
         # is only the separately validated stock wrapper into a custom Router.

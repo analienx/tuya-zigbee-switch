@@ -317,9 +317,17 @@ def main():
         if args.non_pm and getattr(args, 'ts0726', False):
             raise ValueError('Runner metering exceptions are mutually exclusive')
         require_increasing(campaign)
-    if getattr(args, 'pm_preflash_physical_unloaded', False) and not (args.manufacturer == 'b28wrpvx' and
-            args.model == 'TS011F-BS-PM' and not args.non_pm and not args.ts0726):
-        raise ValueError('Physical PM preflight requires exact custom BSEED PM board')
+    if getattr(args, 'pm_preflash_physical_unloaded', False):
+        custom_pm = (args.manufacturer == 'b28wrpvx' and args.model == 'TS011F-BS-PM' and
+                     not args.non_pm and not args.ts0726)
+        stock_pm = (campaign is not None and campaign.get('direct_stock_client_one_device') is True
+                    and args.manufacturer == '_TZ3000_b28wrpvx' and args.model == 'TS011F'
+                    and not args.non_pm and not args.ts0726)
+        if stock_pm:
+            from bseed_door_right_stock_to_cli25 import verify_exact
+            verify_exact(campaign)
+        if not (custom_pm or stock_pm):
+            raise ValueError('Physical PM preflight requires an exact custom board or pinned DoorR stock migration')
     if args.mode == 'flash' and getattr(args, 'pm_preflash_physical_unloaded', False) and not args.confirm_load_unplugged:
         raise ValueError('PM physical-proof OTA requires explicit load-unplugged confirmation')
     cross_role = campaign is not None and campaign['preflash_role'] != campaign['postflash_role']
@@ -651,6 +659,7 @@ def main():
             parallel_allowed_ieees=(
                 source_profile.get('concurrent_ota_ieees')
                 if source_profile.get('parallel_ota_max', 1) == 2 else None),
+            role_change_pair=source_profile.get('parallel_role_change_pair'),
         )
         network_lock_owned = True
 

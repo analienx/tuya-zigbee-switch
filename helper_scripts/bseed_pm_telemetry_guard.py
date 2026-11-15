@@ -54,6 +54,22 @@ def set_option(bridge, profile, enabled):
 def begin(profile, campaign_token):
     if profile.get('require_pm') is not True:
         return
+    if profile.get('direct_stock_client_one_device') is True:
+        from bseed_door_right_stock_to_cli25 import verify_exact
+        verify_exact(profile)
+        # The *stock* converter has no custom BSEED quarantine option.
+        # Record the missing capability; never assert that quarantine
+        # was enabled, and never issue an unsupported options command.
+        path = guard_path(profile).with_name('PM_STOCK_NO_QUARANTINE.json')
+        if path.exists():
+            raise ValueError('Existing exact stock OTA telemetry record')
+        record = dict(device=profile['device'], ieee=profile['ieee'],
+                      token=campaign_token, sha256=profile['sha256'],
+                      phase='stock_converter_no_quarantine_option',
+                      quarantine_enabled=False, hardware_acceptance=False,
+                      requires_after_update_pm_provision=True)
+        path.write_text(json.dumps(record, indent=2)+'\n',encoding='utf8')
+        return
     path = guard_path(profile)
     if path.exists():
         raise ValueError('existing telemetry guard requires identity recovery before another OTA')
@@ -281,6 +297,28 @@ def release_reconciled(profile, evidence_path):
 
 
 def release(profile, evidence_path):
+    if profile.get('direct_stock_client_one_device') is True:
+        from bseed_door_right_stock_to_cli25 import verify_exact
+        verify_exact(profile)
+        record_path = guard_path(profile).with_name('PM_STOCK_NO_QUARANTINE.json')
+        record = json.loads(record_path.read_text(encoding='utf8'))
+        lock = json.loads((Path(profile['workdir'])/'ACTIVE_LOCK.json').read_text(encoding='utf8'))
+        evidence = json.loads(Path(evidence_path).read_text(encoding='utf8'))
+        if (record.get('quarantine_enabled') is not False or
+            record.get('ieee') != profile['ieee'] or
+            record.get('token') != lock.get('token') or
+            lock.get('phase') != 'ota_transfer_ok_postflash_unverified' or
+            evidence.get('result') not in ('metadata_refreshed','metadata_already_correct') or
+            evidence.get('ieee') != profile['ieee'] or
+            evidence.get('interview_ok') is not True or
+            (evidence.get('live_zdo_after') or {}).get('role') != profile['postflash_role']):
+            raise ValueError('Cannot finalize stock-to-Client evidence: postflash source/role unverified')
+        # There was never a custom PM quarantine option to release. This
+        # exact no-op still requires independent PM provision+postflash.
+        record['phase']='no_quarantine_option_to_release'
+        record['metadata_evidence']=str(evidence_path)
+        record_path.write_text(json.dumps(record,indent=2)+'\n',encoding='utf8')
+        return
     if profile.get('require_pm') is not True:
         return
     path = guard_path(profile)
