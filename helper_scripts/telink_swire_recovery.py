@@ -215,30 +215,33 @@ DEVICES = {
         ],
     },
     'zg-204zl': {
-        'name': 'HOBEIAN ZG-204ZL PIR + lux (TLSR8253; inspection only)',
-        # The pvvx ZG-204ZL PCB is TLSR8253, NOT TLSR8258.  This tool's
-        # dual-slot write layout/KNLT image validator are TLSR8258-specific.
-        # Keep hardware discovery available without admitting any image or write.
-        'silicon': 'TLSR8253',
+        'name': 'HOBEIAN ZG-204ZL PIR + lux (photo-observed TLSR8258; inspection only)',
+        # pvvx PCB webpage lists TLSR8253, but an actual Hall ZG-204ZL-3.0
+        # PCB has TLSR8258F512ET32. The ZigbeeTLc makefile compiles for
+        # MCU_CORE_8258=1. BSEED's TLSR8258 dual-slot FLASH/NVM geometry is
+        # still not proven for this different PIR board: inspection only.
+        'silicon': 'TLSR8258',
         'inspectionOnly': True,
         'stockFirmwareIdentityDocumented': {'manufacturerCode': 0x1286, 'imageType': 0x0203},
         'customFirmwareIdentityDocumented': {'manufacturerCode': 0x1141, 'imageType': 0x0232},
         'hardwareReference': 'https://pvvx.github.io/ZG-204ZL-3.0/',
         'firmwareReference': 'https://github.com/pvvx/ZigbeeTLc',
         'pads': [
-            ('SWS', '5-pin connector pin 3 = TLSR8253 PA7/SWS; verify pin 1 orientation and continuity'),
+            ('SWS', '5-pin connector pin 3 = TLSR8258 PA7/SWS; verify pin 1 orientation and continuity'),
             ('GND', '5-pin connector pin 2 = GND; verify continuity to battery negative'),
             ('+Vbat', '5-pin connector pin 1 = battery INPUT (not the regulated 2.1 V rail); voltage must match battery limits'),
         ],
         'notes': [
             'Five-pin connector in pvvx board reference: 1 +Vbat, 2 GND, 3 PA7/SWS, 4 PB1/TX, 5 PB7/RX.',
+            'Hall chip-side photo with five pads TOP, switch upper-right: LEFT to RIGHT 5 RX, 4 TX, 3 SWS, 2 GND, 1 +Vbat.',
+            'Photo verifies TLSR8258F512ET32 chip; pvvx hardware page says TLSR8253 but upstream firmware makefile builds 8258.',
             'The original board includes a 2.1 V regulator. Never inject 3.3 V into the regulated 2.1 V node.',
             'A CP2102 TXD at 3.3 V can overdrive SWS if its GPIO supply is 2.1 V; 1.2 kOhm alone is NOT a level shifter.',
             'Do not connect TXD/SWS until target I/O voltage and a compatible level shifter are independently verified.',
             'Remove the coin cell before connecting external supply; verify module voltage and current limit.',
             'pvvx builds include both a stock-to-custom conversion Zigbee OTA and a post-conversion Zigbee OTA.',
             'Factory OTA eligibility needs the live manufacturer/image-type/version tuple; never force a mismatch.',
-            'This profile permits wiring discovery but REFUSES prepare/write: the TLSR8253 flash layout, image',
+            'This profile permits wiring discovery but REFUSES prepare/write: the specific ZG-204ZL flash layout, image',
             'format, NVM/IEEE/factory regions and readback must be independently qualified first.',
             'Bidirectional SWire read needs verified RX/target responses; adapter echo is not target readback.',
             'Do not deploy to a motion sensor that is still in a safety/lighting automation until validated.',
@@ -437,7 +440,7 @@ def check_device(device_id, info, source):
         raise RecoveryError(f'unknown device {device_id!r}; use one of {", ".join(DEVICES)}')
     if device.get('inspectionOnly'):
         raise RecoveryError(
-            f'{device_id} uses TLSR8253: the existing TLSR8258 dual-slot flash writer is not qualified; '
+            f'{device_id} uses TLSR8258 but this PIR flash/NVM layout is not qualified for the BSEED dual-slot writer; '
             'only wiring/discovery and separate readback are supported',
             code='UNQUALIFIED_FLASH_LAYOUT', retry_safe=False)
     if device_id == 'generic-tlsr8258' and info['manufacturerCode'] in (0x1141, 0x124F):
