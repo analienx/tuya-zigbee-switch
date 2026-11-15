@@ -2145,7 +2145,7 @@ class _Lines:
         self.lines, self.pending, self.dropped = [], '', 0
 
     def _keep(self, line):
-        line = line.rstrip('')
+        line = line.rstrip('\r')
         if not line.strip():
             return
         if len(self.lines) < self.MAX_LINES:
@@ -2156,10 +2156,8 @@ class _Lines:
     def write(self, value):
         value = str(value)
         self.pending += value
-        while '
-' in self.pending:
-            line, self.pending = self.pending.split('
-', 1)
+        while '\n' in self.pending:
+            line, self.pending = self.pending.split('\n', 1)
             self._keep(line)
         if len(self.pending) > self.MAX_PENDING:
             self._keep(self.pending[:self.MAX_PENDING])
