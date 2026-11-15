@@ -1636,6 +1636,13 @@ def test_link(port, output, *, phase, device=None, baud=921600, require_flash_re
         raise RecoveryError('invalid link test phase or baud', code='INVALID_ARGUMENT')
     if phase == 'target' and device not in DEVICES:
         raise RecoveryError('target testing needs an explicit supported --device profile', code='INVALID_ARGUMENT')
+    if phase == 'target' and DEVICES[device].get('inspectionOnly'):
+        raise RecoveryError(
+            'ZG-204ZL target SWire testing blocked: the CP2102 3.3 V logic is '
+            'not qualified against this TLSR8253 board I/O supply. Use wiring '
+            'and adapter-only tests, without an SWS connection, until a level-matched '
+            'diagnostic interface is independently validated.',
+            code='SWIRE_VOLTAGE_UNQUALIFIED', retry_safe=False)
     if require_flash_read and phase != 'target':
         raise RecoveryError('--require-flash-read is only valid for the target phase', code='INVALID_ARGUMENT')
     if duration is not None and (phase != 'adapter' or not math.isfinite(duration) or not 0.1 <= duration <= 30):
@@ -1776,6 +1783,10 @@ def watch_link(port, output, *, device, seconds=180, baud=921600, debug=False, o
     """
     if device not in DEVICES or not isinstance(seconds, int) or not 1 <= seconds <= 600 or baud not in (460800, 921600):
         raise RecoveryError('watch needs a supported device, baud and 1..600 seconds', code='INVALID_ARGUMENT')
+    if DEVICES[device].get('inspectionOnly'):
+        raise RecoveryError(
+            'ZG-204ZL target watch blocked pending independent SWS GPIO-level qualification',
+            code='SWIRE_VOLTAGE_UNQUALIFIED', retry_safe=False)
     if not re.fullmatch(r'(?:COM\d+|/dev/[A-Za-z0-9_./-]+)', port or '', re.IGNORECASE):
         raise RecoveryError('invalid serial port', code='INVALID_ARGUMENT')
     output = private_output(output)
