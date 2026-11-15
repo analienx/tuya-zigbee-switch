@@ -21,6 +21,8 @@ C9_SHA256 = 'e52701b83ea7528ed0e9b26cb9e4da0679d125c259c8141e62207c6460738fff'
 # freshly unloaded confirmation; do not re-prompt for this exact grant.
 C16_BUILD = '1.1.3-bseedc16'
 C16_SHA256 = 'd4057825661eb4a6c943ca4f8a5b02d7c709acdb960e4102fd5a185e4f87e321'
+C17_BUILD = '1.1.3-bseedc17'
+C17_SHA256 = '3ae273707a657b79a8bd2b7f6f77794d57547ba3a52247627b4a7c335f932b08'
 R10_BUILD = '1.1.3-bseedr10'
 R10_SHA256 = 'c2bb21dee350fd375586029eefb03f85791b0941bd386882a0b8653bb15bdb96'
 
@@ -84,12 +86,35 @@ def _verify_recovery(profile, *, confirm_unloaded=False,
              profile.get('sha256')) in (
                 ('1.1.2-bseedcli4', C7_BUILD, C7_SHA256),
                 (C7_BUILD, C9_BUILD, C9_SHA256),
-                (C9_BUILD, C16_BUILD, C16_SHA256)))
+                (C9_BUILD, C16_BUILD, C16_SHA256),
+                (C16_BUILD, C17_BUILD, C17_SHA256)))
         consolidated_transition = (transition and profile.get('force_test_transition') is True and (
             (roles == ('EndDevice', 'Router') and profile.get('preflash_build') == C7_BUILD and
              profile.get('postflash_build') == R10_BUILD and profile.get('native_sha256') == R10_SHA256) or
             (roles == ('Router', 'EndDevice') and profile.get('preflash_build') == R10_BUILD and
              profile.get('postflash_build') == C7_BUILD and profile.get('native_sha256') == C7_SHA256)))
+        c17_dual_operator_canary = (
+            not transition and roles == ('EndDevice', 'EndDevice') and
+            (profile.get('preflash_build'), profile.get('postflash_build'),
+             profile.get('sha256')) == (C16_BUILD, C17_BUILD, C17_SHA256))
+        if c17_dual_operator_canary:
+            # The prior c9->c16 no-SWire exception is NOT transferable.
+            # Authorization for this exact image is separately limited to the
+            # user's Nov 15 opt-in two-device pilot, with unloaded-device
+            # confirmation still mandatory. Never imply verified recovery.
+            if not (
+                    profile.get('parallel_ota_max') == 2 and
+                    profile.get('concurrent_ota_ieees') == ['0xa4c138ac993cc245'] and
+                    profile.get('source_rejoin_strategy') == 'none' and
+                    profile.get('force_test_transition') is False and
+                    profile.get('image_type') == 65026 and
+                    str(profile.get('file_version')).lower() == '0x1102301e' and
+                    profile.get('block_bytes') == 32 and
+                    type(profile.get('response_delay_ms')) is int and
+                    profile.get('response_delay_ms') >= 1800 and
+                    profile.get('preflash_relay_physical_mode') == 'follow_state' and
+                    profile.get('expect_relay') == 'OFF'):
+                raise ValueError('c16-to-c17 irreversible-risk exception is pinned to the exact dual-bedroom pilot')
         if not (legacy or consolidated_same or consolidated_transition):
             raise ValueError('Non-invasive path applies only to the exact signed-off Bedroom non-PM candidates')
         if profile.get('require_pm') is not False or profile.get('relay_get_key') != 'state_relay':
@@ -100,8 +125,17 @@ def _verify_recovery(profile, *, confirm_unloaded=False,
             raise ValueError('Legacy non-invasive canary requires pinned relay OFF')
         if not legacy and profile.get('expect_relay') not in ('ON', 'OFF'):
             raise ValueError('Consolidated non-PM canary requires an explicit relay baseline')
-        return {'ieee': profile['ieee'], 'method': ('non-invasive single OTA canary' if legacy else 'non-invasive exact Bedroom canary'),
-                'recovery_available': False}
+        return {'ieee': profile['ieee'],
+                'method': ('non-invasive exact c16-to-c17 dual OTA canary'
+                           if c17_dual_operator_canary else
+                           'non-invasive single OTA canary' if legacy
+                           else 'non-invasive exact Bedroom canary'),
+                'recovery_available': False,
+                'readback_verified': False,
+                'operator_risk_accepted': bool(c17_dual_operator_canary),
+                'hardware_acceptance': False,
+                'warning': ('No verified SWire image or tested chip recovery; a failed OTA can make the socket unrecoverable without wired programming'
+                            if c17_dual_operator_canary else 'No verified SWire backup')}
     from bseed_nonpm_relay_policy import is_exact_balcony_router_candidate
     if (not profile.get('recovery_evidence')
             and is_exact_balcony_router_candidate(profile)):

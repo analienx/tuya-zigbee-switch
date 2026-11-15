@@ -21,8 +21,49 @@ BALCONY_IDENTITY = {
 }
 
 
+# v8 remains a Router, but its bootloader sends query-image type 65026
+# (legacy Client family). A read-only, three-candidate OTA probe confirmed
+# this on IEEE 0xa4c138ac993cc245 on 2026-11-15. The following transport
+# changes ONLY the OTA outer image-type field, while preserving the sealed
+# r18 Router native payload and native version. The different outer SHA is
+# authorized for this exact dual OTA test only; no SWire recovery is proven.
+BALCONY_COMPAT_65026 = dict(
+    **{k: v for k,v in BALCONY_IDENTITY.items() if k != 'sha256'},
+    sha256='347a27e8fc53053f56d83c77227df87dc7397e1a77d23a4c9ecb6d078668dafe',
+    image_type=65026,
+    preflash_query_image_type=65026,
+    native_sha256='4fcc69b1113cbe405ea0aef9ed9ae81b8f13d61147b227671f00b8764cf063e9',
+    file_version='0x1102301d',
+    parallel_ota_max=2,
+    concurrent_ota_ieees=['0xa4c13824a7005afb'],
+    source_rejoin_strategy='none',
+    block_bytes=32,
+    response_delay_ms=1800,
+    force_test_transition=False,
+)
+
+
 def is_exact_balcony_router_candidate(profile):
-    return all(profile.get(key) == value for key, value in BALCONY_IDENTITY.items())
+    standard = all(profile.get(key) == value for key, value in BALCONY_IDENTITY.items())
+    compat = all(profile.get(key) == value for key, value in BALCONY_COMPAT_65026.items())
+    if compat:
+        # Validate both source-query compatibility and preserved native bytes;
+        # an arbitrary wrapper hash must not grant recovery-policy authority.
+        from pathlib import Path
+        import hashlib, struct
+        try:
+            native = Path(profile.get('native_image') or '').read_bytes()
+            transport = Path(profile.get('image') or '').read_bytes()
+            if (hashlib.sha256(native).hexdigest() != BALCONY_COMPAT_65026['native_sha256']
+                    or hashlib.sha256(transport).hexdigest() != BALCONY_COMPAT_65026['sha256']
+                    or transport[56:] != native[56:]):
+                return standard
+            if (struct.unpack_from('<HHI',native,10) != (4417,43555,285356061)
+                    or struct.unpack_from('<HHI',transport,10) != (4417,65026,285356061)):
+                return standard
+        except (OSError, TypeError, ValueError, struct.error):
+            return standard
+    return standard or compat
 
 
 ENTRANCE_IDENTITY = {
