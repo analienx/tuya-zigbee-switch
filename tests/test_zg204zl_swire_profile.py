@@ -1,4 +1,4 @@
-"""Fail-closed ZG-204ZL/TLSR8253 inspection-profile contract.
+"""Fail-closed ZG-204ZL/TLSR8258 inspection-profile contract.
 
 No serial port, target, OTA network, or flash is accessed by these tests.
 """
@@ -13,7 +13,7 @@ import telink_swire_recovery as swire  # noqa: E402
 
 def test_zg204zl_is_a_distinct_tlsr8253_profile():
     profile = swire.DEVICES["zg-204zl"]
-    assert profile["silicon"] == "TLSR8253"
+    assert profile["silicon"] == "TLSR8258"
     assert profile["inspectionOnly"] is True
     assert profile["stockFirmwareIdentityDocumented"] == {
         "manufacturerCode": 0x1286, "imageType": 0x0203
@@ -26,7 +26,7 @@ def test_zg204zl_is_a_distinct_tlsr8253_profile():
 
 def test_zg204zl_wiring_exposes_exact_pvvx_connector_and_stop_warning():
     text = swire.wiring("zg-204zl", "cp2102-single-sws")
-    assert "pin 3 = TLSR8253 PA7/SWS" in text
+    assert "pin 3 = TLSR8258 PA7/SWS" in text
     assert "pin 2 = GND" in text
     assert "pin 1 = battery INPUT" in text
     assert "EXTERNAL SUPPLY -------------- +Vbat" in text
