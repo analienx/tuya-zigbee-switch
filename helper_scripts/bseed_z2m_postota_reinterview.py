@@ -32,9 +32,14 @@ def evaluate(before, after, response, expected_build):
     return 'build_refreshed_postflash_unverified'
 
 
-def validate_campaign(lock, ieee, name, image_sha256):
-    if (lock.get('ieee'), lock.get('device'), lock.get('sha256'), lock.get('phase')) != (
-            ieee, name, image_sha256, 'ota_transfer_ok_postflash_unverified'):
+def validate_campaign(lock, ieee, name, image_sha256, *, allow_postflash_candidate=False):
+    # Re-interview can run only on an unverified transfer. A separate READ-ONLY
+    # postflash verification may be repeated when its first pass already moved
+    # the same authenticated successful campaign into postflash_candidate.
+    # Never permit this exception for a fresh re-interview or a failed transfer.
+    phases = ('ota_transfer_ok_postflash_unverified', 'postflash_candidate') if allow_postflash_candidate else ('ota_transfer_ok_postflash_unverified',)
+    if ((lock.get('ieee'), lock.get('device'), lock.get('sha256')) !=
+            (ieee, name, image_sha256) or lock.get('phase') not in phases):
         raise ValueError('Exact campaign identity/hash and successful OTA transport lock required')
     response=lock.get('response')
     if not isinstance(response,dict) or response.get('status')!='ok' or (
