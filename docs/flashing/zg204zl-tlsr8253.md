@@ -13,7 +13,8 @@ Board reference: https://pvvx.github.io/ZG-204ZL-3.0/
 
 - SoC: **TLSR8258F512ET32** physically photographed on Hall `ZG-204ZL-3.0` board. pvvx's hardware webpage previously states TLSR8253, while the upstream firmware makefile compiles `MCU_CORE_8258=1`.
 - 5-pin connector: **1 = +Vbat**, **2 = GND**, **3 = PA7/SWS**, **4 = PB1/TX**, **5 = PB7/RX**
-- Chip-side view with five holes at top and button upper-right, **left-to-right:** 5 RX, 4 TX, 3 SWS, 2 GND, 1 +Vbat (reverse side mirrored).\n- The board uses an **XC6206 2.1 V LDO**. **Never** inject 3.3 V into its
+- Chip-side view with five holes at top and button upper-right, **left-to-right:** 5 RX, 4 TX, 3 SWS, 2 GND, 1 +Vbat (reverse side mirrored).
+- The board uses an **XC6206 2.1 V LDO**. **Never** inject 3.3 V into its
   **2.1 V output**. +Vbat is the battery input, not a generic 3.3 V rail:
   verify permissible battery voltage and polarity for the exact board first.
 - **Voltage-level warning:** the TLSR8258 SWS pin must stay within its
@@ -23,7 +24,7 @@ Board reference: https://pvvx.github.io/ZG-204ZL-3.0/
   measured SWS I/O supply and an appropriate compatible level-shifting
   interface are verified. See Telink TLSR8258 maximum input-pin limit
   V_IN <= VDD + 0.3 V and pvvx's warning about UART overvoltage.
-  https://www.mouser.com/datasheet/2/1039/DS_TLSR8258_E_Datasheet_for_Telink_BLE_2bIEEE802_1-2301479.pdf
+  The prior TLSR8253-specific datasheet link is NOT an authority for the photographed TLSR8258F512ET32; consult the exact Telink TLSR8258F512ET32 electrical limits.
   https://github.com/pvvx/ZigbeeTLc/issues/161
 - Remove the coin cell when using an externally powered bench setup.
 - The 3-wire contact arrangement for SWS, ground and battery input is not a
