@@ -364,7 +364,14 @@ def main():
             if not (checked.is_file()):
                 raise AssertionError('OTA availability check missing')
             after = json.loads(checked.read_text(encoding='utf8'))['timestamp']
-        verify_record(json.loads(evidence.read_text(encoding='utf8')), gate_profile, after=after)
+        recorded_gate = json.loads(evidence.read_text(encoding='utf8'))
+        if campaign is not None and campaign.get('weak_link_operator_authorization'):
+            from bseed_balcony_link_operator_override import verify_operator_override
+            override = verify_operator_override(campaign, recorded_gate, after=after)
+            print('EXACT_BALCONY_OPERATOR_WEAK_LINK_EXCEPTION',
+                  json.dumps(override, sort_keys=True), flush=True)
+        else:
+            verify_record(recorded_gate, gate_profile, after=after)
     lock = work / 'ACTIVE_LOCK.json'
     old = json.loads(lock.read_text()) if lock.exists() else {}
     pending = old.get('phase') == 'source_verified_candidate_pending'
