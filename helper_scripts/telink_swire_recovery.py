@@ -214,6 +214,34 @@ DEVICES = {
             'Switch the circuit off at the breaker and take the switch out of the wall box before opening it.',
         ],
     },
+    'zg-204zl': {
+        'name': 'HOBEIAN ZG-204ZL PIR + lux (TLSR8253; inspection only)',
+        # The pvvx ZG-204ZL PCB is TLSR8253, NOT TLSR8258.  This tool's
+        # dual-slot write layout/KNLT image validator are TLSR8258-specific.
+        # Keep hardware discovery available without admitting any image or write.
+        'silicon': 'TLSR8253',
+        'inspectionOnly': True,
+        'stockFirmwareIdentityDocumented': {'manufacturerCode': 0x1286, 'imageType': 0x0203},
+        'customFirmwareIdentityDocumented': {'manufacturerCode': 0x1141, 'imageType': 0x0232},
+        'hardwareReference': 'https://pvvx.github.io/ZG-204ZL-3.0/',
+        'firmwareReference': 'https://github.com/pvvx/ZigbeeTLc',
+        'pads': [
+            ('SWS', '5-pin connector pin 3 = TLSR8253 PA7/SWS; verify pin 1 orientation and continuity'),
+            ('GND', '5-pin connector pin 2 = GND; verify continuity to battery negative'),
+            ('3V3', '5-pin connector pin 1 = +Vbat INPUT, not the regulated 2.1 V rail; confirm safe supply voltage'),
+        ],
+        'notes': [
+            'Five-pin connector in pvvx board reference: 1 +Vbat, 2 GND, 3 PA7/SWS, 4 PB1/TX, 5 PB7/RX.',
+            'The original board includes a 2.1 V regulator. Never feed 3.3 V to the regulated 2.1 V node.',
+            'Remove the coin cell before connecting external supply; verify module voltage and current limit.',
+            'pvvx builds include both a stock-to-custom conversion Zigbee OTA and a post-conversion Zigbee OTA.',
+            'Factory OTA eligibility needs the live manufacturer/image-type/version tuple; never force a mismatch.',
+            'This profile permits wiring discovery but REFUSES prepare/write: the TLSR8253 flash layout, image',
+            'format, NVM/IEEE/factory regions and readback must be independently qualified first.',
+            'Bidirectional SWire read needs verified RX/target responses; adapter echo is not target readback.',
+            'Do not deploy to a motion sensor that is still in a safety/lighting automation until validated.',
+        ],
+    },
     'generic-tlsr8258': {
         'name': 'Other TLSR8258 512 KiB device (no profile)',
         'requiresInputSha256': True,
@@ -405,6 +433,11 @@ def check_device(device_id, info, source):
     device = DEVICES.get(device_id)
     if device is None:
         raise RecoveryError(f'unknown device {device_id!r}; use one of {", ".join(DEVICES)}')
+    if device.get('inspectionOnly'):
+        raise RecoveryError(
+            f'{device_id} uses TLSR8253: the existing TLSR8258 dual-slot flash writer is not qualified; '
+            'only wiring/discovery and separate readback are supported',
+            code='UNQUALIFIED_FLASH_LAYOUT', retry_safe=False)
     if device_id == 'generic-tlsr8258' and info['manufacturerCode'] in (0x1141, 0x124F):
         raise RecoveryError('recognized tuya-zigbee-switch, BSEED or Gledopto identity requires its guarded '
                             'device profile (tuya-zigbee-switch --board, bseed-ts011f, bseed-ts0726 or '
@@ -858,6 +891,10 @@ def load_input(device_id, ota_path, image_path, expect_sha256, fetch, *, board=N
     device = DEVICES.get(device_id)
     if device is None:
         raise RecoveryError(f'unknown device {device_id!r}; use one of {", ".join(DEVICES)}')
+    if device.get('inspectionOnly'):
+        raise RecoveryError(
+            f'{device_id} is inspection-only: do not prepare an image for the TLSR8258 flash writer',
+            code='UNQUALIFIED_FLASH_LAYOUT', retry_safe=False)
     if ota_path and image_path:
         raise RecoveryError('give --ota or --image, not both')
     if (board or index_path or role) and not device.get('index'):
@@ -1059,15 +1096,20 @@ def wiring(device_id, connection='tx-only'):
     else:
         lines += ['  RXD, RTS, DTR and +5V stay unconnected.']
     lines += ['',
-              'Before you write:',
+              'Before you connect:' if device.get('inspectionOnly') else 'Before you write:',
               '  1. Continuity: each lead to its pad, and no continuity between SWS, GND and 3V3.',
               '  2. Adapter in 3.3 V TTL mode. TXD idles at about 3.3 V against GND.',
               '  3. selftest --port COMx passes with TXD jumpered to RXD, the device not connected.',
               '  4. The 3.3 V rail reads 3.2-3.4 V with the board connected.', '',
               'Notes:']
     lines += [f'  - {note}' for note in device['notes']]
-    lines += ['', 'If the device does not start after flash: preserve evidence, check the leads and 3.3 V, '
-              'then assess the incident fallback before another write.', f'Troubleshooting: {GUIDE}']
+    if device.get('inspectionOnly'):
+        lines += ['', 'STOP: this is a TLSR8253 inspection-only profile. Do not use prepare, flash, stage,',
+                  'activate, erase or the generic-tlsr8258 profile for this board.',
+                  'A matching full read and verified flash layout are prerequisites to enabling writes.']
+    else:
+        lines += ['', 'If the device does not start after flash: preserve evidence, check the leads and 3.3 V, '
+                  'then assess the incident fallback before another write.', f'Troubleshooting: {GUIDE}']
     return '\n'.join(lines)
 
 
