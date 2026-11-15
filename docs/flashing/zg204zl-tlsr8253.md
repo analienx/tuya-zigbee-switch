@@ -14,15 +14,27 @@ Board reference: https://pvvx.github.io/ZG-204ZL-3.0/
 
 - SoC: **TLSR8253** (pvvx board reference, not assumed TLSR8258)
 - 5-pin connector: **1 = +Vbat**, **2 = GND**, **3 = PA7/SWS**, **4 = PB1/TX**, **5 = PB7/RX**
-- The board uses an **XC6206 2.1 V LDO**. **Never** inject the 3.3 V adapter
-  supply into the regulator's **2.1 V output**. +Vbat is the battery input;
-  verify permissible supply voltage and polarity for the actual PCB before power.
+- The board uses an **XC6206 2.1 V LDO**. **Never** inject 3.3 V into its
+  **2.1 V output**. +Vbat is the battery input, not a generic 3.3 V rail:
+  verify permissible battery voltage and polarity for the exact board first.
+- **Voltage-level warning:** the TLSR8253 SWS pin must stay within its
+  actual GPIO supply voltage limits. The generic CP2102 TXD output is ~3.3 V,
+  but this board may supply its GPIO at 2.1 V. A 1.2 kOhm resistor is
+  **not** a voltage-level converter. Do **not** wire TXD/SWS until the
+  measured SWS I/O supply and an appropriate compatible level-shifting
+  interface are verified. See Telink TLSR8253 maximum input-pin limit
+  V_IN <= VDD + 0.3 V and pvvx's warning about UART overvoltage.
+  https://www.mouser.com/datasheet/2/1039/DS_TLSR8253_E_Datasheet_for_Telink_BLE_2bIEEE802_1-2301479.pdf
+  https://github.com/pvvx/ZigbeeTLc/issues/161
 - Remove the coin cell when using an externally powered bench setup.
 - The 3-wire contact arrangement for SWS, ground and battery input is not a
   promise that adapter-sourced power is adequately regulated/current-limited.
 
-The available `cp2102-single-sws` connection uses TXD through a **1.2 kOhm**
-resistor to the RXD/SWS junction. Only **one SWS contact** reaches the PCB.
+The available `cp2102-single-sws` circuit uses TXD through a **1.2 kOhm**
+resistor to the RXD/SWS junction on already qualified 3.3 V target circuits.
+This is a reference for the *adapter topology*, **not a proven safe voltage
+interface for the ZG-204ZL**. Only **one SWS contact** reaches the PCB once
+the signal level has been qualified.
 An observed adapter TX↔RX echo is *not* target SWire communication. An RX
 indicator LED, loaded RX pin, poor pogo contact, or unsupported power supply
 can prevent bidirectional reads.
