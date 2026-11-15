@@ -6,10 +6,10 @@ kits include it as root `AGENTS.md`, alongside this guide as `README.md`.
 Use this when a Telink TLSR8258 device no longer starts or cannot take an OTA
 update.
 
-> **TLSR8253 ZG-204ZL is NOT covered by the writer below.** Its new
+> **TLSR8258 ZG-204ZL is NOT covered by the writer below.** Its new
 > `zg-204zl` profile provides wiring and read-only discovery, but rejects
 > preparation/writes until a separate flash-layout validation. See
-> [ZG-204ZL TLSR8253 preflight](zg204zl-tlsr8253.md). It rewrites one selected image slot with a USB-UART adapter (A by default). The writer leaves the Zigbee network record, IEEE address, factory calibration
+> [ZG-204ZL TLSR8258 preflight](zg204zl-tlsr8253.md). It rewrites one selected image slot with a USB-UART adapter (A by default). The writer leaves the Zigbee network record, IEEE address, factory calibration
 and saved energy outside its write range. Rejoining and retained-state compatibility
 still need fresh device evidence.
 
