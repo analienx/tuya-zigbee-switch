@@ -228,11 +228,13 @@ DEVICES = {
         'pads': [
             ('SWS', '5-pin connector pin 3 = TLSR8253 PA7/SWS; verify pin 1 orientation and continuity'),
             ('GND', '5-pin connector pin 2 = GND; verify continuity to battery negative'),
-            ('3V3', '5-pin connector pin 1 = +Vbat INPUT, not the regulated 2.1 V rail; confirm safe supply voltage'),
+            ('+Vbat', '5-pin connector pin 1 = battery INPUT (not the regulated 2.1 V rail); voltage must match battery limits'),
         ],
         'notes': [
             'Five-pin connector in pvvx board reference: 1 +Vbat, 2 GND, 3 PA7/SWS, 4 PB1/TX, 5 PB7/RX.',
-            'The original board includes a 2.1 V regulator. Never feed 3.3 V to the regulated 2.1 V node.',
+            'The original board includes a 2.1 V regulator. Never inject 3.3 V into the regulated 2.1 V node.',
+            'A CP2102 TXD at 3.3 V can overdrive SWS if its GPIO supply is 2.1 V; 1.2 kOhm alone is NOT a level shifter.',
+            'Do not connect TXD/SWS until target I/O voltage and a compatible level shifter are independently verified.',
             'Remove the coin cell before connecting external supply; verify module voltage and current limit.',
             'pvvx builds include both a stock-to-custom conversion Zigbee OTA and a post-conversion Zigbee OTA.',
             'Factory OTA eligibility needs the live manufacturer/image-type/version tuple; never force a mismatch.',
@@ -1087,21 +1089,31 @@ def wiring(device_id, connection='tx-only'):
         lines += ['', 'Bidirectional junction at the ADAPTER, not the target:',
                   '  TXD --[1.2 kOhm]--+-- one lead -- SWS',
                   '  RXD -------------+',
-                  '  3V3 -------------------------- 3V3',
+                  ('  EXTERNAL SUPPLY -------------- +Vbat (rated battery voltage only)'
+                   if device.get('inspectionOnly') else '  3V3 -------------------------- 3V3'),
                   '  GND -------------------------- GND',
-                  'Exactly three target contacts: SWS, 3V3 and GND.',
+                  ('Target contacts: SWS, +Vbat and GND; 3.3 V UART logic needs a proven I/O-level interface.'
+                   if device.get('inspectionOnly') else 'Exactly three target contacts: SWS, 3V3 and GND.'),
                   'Use a mechanically secure insulated junction; software cannot measure its contact or resistance.',
                   'RTS, DTR, +5V, RS232 and RS485 stay unconnected.',
                   'CP2102 RX LEDs/input loading can prevent target readback; a chip name is not qualification.']
     else:
         lines += ['  RXD, RTS, DTR and +5V stay unconnected.']
     lines += ['',
-              'Before you connect:' if device.get('inspectionOnly') else 'Before you write:',
-              '  1. Continuity: each lead to its pad, and no continuity between SWS, GND and 3V3.',
-              '  2. Adapter in 3.3 V TTL mode. TXD idles at about 3.3 V against GND.',
-              '  3. selftest --port COMx passes with TXD jumpered to RXD, the device not connected.',
-              '  4. The 3.3 V rail reads 3.2-3.4 V with the board connected.', '',
-              'Notes:']
+              'Before you connect:' if device.get('inspectionOnly') else 'Before you write:']
+    if device.get('inspectionOnly'):
+        lines += [
+            '  1. Continuity: confirm connector orientation, +Vbat, GND, PA7/SWS; no bridged pads.',
+            '  2. Measure the actual target GPIO supply and battery input; do not infer from the USB adapter.',
+            '  3. Check UART-SWS level compatibility (and any level shifter) before making the SWS contact.',
+            '  4. Prove the adapter echo with the target DISCONNECTED, then separately prove target replies.',
+            '  5. Preserve two matching full reads before considering any programming.', '', 'Notes:']
+    else:
+        lines += [
+            '  1. Continuity: each lead to its pad, and no continuity between SWS, GND and 3V3.',
+            '  2. Adapter in 3.3 V TTL mode. TXD idles at about 3.3 V against GND.',
+            '  3. selftest --port COMx passes with TXD jumpered to RXD, the device not connected.',
+            '  4. The 3.3 V rail reads 3.2-3.4 V with the board connected.', '', 'Notes:']
     lines += [f'  - {note}' for note in device['notes']]
     if device.get('inspectionOnly'):
         lines += ['', 'STOP: this is a TLSR8253 inspection-only profile. Do not use prepare, flash, stage,',
