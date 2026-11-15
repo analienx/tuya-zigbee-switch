@@ -60,3 +60,19 @@ def test_zg204zl_direct_device_checker_also_fails_closed():
             "manufacturerCode": 0x1286, "imageType": 0x0203
         }, {})
     assert failed.value.code == "UNQUALIFIED_FLASH_LAYOUT"
+
+
+def test_zg204zl_target_link_fails_before_port_open(tmp_path):
+    receipt = tmp_path / "test-link.json"
+    with pytest.raises(swire.RecoveryError) as failed:
+        swire.test_link("COM3", receipt, phase="target", device="zg-204zl")
+    assert failed.value.code == "SWIRE_VOLTAGE_UNQUALIFIED"
+    assert not receipt.exists()
+
+
+def test_zg204zl_watch_fails_before_port_or_directory_creation(tmp_path):
+    output = tmp_path / "watch"
+    with pytest.raises(swire.RecoveryError) as failed:
+        swire.watch_link("COM3", output, device="zg-204zl")
+    assert failed.value.code == "SWIRE_VOLTAGE_UNQUALIFIED"
+    assert not output.exists()
