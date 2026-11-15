@@ -104,6 +104,17 @@ def require_increasing(profile, registry=None):
             raise IdentityError('stock conversion requires stock-wrapper to Router')
         return {'board': board, 'source': 'stock', 'target_version': native['file_version']}
 
+    if profile.get('balcony_cli2_to_r18_transition') is True:
+        # The 2026-09 legacy cli2 image predates the sealed registry. Do not
+        # invent a source hash or add an unverified fleet-wide registry entry.
+        # This exact Balcony migration instead requires independent recent
+        # ZDO+interview+OTA-version proof and operator-scoped risk acceptance.
+        from bseed_balcony_cli2_to_r18_transition import exact_transition
+        proof = exact_transition(profile)
+        if (outer['image_type'], outer['file_version'], native['image_type'],
+                native['file_version']) != (65026, 0x1102301d, 43555, 0x1102301d):
+            raise IdentityError('Legacy Balcony wrapper/native OTA identity mismatch')
+        return proof
     source = [e for e in source_line['versions'] if e.get('version_str') == profile.get('preflash_build')]
     if 'preflash_file_version' in profile:
         source = [e for e in source if e['file_version'] == number(profile['preflash_file_version'])]

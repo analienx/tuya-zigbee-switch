@@ -8,6 +8,7 @@ It never waives backend-correlated fresh Zigbee relay reads.
 """
 
 BALCONY_LEGACY_POLICY = "legacy_unreported_v8_router"
+BALCONY_LEGACY_CLI2_CLIENT_POLICY = "legacy_unreported_cli2_client"
 BALCONY_IDENTITY = {
     "device": "BedroomSocketBalcony",
     "ieee": "0xa4c138ac993cc245",
@@ -100,6 +101,14 @@ def exact_same_role_nonpm_router_admission(profile):
 def verify_relay_policy_profile(profile):
     """Fail closed for any foreign attempt to use the null-policy exception."""
     expected = profile.get("preflash_relay_physical_mode")
+    if expected == BALCONY_LEGACY_CLI2_CLIENT_POLICY:
+        from bseed_balcony_cli2_to_r18_transition import exact_transition
+        exact_transition(profile)  # exact IEEE, source and sealed Router payload
+        if (profile.get('relay_get_key'), profile.get('expect_relay'),
+                profile.get('non_pm'), profile.get('require_pm')) != (
+                'state_relay', 'OFF', True, False):
+            raise ValueError('Legacy cli2 Client relay OFF policy does not match')
+        return True
     if expected == BALCONY_LEGACY_POLICY:
         if not is_exact_balcony_router_candidate(profile):
             raise ValueError("Legacy v8 null relay policy restricted to exact Balcony r18 image")

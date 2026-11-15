@@ -512,8 +512,12 @@ def main():
         if not (relay.get(args.relay_get_key) == args.expect_relay):
             raise AssertionError('Relay state not verified by read-only GET')
         if args.non_pm:
-            from bseed_nonpm_relay_policy import BALCONY_LEGACY_POLICY, relay_policy_matches
-            if args.preflash_relay_physical_mode == BALCONY_LEGACY_POLICY:
+            from bseed_nonpm_relay_policy import (
+                BALCONY_LEGACY_POLICY, BALCONY_LEGACY_CLI2_CLIENT_POLICY,
+                relay_policy_matches,
+            )
+            if args.preflash_relay_physical_mode in (
+                    BALCONY_LEGACY_POLICY, BALCONY_LEGACY_CLI2_CLIENT_POLICY):
                 if campaign is None or not relay_policy_matches(relay, campaign):
                     raise AssertionError('Exact v8 Router legacy-null relay policy not verified')
             elif not (relay.get('relay_physical_mode') == args.preflash_relay_physical_mode):

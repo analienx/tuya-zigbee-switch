@@ -192,6 +192,13 @@ def _verify_recovery(profile, *, confirm_unloaded=False,
             'hardware_acceptance': False,
             'warning': 'No full chip readback. Loss of socket recoverability is possible.',
         }
+    if transition and roles == ('EndDevice', 'Router') and (
+            profile.get('balcony_cli2_to_r18_transition') is True):
+        from bseed_balcony_cli2_to_r18_transition import exact_transition
+        # This is an explicit irreversible-loss operator waiver for the
+        # corrected cli2->r18 source/target only, NOT SWire backup evidence.
+        # Physically unloaded target was already required above.
+        return exact_transition(profile)
     evidence = _private_file(profile.get('recovery_evidence'), 'Recovery evidence')
     record = json.loads(evidence.read_text(encoding='utf8'))
     if record.get('schema') != 1 or record.get('target_ieee') != profile['ieee']:
