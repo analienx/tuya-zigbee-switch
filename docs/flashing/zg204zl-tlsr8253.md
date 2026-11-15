@@ -82,9 +82,12 @@ python telink_swire_recovery.py wiring --device zg-204zl --connection cp2102-sin
 python telink_swire_recovery.py fetch-reader --json
 ```
 
-Only after confirming adapter-only circuit, secure target contacts, rated
-battery-input voltage, and device-specific authorization should target
-diagnostics be attempted. Private receipts/dumps must remain **outside Git**.
+The initial profile deliberately blocks `test-link --phase target` and
+`watch-link` before opening any port (`SWIRE_VOLTAGE_UNQUALIFIED`).
+Those operations need an independently qualified target-voltage interface
+and a follow-up narrowly reviewed implementation; **do not bypass this profile**
+or connect 3.3 V TXD to SWS directly. Private receipts/dumps must remain
+**outside Git**.
 The generic `read` command uses a SHA-pinned pvvx TLSR825x reader; confirm
 actual flash JEDEC capacity before requesting a full read, keep two complete
 matching reads, and retain factory/IEEE/calibration material. Its success
