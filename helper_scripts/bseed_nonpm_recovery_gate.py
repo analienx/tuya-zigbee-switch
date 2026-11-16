@@ -199,6 +199,19 @@ def _verify_recovery(profile, *, confirm_unloaded=False,
         # corrected cli2->r18 source/target only, NOT SWire backup evidence.
         # Physically unloaded target was already required above.
         return exact_transition(profile)
+    if (not transition and roles == ('EndDevice', 'EndDevice') and
+            profile.get('balcony_legacy_cli2_to_c17') is True):
+        # Exact same-role client upgrade on previously user-approved/unloaded
+        # Balcony. Do not make up SWire recovery or two full-chip backups.
+        from bseed_balcony_cli2_to_c17 import verify_exact
+        proof = verify_exact(profile)
+        return {
+            **proof,
+            'method': 'one-device legacy cli2 to sealed c17 Client canary',
+            'recovery_available': False, 'readback_verified': False,
+            'operator_risk_accepted': True, 'hardware_acceptance': False,
+            'warning': 'No independently verified full-chip backup. A failed OTA may require wired recovery.',
+        }
     evidence = _private_file(profile.get('recovery_evidence'), 'Recovery evidence')
     record = json.loads(evidence.read_text(encoding='utf8'))
     if record.get('schema') != 1 or record.get('target_ieee') != profile['ieee']:

@@ -101,6 +101,10 @@ def exact_same_role_nonpm_router_admission(profile):
 def verify_relay_policy_profile(profile):
     """Fail closed for any foreign attempt to use the null-policy exception."""
     expected = profile.get("preflash_relay_physical_mode")
+    if expected == BALCONY_LEGACY_CLI2_CLIENT_POLICY and profile.get('balcony_legacy_cli2_to_c17') is True:
+        from bseed_balcony_cli2_to_c17 import verify_exact
+        verify_exact(profile)
+        return True
     if expected == BALCONY_LEGACY_CLI2_CLIENT_POLICY:
         from bseed_balcony_cli2_to_r18_transition import exact_transition
         exact_transition(profile)  # exact IEEE, source and sealed Router payload

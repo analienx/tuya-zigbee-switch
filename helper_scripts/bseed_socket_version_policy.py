@@ -125,6 +125,14 @@ def require_increasing(profile, registry=None):
                 native['file_version']) != (65026, 0x1102301d, 43555, 0x1102301d):
             raise IdentityError('Legacy Balcony wrapper/native OTA identity mismatch')
         return proof
+    if profile.get('balcony_legacy_cli2_to_c17') is True:
+        # The source cli2 was built before the sealed registry. Do not
+        # invent its build digest or weaken any other campaign admission.
+        from bseed_balcony_cli2_to_c17 import verify_exact
+        try:
+            return verify_exact(profile)
+        except (OSError, ValueError) as error:
+            raise IdentityError('Exact Balcony Client c17 source refused: '+str(error)) from error
     source = [e for e in source_line['versions'] if e.get('version_str') == profile.get('preflash_build')]
     if 'preflash_file_version' in profile:
         source = [e for e in source if e['file_version'] == number(profile['preflash_file_version'])]
