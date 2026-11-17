@@ -76,6 +76,22 @@ def load_profile(path):
         raise ValueError('force_test_transition must be an explicit Boolean')
     if data.get('force_test_transition') is True and (not data.get('native_image') or not data.get('native_sha256')):
         raise ValueError('force-test transition requires native_image and native_sha256')
+    if 'stock_router_conversion' in data and data['stock_router_conversion'] is not True and \
+            data['stock_router_conversion'] is not False:
+        raise ValueError('stock_router_conversion must be an explicit Boolean')
+    if data.get('stock_router_conversion') is True:
+        if data.get('force_test_transition') is True:
+            raise ValueError('stock_router_conversion and force_test_transition are mutually exclusive')
+        if data.get('preflash_role') != 'Router' or data.get('postflash_role') != 'Router':
+            raise ValueError('stock_router_conversion keeps the Router role unchanged')
+        if not data.get('require_pm'):
+            raise ValueError('stock_router_conversion is a PM-board-only path')
+        if not str(data.get('manufacturer', '')).startswith(('_TZ3000_', '_TZ3002_')):
+            raise ValueError('stock_router_conversion requires the stock manufacturer identity')
+        if not data.get('native_image') or not data.get('native_sha256'):
+            raise ValueError('stock_router_conversion requires native_image and native_sha256')
+        if data.get('pm_settings_baseline'):
+            raise ValueError('stock_router_conversion cannot carry a prior settings baseline')
     for key in ('image', 'mqtt_config', 'workdir', 'index_output', 'template_index'):
         data[key] = str(Path(data[key]).expanduser().resolve())
     if data.get('native_image'):
@@ -426,8 +442,58 @@ def role_audit_cmd(profile, evidence):
 
 
 
+def verify_stock_router_wrapper(profile, router_entry):
+    """Prove the stock-facing wrapper carries exactly the sealed native Router bytes.
+
+    A brand-new stock device's own OTA client only ever requests its stock
+    manufacturer/image-type/version tuple; it has no way to request the real
+    custom identity, so the sealed native image must travel inside a wrapper
+    that only changes the OTA header's image type and file version (never the
+    payload) to that stock-accepted tuple. Byte-identical to the historical
+    from_tuya.ota transform in make_bseed_ts011f_pm_v8.sh.
+    """
+    from bseed_ota_identity import parse_ota_header
+    if not profile.get('native_image') or not Path(profile['native_image']).is_file():
+        raise ValueError('Stock Router conversion requires the sealed native image file')
+    native = Path(profile['native_image']).read_bytes()
+    native_sha256 = hashlib.sha256(native).hexdigest()
+    if native_sha256 != profile.get('native_sha256'):
+        raise ValueError('Native image bytes differ from the declared native_sha256')
+    native_header = parse_ota_header(native)
+    if (native_sha256, native_header['image_type'], profile['postflash_build']) != (
+            router_entry.get('sha256'), router_entry.get('imageType'), router_entry.get('build')):
+        raise ValueError('Native Router image differs from the validated matrix')
+    wrapper = Path(profile['image']).read_bytes()
+    wrapper_header = parse_ota_header(wrapper)
+    if hashlib.sha256(wrapper).hexdigest() != profile['sha256']:
+        raise ValueError('Stock wrapper bytes differ from the declared sha256')
+    if (wrapper_header['manufacturer_code'], wrapper_header['image_type'],
+            wrapper_header['file_version']) != (
+            native_header['manufacturer_code'], int(profile['image_type']),
+            int(str(profile['file_version']), 0)):
+        raise ValueError('Stock wrapper header does not match the declared transport tuple')
+    if int(str(profile['file_version']), 0) != 0xFFFFFFFF:
+        raise ValueError('Stock wrapper file version must be the max-version sentinel')
+    if len(native) != len(wrapper) or native[56:] != wrapper[56:]:
+        raise ValueError('Stock wrapper must preserve the entire sealed native payload')
+    changed = [i for i in range(56) if native[i] != wrapper[i]]
+    if changed != list(range(12, 18)):
+        raise ValueError('Stock wrapper may only change the image-type/file-version header bytes')
+
+
 def verified_router_pm_candidate(profile):
-    """Allow only one same-role PM Router candidate proven by the cross-role binary matrix."""
+    """Allow only one same-role PM Router candidate proven by the cross-role binary matrix.
+
+    Two admissible transports for the same sealed Router bytes. A Router
+    already running custom firmware requests OTA under its own real identity,
+    so `profile['image_type']`/`sha256` name the native image directly. A
+    stock device has no way to request that real identity, so a first custom
+    flash (`stock_router_conversion: true`) instead sends a wrapper under the
+    stock-accepted tuple, verified byte-for-byte against the sealed native
+    image by `verify_stock_router_wrapper`. Either way a settings baseline
+    only makes sense once the device has already run custom firmware once;
+    a stock conversion must not fabricate one.
+    """
     if profile.get('preflash_role') != 'Router' or profile.get('postflash_role') != 'Router':
         raise ValueError('Router PM candidate may not change Zigbee role')
     path = profile.get('pm_router_matrix_evidence')
@@ -440,15 +506,24 @@ def verified_router_pm_candidate(profile):
     if len(roles) != 2 or {x.get('role') for x in roles} != {'Router', 'EndDevice'}:
         raise ValueError('Both PM roles must appear in the matrix')
     router = next(x for x in roles if x['role'] == 'Router')
-    if (router.get('sha256'), router.get('imageType'), router.get('build')) != (
+    stock = profile.get('stock_router_conversion') is True
+    if stock:
+        verify_stock_router_wrapper(profile, router)
+    elif (router.get('sha256'), router.get('imageType'), router.get('build')) != (
             profile['sha256'], int(profile['image_type']), profile['postflash_build']):
         raise ValueError('Private Router candidate differs from validated matrix')
     if profile.get('relay_get_key') != 'state_relay' or not profile.get('require_pm'):
         raise ValueError('Router PM flash requires a verified relay endpoint and PM gate')
-    for key in ('pm_ssh_host','pm_ssh_key','pm_settings_baseline'):
+    required = ('pm_ssh_host', 'pm_ssh_key') if stock else (
+        'pm_ssh_host', 'pm_ssh_key', 'pm_settings_baseline')
+    for key in required:
         if not profile.get(key): raise ValueError('Router PM flash missing '+key)
-    if not Path(profile['pm_ssh_key']).is_file() or not Path(profile['pm_settings_baseline']).is_file():
-        raise ValueError('Router PM preflash key/settings baseline is missing')
+    if stock and profile.get('pm_settings_baseline'):
+        raise ValueError('A stock conversion has no genuine prior custom settings to baseline')
+    if not stock and not Path(profile['pm_settings_baseline']).is_file():
+        raise ValueError('Router PM preflash settings baseline is missing')
+    if not Path(profile['pm_ssh_key']).is_file():
+        raise ValueError('Router PM preflash key is missing')
     return True
 
 def main():
