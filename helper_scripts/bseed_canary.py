@@ -55,16 +55,7 @@ DEVICE_REQUIRED = ('ieee', 'board', 'role', 'expect_relay')
 # fails fast and the next campaign resumes from its retained partial image,
 # instead of idling 30 min per stall. Bedroom FORCE still enforces >=1800000
 # at profile load, so its site entry must override this explicitly.
-# block_bytes 48 (operator decision 2026-11-17, docs/bseed_ota_transfer_speed_20261117.md):
-# the installed tl_zigbee_sdk client hardcodes OTA_IMAGE_MAX_DATA_SIZE=48 and
-# always requests exactly that; a server cap above 48 is a no-op, and 32 was
-# leaving a third of the device's own block on the table for no reliability
-# benefit -- the 2026-09-24 incident this pacing comes from explicitly found
-# block size was not the variable (32- and 48-byte blocks failed identically
-# unpaced; 48-byte blocks completed once paced). response_delay_ms is left at
-# 1200 unchanged: that is the one setting this repo has direct incident
-# evidence for, and lowering it is a per-device call, not a blanket default.
-PACING = {'block_bytes': 48, 'response_delay_ms': 1200,
+PACING = {'block_bytes': 32, 'response_delay_ms': 1200,
           'request_timeout_ms': 300000, 'monitor_seconds': 14400,
           'check_timeout_seconds': 90}
 IDENTITY = {'device', 'ieee', 'manufacturer', 'model', 'preflash_role', 'postflash_role',
