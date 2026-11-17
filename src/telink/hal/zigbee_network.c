@@ -244,9 +244,15 @@ static uint32_t client_zdo_rejoin_deferred_since_ms;
  * A factory-new device holds no network state or routes, so the reboot costs
  * only a brief relay dropout while the MCU restarts; a long hold leaves a
  * freshly converted socket dark (90 min plus stagger stranded a converted
- * socket for about 1 h 45 min). The rescue budget still bounds reboots. */
-#define FACTORY_STEERING_TERMINAL_HOLD_MS    (15u * 60u * 1000u)
-#define FACTORY_STEERING_OWNER_HOLD_MS       (15u * 60u * 1000u)
+ * socket for about 1 h 45 min). Scan, association and key transport finish
+ * within about a minute, so 5 minutes without a terminal callback means the
+ * owner is orphaned. Factory-new devices do not arrive in herds, so the
+ * stagger only needs to break ties, not spread a power-restore storm. The
+ * rescue budget still bounds reboots; boot + both rescues fit in a 35-minute
+ * scoped join campaign. */
+#define FACTORY_STEERING_TERMINAL_HOLD_MS    (5u * 60u * 1000u)
+#define FACTORY_STEERING_OWNER_HOLD_MS       (5u * 60u * 1000u)
+#define FACTORY_STEERING_STAGGER_MS          (2u * 60u * 1000u)
 static bool     network_steering_terminal_seen;
 static bool     network_steering_checkpoint_scheduled;
 static uint32_t network_steering_terminal_ms;
@@ -1639,7 +1645,7 @@ void hal_zigbee_start_network_steering(void) {
                            FACTORY_STEERING_TERMINAL_HOLD_MS :
                            FACTORY_STEERING_OWNER_HOLD_MS;
         uint32_t stagger = bseed_recovery_action_stagger_ms(
-            g_zbMacPib.extAddress, 0x46535452u, 15u * 60u * 1000u);
+            g_zbMacPib.extAddress, 0x46535452u, FACTORY_STEERING_STAGGER_MS);
 
         /* Terminal callbacks cannot be correlated with separate attempts.
          * After a terminal steering outcome, the re-arm tick permits the
