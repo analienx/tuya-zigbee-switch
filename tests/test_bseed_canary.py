@@ -132,6 +132,18 @@ def test_request_timeout_defaults_to_five_minutes_and_device_may_override(tmp_pa
     assert profile['request_timeout_ms'] == 1800000
 
 
+def test_block_bytes_defaults_to_the_devices_own_hardcoded_request_size(tmp_path):
+    # tl_zigbee_sdk's OTA client always requests OTA_IMAGE_MAX_DATA_SIZE (48)
+    # regardless of the server's cap; a lower default only adds round trips.
+    # See docs/bseed_ota_transfer_speed_20261117.md.
+    assert canary.PACING['block_bytes'] == 48
+    artifacts, registry = make_artifacts(tmp_path, 'pm')
+    site = make_site(tmp_path, 'pm', 'EndDevice')
+    path, profile = canary.build_profile(site, 'Canary', artifacts, registry)
+    assert profile['block_bytes'] == 48
+    assert load_profile(path)['block_bytes'] == 48
+
+
 def test_site_and_identity_overrides_are_guarded(tmp_path):
     artifacts, registry = make_artifacts(tmp_path, 'pm')
     site = make_site(tmp_path, 'pm', 'EndDevice', overrides={'sha256': '0' * 64})
