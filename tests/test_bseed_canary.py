@@ -132,6 +132,17 @@ def test_request_timeout_defaults_to_five_minutes_and_device_may_override(tmp_pa
     assert profile['request_timeout_ms'] == 1800000
 
 
+@pytest.mark.parametrize('board', ['pm', 'nonpm'])
+def test_canary_uses_48_byte_blocks_with_paced_responses(tmp_path, board):
+    # Canary sockets run custom firmware, whose OTA client requests 48 bytes.
+    assert canary.PACING['block_bytes'] == 48 and canary.PACING['response_delay_ms'] >= 1200
+    artifacts, registry = make_artifacts(tmp_path, board)
+    site = make_site(tmp_path, board, 'EndDevice')
+    path, profile = canary.build_profile(site, 'Canary', artifacts, registry)
+    assert profile['block_bytes'] == 48
+    assert load_profile(path)['block_bytes'] == 48
+
+
 def test_site_and_identity_overrides_are_guarded(tmp_path):
     artifacts, registry = make_artifacts(tmp_path, 'pm')
     site = make_site(tmp_path, 'pm', 'EndDevice', overrides={'sha256': '0' * 64})

@@ -1,6 +1,14 @@
 # BSEED OTA transfer speed: verified facts and open questions (2026-11-17)
 
-Read-only source research; no device was touched. This record exists so the same questions are not re-investigated, and so two wrong conclusions from the first draft of this research are not repeated (see "Corrections" below). **It changes no default.** `block_bytes` stays 32 and `response_delay_ms` stays 1200 in `bseed_canary.py`.
+Read-only source research; no device was touched. This record exists so the same questions are not re-investigated, and so two wrong conclusions from the first draft of this research are not repeated (see "Corrections" below).
+
+**Decision (owner, 2026-11-17):** use 48-byte blocks wherever the downloading firmware is proven to take them. `helper_scripts/bseed_ota_block_policy.py` enforces it for every campaign profile and in the non-PM recovery and two-slot gates:
+
+- **Custom firmware, paced:** 48 bytes allowed when `response_delay_ms` is at least 1200. This is the canary default (`bseed_canary.py`).
+- **Stock first conversion:** 32 bytes. Tuya's own firmware does the download, and nothing proves it takes more.
+- **Exact historical authorizations** (Bedroom, Balcony, Entrance): stay pinned at 32, as approved.
+
+`response_delay_ms` stays 1200.
 
 ## Which OTA client is downloading matters first
 
@@ -22,12 +30,13 @@ All from `zigbee/ota/ota.h`, `zigbee/ota/ota.c` and `zigbee/zcl/ota_upgrading/zc
 - **No hidden second delay from Zigbee2MQTT.** `zcl_attr_minBlockPeriod` defaults to 0 and is set only from a WAIT_FOR_DATA block response (`rsp.wait.blockReqDelay`). `zigbee-herdsman` does not send that status. Only `response_delay_ms` paces the transfer from the server side.
 - **`response_delay_ms` is a minimum spacing between server responses**, measured from the previous response (`#lastBlockResponseTime`). It has no effect when the natural round trip is already longer.
 
-## Why block size is not changed
+## Why 48 bytes needs custom firmware and pacing
 
-The first draft of this research raised the canary default to 48. That change was withdrawn because:
+- **Every recorded ~48–50-byte failure was unpaced.** KitchenSocketRight `v8u5-rc1` (50-byte-ceiling ABORT) and stock `cli6` (50-byte stall) both ran on 2026-09-20. Response pacing was introduced after the 2026-09-24 incident.
+- **The one paced 48-byte run completed.** BedroomSocketCabinetRight `cli4` → `cli5-rc1`, custom firmware, 1200 ms pacing. Unpaced, 32 and 48 bytes had stalled alike there.
+- **Stock firmware is a different client.** Its only evidence is the unpaced `cli6` run, so stock stays at 32 until a stock transfer proves otherwise.
 
-1. **It breaks existing gates.** `bseed_nonpm_recovery_gate.py` refuses any non-PM flash unless `block_bytes == 32`, and the two-slot pilot (`bseed_network_campaign_lock.py`, `parallel_ota_max: 2`) refuses anything but 32. A 48-byte canary default would fail those runs before transfer.
-2. **PM evidence points the other way.** The "block size was not the variable" finding came from one non-PM sleepy Client (BedroomSocketCabinetRight). For the PM board, `SKILL.md` records two cases where a ~48–50-byte transfer failed and a 32-byte retry completed (KitchenSocketRight `v8u5-rc1` after a 50-byte-ceiling ABORT; stock `cli6` above). Neither abort cause is proven, but neither supports 48 as a default.
+The first draft of this change set 48 without updating the gates that pinned 32 (`bseed_nonpm_recovery_gate.py`, the two-slot pilot in `bseed_network_campaign_lock.py`). Those gates now admit 32, or 48 under the same policy.
 
 ## Where the time actually goes
 
@@ -48,7 +57,7 @@ Lower bound only; retries add to it. `response_delay_ms` is the larger lever. It
 
 - **Wrong:** "flash writes are batched about every 110 blocks, so flash-write time is not a bottleneck". Image data is written per block. Only resume metadata is batched.
 - **Wrong scope:** the 48-byte, 5 s and 10-retry figures were presented as general. They apply only to sockets already running custom firmware. They say nothing about a stock socket's first conversion.
-- **Unsupported:** raising the canary default to 48 bytes. It conflicts with pinned 32-byte gates and with the PM evidence above.
+- **Incomplete:** the first draft set the canary default to 48 without updating the gates that pinned 32, and without separating stock from custom downloads. Both are now handled.
 
 ## Sources
 

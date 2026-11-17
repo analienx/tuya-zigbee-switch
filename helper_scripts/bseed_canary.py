@@ -55,7 +55,12 @@ DEVICE_REQUIRED = ('ieee', 'board', 'role', 'expect_relay')
 # fails fast and the next campaign resumes from its retained partial image,
 # instead of idling 30 min per stall. Bedroom FORCE still enforces >=1800000
 # at profile load, so its site entry must override this explicitly.
-PACING = {'block_bytes': 32, 'response_delay_ms': 1200,
+# block_bytes 48 (operator decision 2026-11-17): canary sockets always run
+# custom firmware, whose OTA client requests exactly 48 bytes; 48 is proven
+# only with paced responses, which response_delay_ms provides. Exact historical
+# authorizations (Bedroom, Balcony, Entrance) stay pinned at 32 and must
+# override it. See helper_scripts/bseed_ota_block_policy.py.
+PACING = {'block_bytes': 48, 'response_delay_ms': 1200,
           'request_timeout_ms': 300000, 'monitor_seconds': 14400,
           'check_timeout_seconds': 90}
 IDENTITY = {'device', 'ieee', 'manufacturer', 'model', 'preflash_role', 'postflash_role',

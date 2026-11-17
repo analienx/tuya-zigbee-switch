@@ -142,8 +142,10 @@ def require_profile_authority(profile):
         raise ValueError('Two-slot pilot refuses any source-rejoin automation')
     if profile.get('allow_join_all_fallback', False) is not False:
         raise ValueError('Two-slot pilot refuses permit-join-all')
-    if profile.get('block_bytes') != 32:
-        raise ValueError('Two-slot initial pilot requires 32-byte OTA blocks')
+    if profile.get('block_bytes') not in (32, 48) or isinstance(profile.get('block_bytes'), bool):
+        raise ValueError('Two-slot pilot requires 32- or 48-byte OTA blocks')
+    from bseed_ota_block_policy import check_block_bytes
+    check_block_bytes(profile, allowed=(32, 48))
     delay = profile.get('response_delay_ms')
     if type(delay) is not int or delay < 1800:
         raise ValueError('Two-slot initial pilot requires >=1800ms per-device response pacing')
