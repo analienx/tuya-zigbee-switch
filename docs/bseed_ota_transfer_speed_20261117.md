@@ -2,10 +2,10 @@
 
 Read-only source research; no device was touched. This record exists so the same questions are not re-investigated, and so two wrong conclusions from the first draft of this research are not repeated (see "Corrections" below).
 
-**Decision (owner, 2026-11-17):** use 48-byte blocks wherever the downloading firmware is proven to take them. `helper_scripts/bseed_ota_block_policy.py` enforces it for every campaign profile and in the non-PM recovery and two-slot gates:
+**Decision (owner, 2026-11-17):** use 48-byte blocks wherever possible. `helper_scripts/bseed_ota_block_policy.py` enforces it for every campaign profile and in the non-PM recovery and two-slot gates:
 
-- **Custom firmware, paced:** 48 bytes allowed when `response_delay_ms` is at least 1200. This is the canary default (`bseed_canary.py`).
-- **Stock first conversion:** 32 bytes. Tuya's own firmware does the download, and nothing proves it takes more.
+- **Paced transfers** (`response_delay_ms` at least 1200), custom or stock firmware: 48 bytes. This is the canary default (`bseed_canary.py`) and the default whenever a profile leaves `block_bytes` unset.
+- **Unpaced transfers:** 32 bytes.
 - **Exact historical authorizations** (Bedroom, Balcony, Entrance): stay pinned at 32, as approved.
 
 `response_delay_ms` stays 1200.
@@ -15,9 +15,16 @@ Read-only source research; no device was touched. This record exists so the same
 An OTA image is downloaded by the firmware that is **currently running** on the socket:
 
 - **Socket already on custom BSEED firmware** (any same-role refresh or role transition): the client is the pinned Telink `tl_zigbee_sdk` V3.7.2.0 OTA client compiled into this repo's images. The SDK facts below apply.
-- **Stock Tuya socket, first conversion** (e.g. a `from_tuya` wrapper): the client is Tuya's own firmware. None of the SDK facts below are proven for it. Its request size, retry and timeout behavior are unknown from source.
+- **Stock Tuya socket, first conversion** (e.g. a `from_tuya` wrapper): the client is Tuya's own firmware. The SDK facts below are not proven for it; its retry and timeout behavior are unknown from source.
 
-This repo's own evidence for **stock** downloads (`SKILL.md`, stock-facing PM Client `cli6`): a 100-byte cap aborted at 0%, a 50-byte cap stalled at offset 41150, and a 32-byte cap resumed and completed. For first conversions, 32 bytes is the only evidenced value.
+What this repo did record for a **stock** download (`docs/bseed_kitchenleft_ota_abort_triage_20260920.md`, KitchenSocketLeft stock `_TZ3000_b28wrpvx`, `cli6` wrapper, 2026-09-20):
+
+- **The stock firmware requested 64-byte blocks.** Zigbee2MQTT never sends more than the device requests, so any cap up to 64 is within what it asked for.
+- **It accepted 823 consecutive 50-byte blocks** (offsets 0 to 41100), then requested offset 41150 nine times and sent ABORT. The run was unpaced; a TS0726 dimmer OTA was already at 79% by 14:59, so an overlap with this 14:36–14:41 run is possible but unconfirmed. The cause was never established.
+- **The 100-byte attempt aborted at 0%** while actually sending 64-byte blocks. That points at frame size (64 bytes plus headers), not at 48.
+- **The 32-byte run that completed** only resumed the last ~74% from the retained partial image, also unpaced. It is not a controlled comparison.
+
+Nothing here shows stock firmware failing at 48 bytes.
 
 ## Verified facts for the custom-firmware OTA client
 
@@ -30,11 +37,11 @@ All from `zigbee/ota/ota.h`, `zigbee/ota/ota.c` and `zigbee/zcl/ota_upgrading/zc
 - **No hidden second delay from Zigbee2MQTT.** `zcl_attr_minBlockPeriod` defaults to 0 and is set only from a WAIT_FOR_DATA block response (`rsp.wait.blockReqDelay`). `zigbee-herdsman` does not send that status. Only `response_delay_ms` paces the transfer from the server side.
 - **`response_delay_ms` is a minimum spacing between server responses**, measured from the previous response (`#lastBlockResponseTime`). It has no effect when the natural round trip is already longer.
 
-## Why 48 bytes needs custom firmware and pacing
+## Why 48 bytes needs pacing
 
 - **Every recorded ~48–50-byte failure was unpaced.** KitchenSocketRight `v8u5-rc1` (50-byte-ceiling ABORT) and stock `cli6` (50-byte stall) both ran on 2026-09-20. Response pacing was introduced after the 2026-09-24 incident.
 - **The one paced 48-byte run completed.** BedroomSocketCabinetRight `cli4` → `cli5-rc1`, custom firmware, 1200 ms pacing. Unpaced, 32 and 48 bytes had stalled alike there.
-- **Stock firmware is a different client.** Its only evidence is the unpaced `cli6` run, so stock stays at 32 until a stock transfer proves otherwise.
+- **Stock firmware asked for more than 48** and took 50-byte blocks for most of a transfer; its one stall was unpaced. The first paced stock conversion is the deciding data point. A stall there keeps the partial image and can resume at 32 without losing progress, as the `cli6` run did.
 
 The first draft of this change set 48 without updating the gates that pinned 32 (`bseed_nonpm_recovery_gate.py`, the two-slot pilot in `bseed_network_campaign_lock.py`). Those gates now admit 32, or 48 under the same policy.
 
@@ -47,7 +54,7 @@ At the current 32 bytes and 1200 ms pacing, server pacing dominates:
 | PM Client `cli26` | 178 082 B | 5 566 | ~111 min | 3 711 | ~74 min |
 | PM Router `r23` | 205 826 B | 6 433 | ~129 min | 4 289 | ~86 min |
 
-Lower bound only; retries add to it. `response_delay_ms` is the larger lever. It is also the one setting this repo has direct incident evidence for: removing it caused real stalls (`MAC_BAD_STATE` collisions on the coordinator). Any reduction should be a **deliberate, single-device canary** on a socket already running custom firmware with a strong link, not a default change. Measure blocks per second and stall count against a 1200 ms baseline before generalizing.
+Lower bound only; retries add to it. `response_delay_ms` is the larger lever. It is also the one setting this repo has direct incident evidence for: removing it caused real stalls (`MAC_BAD_STATE` collisions on the coordinator). Any reduction should be a **deliberate, single-device canary** on a socket with a strong link, not a default change. Measure blocks per second and stall count against a 1200 ms baseline before generalizing.
 
 ## Parallel OTA
 
@@ -57,10 +64,11 @@ Lower bound only; retries add to it. `response_delay_ms` is the larger lever. It
 
 - **Wrong:** "flash writes are batched about every 110 blocks, so flash-write time is not a bottleneck". Image data is written per block. Only resume metadata is batched.
 - **Wrong scope:** the 48-byte, 5 s and 10-retry figures were presented as general. They apply only to sockets already running custom firmware. They say nothing about a stock socket's first conversion.
-- **Incomplete:** the first draft set the canary default to 48 without updating the gates that pinned 32, and without separating stock from custom downloads. Both are now handled.
+- **Incomplete:** the first draft set the canary default to 48 without updating the gates that pinned 32. They now admit 48 under the same rule.
+- **Misread:** an intermediate version kept stock firmware at 32, describing the `cli6` run as "a 50-byte stall". The trace shows stock firmware requested 64 bytes and took 823 consecutive 50-byte blocks; its one stall was unpaced and unexplained.
 
 ## Sources
 
 - Telink `tl_zigbee_sdk` V3.7.2.0: `zigbee/ota/ota.h`, `zigbee/ota/ota.c` (`ota_imageBlockReq`, `ota_imageDataProcess`, `ota_saveUpdateInfo2NV`, `ota_sendImageBlockReq`, `ota_imagePageReqHandler`), `zigbee/zcl/ota_upgrading/zcl_ota_attr.c`.
 - `Koenkk/zigbee-herdsman` `master`: `src/controller/helpers/ota.ts`.
-- This repo: `docs/bseed_ota_abort_forensics.md`, `skills/bseed-zigbee-ota/SKILL.md` (cli6, KitchenSocketRight `v8u5-rc1` and BedroomSocketCabinetRight write-ups), `helper_scripts/bseed_nonpm_recovery_gate.py`, `helper_scripts/bseed_network_campaign_lock.py`.
+- This repo: `docs/bseed_ota_abort_forensics.md`, `docs/bseed_kitchenleft_ota_abort_triage_20260920.md`, `skills/bseed-zigbee-ota/SKILL.md` (cli6, KitchenSocketRight `v8u5-rc1` and BedroomSocketCabinetRight write-ups), `helper_scripts/bseed_nonpm_recovery_gate.py`, `helper_scripts/bseed_network_campaign_lock.py`.

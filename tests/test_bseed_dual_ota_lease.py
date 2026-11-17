@@ -49,13 +49,13 @@ def claim(profile, *, token=None):
     )
 
 
-def test_two_slot_pilot_admits_48_byte_blocks_for_custom_firmware(tmp_path):
+@pytest.mark.parametrize("manufacturer", [None, "b28wrpvx", "_TZ3000_b28wrpvx"])
+def test_two_slot_pilot_admits_48_byte_blocks_when_paced(tmp_path, manufacturer):
     profile = p(tmp_path)
     profile["block_bytes"] = 48
+    if manufacturer:
+        profile["manufacturer"] = manufacturer
     assert require_profile_authority(profile)
-    profile["manufacturer"] = "_TZ3000_b28wrpvx"
-    with pytest.raises(ValueError, match="Stock firmware"):
-        require_profile_authority(profile)
 
 
 def test_two_exactly_reciprocal_devices_can_own_independent_slots(tmp_path):
