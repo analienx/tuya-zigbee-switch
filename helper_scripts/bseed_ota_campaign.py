@@ -41,10 +41,11 @@ def validate_pm_mode(data):
     proof = data.get('pm_preflash_load_proof', 'meter')
     if proof not in ('meter', 'physically_unloaded'):
         raise ValueError('PM preflash load proof must be meter or physically_unloaded')
-    if proof == 'physically_unloaded' and not (custom and board == 'b28wrpvx' and
+    if proof == 'physically_unloaded' and not ((custom and board == 'b28wrpvx' and
             model == 'TS011F-BS-PM' and data.get('require_pm') is True and
-            data.get('non_pm') is not True):
-        raise ValueError('Physical PM preflash load proof only for exact custom PM socket')
+            data.get('non_pm') is not True) or stock_client_conversion(data)):
+        raise ValueError('Physical PM preflash load proof only for exact custom PM socket '
+                         'or a stock PM Client conversion')
     if custom and board == 'b28wrpvx':
         if model != 'TS011F-BS-PM' or data.get('require_pm') is not True or data.get('non_pm') is True:
             raise ValueError('Custom PM campaign b28wrpvx/TS011F-BS-PM requires matching board/model,'
@@ -59,6 +60,40 @@ def validate_pm_mode(data):
             raise ValueError('TS0726 campaign iedhxgyi/TS0726-3-BS requires matching board/model and explicit Boolean require_pm=false')
         return False
     return data.get('require_pm')
+
+
+STOCK_PM_MANUFACTURER = '_TZ3000_b28wrpvx'
+STOCK_PM_MODEL = 'TS011F'
+
+
+def stock_client_conversion(data):
+    """Validated stock PM socket -> custom PM mains Client in one OTA.
+
+    The stock converter has no fresh-sample PM stamp, so the live meter proof
+    cannot pass; a fresh physical unplugged attestation replaces it, as for
+    the custom PM physical route. The native image and the header-only stock
+    wrapper are proven by bseed_socket_version_policy.require_increasing.
+    """
+    value = data.get('stock_client_conversion')
+    if value is None or value is False:
+        return False
+    if value is not True:
+        raise ValueError('stock_client_conversion must be an explicit Boolean')
+    expected = {'manufacturer': STOCK_PM_MANUFACTURER, 'model': STOCK_PM_MODEL,
+                'preflash_role': 'Router', 'postflash_role': 'EndDevice', 'require_pm': True,
+                'pm_preflash_load_proof': 'physically_unloaded'}
+    for key, want in expected.items():
+        if data.get(key) != want:
+            raise ValueError('stock_client_conversion requires %s=%r' % (key, want))
+    if data.get('non_pm') is True or data.get('force_test_transition') is True:
+        raise ValueError('stock_client_conversion is a PM board, non-FORCE route')
+    if not data.get('native_image') or not data.get('native_sha256'):
+        raise ValueError('stock_client_conversion requires native_image and native_sha256')
+    if data.get('preflash_build') not in (None, ''):
+        raise ValueError('Stock firmware has no custom build; do not pin a preflash_build')
+    if not data.get('join_via'):
+        raise ValueError('stock_client_conversion changes role and requires a verified join_via Router')
+    return True
 
 
 def load_profile(path):
@@ -90,6 +125,7 @@ def load_profile(path):
     if data.get('network_lock_dir') and Path(data['network_lock_dir']).is_relative_to(ROOT):
         raise ValueError('Network lock authority must not be inside repository')
     validate_pm_mode(data)
+    stock_client_conversion(data)
     from bseed_ota_block_policy import check_block_bytes, default_block_bytes
     if data.get('block_bytes') is None:
         data['block_bytes'] = default_block_bytes(data)

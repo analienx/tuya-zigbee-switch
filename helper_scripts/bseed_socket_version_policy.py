@@ -97,10 +97,27 @@ def require_increasing(profile, registry=None):
 
     if stock_prefix is not None:
         # Stock versions use a different numbering scheme. Stock conversion
-        # is only the separately validated stock wrapper into a custom Router.
+        # is the separately validated stock wrapper into a custom Router, or,
+        # for an explicit stock_client_conversion profile, into a mains Client.
         if force_test:
             raise IdentityError('force-test transition is only for already-custom socket firmware')
-        if source_role != 'Router' or target_role != 'Router' or outer['image_type'] != 54179 or outer['file_version'] != 0xffffffff:
+        if source_role != 'Router' or outer['image_type'] != 54179 or outer['file_version'] != 0xffffffff:
+            raise IdentityError('stock conversion requires a stock wrapper from a stock Router')
+        if target_role == 'EndDevice':
+            if profile.get('stock_client_conversion') is not True:
+                raise IdentityError('stock-to-Client conversion requires stock_client_conversion=true')
+            if not profile.get('native_image') or not profile.get('native_sha256'):
+                raise IdentityError('stock-to-Client conversion requires native_image and native_sha256')
+            if hashlib.sha256(payload).hexdigest() != profile['native_sha256']:
+                raise IdentityError('stock-to-Client native image hash mismatch')
+            expected = bytearray(payload)
+            struct.pack_into('<H', expected, 12, 54179)
+            struct.pack_into('<I', expected, 14, 0xffffffff)
+            if transport != bytes(expected):
+                raise IdentityError('stock wrapper may change only the OTA image type and file version')
+            return {'board': board, 'source': 'stock', 'source_role': source_role,
+                    'target_role': target_role, 'target_version': native['file_version']}
+        if target_role != 'Router':
             raise IdentityError('stock conversion requires stock-wrapper to Router')
         return {'board': board, 'source': 'stock', 'target_version': native['file_version']}
 
