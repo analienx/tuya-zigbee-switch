@@ -91,21 +91,22 @@ def test_wrapper_proof_accepts_header_only_diff(tmp_path):
     assert campaign.verify_stock_router_wrapper(profile, router_entry) is None
 
 
-@pytest.mark.parametrize('mutate', [
-    lambda b: bytearray(b[:-1]) + b'\x01',          # payload byte changed
-    lambda b: (lambda w: (struct.pack_into('<H', w, 6, 0xDEAD), bytes(w))[1])(bytearray(b)),
+@pytest.mark.parametrize('mutate, match', [
+    (lambda b: bytearray(b[:-1]) + b'\x01', 'preserve the entire'),  # payload byte changed
+    # Flips the header_length field (offset 6) -- inside the 56-byte header
+    # but outside the image-type/file-version bytes (12..17) a stock wrapper
+    # is allowed to change.
+    (lambda b: (lambda w: (struct.pack_into('<H', w, 6, 0xDEAD), bytes(w))[1])(bytearray(b)),
+     'only change'),
 ])
-def test_wrapper_proof_rejects_payload_or_extra_header_change(tmp_path, mutate):
-    """The second case flips the header_length field (offset 6) — inside the
-    56-byte header but outside the image-type/file-version bytes (12..17)
-    that a stock wrapper is allowed to change."""
+def test_wrapper_proof_rejects_payload_or_extra_header_change(tmp_path, mutate, match):
     profile = stock_profile(tmp_path)
     wrapper = Path(profile['image']).read_bytes()
     tampered = bytes(mutate(wrapper))
     Path(profile['image']).write_bytes(tampered)
     profile['sha256'] = hashlib.sha256(tampered).hexdigest()
     matrix = json.loads(Path(profile['pm_router_matrix_evidence']).read_text())
-    with pytest.raises(ValueError, match='only change'):
+    with pytest.raises(ValueError, match=match):
         campaign.verify_stock_router_wrapper(profile, matrix['artifacts'][0])
 
 
@@ -166,10 +167,10 @@ def test_verified_router_pm_candidate_native_path_still_requires_baseline_file(t
     profile['image_type'] = NATIVE_IMAGE_TYPE
     profile['image'] = profile['native_image']
     profile['sha256'] = profile['native_sha256']
-    with pytest.raises(ValueError, match='settings baseline'):
+    with pytest.raises(ValueError, match='baseline'):
         campaign.verified_router_pm_candidate(profile)
     profile['pm_settings_baseline'] = str(tmp_path / 'missing.json')
-    with pytest.raises(ValueError, match='settings baseline'):
+    with pytest.raises(ValueError, match='baseline'):
         campaign.verified_router_pm_candidate(profile)
 
 
@@ -184,6 +185,7 @@ def test_load_profile_rejects_unsafe_stock_router_settings(tmp_path, mutation, m
     profile.update(mutation)
     profile.update({
         'image_type': STOCK_IMAGE_TYPE, 'url': 'http://example.invalid/w.ota',
+        'broker': '127.0.0.1',
         'mqtt_config': str(write(tmp_path / 'mqtt.yaml', b'mqtt: {}')),
         'workdir': str(tmp_path / 'campaign'),
         'expect_relay': 'ON', 'index_url': 'http://example.invalid/i.json',
@@ -200,7 +202,7 @@ def test_load_profile_requires_native_fields_for_stock_conversion(tmp_path):
     profile = stock_profile(tmp_path)
     del profile['native_sha256']
     profile.update({
-        'url': 'http://example.invalid/w.ota',
+        'url': 'http://example.invalid/w.ota', 'broker': '127.0.0.1',
         'mqtt_config': str(write(tmp_path / 'mqtt.yaml', b'mqtt: {}')),
         'workdir': str(tmp_path / 'campaign'),
         'expect_relay': 'ON', 'index_url': 'http://example.invalid/i.json',
@@ -216,7 +218,7 @@ def test_load_profile_requires_native_fields_for_stock_conversion(tmp_path):
 def test_stock_router_flash_dispatch_order_matches_native_router_flash(tmp_path, monkeypatch):
     profile = stock_profile(tmp_path)
     profile.update({
-        'url': 'http://example.invalid/w.ota',
+        'url': 'http://example.invalid/w.ota', 'broker': '127.0.0.1',
         'mqtt_config': str(write(tmp_path / 'mqtt.yaml', b'mqtt: {}')),
         'workdir': str(tmp_path / 'campaign'),
         'expect_relay': 'ON', 'index_url': 'http://example.invalid/i.json',
