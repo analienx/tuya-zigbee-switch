@@ -153,6 +153,7 @@ void process_device_type_change() {
     if (stored_device_type != CURRENT_DEVICE_TYPE) {
         printf("Device type change detected: %d -> %d\r\n", stored_device_type,
                CURRENT_DEVICE_TYPE);
+
         /* Record the new role only once the old role's Zigbee state is gone:
          * an interrupted reset must repeat on the next boot, not leave this
          * Router on the Client's network state. */

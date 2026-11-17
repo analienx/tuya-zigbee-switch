@@ -4,6 +4,7 @@
 #include "hal/printf_selector.h"
 #include "hal/system.h"
 #include "hal/tasks.h"
+#include <stddef.h>
 #include <stdint.h>
 
 static hal_task_t reset_task;
