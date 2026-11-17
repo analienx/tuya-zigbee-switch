@@ -87,6 +87,17 @@ int main(void) {
     };
     network_indicator_not_connected(&plain);
     assert(only.blink_times_left == LED_BLINK_FOREVER);
+
+    /* led_on() mid-blink leaves the timer scheduled; a new blink must cancel
+     * it, not re-initialize it (the stub scheduler exits on that). */
+    led_t lone = { .pin = 0, .on_high = 1 };
+    led_blink(&lone, 500, 500, LED_BLINK_FOREVER);
+    step(100);
+    led_on(&lone);
+    led_blink(&lone, 500, 500, LED_BLINK_FOREVER);
+    assert(pin_level[0] == 1);
+    step(500);
+    assert(pin_level[0] == 0);
     return 0;
 }
 '''
