@@ -6,6 +6,8 @@
 
 typedef struct {
     led_t *leds[4];
+    // Extra LEDs that blink in phase with leds[] only while not joined.
+    led_t *search_leds[4];
     bool   has_dedicated_led;
     bool   manual_state_when_connected;
 } network_indicator_t;

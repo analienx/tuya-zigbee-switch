@@ -12,6 +12,8 @@ def marker_binary(tmp_path_factory):
     source = (ROOT / 'src/app.c').read_text()
     start = 'void process_device_type_change() {'
     role = start + source.split('#else\n' + start, 1)[1].split('\n#endif', 1)[0]
+    marker = 'static void write_current_role_marker(void) {'
+    helper = marker + source.split(marker, 1)[1].split('\n#endif', 1)[0]
     harness = r'''
 #include <assert.h>
 #include <stdint.h>
@@ -23,6 +25,7 @@ def marker_binary(tmp_path_factory):
 static enum device_type_t stored_role = DEVICE_TYPE_END_DEVICE;
 static hal_nvm_status_t read_status = HAL_NVM_SUCCESS;
 static unsigned writes, network_resets;
+static void (*pending_after_reset)(void);
 hal_nvm_status_t hal_nvm_read(uint8_t item, uint16_t size, uint8_t *data) {
     assert(item == NV_ITEM_DEVICE_TYPE && size == sizeof(stored_role));
     if (read_status == HAL_NVM_SUCCESS) memcpy(data, &stored_role, size);
@@ -34,7 +37,17 @@ hal_nvm_status_t hal_nvm_write(uint8_t item, uint16_t size, uint8_t *data) {
     memcpy(&stored_role, data, size);
     return HAL_NVM_SUCCESS;
 }
-void schedule_network_reset(uint16_t ms) { assert(ms == 1); network_resets++; }
+void schedule_network_reset_then(uint16_t ms, void (*after_reset)(void)) {
+    assert(ms == 1 && after_reset != NULL);
+    network_resets++;
+    pending_after_reset = after_reset;
+}
+/* The reset task: Zigbee state is erased, then after_reset runs. */
+static void finish_network_reset(void) {
+    assert(pending_after_reset != NULL);
+    pending_after_reset();
+    pending_after_reset = NULL;
+}
 '''
     cases = r'''
 int main(int argc, char **argv) {
@@ -47,17 +60,32 @@ int main(int argc, char **argv) {
         assert(stored_role == DEVICE_TYPE_END_DEVICE);
         read_status = HAL_NVM_SUCCESS;
         process_device_type_change();
-        assert(writes == 1 && network_resets == 1);
-        assert(stored_role == DEVICE_TYPE_ROUTER);
+        assert(writes == 0 && network_resets == 1);
+        finish_network_reset();
+        assert(writes == 1 && stored_role == DEVICE_TYPE_ROUTER);
     } else if (!strcmp(argv[1], "missing-marker")) {
         read_status = HAL_NVM_NOT_FOUND;
         process_device_type_change();
         assert(writes == 1 && network_resets == 0);
         assert(stored_role == DEVICE_TYPE_ROUTER);
     } else if (!strcmp(argv[1], "client-to-router")) {
+        /* The new role is recorded only after the old state is erased. */
         process_device_type_change();
-        assert(writes == 1 && network_resets == 1);
-        assert(stored_role == DEVICE_TYPE_ROUTER);
+        assert(writes == 0 && network_resets == 1);
+        assert(stored_role == DEVICE_TYPE_END_DEVICE);
+        finish_network_reset();
+        assert(writes == 1 && stored_role == DEVICE_TYPE_ROUTER);
+    } else if (!strcmp(argv[1], "interrupted-reset")) {
+        /* Power lost before the reset ran: the next boot must repeat it. */
+        process_device_type_change();
+        pending_after_reset = NULL;
+        process_device_type_change();
+        assert(writes == 0 && network_resets == 2);
+        assert(stored_role == DEVICE_TYPE_END_DEVICE);
+        finish_network_reset();
+        assert(writes == 1 && stored_role == DEVICE_TYPE_ROUTER);
+        process_device_type_change();
+        assert(writes == 1 && network_resets == 2);
     } else if (!strcmp(argv[1], "same-role")) {
         stored_role = DEVICE_TYPE_ROUTER;
         process_device_type_change();
@@ -69,13 +97,14 @@ int main(int argc, char **argv) {
     binary = tmp_path_factory.mktemp('router-marker') / 'router-marker'
     subprocess.run(['cc', '-std=c99', '-Wall', '-Werror', '-DHAL_STUB=1',
                     '-I', str(ROOT / 'src'), '-x', 'c', '-', '-o', str(binary)],
-                   input=harness + role + cases, text=True,
+                   input=harness + helper + role + cases, text=True,
                    capture_output=True, check=True)
     return binary
 
 
 @pytest.mark.parametrize('case', [
-    'unreadable-marker', 'missing-marker', 'client-to-router', 'same-role',
+    'unreadable-marker', 'missing-marker', 'client-to-router',
+    'interrupted-reset', 'same-role',
 ])
 def test_router_role_marker_contract(marker_binary, case):
     subprocess.run([str(marker_binary), case], check=True, timeout=10)

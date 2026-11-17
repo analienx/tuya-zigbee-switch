@@ -102,7 +102,11 @@ int main(void) {
     bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,0); /* duplicate A */
     now+=10000u; hal_zigbee_start_network_steering();
     assert(steer_calls==1u);
-    now+=FACTORY_STEERING_TERMINAL_HOLD_MS+15u*60u*1000u+1u;
+    /* Not before the hold: a short hold must still be a hold. */
+    now+=FACTORY_STEERING_TERMINAL_HOLD_MS-20000u;
+    hal_zigbee_start_network_steering();
+    assert(steer_calls==1u && rescue_calls==0u);
+    now+=FACTORY_STEERING_STAGGER_MS+20001u;
     hal_zigbee_start_network_steering();
     assert(steer_calls==1u && rescue_calls==1u && budget_used==1u);
     hal_zigbee_start_network_steering();
@@ -148,7 +152,7 @@ int main(void) {
      * storm and no unsafe repeated steering A/B. Supervised reboot remains
      * a separate physical intervention after the automatic cap. */
     budget_used=2u;
-    now+=FACTORY_STEERING_OWNER_HOLD_MS+15u*60u*1000u+1u;
+    now+=FACTORY_STEERING_OWNER_HOLD_MS+FACTORY_STEERING_STAGGER_MS+1u;
     hal_zigbee_start_network_steering();
     assert(steer_calls==5u && rescue_calls==1u && budget_used==2u);
     return 0;

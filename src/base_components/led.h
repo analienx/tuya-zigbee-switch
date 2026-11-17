@@ -50,4 +50,12 @@ void led_off(led_t *led);
 void led_blink(led_t *led, uint16_t on_time_ms, uint16_t off_time_ms,
                uint16_t times);
 
+/**
+ * @brief      Turn off led and cancel its pending blink timer, so a following
+ *             led_blink() starts a new phase
+ * @param	   *led - Led to use
+ * @return     none
+ */
+void led_stop(led_t *led);
+
 #endif
