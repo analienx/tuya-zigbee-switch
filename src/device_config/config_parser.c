@@ -35,6 +35,7 @@ void peripherals_init(void);
 
 network_indicator_t network_indicator = {
     .leds                        = { NULL, NULL, NULL, NULL },
+    .search_leds                 = { NULL, NULL, NULL, NULL },
     .has_dedicated_led           = 0,
     .manual_state_when_connected = 1,
 };
@@ -251,6 +252,16 @@ void parse_config() {
                     }
                 }
             }
+#ifdef BSEED_SEARCH_LEDS
+            else {
+                for (int index = 0; index < 4; index++) {
+                    if (network_indicator.search_leds[index] == NULL) {
+                        network_indicator.search_leds[index] = &leds[leds_cnt];
+                        break;
+                    }
+                }
+            }
+#endif
             leds_cnt++;
         } else if (entry[0] == 'S') {
             hal_gpio_pin_t  pin  = hal_gpio_parse_pin(entry + 1);

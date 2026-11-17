@@ -266,6 +266,10 @@ void sync_indicator_led(zigbee_relay_cluster *cluster) {
         break;
     }
 
+#ifdef BSEED_SEARCH_LEDS
+    // The network-search blink owns the LED until the join stops it.
+    if (cluster->indicator_led->blink_times_left != LED_BLINK_FOREVER)
+#endif
     cluster->indicator_state ? led_on(cluster->indicator_led)
                            : led_off(cluster->indicator_led);
 

@@ -240,9 +240,11 @@ static uint32_t client_zdo_rejoin_deferred_since_ms;
 /* Factory-new steering uses untagged BDB terminal callbacks as well. After
  * one accepted steering operation, a second SDK owner cannot be safely
  * assigned within the same boot. A prolonged failed or orphaned commission
- * may instead use the existing fail-closed rescue budget for a clean boot. */
-#define FACTORY_STEERING_TERMINAL_HOLD_MS    (45u * 60u * 1000u)
-#define FACTORY_STEERING_OWNER_HOLD_MS       (90u * 60u * 1000u)
+ * may instead use the existing fail-closed rescue budget for a clean boot.
+ * A factory-new device holds no network state or routes, so the reboot costs
+ * nothing; a long hold only leaves a freshly converted socket dark. */
+#define FACTORY_STEERING_TERMINAL_HOLD_MS    (15u * 60u * 1000u)
+#define FACTORY_STEERING_OWNER_HOLD_MS       (15u * 60u * 1000u)
 static bool     network_steering_terminal_seen;
 static bool     network_steering_checkpoint_scheduled;
 static uint32_t network_steering_terminal_ms;

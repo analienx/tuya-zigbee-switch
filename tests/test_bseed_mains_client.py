@@ -92,7 +92,7 @@ def test_router_to_client_transition_resets_network_not_application_nv_module():
     assert app.index("if (process_device_type_change())") < app.index("parse_config();")
     assert "#else\nvoid process_device_type_change()" in app
     assert "#ifndef BSEED_MAINS_CLIENT\n    process_device_type_change();" in app
-    assert "schedule_network_reset(1);" in app
+    assert "schedule_network_reset_then(1, write_current_role_marker);" in app
     assert "hal_nvm_clear_all" not in app
     assert "#ifdef BSEED_MAINS_CLIENT\nbool hal_role_change_reset" in telink
     for module in ["NV_MODULE_ZB_INFO", "NV_MODULE_ADDRESS_TABLE", "NV_MODULE_APS", "NV_MODULE_ZCL", "NV_MODULE_OTA", "NV_MODULE_KEYPAIR"]:

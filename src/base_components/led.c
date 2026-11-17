@@ -63,3 +63,10 @@ void led_blink(led_t *led, uint16_t on_time_ms, uint16_t off_time_ms,
     hal_tasks_init(&led->blink_task);
     hal_tasks_schedule(&led->blink_task, on_time_ms);
 }
+
+void led_stop(led_t *led) {
+    // Only a task led_blink() initialized can be linked into the timer list.
+    if (led->blink_task.handler == led_blink_handler)
+        hal_tasks_unschedule(&led->blink_task);
+    led_off(led);
+}
