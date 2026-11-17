@@ -97,3 +97,116 @@ def test_stale_build_allows_interview_candidate_only_after_fresh_inventory_and_l
     assert (evidence['result'] == 'rejoin_candidate') == expected
     assert evidence['identity_verified'] is False
     assert evidence['inventory']['software_build_id'] == 'old-build'
+
+
+def test_window_budget_bounds_each_window_and_the_whole_campaign():
+    from bseed_z2m_rejoin_window import window_budget
+    assert window_budget(120, None) == (120, 120)
+    assert window_budget(180, 2100) == (180, 2100)
+    for seconds, total in ((20, 600), (200, 600), (120, 60), (120, 2701)):
+        with pytest.raises(ValueError):
+            window_budget(seconds, total)
+
+
+def test_only_a_device_new_to_the_network_counts_as_foreign_join():
+    from bseed_z2m_rejoin_window import foreign_joiner
+    known = {IEEE, '0xa4c138075cd16ed4'}
+    joined = lambda ieee, kind='device_joined': {'type': kind, 'data': {'ieee_address': ieee}}
+    assert foreign_joiner(joined('0x00000000deadbeef'), known, IEEE) == '0x00000000deadbeef'
+    assert foreign_joiner(joined('0x00000000deadbeef', 'device_announce'), known, IEEE)
+    assert foreign_joiner(joined(IEEE), known, IEEE) is None
+    assert foreign_joiner(joined('0xa4c138075cd16ed4'), known, IEEE) is None
+    assert foreign_joiner(joined('0x00000000deadbeef', 'device_leave'), known, IEEE) is None
+    assert foreign_joiner('not an event', known, IEEE) is None
+
+
+def _run_campaign(tmp_path, monkeypatch, *, total, on_open, live_role='EndDevice'):
+    import itertools
+    import json
+    from types import SimpleNamespace
+    import bseed_z2m_rejoin_window as module
+
+    config = tmp_path / 'mqtt.yaml'
+    config.write_text('mqtt: {base_topic: test}')
+    lock = tmp_path / 'lock.json'
+    lock.write_text(json.dumps(LOCK))
+    output = tmp_path / 'evidence.json'
+    target = {**INVENTORY[0], 'software_build_id': 'old-build', 'network_address': 123}
+    inventory = [target, INVENTORY[1]]
+    requests, pending = [], []
+
+    class Event:
+        def set(self): pass
+        def clear(self): pass
+        def wait(self, *args):
+            while pending:
+                pending.pop(0)()
+            return True
+
+    class Client:
+        opens = 0
+        def __init__(self, *args, **kwargs): pass
+        def username_pw_set(self, *args): pass
+        def connect(self, *args): pass
+        def subscribe(self, *args): pass
+        def disconnect(self): pass
+        def loop_stop(self): pass
+        def emit(self, topic, data, retain=False):
+            self.on_message(self, None, SimpleNamespace(topic='test/' + topic,
+                payload=json.dumps(data).encode(), retain=retain))
+        def loop_start(self):
+            self.on_connect(self, None, None, SimpleNamespace(is_failure=False), None)
+            self.emit('bridge/devices', inventory, True)
+            self.emit('bridge/info', {'permit_join': False}, True)
+        def publish(self, topic, payload, **kwargs):
+            data = json.loads(payload)
+            requests.append(data)
+            self.emit('bridge/response/permit_join', {'status': 'ok', 'transaction': data['transaction']})
+            if data['time']:
+                Client.opens += 1
+                on_open(Client.opens, lambda *event: pending.append(lambda: self.emit(*event)), inventory)
+            return SimpleNamespace(wait_for_publish=lambda *args: None)
+
+    monkeypatch.setattr(module, 'mqtt', SimpleNamespace(
+        Client=Client, CallbackAPIVersion=SimpleNamespace(VERSION2=2)))
+    monkeypatch.setattr(module.threading, 'Event', Event)
+    monkeypatch.setattr(module, 'read_node_descriptor', lambda *args: {'role': live_role})
+    monkeypatch.setattr(module.time, 'monotonic', lambda counter=itertools.count(): next(counter))
+    monkeypatch.setattr(module, 'arguments', lambda: SimpleNamespace(
+        target=target['friendly_name'], ieee=IEEE, confirm_ieee=IEEE,
+        permit_via=INVENTORY[1]['friendly_name'], seconds=30, total_seconds=total,
+        expect_role='EndDevice', expect_build='new-build', mqtt_config=str(config),
+        broker='mock', campaign_lock=str(lock), output=str(output)))
+    code = 0
+    try:
+        module.main()
+    except SystemExit as error:
+        code = error.code
+    return code, [r['time'] for r in requests], json.loads(output.read_text())
+
+
+def test_window_reopens_until_the_target_rejoins(tmp_path, monkeypatch):
+    def on_open(n, schedule, inventory):
+        if n == 2:  # the socket's next attempt lands in the second window
+            schedule('bridge/devices', inventory, False)
+    code, times, evidence = _run_campaign(tmp_path, monkeypatch, total=200, on_open=on_open)
+    assert code == 0 and times == [30, 30, 0]
+    assert evidence['result'] == 'rejoin_candidate' and len(evidence['windows']) == 2
+    assert evidence['total_seconds'] == 200 and evidence['foreign_join'] is None
+
+
+def test_window_stops_at_total_and_closes_when_target_never_rejoins(tmp_path, monkeypatch):
+    code, times, evidence = _run_campaign(tmp_path, monkeypatch, total=100,
+                                          on_open=lambda *args: None)
+    assert code == 2 and times[-1] == 0 and len(times) >= 3
+    assert all(t == 30 for t in times[:-1]) and evidence['result'] == 'unconfirmed'
+
+
+def test_foreign_join_aborts_and_closes_immediately(tmp_path, monkeypatch):
+    def on_open(n, schedule, inventory):
+        schedule('bridge/event', {'type': 'device_joined',
+                                  'data': {'ieee_address': '0x00000000deadbeef'}}, False)
+    code, times, evidence = _run_campaign(tmp_path, monkeypatch, total=600, on_open=on_open)
+    assert code == 2 and times == [30, 0]
+    assert evidence['foreign_join'] == '0x00000000deadbeef'
+    assert evidence['result'] == 'foreign_join_aborted'

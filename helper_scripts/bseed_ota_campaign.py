@@ -90,6 +90,10 @@ def load_profile(path):
     if data.get('network_lock_dir') and Path(data['network_lock_dir']).is_relative_to(ROOT):
         raise ValueError('Network lock authority must not be inside repository')
     validate_pm_mode(data)
+    if preserve_state(data):
+        relay_endpoints(data)
+        post_ota_configure(data)
+    join_total_seconds(data)
     if (data.get('force_test_transition') is True and data.get('non_pm') is True and
             data.get('device') == 'BedroomSocketCabinetRight' and
             data.get('ieee') == '0xa4c13824a7005afb'):
@@ -103,6 +107,106 @@ def load_profile(path):
             raise ValueError('Bedroom non-PM FORCE canary requires at least 14400 s overall monitor')
     data['_profile_path'] = str(source)
     return data
+
+
+STATE_SNAPSHOT = 'DEVICE_STATE_SNAPSHOT.json'
+DEFAULT_JOIN_TOTAL_SECONDS = 2100  # firmware boot + both orphaned-steering rescues
+
+
+def _optional_boolean(profile, key):
+    value = profile.get(key)
+    if value is not None and value is not True and value is not False:
+        raise ValueError(key + ' must be an explicit Boolean')
+    return value
+
+
+def preserve_state(profile):
+    """Snapshot group membership before the OTA and restore it afterwards."""
+    return _optional_boolean(profile, 'preserve_device_state') is True
+
+
+def relay_endpoints(profile):
+    """Relay (and Groups) endpoint before and after the image, per board layout."""
+    from bseed_z2m_device_state import default_relay_endpoint
+    before = profile.get('preflash_relay_endpoint')
+    if before is None:
+        before = default_relay_endpoint(profile['manufacturer'], profile['model'])
+    after = profile.get('postflash_relay_endpoint')
+    if after is None:
+        after = default_relay_endpoint(profile.get('postflash_manufacturer') or 'custom',
+                                       profile.get('postflash_model') or profile['model'])
+    for value in (before, after):
+        if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 240:
+            raise ValueError('Relay endpoints must be integers 1..240')
+    return before, after
+
+
+def post_ota_configure(profile):
+    """A role change erases the device's reporting setup while Zigbee2MQTT still
+    lists it as configured. PM Clients get theirs from bseed_pm_provision."""
+    value = _optional_boolean(profile, 'post_ota_configure')
+    if value is not None:
+        return value
+    return (profile['preflash_role'] != profile['postflash_role'] and
+            profile['postflash_role'] == 'Router')
+
+
+def join_total_seconds(profile):
+    value = profile.get('join_total_seconds', DEFAULT_JOIN_TOTAL_SECONDS)
+    if not isinstance(value, int) or isinstance(value, bool) or not 30 <= value <= 2700:
+        raise ValueError('join_total_seconds must be an integer 30..2700')
+    if value < int(profile.get('join_seconds', 120)):
+        raise ValueError('join_total_seconds must cover at least one join_seconds window')
+    return value
+
+
+def state_snapshot_cmd(profile, evidence):
+    before, _ = relay_endpoints(profile)
+    return [sys.executable, '-u', str(ROOT/'helper_scripts/bseed_z2m_device_state.py'), 'snapshot',
+            '--device', profile['device'], '--ieee', profile['ieee'],
+            '--relay-endpoint', str(before), '--mqtt-config', profile['mqtt_config'],
+            '--broker', profile['broker'], '--output', str(evidence)]
+
+
+def state_restore_cmd(profile, confirmation, evidence):
+    if confirmation != profile['ieee']:
+        raise ValueError('Confirm exact IEEE to restore device state')
+    _, after = relay_endpoints(profile)
+    cmd = [sys.executable, '-u', str(ROOT/'helper_scripts/bseed_z2m_device_state.py'), 'restore',
+           '--device', profile['device'], '--ieee', profile['ieee'], '--confirm-ieee', confirmation,
+           '--relay-endpoint', str(after),
+           '--snapshot', str(Path(profile['workdir']) / STATE_SNAPSHOT),
+           '--mqtt-config', profile['mqtt_config'], '--broker', profile['broker'],
+           '--output', str(evidence)]
+    if post_ota_configure(profile):
+        cmd.append('--configure')
+    return cmd
+
+
+def take_state_snapshot(profile):
+    """Runs before any firmware write. A resumed campaign keeps its first,
+    pre-OTA snapshot: a later one would record the already-lost state."""
+    if not preserve_state(profile):
+        print('STATE_PRESERVATION_DISABLED groups and reporting are not snapshotted', flush=True)
+        return 0
+    path = Path(profile['workdir']) / STATE_SNAPSHOT
+    if path.exists():
+        print('STATE_SNAPSHOT_REUSED', path, flush=True)
+        return 0
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return subprocess.call(state_snapshot_cmd(profile, path))
+
+
+def restore_device_state(profile, confirmation):
+    if not preserve_state(profile):
+        return 0
+    if not (Path(profile['workdir']) / STATE_SNAPSHOT).is_file():
+        print('STATE_SNAPSHOT_MISSING no pre-OTA snapshot to restore from', flush=True)
+        return 3
+    import uuid
+    evidence = Path(profile['workdir']) / ('state_restore_' + uuid.uuid4().hex + '.json')
+    print('PRIVATE_EVIDENCE', evidence, flush=True)
+    return subprocess.call(state_restore_cmd(profile, confirmation, evidence))
 
 
 def make_index(profile):
@@ -233,6 +337,7 @@ def rejoin_cmd(profile, confirmation, evidence_path):
             '--target', profile['device'], '--ieee', profile['ieee'],
             '--confirm-ieee', confirmation, '--permit-via', profile['join_via'],
             '--seconds', str(profile.get('join_seconds', 120)),
+            '--total-seconds', str(join_total_seconds(profile)),
             '--expect-build', profile['postflash_build'], '--expect-role', profile['postflash_role'],
             '--mqtt-config', profile['mqtt_config'], '--broker', profile['broker'],
             '--campaign-lock', str(Path(profile['workdir'])/'ACTIVE_LOCK.json'),
@@ -349,8 +454,8 @@ def verified_router_pm_candidate(profile):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', required=True, help='Private JSON profile outside git')
-    parser.add_argument('--mode', choices=['prepare', 'preflight', 'link-gate', 'qualify', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'reconcile-installed', 'reconcile-source', 'abandon-source', 'provision-pm', 'audit-pm', 'postflash', 'reinterview', 'status'], required=True)
-    parser.add_argument('--confirm-ieee', help='Required for flash, transition, rejoin, metadata, reconciliation, abandonment and provision-pm; must match profile IEEE exactly')
+    parser.add_argument('--mode', choices=['prepare', 'preflight', 'link-gate', 'qualify', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'reconcile-installed', 'reconcile-source', 'abandon-source', 'provision-pm', 'audit-pm', 'postflash', 'reinterview', 'snapshot-state', 'restore-state', 'status'], required=True)
+    parser.add_argument('--confirm-ieee', help='Required for flash, transition, rejoin, metadata, reconciliation, abandonment, provision-pm and restore-state; must match profile IEEE exactly')
     parser.add_argument('--confirm-sha256', help='Abandon-source only: exact failed candidate SHA-256')
     parser.add_argument('--confirm-load-unplugged', action='store_true', help='Flash/transition: operator just physically verified no appliance attached; required for non-PM and PM physical-proof route')
     args = parser.parse_args()
@@ -427,6 +532,23 @@ def main():
                '--confirm-sha256', args.confirm_sha256,
                '--reason', 'operator_abandoned']
         raise SystemExit(subprocess.call(cmd))
+    if args.mode == 'snapshot-state':
+        if args.confirm_ieee:
+            raise SystemExit('Read-only snapshot takes no --confirm-ieee')
+        path = work / STATE_SNAPSHOT
+        if path.exists():
+            raise SystemExit('Pre-OTA snapshot already exists; never overwrite it: ' + str(path))
+        work.mkdir(parents=True, exist_ok=True)
+        raise SystemExit(subprocess.call(state_snapshot_cmd(profile, path)))
+    if args.mode == 'restore-state':
+        if args.confirm_ieee != profile['ieee']:
+            raise SystemExit('State restore refused: confirm exact IEEE')
+        if not (work / STATE_SNAPSHOT).is_file():
+            raise SystemExit('State restore requires the pre-OTA snapshot in the workdir')
+        import uuid
+        evidence = work / ('state_restore_' + uuid.uuid4().hex + '.json')
+        print('PRIVATE_EVIDENCE', evidence, flush=True)
+        raise SystemExit(subprocess.call(state_restore_cmd(profile, args.confirm_ieee, evidence)))
     if args.mode == 'audit-pm':
         import uuid
         evidence = work / ('pm_role_audit_' + uuid.uuid4().hex + '.json')
@@ -511,6 +633,10 @@ def main():
             if profile.get('non_pm') is True:
                 from bseed_nonpm_recovery_gate import verify_transition_recovery
                 verify_transition_recovery(profile, confirm_unloaded=args.confirm_load_unplugged)
+            snapshot_status = take_state_snapshot(profile)
+            if snapshot_status:
+                print('STATE_SNAPSHOT_FAILED_NO_FLASH', flush=True)
+                raise SystemExit(snapshot_status)
             print('ONE_DEVICE_ROLE_TRANSITION', profile['ieee'], flush=True)
             flashed = subprocess.call(runner_args(profile, 'flash', confirm_unloaded=args.confirm_load_unplugged))
             if flashed: raise SystemExit(flashed)  # Primitive never retries; supervised resume must reconcile first.
@@ -523,6 +649,9 @@ def main():
         if profile.get('require_pm'):
             from bseed_pm_telemetry_guard import release
             release(profile, metadata_evidence)
+        restored = restore_device_state(profile, args.confirm_ieee)
+        if restored: raise SystemExit(restored)
+        if profile.get('require_pm'):
             if profile['postflash_role'] == 'EndDevice':
                 pm_evidence = work / ('pm_provision_' + uuid.uuid4().hex + '.json')
                 provisioned = subprocess.call(provision_cmd(profile, args.confirm_ieee, pm_evidence))
@@ -551,6 +680,10 @@ def main():
             raise SystemExit('Load confirmation requires the explicit PM physical-proof route')
         if profile.get('require_pm') and profile['postflash_role'] == 'EndDevice':
             provision_cmd(profile, args.confirm_ieee, work / 'pm_prevalidated.json')
+        snapshot_status = take_state_snapshot(profile)
+        if snapshot_status:
+            print('STATE_SNAPSHOT_FAILED_NO_FLASH', flush=True)
+            raise SystemExit(snapshot_status)
         print('EXPLICIT_FLASH_TARGET', profile['ieee'], profile['device'], flush=True)
         flashed = subprocess.call(runner_args(profile, 'flash', confirm_unloaded=args.confirm_load_unplugged))
         if flashed: raise SystemExit(flashed)  # Primitive never retries; progress-gated supervisor may resume after reconciliation.
@@ -563,7 +696,10 @@ def main():
         if profile.get('require_pm'):
             from bseed_pm_telemetry_guard import release
             release(profile, interview)
-            import uuid
+        # A stock-to-custom image moves the relay endpoint; restore groups there.
+        restored = restore_device_state(profile, args.confirm_ieee)
+        if restored: raise SystemExit(restored)
+        if profile.get('require_pm'):
             if profile['postflash_role'] == 'Router':
                 post = work / ('postflash_' + uuid.uuid4().hex + '.json')
                 post_code = subprocess.call(postflash_cmd(profile, post))
@@ -587,7 +723,7 @@ def main():
             record_postflash_candidate(profile)
         raise SystemExit(post_status)
     elif args.confirm_ieee:
-        raise SystemExit('--confirm-ieee may only be supplied for flash, transition, rejoin, metadata, reconcile-installed, reconcile-source, abandon-source, reinterview or provision-pm')
+        raise SystemExit('--confirm-ieee may only be supplied for flash, transition, rejoin, metadata, reconcile-installed, reconcile-source, abandon-source, reinterview, provision-pm or restore-state')
     raise SystemExit(subprocess.call(runner_args(profile, args.mode)))
 
 
