@@ -349,6 +349,9 @@ def build_profile(site, name, artifacts, registry=None, live=None):
         'image_type': cand['type'], 'file_version': '0x%08x' % cand['version'],
         'expect_relay': device['expect_relay'], 'force_test_transition': False,
         'require_pm': board == 'pm', 'non_pm': board == 'nonpm',
+        # Sockets: snapshot groups before the OTA and verify them after it.
+        # Multi-relay boards have no default relay endpoint and stay opt-in.
+        'preserve_device_state': board in ('pm', 'nonpm'),
     })
     concurrent = site.get('concurrent_ota_ieees') or []
     if concurrent:

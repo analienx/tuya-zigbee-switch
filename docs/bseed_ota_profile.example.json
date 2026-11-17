@@ -27,6 +27,8 @@
   "postflash_build": "REPLACE_WITH_EXPECTED_CUSTOM_BUILD",
   "join_via": "VERIFIED_NEIGHBOR_ROUTER_FRIENDLY_NAME",
   "join_seconds": 120,
+  "join_total_seconds": 2100,
+  "preserve_device_state": true,
   "source_rejoin_strategy": "auto",
   "allow_join_all_fallback": false,
   "block_bytes": 32,
