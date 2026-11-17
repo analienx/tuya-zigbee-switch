@@ -31,12 +31,29 @@ def stock_source(profile):
     return str(profile.get('manufacturer', '')).startswith(STOCK_PREFIXES)
 
 
+def _paced(profile):
+    delay = profile.get('response_delay_ms')
+    return (not isinstance(delay, bool) and isinstance(delay, int)
+            and delay >= PACED_RESPONSE_DELAY_MS)
+
+
+def default_block_bytes(profile):
+    """Largest block size the policy allows when a profile leaves it unset.
+
+    Without this the runner falls back to its own 50-byte default, which is
+    unproven for stock firmware and unpaced for custom firmware.
+    """
+    if not stock_source(profile) and _paced(profile):
+        return CUSTOM_CLIENT_BLOCK_BYTES
+    return EVIDENCED_BLOCK_BYTES
+
+
 def check_block_bytes(profile, allowed=None):
     """Return the profile's block size, or raise if its downloader is unproven at it.
 
     allowed=None checks only the rules for sizes above 32 and accepts an
-    absent value (the runner then uses its own default). Gates that admit
-    only evidenced sizes pass allowed=GATE_BLOCK_BYTES.
+    absent value; load_profile fills that from default_block_bytes first.
+    Gates that admit only evidenced sizes pass allowed=GATE_BLOCK_BYTES.
     """
     raw = profile.get('block_bytes')
     if raw is None:
@@ -55,8 +72,7 @@ def check_block_bytes(profile, allowed=None):
         if stock_source(profile):
             raise ValueError('Stock firmware downloads a first conversion; only 32-byte '
                              'blocks are evidenced for it')
-        delay = profile.get('response_delay_ms')
-        if isinstance(delay, bool) or not isinstance(delay, int) or delay < PACED_RESPONSE_DELAY_MS:
+        if not _paced(profile):
             raise ValueError('Blocks above 32 bytes are proven only with response_delay_ms >= %d'
                              % PACED_RESPONSE_DELAY_MS)
     return block

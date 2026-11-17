@@ -8,7 +8,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'helper_scripts'))
 from bseed_ota_block_policy import (  # noqa: E402
-    GATE_BLOCK_BYTES, check_block_bytes, stock_source,
+    GATE_BLOCK_BYTES, check_block_bytes, default_block_bytes, stock_source,
 )
 import bseed_ota_campaign as campaign  # noqa: E402
 
@@ -71,6 +71,27 @@ def _profile_file(tmp_path, **changes):
     path = tmp_path / 'profile.json'
     path.write_text(json.dumps(profile))
     return path
+
+
+@pytest.mark.parametrize('profile,expected', [
+    ({'manufacturer': 'b28wrpvx', 'response_delay_ms': 1200}, 48),
+    ({'manufacturer': 'b28wrpvx', 'response_delay_ms': 250}, 32),
+    ({'manufacturer': 'b28wrpvx'}, 32),
+    ({'manufacturer': '_TZ3000_b28wrpvx', 'response_delay_ms': 1800}, 32),
+])
+def test_unset_block_size_defaults_to_the_largest_proven_size(profile, expected):
+    assert default_block_bytes(profile) == expected
+
+
+def test_load_profile_fills_an_unset_block_size_so_the_runner_never_guesses(tmp_path):
+    paced = campaign.load_profile(_profile_file(tmp_path, block_bytes=None))
+    assert paced['block_bytes'] == 48
+    assert campaign.runner_args(paced, 'check')[
+        campaign.runner_args(paced, 'check').index('--max-block-bytes') + 1] == '48'
+    stock = campaign.load_profile(_profile_file(
+        tmp_path, block_bytes=None, manufacturer='_TZ3000_b28wrpvx', model='TS011F',
+        image_type=54179, file_version='0xffffffff'))
+    assert stock['block_bytes'] == 32
 
 
 def test_load_profile_applies_the_policy_to_every_campaign(tmp_path):
