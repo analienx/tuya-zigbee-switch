@@ -55,6 +55,11 @@ void led_blink(led_t *led, uint16_t on_time_ms, uint16_t off_time_ms,
         return;
     }
 
+    // led_on()/led_off() end a blink without cancelling its timer, which stays
+    // linked until it next fires; never re-init an event still in the list.
+    if (led->blink_task.handler == led_blink_handler)
+        hal_tasks_unschedule(&led->blink_task);
+
     hal_gpio_write(led->pin, led->on_high);
     led->on = 1;
     led->blink_times_left   = times;
