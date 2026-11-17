@@ -32,8 +32,8 @@ Exact device identity. Independent relay control. PM telemetry. Router and mains
 
 | Hardware family | Zigbee manufacturer / model | Published Router | Sealed Router / mains Client candidates |
 | --- | --- | --- | --- |
-| TS011F-BS-PM · power monitoring | `b28wrpvx` / `TS011F-BS-PM` | `1.2.5-bseedv8u4` | `1.2.5-bseedr22` / `1.2.5-bseedcli25` |
-| TS011F-BS · no metering | `o1jzcxou` / `TS011F-BS` | `1.1.3-bseedv8` | `1.1.3-bseedr19` / `1.1.3-bseedc17` |
+| TS011F-BS-PM · power monitoring | `b28wrpvx` / `TS011F-BS-PM` | `1.2.5-bseedv8u4` | sealed `1.2.5-bseedr22` / `1.2.5-bseedcli25`; draft `1.2.5-bseedr23` / `1.2.5-bseedcli26` |
+| TS011F-BS · no metering | `o1jzcxou` / `TS011F-BS` | `1.1.3-bseedv8` | sealed `1.1.3-bseedr19` / `1.1.3-bseedc17`; draft `1.1.3-bseedr20` / `1.1.3-bseedc18` |
 | TS0726 · three-gang switch/dimmer | `iedhxgyi` / `TS0726-3-BS` | `1.1.8-bseedv8` | Separately controlled TS0726 candidate train |
 
 **Do not mistake the rightmost column for an upgrade offer.** These newer images are sealed candidate artifacts, not published fleet updates. One successful `cli25` device canary does not authorize broader Client rollout; role changes and hardware acceptance remain separately gated. Client images and role-transition wrappers are not in the public index. [See full identities, hex versions and acceptance status](docs/bseed_socket_release_status.md).

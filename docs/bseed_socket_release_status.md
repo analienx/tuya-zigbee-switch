@@ -34,11 +34,13 @@ These fresh identities are defined in `helper_scripts/bseed_pm_release.py` and `
 <!-- current-candidate-matrix:start -->
 | Board | Role | Current candidate | Native FILEVER | OTA image type | Publication / acceptance |
 | --- | --- | --- | --- | ---: | --- |
-| PM TS011F-BS-PM | Router | `1.2.5-bseedr22` | `0x12053024` | 43556 | **Sealed** `720aa6b8` · not public · started on hardware 2026-11-13 ([wired restore](bseed_tableleft_r21_r22_recovery_20261113.md)) · OTA and hardware acceptance pending |
-| PM TS011F-BS-PM | mains Client | `1.2.5-bseedcli25` | `0x12053024` | 65024 | **Sealed** `720aa6b8` · not public · [KitchenSocketLeft OTA and postflash canary confirmed operational 2026-11-14](bseed_kitchenleft_cli25_canary_20261114.md) · full hardware/soak acceptance pending |
-| non-PM TS011F-BS | Router | `1.1.3-bseedr19` | `0x1102301E` | 43555 | **Sealed** `720aa6b8` · not public · implementation and hardware acceptance pending |
-| non-PM TS011F-BS | mains Client | `1.1.3-bseedc17` | `0x1102301E` | 65026 | **Sealed** `720aa6b8` · not public · implementation and hardware acceptance pending |
+| PM TS011F-BS-PM | Router | `1.2.5-bseedr23` | `0x12053025` | 43556 | **Draft** PR #134 · not sealed · not public · hardware acceptance pending |
+| PM TS011F-BS-PM | mains Client | `1.2.5-bseedcli26` | `0x12053025` | 65024 | **Draft** PR #134 · not sealed · not public · hardware acceptance pending |
+| non-PM TS011F-BS | Router | `1.1.3-bseedr20` | `0x1102301F` | 43555 | **Draft** PR #134 · not sealed · not public · hardware acceptance pending |
+| non-PM TS011F-BS | mains Client | `1.1.3-bseedc18` | `0x1102301F` | 65026 | **Draft** PR #134 · not sealed · not public · hardware acceptance pending |
 <!-- current-candidate-matrix:end -->
+
+The draft set above adds a 15-minute factory-new steering rescue (was 45/90 minutes), records the Router role marker only after the role-change reset has run, and flashes the relay indicator LED in phase with the status LED while not joined. The previous sealed set stays deployable under its own identities: PM `1.2.5-bseedr22` / `1.2.5-bseedcli25` (`0x12053024`) and non-PM `1.1.3-bseedr19` / `1.1.3-bseedc17` (`0x1102301E`), sealed from `720aa6b8`. r22 was started by wire on Table Left on 2026-11-13 ([record](bseed_tableleft_r21_r22_recovery_20261113.md)); cli25 is [operator-confirmed on KitchenSocketLeft](bseed_kitchenleft_cli25_canary_20261114.md).
 
 The PM Router and Client deliberately share one board-wide version counter but have distinct OTA image types. The same principle applies to the non-PM pair. **Never cross-flash**, change Zigbee roles using the ordinary index, rebuild under a previously sealed identity or use a GitHub build alone as deployment approval.
 

@@ -19,8 +19,9 @@ bool reboot_checkpoint_ready(uint8_t *deferrals);
 /* Reset network state while checkpointing application metering first. */
 void schedule_network_reset(uint16_t delay_ms);
 
-/* As above, running after_reset once the network state is gone and before
- * the reboot. A later schedule_network_reset() call replaces after_reset. */
+/* As above, running after_reset right after the platform network reset call
+ * and before the reboot. A later schedule_network_reset() call replaces
+ * after_reset. */
 void schedule_network_reset_then(uint16_t delay_ms, void (*after_reset)(void));
 
 #endif // RESET_H

@@ -154,9 +154,10 @@ void process_device_type_change() {
         printf("Device type change detected: %d -> %d\r\n", stored_device_type,
                CURRENT_DEVICE_TYPE);
 
-        /* Record the new role only once the old role's Zigbee state is gone:
-         * an interrupted reset must repeat on the next boot, not leave this
-         * Router on the Client's network state. */
+        /* Record the new role only after the old role's Zigbee reset has
+         * run: a reset lost to power failure or a deferred checkpoint must
+         * repeat on the next boot, not leave this Router on the Client's
+         * network state. */
         schedule_network_reset_then(1, write_current_role_marker);
     }
 }

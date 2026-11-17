@@ -242,7 +242,9 @@ static uint32_t client_zdo_rejoin_deferred_since_ms;
  * assigned within the same boot. A prolonged failed or orphaned commission
  * may instead use the existing fail-closed rescue budget for a clean boot.
  * A factory-new device holds no network state or routes, so the reboot costs
- * nothing; a long hold only leaves a freshly converted socket dark. */
+ * only a brief relay dropout while the MCU restarts; a long hold leaves a
+ * freshly converted socket dark (90 min plus stagger stranded a converted
+ * socket for about 1 h 45 min). The rescue budget still bounds reboots. */
 #define FACTORY_STEERING_TERMINAL_HOLD_MS    (15u * 60u * 1000u)
 #define FACTORY_STEERING_OWNER_HOLD_MS       (15u * 60u * 1000u)
 static bool     network_steering_terminal_seen;
