@@ -124,6 +124,13 @@ ifeq ($(strip $(BSEED_LINK_POLICY)),1)
 DEVICE_DEFS += -DBSEED_LINK_POLICY
 endif
 
+# BSEED sockets: relay indicator LEDs flash with the status LED while not
+# joined. Explicit build input so other boards keep their indicator behavior.
+BSEED_SEARCH_LEDS ?=
+ifeq ($(strip $(BSEED_SEARCH_LEDS)),1)
+DEVICE_DEFS += -DBSEED_SEARCH_LEDS
+endif
+
 # Unified PM target options. They are explicit build inputs rather than global
 # firmware behavior, so TS0726 and every existing board remain unchanged.
 BSEED_PM_B28WRPVX ?=

@@ -50,6 +50,17 @@ void hal_tasks_init(hal_task_t *task) {
         exit(1);
     }
 
+    /* The Telink scheduler links the event into the SDK timer list, and
+     * re-initializing a linked event cuts the list there, silently dropping
+     * every later timer. Fail loudly here instead of masking it. */
+    for (int i = 0; i < MAX_TASKS; i++) {
+        if (tasks[i].active && tasks[i].task == task) {
+            io_log("TASKS", "Error: hal_tasks_init on scheduled task %p",
+                   (void *)task);
+            exit(1);
+        }
+    }
+
     memset(&task->platform_struct, 0, sizeof(task->platform_struct));
     io_log("TASKS", "Initialized task at %p", (void *)task);
 }

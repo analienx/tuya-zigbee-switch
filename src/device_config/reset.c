@@ -4,6 +4,7 @@
 #include "hal/printf_selector.h"
 #include "hal/system.h"
 #include "hal/tasks.h"
+#include <stddef.h>
 #include <stdint.h>
 
 static hal_task_t reset_task;
@@ -59,6 +60,8 @@ void reboot_handler(void *arg) {
     hal_system_reset();
 }
 
+static void (*network_reset_done)(void);
+
 static void network_reset_handler(void *arg) {
     (void)arg;
     if (!reboot_checkpoint_ready(&network_reset_deferrals)) {
@@ -66,11 +69,18 @@ static void network_reset_handler(void *arg) {
         return;
     }
     hal_factory_reset();
+    if (network_reset_done != NULL)
+        network_reset_done();
     schedule_reboot(DEFAULT_RESET_DELAY_MS);
 }
 
 void schedule_network_reset(uint16_t delay_ms) {
+    schedule_network_reset_then(delay_ms, NULL);
+}
+
+void schedule_network_reset_then(uint16_t delay_ms, void (*after_reset)(void)) {
     ensure_reset_tasks_initialized();
+    network_reset_done         = after_reset;
     network_reset_task.handler = network_reset_handler;
     hal_tasks_schedule(&network_reset_task,
                        delay_ms != 0 ? delay_ms : DEFAULT_RESET_DELAY_MS);

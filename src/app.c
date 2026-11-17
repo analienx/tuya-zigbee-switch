@@ -57,6 +57,15 @@ static void apply_mains_client_defaults(void) {
 
 #endif
 
+#ifndef BSEED_MAINS_CLIENT
+static void write_current_role_marker(void) {
+    enum device_type_t role = CURRENT_DEVICE_TYPE;
+
+    hal_nvm_write(NV_ITEM_DEVICE_TYPE, sizeof(role), (uint8_t *)&role);
+}
+
+#endif
+
 #ifdef BSEED_MAINS_CLIENT
 static bool process_device_type_change(void) {
     enum device_type_t stored_device_type;
@@ -144,10 +153,12 @@ void process_device_type_change() {
     if (stored_device_type != CURRENT_DEVICE_TYPE) {
         printf("Device type change detected: %d -> %d\r\n", stored_device_type,
                CURRENT_DEVICE_TYPE);
-        stored_device_type = CURRENT_DEVICE_TYPE;
-        hal_nvm_write(NV_ITEM_DEVICE_TYPE, sizeof(stored_device_type),
-                      (uint8_t *)&stored_device_type);
-        schedule_network_reset(1);
+
+        /* Record the new role only after the old role's Zigbee reset has
+         * run: a reset lost to power failure or a deferred checkpoint must
+         * repeat on the next boot, not leave this Router on the Client's
+         * network state. */
+        schedule_network_reset_then(1, write_current_role_marker);
     }
 }
 
