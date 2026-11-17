@@ -73,8 +73,8 @@ def test_physical_proof_stays_refused_for_other_stock_profiles(tmp_path):
 
 
 def runner_args(**changes):
-    return SimpleNamespace(**dict(pm_preflash_physical_unloaded=True, non_pm=False, ts0726=False,
-                                  manufacturer='_TZ3000_b28wrpvx', model='TS011F'), **changes)
+    return SimpleNamespace(**dict(dict(pm_preflash_physical_unloaded=True, non_pm=False, ts0726=False,
+                                       manufacturer='_TZ3000_b28wrpvx', model='TS011F'), **changes))
 
 
 def test_runner_physical_preflight_board_rule():
