@@ -34,13 +34,13 @@ These fresh identities are defined in `helper_scripts/bseed_pm_release.py` and `
 <!-- current-candidate-matrix:start -->
 | Board | Role | Current candidate | Native FILEVER | OTA image type | Publication / acceptance |
 | --- | --- | --- | --- | ---: | --- |
-| PM TS011F-BS-PM | Router | `1.2.5-bseedr23` | `0x12053025` | 43556 | **Draft** PR #134 · not sealed · not public · hardware acceptance pending |
-| PM TS011F-BS-PM | mains Client | `1.2.5-bseedcli26` | `0x12053025` | 65024 | **Draft** PR #134 · not sealed · not public · hardware acceptance pending |
-| non-PM TS011F-BS | Router | `1.1.3-bseedr20` | `0x1102301F` | 43555 | **Draft** PR #134 · not sealed · not public · hardware acceptance pending |
-| non-PM TS011F-BS | mains Client | `1.1.3-bseedc18` | `0x1102301F` | 65026 | **Draft** PR #134 · not sealed · not public · hardware acceptance pending |
+| PM TS011F-BS-PM | Router | `1.2.5-bseedr23` | `0x12053025` | 43556 | **Sealed** `2a5b0d08` · not public · hardware acceptance pending |
+| PM TS011F-BS-PM | mains Client | `1.2.5-bseedcli26` | `0x12053025` | 65024 | **Sealed** `2a5b0d08` · not public · hardware acceptance pending |
+| non-PM TS011F-BS | Router | `1.1.3-bseedr20` | `0x1102301F` | 43555 | **Sealed** `2a5b0d08` · not public · hardware acceptance pending |
+| non-PM TS011F-BS | mains Client | `1.1.3-bseedc18` | `0x1102301F` | 65026 | **Sealed** `2a5b0d08` · not public · hardware acceptance pending |
 <!-- current-candidate-matrix:end -->
 
-The draft set above cuts the orphaned factory-new steering rescue to 5 minutes plus at most 2 minutes of stagger (was 45/90 minutes plus up to 15), records the Router role marker only after the role-change reset has run, and flashes the relay indicator LED in phase with the status LED while not joined. The previous sealed set stays deployable under its own identities: PM `1.2.5-bseedr22` / `1.2.5-bseedcli25` (`0x12053024`) and non-PM `1.1.3-bseedr19` / `1.1.3-bseedc17` (`0x1102301E`), sealed from `720aa6b8`. r22 was started by wire on Table Left on 2026-11-13 ([record](bseed_tableleft_r21_r22_recovery_20261113.md)); cli25 is [operator-confirmed on KitchenSocketLeft](bseed_kitchenleft_cli25_canary_20261114.md).
+The set above, sealed on 2026-11-17 from exact-SHA CI at `2a5b0d08` (PR #134; sealing fixes the bytes, it is not hardware acceptance), cuts the orphaned factory-new steering rescue to 5 minutes plus at most 2 minutes of stagger (was 45/90 minutes plus up to 15), records the Router role marker only after the role-change reset has run, and flashes the relay indicator LED in phase with the status LED while not joined. The previous sealed set stays deployable under its own identities: PM `1.2.5-bseedr22` / `1.2.5-bseedcli25` (`0x12053024`) and non-PM `1.1.3-bseedr19` / `1.1.3-bseedc17` (`0x1102301E`), sealed from `720aa6b8`. r22 was started by wire on Table Left on 2026-11-13 ([record](bseed_tableleft_r21_r22_recovery_20261113.md)); cli25 is [operator-confirmed on KitchenSocketLeft](bseed_kitchenleft_cli25_canary_20261114.md).
 
 The PM Router and Client deliberately share one board-wide version counter but have distinct OTA image types. The same principle applies to the non-PM pair. **Never cross-flash**, change Zigbee roles using the ordinary index, rebuild under a previously sealed identity or use a GitHub build alone as deployment approval.
 
