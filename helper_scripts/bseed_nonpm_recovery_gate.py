@@ -25,6 +25,31 @@ R10_BUILD = '1.1.3-bseedr10'
 R10_SHA256 = 'c2bb21dee350fd375586029eefb03f85791b0941bd386882a0b8653bb15bdb96'
 
 
+# User-authorized 2026-11-18 ("Dont ask about accepting risks again and go
+# ahead", answering the explicit question whether irreversible brick risk is
+# accepted for WRSocketEntrance r19 -> r20 without SWire readbacks): ONE exact
+# same-role Router OTA on this IEEE with the sealed 2a5b0d08 r20 image. It is
+# not a recovery method, not fleet approval and not hardware acceptance. The
+# load must still be proven off for this flash (human attestation or the
+# campaign's fresh verified relay-OFF record).
+ENTRANCE_R20 = {
+    'device': 'WRSocketEntrance', 'ieee': '0xa4c1387b13e9436d',
+    'manufacturer': 'o1jzcxou', 'model': 'TS011F-BS',
+    'preflash_build': '1.1.3-bseedr19', 'postflash_build': '1.1.3-bseedr20',
+    'sha256': 'c3d4f3076710e390c485f5b475aa3a6ca51f444ab8fbac8a32b510f2238653a6',
+    'preflash_relay_physical_mode': 'follow_state', 'expect_relay': 'OFF',
+    'relay_get_key': 'state_relay',
+}
+
+
+def is_exact_entrance_r20_operator_risk(profile, roles, transition):
+    return (not transition and roles == ('Router', 'Router') and
+            all(profile.get(key) == value for key, value in ENTRANCE_R20.items()) and
+            profile.get('require_pm') is False and
+            profile.get('force_test_transition') is False and
+            not profile.get('parallel_ota_max') and not profile.get('concurrent_ota_ieees'))
+
+
 def _private_file(value, label):
     if not isinstance(value, str) or not value or not Path(value).is_absolute():
         raise ValueError(label + ': absolute private file path required')
@@ -133,6 +158,12 @@ def _verify_recovery(profile, *, confirm_unloaded=False,
         return {'ieee': profile['ieee'],
                 'method': 'non-invasive exact Entrance Router v8-to-r18 canary',
                 'recovery_available': False}
+    if not profile.get('recovery_evidence') and is_exact_entrance_r20_operator_risk(profile, roles, transition):
+        return {'ieee': profile['ieee'],
+                'method': 'explicit same-role r19-to-r20 operator risk canary',
+                'recovery_available': False, 'readback_verified': False,
+                'operator_risk_accepted': True, 'hardware_acceptance': False,
+                'warning': 'No full chip readback. Loss of socket recoverability is possible.'}
     evidence = _private_file(profile.get('recovery_evidence'), 'Recovery evidence')
     record = json.loads(evidence.read_text(encoding='utf8'))
     if record.get('schema') != 1 or record.get('target_ieee') != profile['ieee']:

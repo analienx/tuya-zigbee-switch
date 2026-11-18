@@ -160,8 +160,9 @@ def validate_timeout_reconcile_release(profile, record, evidence, lock):
 def validate_source_unchanged_release(profile, record, evidence, lock):
     """Release quarantine only when the attempted OTA stopped and fresh
     evidence proves the exact preflash build/role is still installed."""
+    stock = is_stock_guard(profile, record)
     if (record.get('ieee'), record.get('sha256'), record.get('phase')) != (
-            profile['ieee'], profile['sha256'], 'enabled'):
+            profile['ieee'], profile['sha256'], STOCK_NO_QUARANTINE_PHASE if stock else 'enabled'):
         raise ValueError('telemetry guard does not match this enabled campaign')
     if (lock.get('ieee'), lock.get('sha256'), lock.get('token'), lock.get('phase')) != (
             profile['ieee'], profile['sha256'], record.get('token'),
@@ -173,11 +174,18 @@ def validate_source_unchanged_release(profile, record, evidence, lock):
     if evidence.get('result') != 'source_unchanged_reconciled':
         raise ValueError('wrong source-unchanged evidence result')
     if (evidence.get('ieee'), evidence.get('source_build'), evidence.get('source_role')) != (
-            profile['ieee'], profile['preflash_build'], profile['preflash_role']):
+            profile['ieee'], 'stock' if stock else profile['preflash_build'], profile['preflash_role']):
         raise ValueError('fresh source identity does not match preflash build/role')
     if evidence.get('update_available') is not True or evidence.get('ota_transport_success') is not False:
         raise ValueError('source-unchanged reconciliation requires pending exact update and no transport success')
     return True
+
+
+def is_stock_guard(profile, record):
+    """A stock-to-Client guard only records that no quarantine option exists."""
+    return (profile.get('stock_client_conversion') is True and 'preflash_build' not in profile
+            and record.get('phase') == STOCK_NO_QUARANTINE_PHASE
+            and record.get('quarantine_enabled') is False)
 
 
 def release_source_pending(profile, evidence_path):
@@ -244,6 +252,15 @@ def release_source_unchanged(profile, evidence_path):
     evidence = json.loads(Path(evidence_path).read_text(encoding='utf8'))
     lock = json.loads((path.parent / 'ACTIVE_LOCK.json').read_text(encoding='utf8'))
     validate_source_unchanged_release(profile, record, evidence, lock)
+    if is_stock_guard(profile, record):
+        # Nothing was quarantined, so no option is written; close the record
+        # so the next attempt can arm its own guard.
+        record.update(phase='released_source_unchanged_stock', evidence=str(evidence_path),
+                      transport_phase_preserved='source_unchanged_reconciled')
+        path.write_text(json.dumps(record, indent=2), encoding='utf8')
+        path.rename(path.with_name(
+            'PM_TELEMETRY_RELEASED_SOURCE_UNCHANGED_' + str(lock['token']) + '.json'))
+        return
     bridge = bridge_for(profile)
     try:
         bridge.start()

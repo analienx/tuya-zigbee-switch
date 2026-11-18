@@ -491,3 +491,45 @@ def test_cli_requires_exact_ieee_confirmation():
         guard.main(upper + ['--confirm-ieee', '0xA4C138CDF963EAC3'])
     with pytest.raises(SystemExit):
         guard.main(base)
+
+
+def stock_source_fixture(tmp_path):
+    p = dict(ieee='0x0011223344556677', sha256='a'*64, device='WRSocketWindowLeft',
+             workdir=str(tmp_path), require_pm=True, stock_client_conversion=True,
+             manufacturer='_TZ3000_b28wrpvx', preflash_role='Router',
+             postflash_build='1.2.5-bseedcli26', postflash_role='EndDevice')
+    record = dict(ieee=p['ieee'], sha256=p['sha256'], token='campaign-1',
+                  started='2026-11-18T14:12:48+00:00',
+                  phase=guard.STOCK_NO_QUARANTINE_PHASE, quarantine_enabled=False)
+    lock = dict(ieee=p['ieee'], sha256=p['sha256'], token='campaign-1', phase='source_unchanged_reconciled')
+    evidence = dict(at='2026-11-18T16:00:00+00:00', result='source_unchanged_reconciled', ieee=p['ieee'],
+                    source_build='stock', source_role='Router', update_available=True,
+                    ota_transport_success=False)
+    return p, record, evidence, lock
+
+
+def test_stock_guard_source_unchanged_closes_without_any_option_write(tmp_path, monkeypatch):
+    p, record, evidence, lock = stock_source_fixture(tmp_path)
+    guard.guard_path(p).write_text(json.dumps(record))
+    (tmp_path / 'ACTIVE_LOCK.json').write_text(json.dumps(lock))
+    (tmp_path / 'evidence.json').write_text(json.dumps(evidence))
+    monkeypatch.setattr(guard, 'bridge_for', lambda _p: pytest.fail('stock guard must not touch Z2M'))
+    guard.release_source_unchanged(p, tmp_path / 'evidence.json')
+    assert not guard.guard_path(p).exists()
+    closed = json.loads((tmp_path / 'PM_TELEMETRY_RELEASED_SOURCE_UNCHANGED_campaign-1.json').read_text())
+    assert closed['phase'] == 'released_source_unchanged_stock'
+
+
+@pytest.mark.parametrize('profile_change, record_change, evidence_change', [
+    ({}, {'quarantine_enabled': True}, {}),
+    ({'stock_client_conversion': False}, {}, {}),
+    ({'preflash_build': '1.0.13'}, {}, {}),
+    ({}, {}, {'source_build': '1.2.5-bseedcli26'}),
+    ({}, {}, {'ota_transport_success': True}),
+    ({}, {'sha256': 'b'*64}, {}),
+])
+def test_stock_guard_release_stays_exact(tmp_path, profile_change, record_change, evidence_change):
+    p, record, evidence, lock = stock_source_fixture(tmp_path)
+    p.update(profile_change); record.update(record_change); evidence.update(evidence_change)
+    with pytest.raises(ValueError):
+        validate_source_unchanged_release(p, record, evidence, lock)

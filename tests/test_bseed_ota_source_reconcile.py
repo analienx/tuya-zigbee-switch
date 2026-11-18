@@ -174,3 +174,42 @@ def test_cached_pm_power_cannot_pass_retry_gate():
     },baseline_ms=request-1000,request_ms=request,received_ms=request+200)
     assert live["power"] == 1.5
     assert live["sample_time_ms"] == request+120
+
+
+STOCK = {"device": "WRSocketWindowLeft", "ieee": IEEE, "manufacturer": "_TZ3000_b28wrpvx",
+         "model": "TS011F", "preflash_role": "Router", "stock_client_conversion": True}
+
+
+def stock_row(**changes):
+    row = {"ieee_address": IEEE, "friendly_name": "WRSocketWindowLeft",
+           "manufacturer": "_TZ3000_b28wrpvx", "model_id": "TS011F", "type": "Router",
+           "software_build_id": "1.0.13", "interview_state": "SUCCESSFUL"}
+    row.update(changes)
+    return [row]
+
+
+@pytest.mark.parametrize("build", ["1.0.13", None])
+def test_stock_conversion_source_is_proven_by_stock_identity(build):
+    assert sr.inventory_match(stock_row(software_build_id=build), STOCK)
+    sr.fresh_source_identity({"state": "OFF", "device": {
+        "ieeeAddr": IEEE, "softwareBuildID": build, "type": "Router"}}, STOCK)
+
+
+@pytest.mark.parametrize("changes", [
+    {"software_build_id": "1.2.5-bseedcli26"}, {"manufacturer": "b28wrpvx"},
+    {"model_id": "TS011F-BS-PM"}, {"type": "EndDevice"},
+])
+def test_stock_conversion_refuses_an_installed_or_changed_source(changes):
+    with pytest.raises(ValueError, match="no longer matches"):
+        sr.inventory_match(stock_row(**changes), STOCK)
+
+
+def test_stock_rule_never_applies_to_custom_or_unpinned_profiles():
+    with pytest.raises(ValueError, match="not a stock conversion"):
+        sr.source_build_matches(dict(STOCK, stock_client_conversion=False), "1.0.13")
+    with pytest.raises(ValueError, match="stock manufacturer"):
+        sr.source_build_matches(dict(STOCK, manufacturer="b28wrpvx"), "1.0.13")
+    assert sr.source_build_matches(dict(STOCK, preflash_build="1.0.13"), "1.0.14") is False
+    with pytest.raises(ValueError, match="Fresh source identity"):
+        sr.fresh_source_identity({"state": "OFF", "device": {
+            "ieeeAddr": IEEE, "softwareBuildID": "1.2.5-bseedcli26", "type": "Router"}}, STOCK)

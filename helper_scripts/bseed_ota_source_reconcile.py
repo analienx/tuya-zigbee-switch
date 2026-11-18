@@ -22,6 +22,7 @@ import yaml
 
 from bseed_ota_campaign import load_profile, network_lock_path
 from bseed_targeted_z2m_ota import archive_prior_check
+from bseed_source_build import source_build_matches, source_build_label  # noqa: F401 (re-exported)
 from bseed_network_campaign_lock import (
     read_lock,
     release_source_unchanged,
@@ -39,10 +40,9 @@ def inventory_match(devices, profile):
         raise ValueError('Target IEEE absent or ambiguous')
     d = matches[0]
     interview_ok = d.get('interview_state') == 'SUCCESSFUL' or d.get('interview_completed') is True
-    if (d.get('friendly_name'), d.get('manufacturer'), d.get('model_id'),
-        d.get('type'), d.get('software_build_id')) != (
-            profile['device'], profile['manufacturer'], profile['model'],
-            profile['preflash_role'], profile['preflash_build']):
+    if ((d.get('friendly_name'), d.get('manufacturer'), d.get('model_id'), d.get('type')) != (
+            profile['device'], profile['manufacturer'], profile['model'], profile['preflash_role'])
+            or not source_build_matches(profile, d.get('software_build_id'))):
         raise ValueError('Fresh inventory no longer matches exact preflash identity')
     if not interview_ok:
         raise ValueError('Preflash source interview is not complete')
@@ -52,9 +52,8 @@ def inventory_match(devices, profile):
 def fresh_source_identity(target, profile):
     """Inventory is corroborating only; identity MUST come from a new target message."""
     device = (target or {}).get('device') or {}
-    expected = (profile['ieee'], profile['preflash_build'], profile['preflash_role'])
     found = (device.get('ieeeAddr'), device.get('softwareBuildID'), device.get('type'))
-    if found != expected:
+    if (found[0], found[2]) != (profile['ieee'], profile['preflash_role']) or not source_build_matches(profile, found[1]):
         raise ValueError('Fresh source identity build/role/IEEE absent or mismatched: ' + repr(found))
     if profile.get('relay_get_key', 'state') not in (target or {}):
         raise ValueError('Fresh target did not answer the requested relay property')
@@ -217,7 +216,7 @@ def reconcile(profile_path, confirmation, observe_seconds=45, verify_candidate=T
             'at': now(),
             'ieee': profile['ieee'],
             'device': profile['device'],
-            'source_build': profile['preflash_build'],
+            'source_build': source_build_label(profile),
             'source_role': profile['preflash_role'],
             'candidate_sha256': profile['sha256'],
             'candidate_check_performed': bool(verify_candidate),
