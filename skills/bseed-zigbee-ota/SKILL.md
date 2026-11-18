@@ -5,6 +5,21 @@ description: Build, verify and seal BSEED firmware candidates and conduct single
 
 # BSEED Zigbee OTA maintenance
 
+## Start here: migrate a socket with one command (2026-11-18)
+
+For an ordinary socket migration use `helper_scripts/bseed_socket_migrate.py` ([docs](../../docs/bseed_socket_migrate.md)) instead of hand-writing profiles, wrappers and publish commands. It drives the canonical campaign below and keeps every gate in this file.
+
+```
+set BSEED_SITE=<private site.json>
+python helper_scripts/bseed_socket_migrate.py plan    --device NAME --to client|router|same   # read-only; writes the private workdir
+python helper_scripts/bseed_socket_migrate.py publish --device NAME                            # image + index to HA, served hash checked
+python helper_scripts/bseed_socket_migrate.py run     --device NAME                            # waits for the lease; OFF -> flash -> provision -> postflash -> ON
+python helper_scripts/bseed_socket_migrate.py release --device NAME --authority "<owner's words>"
+python helper_scripts/bseed_socket_migrate.py queue   --device A --device B --to client [--release-authority "<standing acceptance>"]
+```
+
+`plan` discovers the live identity, picks the route and the sealed candidate from the site's `candidate_package`, builds the stock or FORCE wrapper when needed, chooses `join_via` from the target's live neighbour table (strongest Router) and lists end devices that will have to re-parent; it then runs `load_profile`, the version policy, automatic relay OFF validation and, for non-PM, the recovery gate, so a refusal costs nothing. `run` resumes a stopped transfer only through `reconcile-source` and only while OTA progress strictly increases (the resume supervisor's gate, at most `--max-resumes`). OTAs run one at a time: the shared single-slot lease is never bypassed, and two-slot mode refuses role changes. Routes: stock PM Router → PM Client; custom PM same role; custom PM Client ↔ Router (FORCE); custom non-PM same role where the recovery gate admits it. Stock → Router and non-PM role changes are refused.
+
 ## PR #114 software acceptance — owner instruction 2026-11-07
 
 The owner has no noncritical hardware and requested that software checks

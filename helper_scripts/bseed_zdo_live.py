@@ -59,3 +59,75 @@ def read_node_descriptor(mqtt_config, broker, ieee, network_address, timeout=20)
         return parse_node_descriptor(response,nwk)
     finally:
         client.loop_stop();client.disconnect()
+
+
+MGMT_LQI = 0x31  # ZDO Mgmt_Lqi_req: the target's neighbour table, read-only
+
+
+def parse_neighbor_page(result):
+    if result.get('status') != 'ok':
+        raise ValueError('ZDO Mgmt_Lqi failed: ' + str(result.get('error')))
+    payload = result.get('data')
+    if not isinstance(payload, list) or len(payload) < 2 or payload[0] != 0 or not isinstance(payload[1], dict):
+        raise ValueError('Missing successful ZDO neighbour table page')
+    page = payload[1]
+    total, entries = page.get('neighborTableEntries'), page.get('entryList')
+    if type(total) is not int or not isinstance(entries, list):
+        raise ValueError('Malformed ZDO neighbour table page')
+    return total, entries
+
+
+def read_neighbor_table(mqtt_config, broker, ieee, network_address, timeout=25, max_pages=12):
+    """Exact IEEE/NWK, transaction-matched, paginated Mgmt_Lqi read. Never writes."""
+    if not ieee.startswith('0x') or len(ieee) != 18:
+        raise ValueError('Invalid target IEEE')
+    nwk = int(network_address)
+    config = yaml.safe_load(Path(mqtt_config).read_text(encoding='utf8'))['mqtt']
+    base = config.get('base_topic', 'zigbee2mqtt')
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id='bseed-lqi-' + uuid.uuid4().hex[:12])
+    client.username_pw_set(config.get('user', ''), config.get('password', ''))
+    ready, answered, responses = threading.Event(), threading.Event(), {}
+
+    def on_connect(c, _u, _f, reason, _p):
+        if not reason.is_failure:
+            c.subscribe(base + '/bridge/response/action', qos=1)
+            ready.set()
+
+    def on_message(_c, _u, message):
+        try:
+            body = json.loads(message.payload)
+        except (ValueError, UnicodeDecodeError):
+            return
+        if isinstance(body, dict) and body.get('transaction'):
+            responses[body['transaction']] = body
+            answered.set()
+
+    client.on_connect, client.on_message = on_connect, on_message
+    client.connect(broker, 1883, 10)
+    client.loop_start()
+    try:
+        if not ready.wait(10):
+            raise TimeoutError('MQTT ZDO subscription not ready')
+        time.sleep(0.3)
+        entries, total, index = [], None, 0
+        for _ in range(max_pages):
+            if total is not None and index >= total:
+                break
+            token = 'bseed-lqi-' + uuid.uuid4().hex
+            payload = {'transaction': token, 'action': 'raw', 'params': {
+                'ieee_address': ieee, 'network_address': nwk, 'profile_id': 0,
+                'cluster_key': MGMT_LQI, 'zdo_params': [index], 'disable_response': False}}
+            client.publish(base + '/bridge/request/action', json.dumps(payload), qos=1).wait_for_publish(5)
+            deadline = time.monotonic() + timeout
+            while token not in responses and time.monotonic() < deadline:
+                answered.wait(0.5)
+                answered.clear()
+            if token not in responses:
+                raise TimeoutError('No transaction-matched ZDO neighbour table page')
+            total, page = parse_neighbor_page(responses.pop(token))
+            entries += page
+            index += max(1, len(page))
+        return entries
+    finally:
+        client.loop_stop()
+        client.disconnect()
