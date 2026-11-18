@@ -126,6 +126,8 @@ def load_profile(path):
         raise ValueError('Network lock authority must not be inside repository')
     validate_pm_mode(data)
     stock_client_conversion(data)
+    import bseed_relay_auto_off
+    bseed_relay_auto_off.validate(data)
     from bseed_ota_block_policy import check_block_bytes, default_block_bytes
     if data.get('block_bytes') is None:
         data['block_bytes'] = default_block_bytes(data)
@@ -295,6 +297,26 @@ def network_lock_path(profile, *, required=False):
     if path.resolve().is_relative_to(ROOT):
         raise ValueError('Network lock authority must be private/outside repository')
     return path
+
+
+def accept_candidate(profile):
+    """postflash_candidate, then return an auto-OFF relay to its pre-flash state."""
+    record_postflash_candidate(profile)
+    import bseed_relay_auto_off
+    if bseed_relay_auto_off.enabled(profile):
+        bseed_relay_auto_off.restore_after_acceptance(profile)
+
+
+def auto_relay_off_then_check(profile):
+    """Switch the relay OFF (verified), then a fresh OTA check under the meter proof."""
+    import bseed_relay_auto_off
+    if not bseed_relay_auto_off.enabled(profile):
+        return 0
+    bseed_relay_auto_off.switch_off_before_flash(profile)
+    status = subprocess.call(runner_args(profile, 'check'))
+    if status:
+        print('AUTO_RELAY_OFF_CHECK_FAILED_NO_FLASH', status, flush=True)
+    return status
 
 
 def record_postflash_candidate(profile):
@@ -650,7 +672,7 @@ def main():
         print('PRIVATE_EVIDENCE', evidence, flush=True)
         status = subprocess.call(cmd)
         if status == 0:
-            record_postflash_candidate(profile)
+            accept_candidate(profile)
         raise SystemExit(status)
     if args.mode in ('transition', 'rejoin', 'metadata'):
         if args.confirm_ieee != profile['ieee']:
@@ -682,6 +704,8 @@ def main():
             if profile.get('non_pm') is True:
                 from bseed_nonpm_recovery_gate import verify_transition_recovery
                 verify_transition_recovery(profile, confirm_unloaded=args.confirm_load_unplugged)
+            checked = auto_relay_off_then_check(profile)
+            if checked: raise SystemExit(checked)
             snapshot_status = take_state_snapshot(profile)
             if snapshot_status:
                 print('STATE_SNAPSHOT_FAILED_NO_FLASH', flush=True)
@@ -695,6 +719,9 @@ def main():
         metadata_evidence = work / ('metadata_' + uuid.uuid4().hex + '.json')
         refreshed = subprocess.call(metadata_cmd(profile, args.confirm_ieee, metadata_evidence))
         if refreshed: raise SystemExit(refreshed)
+        import bseed_relay_auto_off
+        if bseed_relay_auto_off.enabled(profile):
+            bseed_relay_auto_off.reassert_off_after_rejoin(profile)
         if profile.get('require_pm'):
             from bseed_pm_telemetry_guard import release
             release(profile, metadata_evidence)
@@ -714,7 +741,7 @@ def main():
                 audit_status = subprocess.call(role_audit_cmd(profile, audit_evidence))
             status = 0 if post_status == 0 and audit_status == 0 else 2
             if status == 0:
-                record_postflash_candidate(profile)
+                accept_candidate(profile)
             raise SystemExit(status)
         return
     if args.mode == 'flash':
@@ -729,6 +756,8 @@ def main():
             raise SystemExit('Load confirmation requires the explicit PM physical-proof route')
         if profile.get('require_pm') and profile['postflash_role'] == 'EndDevice':
             provision_cmd(profile, args.confirm_ieee, work / 'pm_prevalidated.json')
+        checked = auto_relay_off_then_check(profile)
+        if checked: raise SystemExit(checked)
         snapshot_status = take_state_snapshot(profile)
         if snapshot_status:
             print('STATE_SNAPSHOT_FAILED_NO_FLASH', flush=True)
@@ -756,7 +785,7 @@ def main():
                 audit_code = subprocess.call(role_audit_cmd(profile, audit))
                 status = 0 if post_code == 0 and audit_code == 0 else 2
                 if status == 0:
-                    record_postflash_candidate(profile)
+                    accept_candidate(profile)
                 raise SystemExit(status)
             pm_evidence = work / ('pm_provision_' + uuid.uuid4().hex + '.json')
             provisioned = subprocess.call(provision_cmd(profile, args.confirm_ieee, pm_evidence))
@@ -764,12 +793,12 @@ def main():
             post_evidence = work / ('postflash_' + uuid.uuid4().hex + '.json')
             post_status = subprocess.call(postflash_cmd(profile, post_evidence))
             if post_status == 0:
-                record_postflash_candidate(profile)
+                accept_candidate(profile)
             raise SystemExit(post_status)
         post = work / ('postflash_' + uuid.uuid4().hex + '.json')
         post_status = subprocess.call(postflash_cmd(profile, post))
         if post_status == 0:
-            record_postflash_candidate(profile)
+            accept_candidate(profile)
         raise SystemExit(post_status)
     elif args.confirm_ieee:
         raise SystemExit('--confirm-ieee may only be supplied for flash, transition, rejoin, metadata, reconcile-installed, reconcile-source, abandon-source, reinterview, provision-pm or restore-state')
