@@ -319,6 +319,17 @@ def auto_relay_off_then_check(profile):
     return status
 
 
+def load_confirmation(profile, human):
+    """(confirmed, relay_off_record): the human attestation, or this flash's fresh verified-OFF record."""
+    if human:
+        return True, None
+    import bseed_relay_auto_off
+    if (bseed_relay_auto_off.enabled(profile) and bseed_relay_auto_off.proof(profile) == 'relay_off'
+            and bseed_relay_auto_off.verified_off_record(profile)):
+        return True, bseed_relay_auto_off.record_path(profile)
+    return False, None
+
+
 def record_postflash_candidate(profile):
     """Record software evidence without granting hardware acceptance or releasing
     network ownership. A passing postflash probe never authorizes another OTA."""
@@ -349,7 +360,7 @@ def record_postflash_candidate(profile):
     return True
 
 
-def runner_args(profile, mode, *, confirm_unloaded=False):
+def runner_args(profile, mode, *, confirm_unloaded=False, relay_off_record=None):
     keys = [('device','device'), ('ieee','ieee'), ('manufacturer','manufacturer'),
             ('model','model'), ('preflash_role','role'), ('image','image'),
             ('sha256','sha256'), ('url','url'), ('mqtt_config','mqtt-config'),
@@ -370,6 +381,8 @@ def runner_args(profile, mode, *, confirm_unloaded=False):
         cmd.append('--pm-preflash-physical-unloaded')
         if mode == 'flash' and confirm_unloaded:
             cmd.append('--confirm-load-unplugged')
+    if mode == 'flash' and relay_off_record:
+        cmd.extend(['--relay-off-record', str(relay_off_record)])
     if profile.get('non_pm') is True:
         cmd.append('--non-pm')
         if mode == 'flash':
@@ -530,8 +543,11 @@ def main():
     if args.confirm_load_unplugged and not (args.mode in ('flash', 'transition') and
             (profile.get('non_pm') is True or physical_pm)):
         raise SystemExit('--confirm-load-unplugged is only valid for non-PM or pinned PM physical-proof flash')
-    if args.mode in ('flash', 'transition') and physical_pm and not args.confirm_load_unplugged:
-        raise SystemExit('PM physical-proof flash requires fresh --confirm-load-unplugged attestation')
+    import bseed_relay_auto_off
+    auto_off = bseed_relay_auto_off.enabled(profile)
+    if (args.mode in ('flash', 'transition') and physical_pm and not args.confirm_load_unplugged
+            and not auto_off):
+        raise SystemExit('PM physical-proof flash requires fresh --confirm-load-unplugged attestation or auto_relay_off')
     if profile.get('require_pm') and profile['postflash_role'] == 'Router' and args.mode in ('flash','transition','rejoin'):
         if profile.get('force_test_transition') is True:
             if args.mode == 'flash':
@@ -703,15 +719,22 @@ def main():
         if args.mode == 'transition':
             if profile.get('non_pm') is True:
                 from bseed_nonpm_recovery_gate import verify_transition_recovery
-                verify_transition_recovery(profile, confirm_unloaded=args.confirm_load_unplugged)
+                # Shape first (no device write before the gate's other checks pass).
+                verify_transition_recovery(profile, confirm_unloaded=args.confirm_load_unplugged or auto_off)
             checked = auto_relay_off_then_check(profile)
             if checked: raise SystemExit(checked)
+            confirmed, relay_record = load_confirmation(profile, args.confirm_load_unplugged)
+            if profile.get('non_pm') is True:
+                verify_transition_recovery(profile, confirm_unloaded=confirmed)
+            if (profile.get('non_pm') is True or physical_pm) and not confirmed:
+                raise SystemExit('Load safety not proven: no attestation and no fresh verified relay OFF')
             snapshot_status = take_state_snapshot(profile)
             if snapshot_status:
                 print('STATE_SNAPSHOT_FAILED_NO_FLASH', flush=True)
                 raise SystemExit(snapshot_status)
             print('ONE_DEVICE_ROLE_TRANSITION', profile['ieee'], flush=True)
-            flashed = subprocess.call(runner_args(profile, 'flash', confirm_unloaded=args.confirm_load_unplugged))
+            flashed = subprocess.call(runner_args(profile, 'flash', confirm_unloaded=args.confirm_load_unplugged,
+                                                  relay_off_record=relay_record))
             if flashed: raise SystemExit(flashed)  # Primitive never retries; supervised resume must reconcile first.
         join_evidence = work / ('rejoin_' + uuid.uuid4().hex + '.json')
         joined = subprocess.call(rejoin_cmd(profile, args.confirm_ieee, join_evidence))
@@ -751,19 +774,26 @@ def main():
             raise SystemExit('Cross-role flash refused: use --mode transition for scoped rejoin')
         if profile.get('non_pm') is True:
             from bseed_nonpm_recovery_gate import verify_recovery
-            verify_recovery(profile, confirm_unloaded=args.confirm_load_unplugged)
+            # Shape first (no device write before the gate's other checks pass).
+            verify_recovery(profile, confirm_unloaded=args.confirm_load_unplugged or auto_off)
         elif args.confirm_load_unplugged and not physical_pm:
             raise SystemExit('Load confirmation requires the explicit PM physical-proof route')
         if profile.get('require_pm') and profile['postflash_role'] == 'EndDevice':
             provision_cmd(profile, args.confirm_ieee, work / 'pm_prevalidated.json')
         checked = auto_relay_off_then_check(profile)
         if checked: raise SystemExit(checked)
+        confirmed, relay_record = load_confirmation(profile, args.confirm_load_unplugged)
+        if profile.get('non_pm') is True:
+            verify_recovery(profile, confirm_unloaded=confirmed)
+        if (profile.get('non_pm') is True or physical_pm) and not confirmed:
+            raise SystemExit('Load safety not proven: no attestation and no fresh verified relay OFF')
         snapshot_status = take_state_snapshot(profile)
         if snapshot_status:
             print('STATE_SNAPSHOT_FAILED_NO_FLASH', flush=True)
             raise SystemExit(snapshot_status)
         print('EXPLICIT_FLASH_TARGET', profile['ieee'], profile['device'], flush=True)
-        flashed = subprocess.call(runner_args(profile, 'flash', confirm_unloaded=args.confirm_load_unplugged))
+        flashed = subprocess.call(runner_args(profile, 'flash', confirm_unloaded=args.confirm_load_unplugged,
+                                              relay_off_record=relay_record))
         if flashed: raise SystemExit(flashed)  # Primitive never retries; progress-gated supervisor may resume after reconciliation.
         import uuid
         interview = work / ('postota_interview_' + uuid.uuid4().hex + '.json')

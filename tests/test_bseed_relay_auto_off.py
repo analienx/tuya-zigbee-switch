@@ -84,10 +84,10 @@ def test_record_from_another_target_is_refused(tmp_path):
 
 @pytest.mark.parametrize('changes, match', [
     ({'auto_relay_off': 'yes'}, 'explicit Boolean'),
-    ({'require_pm': False, 'non_pm': True}, 'PM board'),
-    ({'pm_preflash_load_proof': 'physically_unloaded'}, 'replaces the physical'),
+    ({'require_pm': None, 'non_pm': None}, 'explicit PM or non-PM'),
+    ({'pm_preflash_load_proof': 'physically_unloaded'}, 'custom PM firmware uses the meter route'),
     ({'expect_relay': 'ON'}, 'expect_relay=OFF'),
-    ({'manufacturer': '_TZ3000_b28wrpvx', 'model': 'TS011F'}, 'custom PM firmware'),
+    ({'manufacturer': '_TZ3000_b28wrpvx', 'model': 'TS011F'}, 'stock PM uses the physically_unloaded'),
 ])
 def test_profile_shape(tmp_path, changes, match):
     with pytest.raises(ValueError, match=match):
@@ -125,3 +125,63 @@ def test_auto_off_runs_before_the_snapshot_and_the_flash_in_both_modes():
     # Every candidate path goes through accept_candidate (the only direct call is inside it).
     assert source.count('record_postflash_candidate(profile)\n') == 1
     assert source.count('accept_candidate(profile)\n') >= 5
+
+
+def test_proof_kind_per_board(tmp_path):
+    assert relay.proof(profile(tmp_path)) == 'meter'
+    stock = profile(tmp_path, manufacturer='_TZ3000_b28wrpvx', model='TS011F',
+                    pm_preflash_load_proof='physically_unloaded', relay_get_key='state')
+    nonpm = profile(tmp_path, require_pm=False, non_pm=True, manufacturer='o1jzcxou', model='TS011F-BS')
+    for p in (stock, nonpm):
+        assert relay.validate(p) is True and relay.proof(p) == 'relay_off'
+
+
+def test_verified_off_record_is_fresh_target_only(tmp_path):
+    import datetime as dt
+    p, fake = profile(tmp_path, require_pm=False, non_pm=True), FakeRelay('ON')
+    assert relay.verified_off_record(p) is False
+    relay.switch_off_before_flash(p, fake)
+    assert relay.verified_off_record(p) is True
+    assert relay.verified_off_record(dict(p, ieee='0x00112233445566ff')) is False
+    saved = json.loads(relay.record_path(p).read_text())
+    saved['verified_off_at'] = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=16)).isoformat()
+    relay.record_path(p).write_text(json.dumps(saved))
+    assert relay.verified_off_record(p) is False
+
+
+def test_runner_accepts_only_this_campaigns_fresh_record(tmp_path):
+    from types import SimpleNamespace
+    from bseed_targeted_z2m_ota import load_confirmation
+    p = profile(tmp_path, require_pm=False, non_pm=True)
+    relay.switch_off_before_flash(p, FakeRelay('ON'))
+    record = str(relay.record_path(p))
+    args = lambda **k: SimpleNamespace(**dict(dict(confirm_load_unplugged=False, relay_off_record=record,
+                                                   mode='flash'), **k))
+    assert load_confirmation(args(), p) is True
+    assert load_confirmation(args(relay_off_record=None), p) is False
+    assert load_confirmation(args(confirm_load_unplugged=True, relay_off_record=None), None) is True
+    for bad, campaign_profile in ((args(mode='check'), p), (args(), None),
+                                  (args(), dict(p, auto_relay_off=False)),
+                                  (args(), profile(tmp_path)),  # meter route keeps the meter proof
+                                  (args(relay_off_record=str(tmp_path / 'other.json')), p)):
+        with pytest.raises(ValueError):
+            load_confirmation(bad, campaign_profile)
+
+
+def test_campaign_confirmation_and_runner_flag(tmp_path):
+    p = profile(tmp_path, require_pm=False, non_pm=True)
+    assert campaign.load_confirmation(p, False) == (False, None)
+    assert campaign.load_confirmation(p, True) == (True, None)
+    relay.switch_off_before_flash(p, FakeRelay('ON'))
+    assert campaign.load_confirmation(p, False) == (True, relay.record_path(p))
+    assert campaign.load_confirmation(profile(tmp_path), False) == (False, None)  # meter route
+
+
+def test_auto_off_runs_before_the_load_gate_in_both_modes():
+    source = (ROOT / 'helper_scripts/bseed_ota_campaign.py').read_text(encoding='utf8')
+    for marker in ("print('ONE_DEVICE_ROLE_TRANSITION'", "print('EXPLICIT_FLASH_TARGET'"):
+        flash = source.index(marker)
+        off = source.rindex('auto_relay_off_then_check(profile)', 0, flash)
+        confirm = source.rindex('load_confirmation(profile, args.confirm_load_unplugged)', 0, flash)
+        refuse = source.rindex("Load safety not proven", 0, flash)
+        assert off < confirm < refuse < flash
