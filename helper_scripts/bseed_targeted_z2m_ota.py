@@ -245,6 +245,25 @@ def independently_fresh_pm_sample(data, *, baseline_ms, request_ms, received_ms)
     return {'power': watts, 'sample_time_ms': stamp}
 
 
+def load_confirmation(args, campaign):
+    """Human attestation, or the canonical campaign's fresh verified-OFF record (flash only)."""
+    if args.confirm_load_unplugged:
+        return True
+    record = getattr(args, 'relay_off_record', None)
+    if not record:
+        return False
+    if args.mode != 'flash' or campaign is None:
+        raise ValueError('A relay-OFF record is accepted only for a canonical campaign flash')
+    import bseed_relay_auto_off
+    if not (bseed_relay_auto_off.enabled(campaign) and bseed_relay_auto_off.proof(campaign) == 'relay_off'):
+        raise ValueError('Relay-OFF record requires an auto_relay_off profile without a meter proof')
+    if Path(record).resolve() != bseed_relay_auto_off.record_path(campaign).resolve():
+        raise ValueError('Relay-OFF record is not this campaign\'s record')
+    if not bseed_relay_auto_off.verified_off_record(campaign, record):
+        raise ValueError('Relay-OFF record is missing, foreign or older than 15 minutes')
+    return True
+
+
 def arguments():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--mode', choices=['preflight', 'check', 'flash'], required=True)
@@ -263,6 +282,8 @@ def arguments():
     p.add_argument('--non-pm', action='store_true', help='Strict non-PM TS011F-BS Client exception; never use for PM devices')
     p.add_argument('--ts0726', action='store_true', help='Strict TS0726-3-BS Router exception (no metering hardware); never use for PM devices')
     p.add_argument('--hardware-evidence', help='Private exact-board recovery readback attestation, non-PM flash only')
+    p.add_argument('--relay-off-record', help='Flash: the campaign\'s fresh verified-OFF auto_relay_off record; '
+                   'replaces --confirm-load-unplugged for sockets whose meter cannot prove zero watts')
     p.add_argument('--confirm-load-unplugged', action='store_true', help='Operator has just physically verified no appliance attached; required for PM physical-proof flash')
     p.add_argument('--preflash-build')
     p.add_argument('--preflash-relay-physical-mode')
@@ -335,7 +356,8 @@ def main():
             raise ValueError('Runner metering exceptions are mutually exclusive')
         require_increasing(campaign)
     require_physical_preflight_board(args, campaign)
-    if args.mode == 'flash' and getattr(args, 'pm_preflash_physical_unloaded', False) and not args.confirm_load_unplugged:
+    load_confirmed = load_confirmation(args, campaign)
+    if args.mode == 'flash' and getattr(args, 'pm_preflash_physical_unloaded', False) and not load_confirmed:
         raise ValueError('PM physical-proof OTA requires explicit load-unplugged confirmation')
     cross_role = campaign is not None and campaign['preflash_role'] != campaign['postflash_role']
     source_profile = campaign
@@ -357,8 +379,8 @@ def main():
                 args.preflash_build != campaign.get('preflash_build') or
                 args.preflash_relay_physical_mode != campaign.get('preflash_relay_physical_mode')):
             raise ValueError('Runner recovery inputs differ from canonical profile')
-        recovery_gate(campaign, confirm_unloaded=args.confirm_load_unplugged)
-    elif args.hardware_evidence or (args.confirm_load_unplugged and not (
+        recovery_gate(campaign, confirm_unloaded=load_confirmed)
+    elif args.hardware_evidence or (load_confirmed and not (
             args.mode == 'flash' and getattr(args, 'pm_preflash_physical_unloaded', False))):
         raise ValueError('Hardware recovery evidence is non-PM-only; physical PM confirmation requires pinned flash')
     verify_image(args)

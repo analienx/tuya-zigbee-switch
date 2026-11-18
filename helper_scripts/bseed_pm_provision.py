@@ -200,10 +200,15 @@ def validate_states(states, db, idle=False):
 
 
 def observation_policy(requested_seconds, expect_idle):
-    """An idle gate needs a full max-300s current-report window plus margin."""
+    """An idle gate needs a full max-300s current-report window plus margin.
+
+    The deadline must leave room for the first message after the baseline:
+    idle sockets publish every 5-40 s (2026-11-18 Cabinet/RightR), so a 330 s
+    deadline for a 310 s span failed whenever the first message came late.
+    """
     if not 75 <= requested_seconds <= 420:
         raise ValueError('Observation seconds must be bounded to 75..420')
-    return max(requested_seconds, 330) if expect_idle else requested_seconds, (310 if expect_idle else 8)
+    return max(requested_seconds, 400) if expect_idle else requested_seconds, (310 if expect_idle else 8)
 
 
 def arguments():

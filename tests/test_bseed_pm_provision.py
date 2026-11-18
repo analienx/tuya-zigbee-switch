@@ -68,7 +68,7 @@ def test_energy_monotonic_and_freshness():
 def test_idle_observation_covers_full_current_reporting_window():
     from bseed_pm_provision import observation_policy
     assert observation_policy(135, False) == (135, 8)
-    assert observation_policy(135, True) == (330, 310)
-    assert observation_policy(400, True) == (400, 310)
+    assert observation_policy(135, True) == (400, 310)
+    assert observation_policy(420, True) == (420, 310)
     with pytest.raises(ValueError, match='bounded'):
         observation_policy(500, True)
