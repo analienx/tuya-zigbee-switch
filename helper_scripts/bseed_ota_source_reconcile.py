@@ -22,6 +22,7 @@ import yaml
 
 from bseed_ota_campaign import load_profile, network_lock_path
 from bseed_targeted_z2m_ota import archive_prior_check
+from bseed_source_build import source_build_matches, source_build_label  # noqa: F401 (re-exported)
 from bseed_network_campaign_lock import (
     read_lock,
     release_source_unchanged,
@@ -31,24 +32,6 @@ from bseed_network_campaign_lock import (
 
 def now():
     return dt.datetime.now(dt.timezone.utc).isoformat()
-
-
-def source_build_matches(profile, build):
-    """Exact preflash_build, or, for a stock-to-Client conversion (which may not
-    pin one), any build that is not custom BSEED firmware. The stock
-    manufacturer/model/role are matched exactly as well; the custom image
-    reports b28wrpvx / TS011F-BS-PM / EndDevice, so an install cannot pass."""
-    if 'preflash_build' in profile:
-        return build == profile['preflash_build']
-    if profile.get('stock_client_conversion') is not True:
-        raise ValueError('Profile pins no preflash_build and is not a stock conversion')
-    if not str(profile.get('manufacturer', '')).startswith('_TZ3000_'):
-        raise ValueError('Stock conversion profile without a stock manufacturer')
-    return build is None or (isinstance(build, str) and 'bseed' not in build.lower())
-
-
-def source_build_label(profile):
-    return profile.get('preflash_build', 'stock')
 
 
 def inventory_match(devices, profile):

@@ -559,8 +559,9 @@ def main():
             log('historical_stale_basic_wire_verified', source)
         if pending or (old.get('phase') == 'source_unchanged_reconciled' and args.mode == 'flash'):
             fresh_id = relay.get('device') or {}
-            if campaign and (fresh_id.get('softwareBuildID'), fresh_id.get('type')) != (
-                    campaign['preflash_build'], campaign['preflash_role']):
+            from bseed_source_build import source_build_matches
+            if campaign and (fresh_id.get('type') != campaign['preflash_role'] or
+                             not source_build_matches(campaign, fresh_id.get('softwareBuildID'))):
                 raise AssertionError('Fresh target source firmware/role changed since source reconciliation')
 
         meter_input = relay
