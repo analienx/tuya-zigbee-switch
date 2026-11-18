@@ -274,6 +274,23 @@ def arguments():
     return p.parse_args()
 
 
+def require_physical_preflight_board(args, campaign):
+    """Physical unplugged proof replaces the live meter only on proven PM routes."""
+    if not getattr(args, 'pm_preflash_physical_unloaded', False):
+        return
+    if getattr(args, 'non_pm', False) or getattr(args, 'ts0726', False):
+        raise ValueError('Physical PM preflight is for the BSEED PM board only')
+    if (args.manufacturer, args.model) == ('b28wrpvx', 'TS011F-BS-PM'):
+        return
+    # Stock PM socket -> custom Client: the canonical campaign was already
+    # validated by load_profile and require_increasing (native + wrapper proof).
+    if (campaign is not None and campaign.get('stock_client_conversion') is True and
+            (args.manufacturer, args.model) == ('_TZ3000_b28wrpvx', 'TS011F')):
+        return
+    raise ValueError('Physical PM preflight requires the exact custom PM board or a '
+                     'stock PM Client conversion profile')
+
+
 def needs_canonical_campaign(mode, profile_path):
     # A pending-source preflight MUST attach the exact signed-off campaign.
     # Direct preflight without a profile remains valid only outside pending.
@@ -317,9 +334,7 @@ def main():
         if args.non_pm and getattr(args, 'ts0726', False):
             raise ValueError('Runner metering exceptions are mutually exclusive')
         require_increasing(campaign)
-    if getattr(args, 'pm_preflash_physical_unloaded', False) and not (args.manufacturer == 'b28wrpvx' and
-            args.model == 'TS011F-BS-PM' and not args.non_pm and not args.ts0726):
-        raise ValueError('Physical PM preflight requires exact custom BSEED PM board')
+    require_physical_preflight_board(args, campaign)
     if args.mode == 'flash' and getattr(args, 'pm_preflash_physical_unloaded', False) and not args.confirm_load_unplugged:
         raise ValueError('PM physical-proof OTA requires explicit load-unplugged confirmation')
     cross_role = campaign is not None and campaign['preflash_role'] != campaign['postflash_role']

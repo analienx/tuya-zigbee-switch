@@ -51,12 +51,29 @@ def set_option(bridge, profile, enabled):
     return data
 
 
+STOCK_NO_QUARANTINE_PHASE = 'stock_converter_no_quarantine_option'
+
+
 def begin(profile, campaign_token):
     if profile.get('require_pm') is not True:
         return
     path = guard_path(profile)
     if path.exists():
         raise ValueError('existing telemetry guard requires identity recovery before another OTA')
+    if profile.get('stock_client_conversion') is True:
+        # The stock converter has no BSEED quarantine option. Record that;
+        # never claim quarantine was enabled or send an unsupported option.
+        # The custom Client still needs PM provisioning after the update.
+        record = dict(ieee=profile['ieee'], device=profile['device'], sha256=profile['sha256'],
+                      token=campaign_token, expected_build=profile['postflash_build'],
+                      expected_role=profile['postflash_role'],
+                      started=dt.datetime.now(dt.timezone.utc).isoformat(),
+                      phase=STOCK_NO_QUARANTINE_PHASE, quarantine_enabled=False,
+                      requires_pm_provision=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open('x', encoding='utf8') as handle:
+            json.dump(record, handle, indent=2)
+        return
     bridge = bridge_for(profile)
     try:
         bridge.start()
@@ -287,6 +304,15 @@ def release(profile, evidence_path):
     record = json.loads(path.read_text(encoding='utf8'))
     evidence = json.loads(Path(evidence_path).read_text(encoding='utf8'))
     lock = json.loads((path.parent / 'ACTIVE_LOCK.json').read_text(encoding='utf8'))
+    if profile.get('stock_client_conversion') is True:
+        if record.get('phase') != STOCK_NO_QUARANTINE_PHASE or record.get('quarantine_enabled') is not False:
+            raise ValueError('stock conversion record does not match this campaign')
+        # Same identity, lock and fresh-evidence checks; there is no option to release.
+        validate_release(profile, dict(record, phase='enabled'), evidence, lock)
+        record.update(phase='released_no_quarantine_option', evidence=str(evidence_path))
+        path.write_text(json.dumps(record, indent=2), encoding='utf8')
+        path.rename(path.with_name('PM_TELEMETRY_RELEASED_' + str(lock['token']) + '.json'))
+        return
     validate_release(profile, record, evidence, lock)
     bridge = bridge_for(profile)
     try:

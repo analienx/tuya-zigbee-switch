@@ -142,6 +142,40 @@ def test_stock_wrapper_can_only_convert_into_native_router(tmp_path, board):
         require_increasing(p, registry)
 
 
+def stock_client_fixture(tmp_path, board='b28wrpvx'):
+    p, registry = fixture(tmp_path, board, 'Router', 'EndDevice')
+    p.update(manufacturer='_TZ3000_' + board, model='TS011F', stock_client_conversion=True,
+             native_sha256=hashlib.sha256(Path(p['native_image']).read_bytes()).hexdigest())
+    p.pop('preflash_build')
+    replace_transport(p, image_type=54179, version=0xffffffff)
+    return p, registry
+
+
+def test_stock_wrapper_converts_into_a_sealed_client_only_when_explicit(tmp_path):
+    p, registry = stock_client_fixture(tmp_path)
+    verdict = require_increasing(p, registry)
+    assert (verdict['source'], verdict['source_role'], verdict['target_role']) == (
+        'stock', 'Router', 'EndDevice')
+    p['stock_client_conversion'] = False
+    with pytest.raises(IdentityError, match='stock_client_conversion'):
+        require_increasing(p, registry)
+
+
+@pytest.mark.parametrize('mutation', ['missing_native_hash', 'bad_native_hash',
+                                      'extra_header_byte', 'unsealed', 'not_max_version'])
+def test_stock_client_conversion_rejects_unproven_bytes(tmp_path, mutation):
+    p, registry = stock_client_fixture(tmp_path)
+    if mutation == 'missing_native_hash': p.pop('native_sha256')
+    if mutation == 'bad_native_hash': p['native_sha256'] = '0' * 64
+    if mutation == 'extra_header_byte':
+        blob = bytearray(Path(p['image']).read_bytes()); blob[20] ^= 0xff
+        Path(p['image']).write_bytes(blob); p['sha256'] = hashlib.sha256(blob).hexdigest()
+    if mutation == 'unsealed': registry[65024]['versions'][0]['sha512'] = None
+    if mutation == 'not_max_version': replace_transport(p, image_type=54179, version=102)
+    with pytest.raises(IdentityError):
+        require_increasing(p, registry)
+
+
 def test_explicit_query_override_cannot_cross_board_types(tmp_path):
     p, registry = fixture(tmp_path)
     p['preflash_query_image_type'] = 65026

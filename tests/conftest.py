@@ -545,3 +545,17 @@ def ensure_never_true(condition_fn: Callable[[], bool], timeout: float = 0.05) -
 def device(stub_proc: StubProc) -> Device:
     dev = Device(stub_proc)
     return dev
+
+
+
+@pytest.fixture(autouse=True)
+def _deployed_converter_gate_passes(monkeypatch):
+    """Campaign tests never reach a live HA host: by default the live
+    deployed-converter gate passes. tests/test_bseed_converter_gate.py imports
+    the real function at module load and exercises it directly."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'helper_scripts'))
+    import bseed_converter_gate
+    monkeypatch.setattr(bseed_converter_gate, 'require_deployed_converter',
+                        lambda profile: {'accepted': True, 'stub': True})
