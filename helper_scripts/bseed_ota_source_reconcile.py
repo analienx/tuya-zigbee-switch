@@ -33,16 +33,33 @@ def now():
     return dt.datetime.now(dt.timezone.utc).isoformat()
 
 
+def source_build_matches(profile, build):
+    """Exact preflash_build, or, for a stock-to-Client conversion (which may not
+    pin one), any build that is not custom BSEED firmware. The stock
+    manufacturer/model/role are matched exactly as well; the custom image
+    reports b28wrpvx / TS011F-BS-PM / EndDevice, so an install cannot pass."""
+    if 'preflash_build' in profile:
+        return build == profile['preflash_build']
+    if profile.get('stock_client_conversion') is not True:
+        raise ValueError('Profile pins no preflash_build and is not a stock conversion')
+    if not str(profile.get('manufacturer', '')).startswith('_TZ3000_'):
+        raise ValueError('Stock conversion profile without a stock manufacturer')
+    return build is None or (isinstance(build, str) and 'bseed' not in build.lower())
+
+
+def source_build_label(profile):
+    return profile.get('preflash_build', 'stock')
+
+
 def inventory_match(devices, profile):
     matches = [d for d in (devices or []) if d.get('ieee_address') == profile['ieee']]
     if len(matches) != 1:
         raise ValueError('Target IEEE absent or ambiguous')
     d = matches[0]
     interview_ok = d.get('interview_state') == 'SUCCESSFUL' or d.get('interview_completed') is True
-    if (d.get('friendly_name'), d.get('manufacturer'), d.get('model_id'),
-        d.get('type'), d.get('software_build_id')) != (
-            profile['device'], profile['manufacturer'], profile['model'],
-            profile['preflash_role'], profile['preflash_build']):
+    if ((d.get('friendly_name'), d.get('manufacturer'), d.get('model_id'), d.get('type')) != (
+            profile['device'], profile['manufacturer'], profile['model'], profile['preflash_role'])
+            or not source_build_matches(profile, d.get('software_build_id'))):
         raise ValueError('Fresh inventory no longer matches exact preflash identity')
     if not interview_ok:
         raise ValueError('Preflash source interview is not complete')
@@ -52,9 +69,8 @@ def inventory_match(devices, profile):
 def fresh_source_identity(target, profile):
     """Inventory is corroborating only; identity MUST come from a new target message."""
     device = (target or {}).get('device') or {}
-    expected = (profile['ieee'], profile['preflash_build'], profile['preflash_role'])
     found = (device.get('ieeeAddr'), device.get('softwareBuildID'), device.get('type'))
-    if found != expected:
+    if (found[0], found[2]) != (profile['ieee'], profile['preflash_role']) or not source_build_matches(profile, found[1]):
         raise ValueError('Fresh source identity build/role/IEEE absent or mismatched: ' + repr(found))
     if profile.get('relay_get_key', 'state') not in (target or {}):
         raise ValueError('Fresh target did not answer the requested relay property')
@@ -217,7 +233,7 @@ def reconcile(profile_path, confirmation, observe_seconds=45, verify_candidate=T
             'at': now(),
             'ieee': profile['ieee'],
             'device': profile['device'],
-            'source_build': profile['preflash_build'],
+            'source_build': source_build_label(profile),
             'source_role': profile['preflash_role'],
             'candidate_sha256': profile['sha256'],
             'candidate_check_performed': bool(verify_candidate),
