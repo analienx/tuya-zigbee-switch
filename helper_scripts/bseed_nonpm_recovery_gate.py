@@ -64,11 +64,16 @@ def _verify_recovery(profile, *, confirm_unloaded=False,
             profile.get('preflash_role'), profile.get('postflash_role')) != (
             'o1jzcxou', 'TS011F-BS', *roles):
         raise ValueError('Non-PM recovery identity/role mismatch')
-    if profile.get('block_bytes') != 32:
-        raise ValueError('Unproven non-PM transfer size: pin 32 bytes')
+    if profile.get('block_bytes') not in (32, 48) or isinstance(profile.get('block_bytes'), bool):
+        raise ValueError('Unproven non-PM transfer size: pin 32 bytes, or 48 bytes with paced responses')
+    from bseed_ota_block_policy import check_block_bytes
+    check_block_bytes(profile, allowed=(32, 48))
     if confirm_unloaded is not True:
         raise ValueError('Physical load not explicitly confirmed disconnected for THIS flash')
     if (profile.get('device'), profile.get('ieee')) == (BEDROOM_DEVICE, BEDROOM_IEEE):
+        # The exact Bedroom authorizations were approved at 32-byte blocks.
+        if profile.get('block_bytes') != 32:
+            raise ValueError('Exact Bedroom non-invasive authorization is pinned to 32-byte blocks')
         # Exact-device candidates only. Legacy rc1/rc2 remain pinned to their exact
         # hashes. The consolidated c7/r10 pair is allowed only on the same
         # Bedroom canary and only when the exact sealed native destination is
@@ -111,6 +116,8 @@ def _verify_recovery(profile, *, confirm_unloaded=False,
         if not (roles == ('Router', 'Router') and not transition and
                 profile.get('preflash_relay_physical_mode') == BALCONY_LEGACY_POLICY):
             raise ValueError('Balcony non-invasive authorization is exact Router v8 to r18 only')
+        if profile.get('block_bytes') != 32:
+            raise ValueError('Exact Balcony non-invasive authorization is pinned to 32-byte blocks')
         verify_relay_policy_profile(profile)
         return {'ieee': profile['ieee'],
                 'method': 'non-invasive exact Balcony Router v8-to-r18 canary',

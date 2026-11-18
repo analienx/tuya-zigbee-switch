@@ -90,6 +90,10 @@ def load_profile(path):
     if data.get('network_lock_dir') and Path(data['network_lock_dir']).is_relative_to(ROOT):
         raise ValueError('Network lock authority must not be inside repository')
     validate_pm_mode(data)
+    from bseed_ota_block_policy import check_block_bytes, default_block_bytes
+    if data.get('block_bytes') is None:
+        data['block_bytes'] = default_block_bytes(data)
+    check_block_bytes(data)
     if preserve_state(data):
         relay_endpoints(data)
         post_ota_configure(data)

@@ -47,6 +47,15 @@ def test_full_readback_gate_and_unloaded_confirmation(tmp_path):
         verify_recovery(profile,confirm_unloaded=True)
 
 
+def test_general_recovery_path_takes_48_bytes_only_when_paced(tmp_path):
+    profile,record,file,backups = fixture(tmp_path)
+    profile['block_bytes']=48
+    with pytest.raises(ValueError,match='response_delay_ms'):
+        verify_recovery(profile,confirm_unloaded=True)
+    profile['response_delay_ms']=1200
+    assert verify_recovery(profile,confirm_unloaded=True)['readback_sha256'] == record['backup_sha256']
+
+
 def test_missing_evidence_and_foreign_identity_fail_closed(tmp_path):
     profile,record,file,_=fixture(tmp_path)
     profile.pop('recovery_evidence')

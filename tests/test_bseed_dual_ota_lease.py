@@ -49,6 +49,15 @@ def claim(profile, *, token=None):
     )
 
 
+@pytest.mark.parametrize("manufacturer", [None, "b28wrpvx", "_TZ3000_b28wrpvx"])
+def test_two_slot_pilot_admits_48_byte_blocks_when_paced(tmp_path, manufacturer):
+    profile = p(tmp_path)
+    profile["block_bytes"] = 48
+    if manufacturer:
+        profile["manufacturer"] = manufacturer
+    assert require_profile_authority(profile)
+
+
 def test_two_exactly_reciprocal_devices_can_own_independent_slots(tmp_path):
     pa, pb = p(tmp_path), p(tmp_path, B, A)
     path_a = require_profile_authority(pa)
