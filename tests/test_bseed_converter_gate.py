@@ -73,9 +73,9 @@ def test_unreadable_converter_or_missing_access_fails_closed(tmp_path, monkeypat
 
 def test_gate_covers_every_pm_mode_that_flashes_provisions_or_accepts():
     pm = {'require_pm': True}
-    for mode in ('preflight', 'check', 'flash', 'transition', 'rejoin', 'provision-pm', 'postflash'):
+    for mode in ('preflight', 'check', 'flash', 'transition', 'provision-pm', 'postflash'):
         assert gate.required(pm, mode)
-    for mode in ('status', 'prepare', 'metadata', 'restore-state', 'snapshot-state'):
+    for mode in ('status', 'prepare', 'rejoin', 'metadata', 'restore-state', 'snapshot-state'):
         assert not gate.required(pm, mode)
     assert not gate.required({'require_pm': False, 'non_pm': True}, 'flash')
 

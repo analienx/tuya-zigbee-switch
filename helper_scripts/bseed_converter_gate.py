@@ -21,7 +21,8 @@ from bseed_z2m_state_refresh import converter_accepts_build
 DEFAULT_CONVERTER_PATH = '/config/zigbee2mqtt/external_converters/switch_custom.js'
 COPY_NAME = 'DEPLOYED_CONVERTER.js'
 RECORD_NAME = 'DEPLOYED_CONVERTER.json'
-GATED_MODES = ('preflight', 'check', 'flash', 'transition', 'rejoin', 'provision-pm', 'postflash')
+# Never 'rejoin': recovering an already-flashed device must not depend on HA files.
+GATED_MODES = ('preflight', 'check', 'flash', 'transition', 'provision-pm', 'postflash')
 
 
 def fetch_deployed_converter(host, username, key, path):
