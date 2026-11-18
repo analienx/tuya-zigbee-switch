@@ -398,7 +398,9 @@ def postflash_cmd(profile, evidence):
             '--mqtt-config', profile['mqtt_config'], '--broker', profile['broker'],
             '--output', str(evidence), '--observe-seconds', str(profile.get('observe_seconds', 20))]
     if profile.get('require_pm'): cmd.append('--require-pm')
-    if profile.get('deployed_converter'): cmd.extend(['--converter', str(profile['deployed_converter'])])
+    from bseed_converter_gate import converter_copy
+    converter = converter_copy(profile)
+    if converter: cmd.extend(['--converter', converter])
     if profile.get('ota_version_check'): cmd.append('--ota-version-check')
     if profile['preflash_role']==profile['postflash_role']:
         cmd.extend(['--preflash-lock',str(Path(profile['workdir'])/'ACTIVE_LOCK.json'),
@@ -516,6 +518,13 @@ def main():
             if args.mode != 'flash':
                 raise SystemExit('Router PM role transition requires an explicit force-test profile')
             verified_router_pm_candidate(profile)  # same-role Router flash, then audit separately
+    import bseed_converter_gate
+    if bseed_converter_gate.required(profile, args.mode):
+        try:
+            bseed_converter_gate.require_deployed_converter(profile)
+        except ValueError as error:
+            print('DEPLOYED_CONVERTER_REFUSED', str(error), flush=True)
+            raise SystemExit(4)
     work = Path(profile['workdir'])
     if args.mode == 'qualify':
         if args.confirm_ieee or profile.get('non_pm') is not True or profile.get('require_pm') is not False or profile['preflash_role'] not in ('EndDevice', 'Router'):
