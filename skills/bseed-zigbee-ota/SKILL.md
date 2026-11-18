@@ -20,6 +20,14 @@ python helper_scripts/bseed_socket_migrate.py queue   --device A --device B --to
 
 `plan` discovers the live identity, picks the route and the sealed candidate from the site's `candidate_package`, builds the stock or FORCE wrapper when needed, chooses `join_via` from the target's live neighbour table (strongest Router) and lists end devices that will have to re-parent; it then runs `load_profile`, the version policy, automatic relay OFF validation and, for non-PM, the recovery gate, so a refusal costs nothing. `run` resumes a stopped transfer only through `reconcile-source` and only while OTA progress strictly increases (the resume supervisor's gate, at most `--max-resumes`). OTAs run one at a time: the shared single-slot lease is never bypassed, and two-slot mode refuses role changes. Routes: stock PM Router → PM Client; custom PM same role; custom PM Client ↔ Router (FORCE); custom non-PM same role where the recovery gate admits it. Stock → Router and non-PM role changes are refused.
 
+### A converted socket that never comes back (2026-11-18)
+
+A stock → `cli` Client normally rejoins by itself within about 90 s (RightR). If Zigbee2MQTT logs `Update ... successful ... Waiting for device announce` and nothing follows for about 10 minutes, and both LEDs flash together, the custom firmware is running and searching; it is not bricked. Do not repeat scoped windows: WindowLeft spent 70 minutes in them, plus a power cycle, without one frame reaching the network. What worked:
+
+1. The owner presses the button 10 times quickly (multi-press network reset: Zigbee pairing only; firmware, configuration and calibration stay).
+2. One bounded network-wide window: `bseed_z2m_rejoin_window.py --network-wide --seconds 120 --total-seconds 300 ...` (same lock, target and foreign-join abort as the scoped mode; total capped at 600 s). It is an operator step, never a profile fallback (`allow_join_all_fallback` stays false).
+3. Continue with `metadata`, `restore-state`, `provision-pm`, `postflash`. The reset brings the relay up ON, so a loaded socket needs `pm_expected_idle: false`; the idle gate is a no-load proof and must not be weakened otherwise.
+
 ## PR #114 software acceptance — owner instruction 2026-11-07
 
 The owner has no noncritical hardware and requested that software checks

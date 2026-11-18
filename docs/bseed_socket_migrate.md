@@ -57,3 +57,13 @@ because the next OTA cannot start while that lease is held.
 
 Refused: stock → Router (no reviewed route yet), non-PM role changes, other
 boards. All transfers use 48-byte blocks with 1200 ms response pacing.
+
+## When the socket does not rejoin
+
+`run` ends with the scoped rejoin window. If the target never announces
+(both LEDs flashing together for more than about 10 minutes), follow
+"A converted socket that never comes back" in the skill: owner network reset
+(10 quick presses), then one `bseed_z2m_rejoin_window.py --network-wide`
+window, then `metadata`, `restore-state`, `provision-pm` and `postflash`.
+The candidate check in the rejoin tool now survives unrelated inventory
+republishes, so a scoped campaign runs its full `--total-seconds`.
