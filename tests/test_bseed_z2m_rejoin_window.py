@@ -120,7 +120,8 @@ def test_only_a_device_new_to_the_network_counts_as_foreign_join():
     assert foreign_joiner('not an event', known, IEEE) is None
 
 
-def _run_campaign(tmp_path, monkeypatch, *, total, on_open, live_role='EndDevice'):
+def _run_campaign(tmp_path, monkeypatch, *, total, on_open, live_role='EndDevice',
+                  node=None, network_wide=False):
     import itertools
     import json
     from types import SimpleNamespace
@@ -170,11 +171,12 @@ def _run_campaign(tmp_path, monkeypatch, *, total, on_open, live_role='EndDevice
     monkeypatch.setattr(module, 'mqtt', SimpleNamespace(
         Client=Client, CallbackAPIVersion=SimpleNamespace(VERSION2=2)))
     monkeypatch.setattr(module.threading, 'Event', Event)
-    monkeypatch.setattr(module, 'read_node_descriptor', lambda *args: {'role': live_role})
+    monkeypatch.setattr(module, 'read_node_descriptor', node or (lambda *args: {'role': live_role}))
     monkeypatch.setattr(module.time, 'monotonic', lambda counter=itertools.count(): next(counter))
     monkeypatch.setattr(module, 'arguments', lambda: SimpleNamespace(
         target=target['friendly_name'], ieee=IEEE, confirm_ieee=IEEE,
-        permit_via=INVENTORY[1]['friendly_name'], seconds=30, total_seconds=total,
+        permit_via=None if network_wide else INVENTORY[1]['friendly_name'],
+        network_wide=network_wide, seconds=30, total_seconds=total,
         expect_role='EndDevice', expect_build='new-build', mqtt_config=str(config),
         broker='mock', campaign_lock=str(lock), output=str(output)))
     code = 0
@@ -182,6 +184,7 @@ def _run_campaign(tmp_path, monkeypatch, *, total, on_open, live_role='EndDevice
         module.main()
     except SystemExit as error:
         code = error.code
+    _run_campaign.requests = requests
     return code, [r['time'] for r in requests], json.loads(output.read_text())
 
 
@@ -200,6 +203,68 @@ def test_window_stops_at_total_and_closes_when_target_never_rejoins(tmp_path, mo
                                           on_open=lambda *args: None)
     assert code == 2 and times[-1] == 0 and len(times) >= 3
     assert all(t == 30 for t in times[:-1]) and evidence['result'] == 'unconfirmed'
+
+
+def test_unrelated_inventory_republish_does_not_end_the_campaign(tmp_path, monkeypatch):
+    """WindowLeft 2026-11-18: another device's interview republished the inventory and the
+    old loop closed joining after one failed live check, three times in one evening."""
+    calls = []
+    def node(*args):
+        calls.append(args)
+        if len(calls) == 1:
+            raise TimeoutError('nodeDescRsp after 10000ms')
+        return {'role': 'EndDevice'}
+    def on_open(n, schedule, inventory):
+        if n == 1:
+            schedule('bridge/devices', inventory, False)   # someone else was interviewed
+            schedule('bridge/devices', inventory, False)   # ignored for the rest of this window
+        if n == 3:
+            schedule('bridge/event', {'type': 'device_announce', 'data': {'ieee_address': IEEE}}, False)
+    code, times, evidence = _run_campaign(tmp_path, monkeypatch, total=200, on_open=on_open, node=node)
+    assert code == 0 and times == [30, 30, 30, 0] and len(calls) == 2
+    assert evidence['result'] == 'rejoin_candidate'
+    assert [r['reason'] for r in evidence['rejected_candidates']] == ['fresh_inventory']
+
+
+def test_rejected_candidates_end_unconfirmed_at_the_total(tmp_path, monkeypatch):
+    def on_open(n, schedule, inventory):
+        schedule('bridge/event', {'type': 'device_announce', 'data': {'ieee_address': IEEE}}, False)
+    code, times, evidence = _run_campaign(tmp_path, monkeypatch, total=100, on_open=on_open,
+                                          live_role='Router')
+    assert code == 2 and times[-1] == 0 and len(times) >= 3
+    assert evidence['result'] == 'unconfirmed' and evidence['rejected_candidates']
+
+
+def test_network_wide_window_has_no_router_and_a_tighter_budget(tmp_path, monkeypatch):
+    from bseed_z2m_rejoin_window import window_budget, permit_payload, MAX_NETWORK_WIDE_SECONDS
+    assert permit_payload(60, None, 't') == {'time': 60, 'transaction': 't'}
+    assert permit_payload(60, 'R', 't')['device'] == 'R'
+    assert window_budget(120, MAX_NETWORK_WIDE_SECONDS, True)[1] == 600
+    with pytest.raises(ValueError):
+        window_budget(120, 601, True)
+    assert window_budget(120, 2100, False)[1] == 2100
+    with pytest.raises(ValueError, match='no permit-via'):
+        validate_recovery(IEEE, IEEE, 'KitchenSocketRight', INVENTORY, False, LOCK, True)
+    with pytest.raises(ValueError, match='requires a permit-via'):
+        validate_recovery(IEEE, IEEE, None, INVENTORY, False, LOCK)
+    target, router = validate_recovery(IEEE, IEEE, None, INVENTORY, False, LOCK, True)
+    assert target['ieee_address'] == IEEE and router is None
+
+    def on_open(n, schedule, inventory):
+        schedule('bridge/event', {'type': 'device_announce', 'data': {'ieee_address': IEEE}}, False)
+    code, times, evidence = _run_campaign(tmp_path, monkeypatch, total=300, on_open=on_open,
+                                          network_wide=True)
+    assert code == 0 and times == [30, 0] and evidence['network_wide'] is True
+    assert all('device' not in r for r in _run_campaign.requests)
+
+
+def test_network_wide_still_aborts_on_a_foreign_join(tmp_path, monkeypatch):
+    def on_open(n, schedule, inventory):
+        schedule('bridge/event', {'type': 'device_joined',
+                                  'data': {'ieee_address': '0x00000000deadbeef'}}, False)
+    code, times, evidence = _run_campaign(tmp_path, monkeypatch, total=300, on_open=on_open,
+                                          network_wide=True)
+    assert code == 2 and times == [30, 0] and evidence['result'] == 'foreign_join_aborted'
 
 
 def test_foreign_join_aborts_and_closes_immediately(tmp_path, monkeypatch):
