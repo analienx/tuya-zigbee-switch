@@ -413,16 +413,21 @@ def cmd_plan(site, args):
 def cmd_publish(site, args):
     work = workdir_for(site, args.device)
     profile = json.loads((work / 'profile.json').read_text(encoding='utf8'))
-    if campaign(work / 'profile.json', 'prepare'):
-        raise SystemExit('prepare failed')
     folder = Path(profile['image']).stem
     remote = site['publish']['remote_dir'].rstrip('/') + '/' + folder
     alias = site['publish']['ssh_alias']
-    for cmd in (['ssh', '-o', 'BatchMode=yes', alias, 'mkdir -p ' + remote],
-                ['scp', '-q', '-o', 'BatchMode=yes', profile['image'], alias + ':' + remote + '/firmware.ota'],
-                ['scp', '-q', '-o', 'BatchMode=yes', profile['index_output'], alias + ':' + remote + '/index.json']):
+
+    def step(cmd):
         if subprocess.call(cmd):
             raise SystemExit('publish step failed: ' + ' '.join(cmd[:2]))
+
+    # prepare verifies the image as served over HTTP before it writes the
+    # index, so the image goes up first and the index only after prepare.
+    step(['ssh', '-o', 'BatchMode=yes', alias, 'mkdir -p ' + remote])
+    step(['scp', '-q', '-o', 'BatchMode=yes', profile['image'], alias + ':' + remote + '/firmware.ota'])
+    if campaign(work / 'profile.json', 'prepare'):
+        raise SystemExit('prepare failed')
+    step(['scp', '-q', '-o', 'BatchMode=yes', profile['index_output'], alias + ':' + remote + '/index.json'])
     import urllib.request
     with urllib.request.urlopen(profile['url'], timeout=30) as response:
         served = hashlib.sha256(response.read()).hexdigest()

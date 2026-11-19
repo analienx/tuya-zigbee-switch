@@ -147,6 +147,46 @@ def test_release_needs_candidate_matching_token_restored_relay_and_words(tmp_pat
         mig.release_request(lease, lock, profile, 'Owner accepted it')
 
 
+def test_publish_uploads_the_image_before_prepare_checks_it(tmp_path, monkeypatch):
+    # prepare fetches the served image over HTTP, so it must run after the
+    # image upload and before the index (which prepare writes) is uploaded.
+    work = tmp_path / 'work'
+    work.mkdir()
+    profile = {'image': str(tmp_path / 'SocketX-a-to-b.ota'), 'index_output': str(tmp_path / 'index.json'),
+               'url': 'http://ha.invalid/local/bseed/SocketX-a-to-b/firmware.ota?v=1',
+               'sha256': mig.hashlib.sha256(b'image').hexdigest()}
+    (work / 'profile.json').write_text(json.dumps(profile))
+    calls = []
+    monkeypatch.setattr(mig, 'workdir_for', lambda _site, _device: work)
+    monkeypatch.setattr(mig.subprocess, 'call', lambda cmd: calls.append(cmd[0] + ':' + cmd[-1].rsplit('/', 1)[-1]) or 0)
+    monkeypatch.setattr(mig, 'campaign', lambda _path, mode: calls.append('campaign:' + mode) or 0)
+
+    class Reply:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self):
+            calls.append('verify')
+            return b'image'
+
+    import urllib.request
+    monkeypatch.setattr(urllib.request, 'urlopen', lambda url, timeout: Reply())
+    site = {'publish': {'remote_dir': '/config/www/bseed', 'ssh_alias': 'ha'}}
+    assert mig.cmd_publish(site, type('A', (), {'device': 'SocketX'})()) == 0
+    assert calls == ['ssh:SocketX-a-to-b', 'scp:firmware.ota',
+                     'campaign:prepare', 'scp:index.json', 'verify']
+
+    # A failed prepare never uploads an index.
+    calls.clear()
+    monkeypatch.setattr(mig, 'campaign', lambda _path, mode: calls.append('campaign:' + mode) or 1)
+    with pytest.raises(SystemExit, match='prepare failed'):
+        mig.cmd_publish(site, type('A', (), {'device': 'SocketX'})())
+    assert 'scp:index.json' not in calls
+
+
 def test_neighbor_page_parsing_is_strict():
     total, entries = parse_neighbor_page({'status': 'ok', 'data': [0, {'neighborTableEntries': 2,
                                                                          'entryList': [{}, {}]}]})
