@@ -61,6 +61,10 @@ def test_generated_converter_loads_and_pm_nonpm_contracts_stay_separate(tmp_path
     script = r'''
 const assert = require('node:assert/strict');
 const {prepareDefinition} = require('zigbee-herdsman-converters');
+const zhc = require('zigbee-herdsman-converters');
+// Surface errors ZHC swallows inside per-device exposes functions.
+if (zhc.setLogger) zhc.setLogger({debug() {}, info() {}, warning(m) {console.error('ZHC-W', m);},
+                                 error(m) {console.error('ZHC-E', m);}});
 const definitions = require(process.argv[1]);
 const find = name => prepareDefinition(definitions.find(d => d.zigbeeModel?.includes(name)));
 const pm = find('TS011F-BS-PM'), nonpm = find('TS011F-BS');
@@ -76,8 +80,10 @@ for (const property of ['power', 'current', 'voltage', 'energy']) {
 // LED brightness only for builds that have Basic 0xFF03.
 // Endpoint-scoped: the property carries the endpoint suffix, the name does not.
 const led = (def, build) => exposed(def, build).some(e => e.name === 'led_brightness');
+const names = (def, build) => JSON.stringify(exposed(def, build).map(
+    e => typeof e === 'function' ? 'fn' : `${e.name}/${e.property}`));
 for (const build of ['1.2.5-bseedr24', '1.2.5-bseedcli27', '1.2.5-bseedr30'])
-    assert.ok(led(pm, build), build);
+    assert.ok(led(pm, build), `${build}: ${names(pm, build)}`);
 for (const build of ['1.2.5-bseedr23', '1.2.5-bseedcli26', '1.2.5-bseedv8u4', '', undefined])
     assert.ok(!led(pm, build), String(build));
 for (const build of ['1.1.3-bseedr21', '1.1.3-bseedc19'])
