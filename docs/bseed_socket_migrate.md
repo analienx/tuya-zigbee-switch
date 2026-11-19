@@ -62,7 +62,7 @@ boards. All transfers use 48-byte blocks with 1200 ms response pacing.
 ## When the socket does not rejoin
 
 `run` ends with a network-wide rejoin window bounded by one deadline (at most
-20 minutes; role changes only). If the
+35 minutes; role changes only). If the
 target still never announces (both LEDs flashing together), follow "A
 converted socket that never comes back" in the skill: owner network reset (10
 quick presses), then one more `bseed_z2m_rejoin_window.py --network-wide`

@@ -50,7 +50,6 @@ from bseed_join_policy import (MAX_NETWORK_WIDE_SECONDS, MAX_SCOPED_TOTAL_SECOND
 from bseed_zdo_live import read_node_descriptor
 
 ROOT = Path(__file__).resolve().parents[1]
-MAX_TOTAL_SECONDS = MAX_SCOPED_TOTAL_SECONDS
 LATE_ANNOUNCE_GRACE_SECONDS = 5
 JOIN_EVENTS = ('device_joined', 'device_interview', 'device_announce')
 
@@ -58,7 +57,7 @@ JOIN_EVENTS = ('device_joined', 'device_interview', 'device_announce')
 def window_budget(seconds, total_seconds, network_wide=False):
     """Validated per-window and whole-campaign join durations."""
     total = seconds if total_seconds is None else total_seconds
-    limit = MAX_NETWORK_WIDE_SECONDS if network_wide else MAX_TOTAL_SECONDS
+    limit = MAX_NETWORK_WIDE_SECONDS if network_wide else MAX_SCOPED_TOTAL_SECONDS
     if not MIN_WINDOW_SECONDS <= seconds <= MAX_WINDOW_SECONDS:
         raise ValueError('Join window must be %d..%d seconds' % (MIN_WINDOW_SECONDS, MAX_WINDOW_SECONDS))
     if not seconds <= total <= limit:
@@ -166,14 +165,17 @@ def main():
     base=config.get('base_topic','zigbee2mqtt');token='bseed-rejoin-'+uuid.uuid4().hex
     state={'info':None,'inventory':None,'response':{},'events':[],'target_state':None,'candidate':None,
            'window_open':False,'fresh_inventory':False,'known':None,'foreign':None,'ignore_inventory':False,
-           'opened':False,'closed':None,'close_token':None}
+           'opened':False,'closed':None,'close_tokens':[],'info_seq':0,'close_info_seq':None,
+           'late_open_closes':set(),'open_tokens':[]}
     ready=threading.Event();wake=threading.Event()
     gate=threading.RLock()  # serializes opening and closing; never held while verifying
     permit_topic=base+'/bridge/request/permit_join'
     def publish_close(suffix):
         with gate:
-            state['close_token']=token+suffix
-            c.publish(permit_topic,json.dumps({'time':0,'transaction':state['close_token']}),qos=1)
+            close_token=token+suffix+'-'+str(len(state['close_tokens']))
+            state['close_tokens'].append(close_token)
+            state['close_info_seq']=state['info_seq']
+            c.publish(permit_topic,json.dumps({'time':0,'transaction':close_token}),qos=1)
     def close_now(reason):
         # Close joining once, immediately, from any thread. Never waits.
         with gate:
@@ -192,7 +194,9 @@ def main():
     def on_message(_c,_u,m):
         try:data=json.loads(m.payload)
         except (UnicodeDecodeError,ValueError):return
-        if m.topic==base+'/bridge/info' and isinstance(data,dict):state['info']=data
+        if m.topic==base+'/bridge/info' and isinstance(data,dict):
+            state['info']=data
+            if not m.retain:state['info_seq']+=1;wake.set()
         elif m.topic==base+'/bridge/devices' and isinstance(data,list):
             state['inventory']=data
             target=next((x for x in data if x.get('ieee_address')==a.ieee),None)
@@ -203,7 +207,14 @@ def main():
                 # may still describe the pre-OTA firmware.
                 state['candidate']='fresh_inventory';wake.set()
         elif m.topic==base+'/bridge/response/permit_join' and isinstance(data,dict):
-            state['response'][data.get('transaction')]=data;wake.set()
+            transaction=data.get('transaction')
+            state['response'][transaction]=data;wake.set()
+            # Bridge requests are handled asynchronously: an open answered
+            # after our close may have taken effect after it. Close again.
+            if (str(transaction).startswith(token+'-open-') and state['closed'] is not None and
+                    transaction not in state['late_open_closes']):
+                state['late_open_closes'].add(transaction)
+                publish_close('-close-after-open')
         elif m.topic==base+'/bridge/event' and state['known'] is not None and not m.retain:
             joiner=foreign_joiner(data,state['known'],a.ieee)
             if joiner and state['foreign'] is None:
@@ -232,7 +243,7 @@ def main():
     c.on_connect=on_connect;c.on_message=on_message
     c.connect(a.broker,1883,10);c.loop_start()
     open_response=None; close_response=None; outcome='unconfirmed'; windows=[]
-    live_node=None; zdo_error=None; rejected=[]; timer=None; failure=None
+    live_node=None; zdo_error=None; rejected=[]; timer=None; failure=None; closed_verified=False
     try:
         if not ready.wait(10):raise RuntimeError('MQTT subscription not ready')
         deadline=time.monotonic()+12
@@ -261,7 +272,7 @@ def main():
                 seconds=window_seconds_left(window_seconds,campaign_stop,sent_at)
                 if seconds<=0:break
                 open_token=token+'-open-'+str(len(windows))
-                state['opened']=True
+                state['opened']=True;state['open_tokens'].append(open_token)
                 c.publish(permit_topic,json.dumps(permit_payload(seconds,permit_via,open_token)),qos=1)
             deadline=time.monotonic()+15
             while (time.monotonic()<deadline and open_token not in state['response'] and
@@ -314,15 +325,26 @@ def main():
         if timer is not None:timer.cancel()
         try:
             close_now('exit')
-            if state['close_token']:
+            if state['close_tokens']:
+                def close_ok():
+                    return next((state['response'][t] for t in state['close_tokens']
+                                 if (state['response'].get(t) or {}).get('status')=='ok'),None)
+                def bridge_closed():
+                    # Every open answered (a late one re-closes), and a
+                    # bridge/info published after the last close says off.
+                    return (all(t in state['response'] for t in state['open_tokens']) and
+                            state['info_seq']>state['close_info_seq'] and
+                            state['info'].get('permit_join') is False)
                 for attempt in range(2):
                     deadline=time.monotonic()+12
-                    while time.monotonic()<deadline and state['close_token'] not in state['response']:
+                    while time.monotonic()<deadline and not (close_ok() and bridge_closed()):
                         wake.wait(0.3);wake.clear()
-                    close_response=state['response'].get(state['close_token'])
-                    if close_response or attempt:break
-                    publish_close('-close-retry')  # one resend if never acknowledged
-                print('JOIN_WINDOW_CLOSE',state['closed'],close_response,flush=True)
+                    close_response=close_ok()
+                    closed_verified=bool(close_response and bridge_closed())
+                    if closed_verified or attempt:break
+                    publish_close('-close-retry')  # missing, error or still open: once more
+                print('JOIN_WINDOW_CLOSE',state['closed'],close_response,
+                      'bridge permit_join off' if closed_verified else 'NOT VERIFIED CLOSED',flush=True)
         except Exception as error:print('CRITICAL_JOIN_CLOSE_FAILED',repr(error),flush=True)
         c.loop_stop();c.disconnect()
     target_now=next((x for x in (state['inventory'] or []) if x.get('ieee_address')==a.ieee),{})
@@ -333,10 +355,11 @@ def main():
             'window_seconds':window_seconds,'closed_by':state['closed'],'failure':failure,
             'total_seconds':total_seconds,'windows':windows,'foreign_join':state['foreign'],
             'open_response':open_response,'close_response':close_response,
+            'closed_verified':closed_verified,'close_requests':state['close_tokens'],
             'identity_verified':False,'expected_build':a.expect_build,
             'live_node_descriptor':live_node,'zdo_error':zdo_error,'rejected_candidates':rejected,
             'fresh_inventory_during_window':state['fresh_inventory'],
-            'result':outcome if close_response and close_response.get('status')=='ok' else 'unconfirmed',
+            'result':outcome if closed_verified else 'unconfirmed',
             'inventory':{k:target_now.get(k) for k in ('friendly_name','ieee_address','type',
                 'manufacturer','model_id','software_build_id','interview_completed')},
             'state':state['target_state'],'target_events':state['events']}

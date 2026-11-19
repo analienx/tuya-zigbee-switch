@@ -30,7 +30,8 @@ def base_profile(tmp_path, **changes):
            'index_url': 'http://example.invalid/index.json',
            'index_output': str(tmp_path / 'index.json'), 'template_index': str(template),
            'postflash_role': 'EndDevice', 'postflash_build': 'expected-client',
-           'join_via': 'KnownRouter', 'preserve_device_state': True}
+           'join_via': 'KnownRouter', 'join_mode': 'network-wide',
+           'preserve_device_state': True}
     cfg.update(changes)
     return cfg
 

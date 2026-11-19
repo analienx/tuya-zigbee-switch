@@ -159,10 +159,10 @@ def build_profile(site, live, route, candidate, *, image, sha256, native_image=N
                  native_image=str(native_image), native_sha256=native_sha256)
     if role_change:
         # Owner rule: rejoin network-wide, never scoped to one parent Router.
-        from bseed_join_policy import MAX_NETWORK_WIDE_SECONDS
+        from bseed_join_policy import DEFAULT_WINDOW_SECONDS, MAX_NETWORK_WIDE_SECONDS
         # Source recovery (resume) keeps its narrow mechanisms: scoped through
         # the strongest Router when there is one, else coordinator-only.
-        p.update(join_mode='network-wide', join_seconds=120,
+        p.update(join_mode='network-wide', join_seconds=DEFAULT_WINDOW_SECONDS,
                  join_total_seconds=MAX_NETWORK_WIDE_SECONDS, allow_join_all_fallback=False,
                  source_rejoin_strategy='scoped' if join_via else 'coordinator')
         if join_via:
@@ -356,6 +356,11 @@ def cmd_plan(site, args):
         from bseed_zdo_live import read_neighbor_table
         neighbors = read_neighbor_table(site['mqtt_config'], site['broker'], live['ieee_address'],
                                         live['network_address'])
+        if not any(entry.get('eui64') in {d.get('ieee_address') for d in devices}
+                   for entry in neighbors or []):
+            # An empty or unreadable table cannot say which children must
+            # re-parent; refuse rather than plan blind.
+            raise Refused('Neighbour table empty or unreadable; retry plan')
         join_via, lqi, children = choose_join_via(neighbors, devices, live['ieee_address'])
         print('STRONGEST_ROUTER_NEIGHBOUR' if join_via else 'NO_ROUTER_NEIGHBOUR', join_via, 'lqi', lqi)
         if route['target'] == 'EndDevice' and children:

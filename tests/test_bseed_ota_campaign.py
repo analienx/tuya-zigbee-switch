@@ -234,13 +234,21 @@ def test_rejoin_defaults_to_a_network_wide_window_within_its_budget(tmp_path):
 
 
 def test_network_wide_total_is_refused_above_its_cap_not_cut(tmp_path):
-    cfg=profile(tmp_path);cfg['join_total_seconds']=2100
-    with pytest.raises(ValueError,match='at most 1200'):
+    cfg=profile(tmp_path);cfg['join_total_seconds']=2400
+    with pytest.raises(ValueError,match='at most 2100'):
         campaign.join_total_seconds(cfg)
     cfg.update(join_mode='scoped',join_via='KnownRouter')
-    assert campaign.join_total_seconds(cfg)==2100
+    assert campaign.join_total_seconds(cfg)==2400
     del cfg['join_total_seconds'];cfg.pop('join_mode');cfg.pop('join_via')
-    assert campaign.join_total_seconds(cfg)==1200   # network-wide default
+    assert campaign.join_total_seconds(cfg)==2100   # boot + both steering rescues
+
+
+def test_old_contract_profile_with_join_via_stays_scoped(tmp_path):
+    """join_via without join_mode meant 'scoped through this Router': never widen it."""
+    cfg=profile(tmp_path);cfg.update(join_via='KnownRouter',join_total_seconds=2100)
+    assert campaign.join_mode(cfg)=='scoped'
+    cmd=campaign.rejoin_cmd(cfg,cfg['ieee'],tmp_path/'e.json')
+    assert cmd[cmd.index('--permit-via')+1]=='KnownRouter' and '--network-wide' not in cmd
 
 
 def test_same_role_updates_never_open_a_join_window(tmp_path):

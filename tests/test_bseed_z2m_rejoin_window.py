@@ -71,6 +71,8 @@ def test_stale_build_allows_interview_candidate_only_after_fresh_inventory_and_l
         def publish(self, topic, payload, **kwargs):
             data = json.loads(payload)
             requests.append(data)
+            # Zigbee2MQTT publishes bridge/info for the new state, then the response.
+            self.emit('bridge/info', {'permit_join': bool(data['time'])})
             self.emit('bridge/response/permit_join', {'status': 'ok', 'transaction': data['transaction']})
             if data['time']:
                 pending.append(lambda: self.emit('bridge/devices', inventory, retained))
@@ -123,7 +125,8 @@ def test_only_a_device_new_to_the_network_counts_as_foreign_join():
 
 
 def _run_campaign(tmp_path, monkeypatch, *, total, on_open, live_role='EndDevice',
-                  node=None, network_wide=False, refuse_open=False):
+                  node=None, network_wide=False, refuse_open=False, late_open_ack=False,
+                  bridge_stays_open=False):
     import itertools
     import json
     from types import SimpleNamespace
@@ -166,8 +169,16 @@ def _run_campaign(tmp_path, monkeypatch, *, total, on_open, live_role='EndDevice
             data = json.loads(payload)
             requests.append(data)
             refused = refuse_open and data['time']
-            self.emit('bridge/response/permit_join', {'status': 'error' if refused else 'ok',
-                                                     'transaction': data['transaction']})
+            def answer(data=data, refused=refused):
+                # Zigbee2MQTT publishes bridge/info for the new state, then the response.
+                self.emit('bridge/info', {'permit_join': bridge_stays_open or
+                                          bool(data['time'] and not refused)})
+                self.emit('bridge/response/permit_join', {'status': 'error' if refused else 'ok',
+                                                         'transaction': data['transaction']})
+            if late_open_ack and data['time']:
+                pending.append(answer)   # the bridge answers this open late
+            else:
+                answer()
             if data['time'] and not refused:
                 Client.opens += 1
                 on_open(Client.opens, lambda *event: pending.append(lambda: self.emit(*event)), inventory)
@@ -255,9 +266,9 @@ def test_network_wide_window_has_no_router_and_a_tighter_budget(tmp_path, monkey
     from bseed_z2m_rejoin_window import window_budget, permit_payload, MAX_NETWORK_WIDE_SECONDS
     assert permit_payload(60, None, 't') == {'time': 60, 'transaction': 't'}
     assert permit_payload(60, 'R', 't')['device'] == 'R'
-    assert window_budget(120, MAX_NETWORK_WIDE_SECONDS, True)[1] == 1200
+    assert window_budget(120, MAX_NETWORK_WIDE_SECONDS, True)[1] == 2100
     with pytest.raises(ValueError):
-        window_budget(120, 1201, True)
+        window_budget(120, 2101, True)
     assert window_budget(120, 2100, False)[1] == 2100
     with pytest.raises(ValueError, match='no permit-via'):
         validate_recovery(IEEE, IEEE, 'KitchenSocketRight', INVENTORY, False, LOCK, True)
@@ -378,3 +389,25 @@ def test_unconfirmed_open_still_writes_evidence(tmp_path, monkeypatch):
     assert evidence['result'] == 'unconfirmed'
     assert evidence['failure'].startswith('permit_join_unconfirmed')
     assert evidence['closed_by'] == 'permit_join_unconfirmed'
+
+
+def test_open_answered_after_the_close_is_closed_again(tmp_path, monkeypatch):
+    """Bridge requests are asynchronous: an open acknowledged after our close
+    may have taken effect after it, so the tool closes once more and only
+    then treats joining as closed."""
+    def on_open(n, schedule, inventory):
+        if n == 1:
+            _run_campaign.deadline[0][1]()   # deadline fires before the open is answered
+    code, times, evidence = _run_campaign(tmp_path, monkeypatch, total=600, on_open=on_open,
+                                          network_wide=True, late_open_ack=True)
+    assert times == [30, 0, 0] and len(evidence['close_requests']) == 2
+    assert evidence['closed_verified'] is True and evidence['closed_by'] == 'deadline'
+
+
+def test_joining_is_not_reported_closed_while_the_bridge_says_open(tmp_path, monkeypatch):
+    def on_open(n, schedule, inventory):
+        schedule('bridge/event', {'type': 'device_announce', 'data': {'ieee_address': IEEE}}, False)
+    code, times, evidence = _run_campaign(tmp_path, monkeypatch, total=300, on_open=on_open,
+                                          network_wide=True, bridge_stays_open=True)
+    assert code == 2 and evidence['result'] == 'unconfirmed'
+    assert evidence['closed_verified'] is False and times.count(0) == 2   # one resend

@@ -183,8 +183,10 @@ def main(argv=None) -> None:
         raise ValueError("Exact target IEEE confirmation required")
 
     seconds = int(a.seconds if a.seconds is not None else profile.get("join_seconds", 120))
-    if not 30 <= seconds <= 180:
-        raise ValueError("Join window must be 30..180 seconds")
+    from bseed_join_policy import MAX_WINDOW_SECONDS, MIN_WINDOW_SECONDS
+    if not MIN_WINDOW_SECONDS <= seconds <= MAX_WINDOW_SECONDS:
+        raise ValueError("Join window must be %d..%d seconds"
+                         % (MIN_WINDOW_SECONDS, MAX_WINDOW_SECONDS))
     if not 2 <= a.probe_every_seconds <= 30:
         raise ValueError("Probe cadence must be 2..30 seconds")
 

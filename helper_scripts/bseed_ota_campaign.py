@@ -133,8 +133,7 @@ def load_profile(path):
     if preserve_state(data):
         relay_endpoints(data)
         post_ota_configure(data)
-    join_total_seconds(data)
-    join_mode(data)
+    join_total_seconds(data)  # also validates join_mode
     if (data.get('force_test_transition') is True and data.get('non_pm') is True and
             data.get('device') == 'BedroomSocketCabinetRight' and
             data.get('ieee') == '0xa4c13824a7005afb'):
@@ -196,13 +195,16 @@ def join_total_seconds(profile):
     """Whole-campaign permit-join time. Network-wide windows default to, and
     may not exceed, MAX_NETWORK_WIDE_SECONDS; a larger value is refused when
     the profile loads instead of being cut silently when the window opens."""
-    from bseed_join_policy import MAX_NETWORK_WIDE_SECONDS, MAX_SCOPED_TOTAL_SECONDS
+    from bseed_join_policy import (MAX_NETWORK_WIDE_SECONDS, MAX_SCOPED_TOTAL_SECONDS,
+                                   MIN_WINDOW_SECONDS)
     network_wide = join_mode(profile) == 'network-wide'
-    default = MAX_NETWORK_WIDE_SECONDS if network_wide else DEFAULT_JOIN_TOTAL_SECONDS
+    default = min(DEFAULT_JOIN_TOTAL_SECONDS, MAX_NETWORK_WIDE_SECONDS) if network_wide \
+        else DEFAULT_JOIN_TOTAL_SECONDS
     value = profile.get('join_total_seconds', default)
     if (not isinstance(value, int) or isinstance(value, bool) or
-            not 30 <= value <= MAX_SCOPED_TOTAL_SECONDS):
-        raise ValueError('join_total_seconds must be an integer 30..2700')
+            not MIN_WINDOW_SECONDS <= value <= MAX_SCOPED_TOTAL_SECONDS):
+        raise ValueError('join_total_seconds must be an integer %d..%d'
+                         % (MIN_WINDOW_SECONDS, MAX_SCOPED_TOTAL_SECONDS))
     if value < int(profile.get('join_seconds', 120)):
         raise ValueError('join_total_seconds must cover at least one join_seconds window')
     if network_wide and value > MAX_NETWORK_WIDE_SECONDS:
@@ -233,7 +235,10 @@ def join_mode(profile):
         if profile.get('join_mode') is not None:
             raise ValueError('join_mode is only for a role migration that needs a fresh association')
         return None
-    mode = profile.get('join_mode', 'network-wide')
+    # A profile written for the old contract (join_via, no join_mode) meant
+    # "scoped through this Router": keep it scoped, never widen it silently.
+    default = 'scoped' if profile.get('join_via') else 'network-wide'
+    mode = profile.get('join_mode', default)
     if mode not in JOIN_MODES:
         raise ValueError('join_mode must be one of %s' % ', '.join(JOIN_MODES))
     if mode == 'scoped' and not profile.get('join_via'):
