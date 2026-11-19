@@ -41,7 +41,7 @@ extern network_indicator_t network_indicator;
 static void network_indicator_quiet(void) {
     if (hal_zigbee_get_network_status() == HAL_ZIGBEE_NETWORK_JOINED)
         network_indicator_from_manual_state(&network_indicator);
-    update_relay_clusters();
+    update_relay_indicator_leds();
 }
 
 network_indicator_t network_indicator = {
@@ -533,6 +533,8 @@ void network_indicator_on_network_status_change(
     hal_zigbee_network_status_t new_status) {
     printf("Network status changed to %d\r\n", new_status);
     if (new_status == HAL_ZIGBEE_NETWORK_JOINED) {
+        if (network_indicator.joined)
+            return;
         if (battery.pin != HAL_INVALID_PIN)
             network_indicator.manual_state_when_connected = 0;
         network_indicator_connected(&network_indicator);

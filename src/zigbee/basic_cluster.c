@@ -52,8 +52,8 @@ static uint8_t basic_endpoint;
 
 /* A written brightness takes effect only once it is stored, so it can never
  * appear to work and then revert at the next reboot. If the write fails the
- * attribute reads back the brightness still in effect; a clamped or reverted
- * value is reported so controllers do not keep showing what was written. */
+ * attribute reads back the brightness still in effect. The converter reads
+ * it after writing; notify configured reporters too if it was corrected. */
 static void led_brightness_commit(void) {
     uint8_t written   = led_brightness_attr;
     uint8_t requested = led_clamp_brightness(written);

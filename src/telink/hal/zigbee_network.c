@@ -1372,8 +1372,9 @@ static bool request_rejoin_with_backoff_impl(bool allow_joined,
     }
 
     printf("Starting network rejoin/backoff\r\n");
-    if (network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN &&
-        !zb_isDeviceJoinedNwk())  // not completed synchronously
+    // Not completed synchronously. Reported while still joined too: the
+    // indicator blinks once the device actually reports not joined.
+    if (network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN)
         notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING);
     return true;
 }
@@ -1468,6 +1469,7 @@ void bdb_commissioning_callback(u8 status, void *arg) {
 #ifdef BSEED_LINK_POLICY
         PRE_PARENT_FIRST_WHEN_REJOIN = TRUE;
 #endif
+        notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_IDLE);  // one-shot done
     }
 #endif
     switch (status) {
@@ -1492,6 +1494,7 @@ void bdb_commissioning_callback(u8 status, void *arg) {
         /* A Router can complete a secure rejoin while zb_isDeviceJoinedNwk()
          * never became false in the main loop. Do not miss this join epoch. */
         app_rearm_network_announcement();
+        notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_IDLE);  // attempt done
         if (network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN)
             firmware_health_increment(&firmware_health.rejoin_success);
         network_recovery_state      = TELINK_NETWORK_RECOVERY_IDLE;

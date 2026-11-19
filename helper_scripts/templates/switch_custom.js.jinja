@@ -11,7 +11,7 @@ const {
     commandsOnOff,
     commandsLevelCtrl,
 } = require("zigbee-herdsman-converters/lib/modernExtend");
-const {assertString} = require("zigbee-herdsman-converters/lib/utils");
+const {assertString, determineEndpoint} = require("zigbee-herdsman-converters/lib/utils");
 const reporting = require("zigbee-herdsman-converters/lib/reporting");
 const constants = require("zigbee-herdsman-converters/lib/constants");
 const Zcl = require('zigbee-herdsman').Zcl;
@@ -390,7 +390,20 @@ Changing this setting can immediately switch mains power. The setting is stored 
             valueStep: 1,
             entityCategory: "config",
         });
-        return {...base, exposes: [(device, options) => supported(device) ?
+        // A successful ZCL write does not prove the NV commit succeeded.
+        // Read the value actually in effect instead of publishing the numeric
+        // extension's optimistic value (also handles firmware clamping).
+        const toZigbee = base.toZigbee.map(converter => ({...converter,
+            convertSet: async (entity, key, value, meta) => {
+                await converter.convertSet(entity, key, value, meta);
+                const response = await determineEndpoint(entity, meta, "genBasic").read("genBasic", [0xff03]);
+                const actual = response[0xff03];
+                if (!Number.isInteger(actual) || actual < 1 || actual > 100)
+                    throw new Error("LED brightness readback is missing or invalid");
+                return {state: {[key]: actual}};
+            },
+        }));
+        return {...base, toZigbee, exposes: [(device, options) => supported(device) ?
             base.exposes.flatMap(e => typeof e === "function" ? e(device, options) : [e]) : []]};
     },
     deviceConfig: (name, endpointName) =>

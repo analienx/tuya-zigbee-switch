@@ -7,6 +7,7 @@ from test_bseed_socket_converter_exposes import ROOT, _render
 sys.path.insert(0, str(ROOT / 'helper_scripts'))
 from bseed_pm_provision import REPORTS, missing_reports
 from bseed_pm_release import CANDIDATES
+from bseed_nonpm_release import CANDIDATES as NONPM_CANDIDATES
 
 
 def test_real_converter_dispatch_reads_relay_for_plain_and_scoped_state(tmp_path):
@@ -90,6 +91,12 @@ for (const build of ['1.1.3-bseedr21', '1.1.3-bseedc19'])
     assert.ok(led(nonpm, build), build);
 for (const build of ['1.1.3-bseedr20', '1.1.3-bseedc18', '1.1.3-bseedv8'])
     assert.ok(!led(nonpm, build), build);
+// Check the actual release definitions too: changing a future build family
+// must update the converter rather than silently dropping this setting.
+const candidates = JSON.parse(process.argv[2]);
+for (const [family, builds] of Object.entries(candidates)) {
+    for (const build of builds) assert.ok(led(family === 'pm' ? pm : nonpm, build), build);
+}
 assert.ok(pm.fromZigbee.some(f => f.cluster === 'haElectricalMeasurement'));
 assert.ok(pm.fromZigbee.some(f => f.cluster === 'seMetering'));
 assert.ok(!nonpm.fromZigbee.some(f => f.cluster === 'haElectricalMeasurement' || f.cluster === 'seMetering'));
@@ -97,7 +104,9 @@ assert.equal(typeof pm.configure, 'function');
 assert.ok(pm.options.some(o => o.property === 'bseed_pm_telemetry_quarantine'));
 assert.ok(!nonpm.options.some(o => o.property === 'bseed_pm_telemetry_quarantine'));
 '''
-    subprocess.run(['node', '-e', script, str(converter)], cwd=ROOT,
+    candidates = {'pm': [c['build'] for c in CANDIDATES.values()],
+                  'nonpm': [c['build'] for c in NONPM_CANDIDATES.values()]}
+    subprocess.run(['node', '-e', script, str(converter), json.dumps(candidates)], cwd=ROOT,
                    check=True, capture_output=True, text=True)
 
 

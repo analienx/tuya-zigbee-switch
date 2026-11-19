@@ -18,6 +18,10 @@
  *   the SDK runs its rejoin backoff retries internally, so a new blink comes
  *   with each rejoin sequence the firmware starts (boot, rescue reboot,
  *   Router one-shot), not with every SDK retry.
+ * A rejoin reported while still joined (Router one-shot, Client stale
+ * parent) blinks only once the device actually reports not joined; an IDLE
+ * report (attempt completed) cancels that. Repeated JOINED reports never end
+ * a blink: only a real not-joined -> joined transition does.
  * Otherwise a disconnected device stays quiet: the relay LED keeps showing
  * the relay state and a dedicated status LED is off. A relay sync that
  * interrupts a blink is repaired at the next status or activity report. */
@@ -43,6 +47,8 @@ typedef struct {
     bool                      manual_state_when_connected;
 
     network_indicator_blink_t blink;
+    bool                      joined;          // last status report
+    bool                      rejoin_pending;  // reported while still joined
     bool                      rejoin_blinked;  // this outage
     uint32_t                  rejoin_blink_started_ms;
     hal_task_t                rejoin_stop_task;
@@ -57,7 +63,7 @@ void network_indicator_from_manual_state(network_indicator_t *indicator);
 
 void network_indicator_commission_success(network_indicator_t *indicator);
 
-/* Network status is not joined. Never starts a blink by itself. */
+/* Network status is not joined. Starts a previously reported pending rejoin. */
 void network_indicator_not_connected(network_indicator_t *indicator);
 
 /* What the radio is doing (see hal_register_on_join_activity_callback). */

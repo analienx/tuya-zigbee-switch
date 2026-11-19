@@ -243,11 +243,23 @@ int main(void) {
     assert(reports[HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING]==1u);
     assert(reports[HAL_ZIGBEE_JOIN_ACTIVITY_IDLE]==2u);
 
-    /* Rejected rejoin request: nothing reported. */
-    fresh(); reject_rejoin=true;
-    hal_zigbee_start_network_steering();
+    /* Success while membership stayed joined still reports completion, so
+     * the indicator discards a pending still-joined rejoin. */
+    joined=true;
+    bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,0);
+    assert(reports[HAL_ZIGBEE_JOIN_ACTIVITY_IDLE]==3u);
+
+    /* Accepted rejoin from a stale joined parent reports its start too. */
+    fresh();
+    assert(request_rejoin_with_backoff_impl(true, true));
+    assert(reports[HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING]==2u);
     assert(rejoin_calls==2u);
-    assert(reports[HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING]==1u);
+
+    /* Rejected rejoin request: nothing reported. */
+    fresh(); joined=false; reject_rejoin=true;
+    hal_zigbee_start_network_steering();
+    assert(rejoin_calls==3u);
+    assert(reports[HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING]==2u);
     return 0;
 }
 """

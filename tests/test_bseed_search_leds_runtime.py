@@ -80,6 +80,9 @@ int main(void) {
     /* A repeated PAIRING report does not restart the phase. */
     uint8_t level = pin_level[1];
     step(100);
+    ind.manual_state_when_connected = 0;
+    network_indicator_from_manual_state(&ind);  /* status-LED write */
+    assert(status.blink_times_left == LED_BLINK_FOREVER);
     network_indicator_join_activity(&ind, HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING);
     assert(pin_level[1] == level);
     step(100);
@@ -108,18 +111,52 @@ int main(void) {
     assert_blinking(NETWORK_INDICATOR_PAIRING_ON_MS, 4);
 
     /* Joined: status LED follows manual state, relay LED is released. */
+    ind.manual_state_when_connected = 1;
     network_indicator_connected(&ind);
     assert(relay.blink_times_left == 0 && status.blink_times_left == 0);
     led_off(&relay);
     assert(pin_level[1] == 1 && pin_level[2] == 0);
     assert_steady(2000);
 
-    /* Network lost: a rejoin attempt blinks slowly for a few minutes. */
+    /* A rejoin while joined stays pending across repeated JOINED reports.
+     * Completion without losing membership clears it: a later unrelated
+     * disconnect must not start a stale rejoin blink. */
+    network_indicator_join_activity(&ind, HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING);
+    assert(ind.rejoin_pending && ind.blink == NETWORK_INDICATOR_QUIET);
+    network_indicator_connected(&ind);
+    assert(ind.rejoin_pending && !ind.rejoin_blinked);
+    assert_steady(2000);
+    network_indicator_join_activity(&ind, HAL_ZIGBEE_JOIN_ACTIVITY_IDLE);
+    assert(!ind.rejoin_pending);
+    network_indicator_not_connected(&ind);
+    assert(ind.blink == NETWORK_INDICATOR_QUIET);
+    network_indicator_connected(&ind);
+
+    /* A late JOINED notification during a running pairing blink does not
+     * cancel it. IDLE ends pairing even when no joined edge was reported. */
+    network_indicator_join_activity(&ind, HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING);
+    network_indicator_connected(&ind);
+    assert(ind.blink == NETWORK_INDICATOR_PAIRING);
+    assert_blinking(NETWORK_INDICATOR_PAIRING_ON_MS, 2);
+    network_indicator_join_activity(&ind, HAL_ZIGBEE_JOIN_ACTIVITY_IDLE);
+    assert(ind.blink == NETWORK_INDICATOR_QUIET);
+
+    /* Network lost after an accepted still-joined rejoin: slow blink starts
+     * at the actual loss, not when the rejoin was first requested. */
+    network_indicator_join_activity(&ind, HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING);
+    assert(ind.rejoin_pending && ind.blink == NETWORK_INDICATOR_QUIET);
+    step(5000);
     quiet_calls = 0;
     uint32_t outage = now_ms;
-    network_indicator_join_activity(&ind, HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING);
+    network_indicator_not_connected(&ind);
+    assert(!ind.rejoin_pending);
     assert(ind.blink == NETWORK_INDICATOR_REJOIN);
     assert_blinking(NETWORK_INDICATOR_REJOIN_ON_MS, 6);
+    ind.manual_state_when_connected = 0;
+    network_indicator_from_manual_state(&ind);
+    assert(status.blink_times_left == LED_BLINK_FOREVER);
+    assert_blinking(NETWORK_INDICATOR_REJOIN_ON_MS, 2);
+    assert(ind.rejoin_blink_started_ms == outage);
     /* Further attempts during the blink do not extend it, but repair it. */
     led_off(&relay);
     network_indicator_join_activity(&ind, HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING);
@@ -144,6 +181,7 @@ int main(void) {
     assert(ind.blink == NETWORK_INDICATOR_QUIET && !ind.rejoin_blinked);
     led_off(&relay);
     assert_steady(NETWORK_INDICATOR_REJOIN_BLINK_MS + 1000);
+    network_indicator_not_connected(&ind);
     network_indicator_join_activity(&ind, HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING);
     assert(ind.blink == NETWORK_INDICATOR_REJOIN);
     network_indicator_connected(&ind);
@@ -250,7 +288,7 @@ def test_join_activity_is_reported_where_the_radio_acts():
     assert net.index('u8 res = bdb_networkSteerStart();') < \
         net.index('notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING)')
     assert net.count('notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING)') == 2
-    assert net.count('notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_IDLE)') == 1
+    assert net.count('notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_IDLE)') == 3
     failure = net.split('case BDB_COMMISSION_STA_REJOIN_FAILURE:', 1)[1].split('default:', 1)[0]
     assert 'notify_join_activity' not in failure
     parser = (ROOT / 'src/device_config/config_parser.c').read_text()

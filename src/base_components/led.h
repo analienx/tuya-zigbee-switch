@@ -40,7 +40,8 @@ void led_off(led_t *led);
 
 /* Brightness of every LED while lit, percent of full drive (1..100). Only
  * LED_DIMMING builds (Telink hardware PWM, never with PM_ENABLE) apply it;
- * every other build drives plain on/off GPIO. */
+ * every other build drives plain on/off GPIO. A second LED on a PWM channel
+ * that another LED already uses stays at full brightness (logged once). */
 #ifndef LED_DEFAULT_BRIGHTNESS
 #define LED_DEFAULT_BRIGHTNESS    100
 #endif

@@ -14,6 +14,7 @@ CODE = r'''
 #include <string.h>
 #include "device_config/config_nv.c"
 #include "base_components/led.c"
+#include "base_components/network_indicator.c"
 #include "zigbee/basic_cluster.c"
 
 uint8_t g_multi_press_reset_count;
@@ -51,7 +52,7 @@ void hal_tasks_schedule(hal_task_t *t, uint32_t ms) { (void)t; (void)ms; }
 void hal_tasks_unschedule(hal_task_t *t) { (void)t; }
 void schedule_reboot(uint16_t delay_ms) { (void)delay_ms; }
 network_indicator_t network_indicator;
-void network_indicator_from_manual_state(network_indicator_t *indicator) { (void)indicator; }
+uint32_t hal_millis(void) { return 0; }
 void peripherals_refresh_leds(void) { refreshes++; }
 void device_params_set_multi_press_reset_count(uint8_t value) { (void)value; }
 
@@ -105,6 +106,16 @@ int main(void) {
     led_set_brightness(LED_DEFAULT_BRIGHTNESS);
     basic_cluster_load_attrs_from_nv();
     assert(led_get_brightness() == LED_DEFAULT_BRIGHTNESS);
+    /* A real status-LED attribute write must leave a join blink running. */
+    led_t status = {.blink_times_left = LED_BLINK_FOREVER};
+    network_indicator.leds[0] = &status;
+    network_indicator.has_dedicated_led = true;
+    network_indicator.blink = NETWORK_INDICATOR_PAIRING;
+    basic_cluster_callback_attr_write_trampoline(ZCL_ATTR_BASIC_STATUS_LED_STATE);
+    assert(status.blink_times_left == LED_BLINK_FOREVER);
+    network_indicator.blink = NETWORK_INDICATOR_REJOIN;
+    basic_cluster_callback_attr_write_trampoline(ZCL_ATTR_BASIC_STATUS_LED_STATE);
+    assert(status.blink_times_left == LED_BLINK_FOREVER);
     return 0;
 }
 '''

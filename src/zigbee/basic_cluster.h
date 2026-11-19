@@ -9,11 +9,13 @@ typedef struct {
     uint8_t              deviceEnable;
     char                 manuName[32];
     char                 modelId[32];
-#ifdef BSEED_LINK_POLICY
-    /* + Basic 0xFF13 link snapshot; both + 0xFF03 LED brightness */
+    /* 17 base; + Basic 0xFF13 link snapshot; + 0xFF03 LED brightness */
+#if defined(BSEED_LINK_POLICY) && defined(LED_DIMMING)
     hal_zigbee_attribute attr_infos[19];
-#else
+#elif defined(BSEED_LINK_POLICY) || defined(LED_DIMMING)
     hal_zigbee_attribute attr_infos[18];
+#else
+    hal_zigbee_attribute attr_infos[17];
 #endif
 } zigbee_basic_cluster;
 

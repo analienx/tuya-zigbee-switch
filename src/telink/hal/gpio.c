@@ -192,6 +192,8 @@ static hal_gpio_pin_t hal_pwm_owner[HAL_PWM_CHANNELS] = {
     HAL_INVALID_PIN, HAL_INVALID_PIN, HAL_INVALID_PIN,
 };
 static uint8_t        hal_pwm_active[HAL_PWM_CHANNELS];
+static uint16_t       hal_pwm_high[HAL_PWM_CHANNELS];  // 0: never programmed
+static uint8_t        hal_pwm_conflict_logged[HAL_PWM_CHANNELS];
 static uint8_t        hal_pwm_clock_ready;
 
 static const hal_pwm_pin_t *hal_pwm_for_pin(hal_gpio_pin_t pin) {
@@ -199,9 +201,19 @@ static const hal_pwm_pin_t *hal_pwm_for_pin(hal_gpio_pin_t pin) {
          i++) {
         if (hal_pwm_pins[i].pin != pin)
             continue;
-        hal_gpio_pin_t owner = hal_pwm_owner[hal_pwm_pins[i].channel];
-        if (owner != HAL_INVALID_PIN && owner != pin)
-            return NULL;  /* channel already drives another LED */
+        uint8_t        ch    = hal_pwm_pins[i].channel;
+        hal_gpio_pin_t owner = hal_pwm_owner[ch];
+        if (owner != HAL_INVALID_PIN && owner != pin) {
+            /* Channel already drives another LED: this one stays at full
+             * brightness. No BSEED board shares a channel (PM C3/B4, non-PM
+             * C2/D2), but say so once on boards that do. */
+            if (!hal_pwm_conflict_logged[ch]) {
+                hal_pwm_conflict_logged[ch] = 1;
+                printf("LED: pin 0x%x shares PWM%u, not dimmed\r\n",
+                       (unsigned)pin, (unsigned)ch);
+            }
+            return NULL;
+        }
 
         return &hal_pwm_pins[i];
     }
@@ -237,9 +249,16 @@ void hal_gpio_write_duty(hal_gpio_pin_t gpio_pin, uint8_t value,
     if (!value)
         high = (uint16_t)(HAL_PWM_CYCLE - high);
     pwm_id id = (pwm_id)pwm->channel;
-    pwm_set_mode(id, PWM_NORMAL_MODE);
-    pwm_set_phase(id, 0);
-    pwm_set_cycle_and_duty(id, HAL_PWM_CYCLE, high);
+    if (hal_pwm_high[pwm->channel] != high) {
+        /* Program only when the duty changes (claim or brightness write),
+         * not on every blink. */
+        if (hal_pwm_high[pwm->channel] == 0) {
+            pwm_set_mode(id, PWM_NORMAL_MODE);
+            pwm_set_phase(id, 0);
+        }
+        pwm_set_cycle_and_duty(id, HAL_PWM_CYCLE, high);
+        hal_pwm_high[pwm->channel] = high;
+    }
     if (!hal_pwm_active[pwm->channel]) {
         pwm_start(id);
         gpio_set_func((GPIO_PinTypeDef)gpio_pin, pwm->func);

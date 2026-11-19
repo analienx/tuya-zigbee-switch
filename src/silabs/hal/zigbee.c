@@ -439,6 +439,7 @@ void sl_zigbee_af_stack_status_cb(sl_status_t status) {
     /* A successful secure rejoin can occur without the application seeing a
      * NOT_JOINED interval; explicitly rearm the per-epoch Device Announce. */
     if (status == SL_STATUS_NETWORK_UP) {
+        notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_IDLE);  // attempt done
         silabs_router_rejoin_pending     = false;
         silabs_router_rejoin_orphaned    = false;
         silabs_router_rejoin_down_events = 0;
@@ -452,8 +453,10 @@ void sl_zigbee_af_stack_status_cb(sl_status_t status) {
         if (silabs_router_rejoin_pending &&
             silabs_router_rejoin_down_events < 2u) {
             silabs_router_rejoin_down_events++;
-            if (silabs_router_rejoin_down_events == 2u)
+            if (silabs_router_rejoin_down_events == 2u) {
                 silabs_router_rejoin_pending = false;
+                notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_IDLE);
+            }
         }
         silabs_router_probe_initialized = false;
     }
