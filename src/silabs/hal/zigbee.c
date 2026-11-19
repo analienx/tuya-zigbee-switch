@@ -235,7 +235,7 @@ sl_zigbee_af_status_t sl_zigbee_af_external_attribute_write_cb(
 static bool     network_steering_in_progress = false;
 static bool     network_steering_retry_pending;
 static uint32_t network_steering_last_attempt_ms;
-#define NETWORK_STEERING_RETRY_MS        10000u
+#define NETWORK_STEERING_RETRY_MS    10000u
 
 /* Join activity for the network indicator: reported only for starts the
  * stack accepted, and for steering completion. */
@@ -286,7 +286,7 @@ static bool silabs_router_start_secure_rejoin(void) {
     }
     sl_status_t st = sl_zigbee_find_and_rejoin_network(
         true, (uint32_t)1u << channel, SL_ZIGBEE_REJOIN_DUE_TO_APP_EVENT_1,
-        SL_ZIGBEE_DEVICE_TYPE_UNCHANGED);
+            SL_ZIGBEE_DEVICE_TYPE_UNCHANGED);
     if (st != SL_STATUS_OK) {
         printf("Silabs Router: encrypted rejoin rejected 0x%lx\n",
                (unsigned long)st);
@@ -479,6 +479,7 @@ void hal_zigbee_start_network_steering() {
         // retry gap, so the next call can try again.
         if (!silabs_router_channel_valid(sl_zigbee_get_radio_channel()))
             return;
+
         silabs_router_last_rejoin_ms = hal_millis();
         (void)silabs_router_start_secure_rejoin();
         return;

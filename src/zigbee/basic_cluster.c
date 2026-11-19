@@ -42,6 +42,7 @@ void basic_cluster_store_attrs_to_nv();
 void basic_cluster_load_attrs_from_nv();
 
 #ifdef LED_DIMMING
+
 /* LED brightness percent (1..100) for every LED while lit. Only builds that
  * can dim (LED_DIMMING: Telink PWM, never with PM_ENABLE) expose it. The ZCL
  * write lands here first; led.c's brightness changes only once it is stored,
@@ -81,6 +82,7 @@ static void led_brightness_load(void) {
     led_brightness_attr = led_get_brightness();
     peripherals_refresh_leds();
 }
+
 #endif
 
 #define DEVICE_CONFIG_STAGE_CHUNK_MAX    24

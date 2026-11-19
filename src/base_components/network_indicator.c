@@ -39,8 +39,8 @@ static void blink_set(network_indicator_t *indicator) {
     bool          pairing = indicator->blink == NETWORK_INDICATOR_PAIRING;
     uint16_t      on_ms   = pairing ? NETWORK_INDICATOR_PAIRING_ON_MS :
                             NETWORK_INDICATOR_REJOIN_ON_MS;
-    uint16_t      off_ms  = pairing ? NETWORK_INDICATOR_PAIRING_OFF_MS :
-                            NETWORK_INDICATOR_REJOIN_OFF_MS;
+    uint16_t off_ms = pairing ? NETWORK_INDICATOR_PAIRING_OFF_MS :
+                      NETWORK_INDICATOR_REJOIN_OFF_MS;
 
     // Restart the whole set together so every LED flashes in phase.
     for (int s = 0; s < 2; s++)

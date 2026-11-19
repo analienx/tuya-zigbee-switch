@@ -159,13 +159,14 @@ void hal_gpio_clear(hal_gpio_pin_t gpio_pin) {
 #if PM_ENABLE
 #error "LED_DIMMING needs a non-sleeping build: PWM stops in sleep"
 #endif
+
 /* LED dimming on the TLSR8258 hardware PWM channels.
-*
-* Pin-to-channel map from the SDK's gpio_set_func() (chip_8258/gpio.c), only
-* the non-inverted outputs. Two pins sharing a channel cannot be dimmed
-* independently: the first pin to use a channel owns it, any other pin on
-* that channel stays on plain full-level GPIO. The PWM block stops in sleep,
-* so a PM_ENABLE build with LED_DIMMING is a compile error above. */
+ *
+ * Pin-to-channel map from the SDK's gpio_set_func() (chip_8258/gpio.c), only
+ * the non-inverted outputs. Two pins sharing a channel cannot be dimmed
+ * independently: the first pin to use a channel owns it, any other pin on
+ * that channel stays on plain full-level GPIO. The PWM block stops in sleep,
+ * so a PM_ENABLE build with LED_DIMMING is a compile error above. */
 #define HAL_PWM_CLOCK_HZ    1000000u
 #define HAL_PWM_CYCLE       1000u /* 1 kHz: no visible flicker */
 
@@ -250,12 +251,14 @@ void hal_gpio_write_duty(hal_gpio_pin_t gpio_pin, uint8_t value,
     if (config)
         config->value = value ? 1 : 0;
 }
+
 #else
 void hal_gpio_write_duty(hal_gpio_pin_t gpio_pin, uint8_t value,
                          uint8_t duty_pct) {
     (void)duty_pct;
     hal_gpio_write(gpio_pin, value);
 }
+
 #endif
 
 uint8_t hal_gpio_read(hal_gpio_pin_t gpio_pin) {

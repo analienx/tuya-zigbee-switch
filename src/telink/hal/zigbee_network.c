@@ -272,10 +272,10 @@ static hal_network_status_change_callback_t network_status_change_callback =
 static hal_join_activity_callback_t join_activity_callback = NULL;
 
 /* Tells the network indicator what the radio is really doing. Only starts
- * the SDK accepted (RET_OK) and that did not already complete synchronously
- * are reported, plus the terminal steering outcome; SDK-internal backoff
- * retries are never inferred from failure callbacks. Reporting never
- * touches recovery state, so SDK rejoin/backoff ownership is unchanged. */
+* the SDK accepted (RET_OK) and that did not already complete synchronously
+* are reported, plus the terminal steering outcome; SDK-internal backoff
+* retries are never inferred from failure callbacks. Reporting never
+* touches recovery state, so SDK rejoin/backoff ownership is unchanged. */
 static void notify_join_activity(hal_zigbee_join_activity_t activity) {
     if (join_activity_callback != NULL)
         join_activity_callback(activity);
