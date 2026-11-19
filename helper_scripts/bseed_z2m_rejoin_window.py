@@ -19,8 +19,16 @@ the next window; the target's own join/announce events always count.
 
 `--network-wide` opens joining on the coordinator and every Router for at
 most MAX_NETWORK_WIDE_SECONDS in total, with the same foreign-join abort. It
-is the campaign default (profile `join_mode`); `--permit-via` is the explicit
-scoped opt-in. WindowLeft (stock -> cli26) never announced after its OTA; 70
+is only for a role migration that needs a fresh association: `--from-role`
+must name the pre-OTA role, differ from `--expect-role` and match the cached
+inventory type. It is the campaign default for role changes (profile
+`join_mode`); `--permit-via` is the explicit scoped opt-in.
+
+One monotonic deadline bounds the campaign: it is fixed before the first
+permit-join request, no window is opened past it, and the last window is
+shortened to what remains. Closing never waits for device verification: a
+foreign join is closed from the MQTT callback and the deadline by a timer,
+both independent of a blocking live check. WindowLeft (stock -> cli26) never announced after its OTA; 70
 min of scoped windows and a power cycle did nothing, and after an owner
 network reset (10 presses) it joined 16 s into one network-wide window.
 CabinetL (2026-11-18) likewise stayed silent through 15 min of scoped windows.
@@ -69,6 +77,20 @@ def target_join_event(event, target_ieee):
             (event.get('data') or {}).get('ieee_address') == target_ieee)
 
 
+def window_seconds_left(window_seconds, deadline, now):
+    """Length of the next window: never past the deadline; 0 means stop."""
+    remaining = int(deadline - now)
+    return max(0, min(window_seconds, remaining))
+
+
+def start_deadline_timer(seconds, callback):
+    """Closes joining at the deadline even while the main loop is blocked."""
+    timer = threading.Timer(max(0.0, seconds), callback)
+    timer.daemon = True
+    timer.start()
+    return timer
+
+
 def permit_payload(seconds, router_name, transaction):
     """Scoped request through one Router, or network-wide when router_name is None."""
     payload = {'time': seconds, 'transaction': transaction}
@@ -78,7 +100,7 @@ def permit_payload(seconds, router_name, transaction):
 
 
 def validate_recovery(target_ieee, confirm_ieee, router_name, inventory, permit_join, lock,
-                      network_wide=False):
+                      network_wide=False, from_role=None, expect_role=None):
     if confirm_ieee != target_ieee: raise ValueError('Explicit target IEEE confirmation required')
     if permit_join is not False: raise ValueError('Joining already open; do not override another campaign')
     if lock.get('ieee') != target_ieee or lock.get('phase') not in ('ota_transfer_ok_postflash_unverified','update_ok'):
@@ -87,6 +109,12 @@ def validate_recovery(target_ieee, confirm_ieee, router_name, inventory, permit_
     if network_wide:
         if router_name is not None: raise ValueError('Network-wide join takes no permit-via Router')
         if len(target) != 1: raise ValueError('Exact target not found')
+        # Only a role migration needs a fresh association; same-role updates
+        # rejoin with their retained network key and never open the network.
+        if from_role not in ('Router', 'EndDevice') or from_role == expect_role:
+            raise ValueError('Network-wide join is only for a role migration (--from-role != --expect-role)')
+        if target[0].get('type') != from_role:
+            raise ValueError('Cached inventory type does not match --from-role')
         return target[0], None
     if router_name is None: raise ValueError('Scoped join requires a permit-via Router')
     router = [x for x in inventory if x.get('friendly_name') == router_name]
@@ -111,6 +139,8 @@ def arguments():
                    help='re-open the window until this many seconds have passed')
     p.add_argument('--expect-build',required=True)
     p.add_argument('--expect-role',required=True,choices=['Router','EndDevice'])
+    p.add_argument('--from-role',choices=['Router','EndDevice'],
+                   help='Pre-OTA role; required with --network-wide (must differ from --expect-role)')
     return p.parse_args()
 
 
@@ -125,8 +155,20 @@ def main():
     config=yaml.safe_load(Path(a.mqtt_config).read_text(encoding='utf8'))['mqtt']
     base=config.get('base_topic','zigbee2mqtt');token='bseed-rejoin-'+uuid.uuid4().hex
     state={'info':None,'inventory':None,'response':{},'events':[],'target_state':None,'candidate':None,
-           'window_open':False,'fresh_inventory':False,'known':None,'foreign':None,'ignore_inventory':False}
+           'window_open':False,'fresh_inventory':False,'known':None,'foreign':None,'ignore_inventory':False,
+           'opened':False,'closed':None,'close_token':None}
     ready=threading.Event();wake=threading.Event()
+    gate=threading.RLock()  # serializes opening and closing; never held while verifying
+    permit_topic=base+'/bridge/request/permit_join'
+    def close_now(reason):
+        # Close joining once, immediately, from any thread. Never waits.
+        with gate:
+            if state['closed'] is not None:return
+            state['closed']=reason;state['window_open']=False
+            if not state['opened']:return
+            state['close_token']=token+'-close'
+            c.publish(permit_topic,json.dumps({'time':0,'transaction':state['close_token']}),qos=1)
+            print('JOIN_CLOSE_SENT',reason,flush=True)
     c=mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,client_id=token)
     c.username_pw_set(config.get('user',''),config.get('password',''))
     def on_connect(c,_u,_flags,reason,_properties):
@@ -152,7 +194,8 @@ def main():
         elif m.topic==base+'/bridge/event' and state['known'] is not None and not m.retain:
             joiner=foreign_joiner(data,state['known'],a.ieee)
             if joiner and state['foreign'] is None:
-                state['foreign']=joiner;print('FOREIGN_JOIN_ABORT',joiner,flush=True);wake.set()
+                state['foreign']=joiner;print('FOREIGN_JOIN_ABORT',joiner,flush=True)
+                close_now('foreign_join');wake.set()
             elif target_join_event(data,a.ieee) and state['window_open']:
                 print('TARGET_JOIN_EVENT',data.get('type'),flush=True)
                 state['candidate']='target_event';wake.set()
@@ -173,8 +216,8 @@ def main():
         except (ValueError,TimeoutError,OSError) as error:return None,repr(error)
     c.on_connect=on_connect;c.on_message=on_message
     c.connect(a.broker,1883,10);c.loop_start()
-    opened=False; open_response=None; close_response=None; outcome='unconfirmed'; windows=[]
-    live_node=None; zdo_error=None; rejected=[]
+    open_response=None; close_response=None; outcome='unconfirmed'; windows=[]
+    live_node=None; zdo_error=None; rejected=[]; timer=None
     try:
         if not ready.wait(10):raise RuntimeError('MQTT subscription not ready')
         deadline=time.monotonic()+12
@@ -183,21 +226,25 @@ def main():
         if not isinstance(state['info'],dict) or not isinstance(state['inventory'],list):
             raise RuntimeError('Missing bridge info or inventory')
         target,router=validate_recovery(a.ieee,a.confirm_ieee,permit_via,state['inventory'],
-                                         state['info'].get('permit_join'),lock,network_wide)
+                                         state['info'].get('permit_join'),lock,network_wide,
+                                         getattr(a,'from_role',None),a.expect_role)
         if target.get('friendly_name')!=a.target:raise RuntimeError('Target name/IEEE mismatch')
         print('RECOVERY_GATE',a.target,a.ieee,'network-wide' if network_wide else
               'via router '+router['friendly_name'],flush=True)
         state['known']={x.get('ieee_address') for x in state['inventory']}
-        topic=base+'/bridge/request/permit_join'
+        # The single deadline is fixed before the first request is sent.
         campaign_stop=time.monotonic()+total_seconds
+        timer=start_deadline_timer(campaign_stop-time.monotonic(),lambda:close_now('deadline'))
         verified=False
-        while not verified and state['foreign'] is None:
-            remaining=campaign_stop-time.monotonic()
-            if remaining<=0:break
-            seconds=int(max(30,min(window_seconds,remaining)))
-            open_token=token+'-open-'+str(len(windows))
-            c.publish(topic,json.dumps(permit_payload(seconds,permit_via,open_token)),qos=1).wait_for_publish(5)
-            opened=True
+        while not verified and state['foreign'] is None and state['closed'] is None:
+            with gate:
+                if state['closed'] is not None:break
+                sent_at=time.monotonic()
+                seconds=window_seconds_left(window_seconds,campaign_stop,sent_at)
+                if seconds<=0:break
+                open_token=token+'-open-'+str(len(windows))
+                state['opened']=True
+                c.publish(permit_topic,json.dumps(permit_payload(seconds,permit_via,open_token)),qos=1)
             deadline=time.monotonic()+15
             while time.monotonic()<deadline and open_token not in state['response']:
                 wake.wait(0.3);wake.clear()
@@ -207,11 +254,15 @@ def main():
             if open_response is None:open_response=response
             if not response or response.get('status')!='ok':
                 raise RuntimeError('Permit-join not confirmed: '+repr(response))
-            state['window_open']=True;state['ignore_inventory']=False
+            with gate:
+                if state['closed'] is not None:break
+                state['window_open']=True;state['ignore_inventory']=False
             print('JOIN_WINDOW_OPEN',seconds,'network-wide' if network_wide else permit_via,
                   'window',len(windows),flush=True)
-            stop=time.monotonic()+seconds
-            while time.monotonic()<stop and not verified and state['foreign'] is None:
+            # Measured from before the request, never from its acknowledgement.
+            stop=min(sent_at+seconds,campaign_stop)
+            while (time.monotonic()<stop and not verified and state['foreign'] is None and
+                   state['closed'] is None):
                 if state['candidate'] is not None:
                     reason=state['candidate']
                     live_node,zdo_error=live_check()
@@ -224,28 +275,36 @@ def main():
                     if state['candidate']==reason:state['candidate']=None  # keep a newer one
                     continue
                 wake.wait(min(2,max(0.05,stop-time.monotonic())));wake.clear()
+        # Joining closes before any further verification.
+        close_now('verified' if verified else 'campaign_end')
         if not verified and state['candidate'] is not None and state['foreign'] is None:
             # A candidate that arrived as the total ran out still gets its live check.
             live_node,zdo_error=live_check()
             verified=bool(live_node and live_node.get('role')==a.expect_role)
         outcome='rejoin_candidate' if verified else 'unconfirmed'
     finally:
-        if opened:
-            close_token=token+'-close';topic=base+'/bridge/request/permit_join'
-            try:
-                c.publish(topic,json.dumps({'time':0,'transaction':close_token}),qos=1).wait_for_publish(5)
-                deadline=time.monotonic()+12
-                while time.monotonic()<deadline and close_token not in state['response']:
-                    wake.wait(0.3);wake.clear()
-                close_response=state['response'].get(close_token)
-                print('JOIN_WINDOW_CLOSE',close_response,flush=True)
-            except Exception as error:print('CRITICAL_JOIN_CLOSE_FAILED',repr(error),flush=True)
+        if timer is not None:timer.cancel()
+        try:
+            close_now('exit')
+            if state['close_token']:
+                for attempt in range(2):
+                    deadline=time.monotonic()+12
+                    while time.monotonic()<deadline and state['close_token'] not in state['response']:
+                        wake.wait(0.3);wake.clear()
+                    close_response=state['response'].get(state['close_token'])
+                    if close_response or attempt:break
+                    with gate:  # one resend if the first close was never acknowledged
+                        state['close_token']=token+'-close-retry'
+                        c.publish(permit_topic,json.dumps({'time':0,'transaction':state['close_token']}),qos=1)
+                print('JOIN_WINDOW_CLOSE',state['closed'],close_response,flush=True)
+        except Exception as error:print('CRITICAL_JOIN_CLOSE_FAILED',repr(error),flush=True)
         c.loop_stop();c.disconnect()
     target_now=next((x for x in (state['inventory'] or []) if x.get('ieee_address')==a.ieee),{})
     if state['foreign'] is not None:outcome='foreign_join_aborted'
     result={'observed_at':dt.datetime.now().astimezone().isoformat(),
             'target':a.target,'ieee':a.ieee,'join_via':'network-wide' if network_wide else permit_via,
-            'network_wide':network_wide,'window_seconds':window_seconds,
+            'network_wide':network_wide,'from_role':getattr(a,'from_role',None),
+            'window_seconds':window_seconds,'closed_by':state['closed'],
             'total_seconds':total_seconds,'windows':windows,'foreign_join':state['foreign'],
             'open_response':open_response,'close_response':close_response,
             'identity_verified':False,'expected_build':a.expect_build,

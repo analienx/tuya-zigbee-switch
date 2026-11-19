@@ -81,6 +81,8 @@ def test_stale_build_allows_interview_candidate_only_after_fresh_inventory_and_l
     monkeypatch.setattr(module.threading, 'Event', Event)
     monkeypatch.setattr(module, 'read_node_descriptor', lambda *args: {'role': live_role})
     monkeypatch.setattr(module.time, 'monotonic', lambda counter=itertools.count(): next(counter))
+    monkeypatch.setattr(module, 'start_deadline_timer',
+                        lambda seconds, callback: SimpleNamespace(cancel=lambda: None))
     monkeypatch.setattr(module, 'arguments', lambda: SimpleNamespace(
         target=target['friendly_name'], ieee=IEEE, confirm_ieee=IEEE,
         permit_via=INVENTORY[1]['friendly_name'], seconds=30, expect_role='EndDevice',
@@ -146,7 +148,8 @@ def _run_campaign(tmp_path, monkeypatch, *, total, on_open, live_role='EndDevice
 
     class Client:
         opens = 0
-        def __init__(self, *args, **kwargs): pass
+        instance = None
+        def __init__(self, *args, **kwargs): Client.instance = self
         def username_pw_set(self, *args): pass
         def connect(self, *args): pass
         def subscribe(self, *args): pass
@@ -171,12 +174,22 @@ def _run_campaign(tmp_path, monkeypatch, *, total, on_open, live_role='EndDevice
     monkeypatch.setattr(module, 'mqtt', SimpleNamespace(
         Client=Client, CallbackAPIVersion=SimpleNamespace(VERSION2=2)))
     monkeypatch.setattr(module.threading, 'Event', Event)
+    clock = itertools.count()
+    _run_campaign.clock = clock
+    _run_campaign.requests_now = requests
+    _run_campaign.client = Client
+    _run_campaign.deadline = []
     monkeypatch.setattr(module, 'read_node_descriptor', node or (lambda *args: {'role': live_role}))
-    monkeypatch.setattr(module.time, 'monotonic', lambda counter=itertools.count(): next(counter))
+    monkeypatch.setattr(module.time, 'monotonic', lambda: next(clock))
+    def deadline_timer(seconds, callback):
+        _run_campaign.deadline.append((seconds, callback))
+        return SimpleNamespace(cancel=lambda: None)
+    monkeypatch.setattr(module, 'start_deadline_timer', deadline_timer)
     monkeypatch.setattr(module, 'arguments', lambda: SimpleNamespace(
         target=target['friendly_name'], ieee=IEEE, confirm_ieee=IEEE,
         permit_via=None if network_wide else INVENTORY[1]['friendly_name'],
-        network_wide=network_wide, seconds=30, total_seconds=total,
+        network_wide=network_wide, from_role='Router' if network_wide else None,
+        seconds=30, total_seconds=total,
         expect_role='EndDevice', expect_build='new-build', mqtt_config=str(config),
         broker='mock', campaign_lock=str(lock), output=str(output)))
     code = 0
@@ -185,6 +198,7 @@ def _run_campaign(tmp_path, monkeypatch, *, total, on_open, live_role='EndDevice
     except SystemExit as error:
         code = error.code
     _run_campaign.requests = requests
+    _run_campaign.requests_ref = requests
     return code, [r['time'] for r in requests], json.loads(output.read_text())
 
 
@@ -201,8 +215,9 @@ def test_window_reopens_until_the_target_rejoins(tmp_path, monkeypatch):
 def test_window_stops_at_total_and_closes_when_target_never_rejoins(tmp_path, monkeypatch):
     code, times, evidence = _run_campaign(tmp_path, monkeypatch, total=100,
                                           on_open=lambda *args: None)
-    assert code == 2 and times[-1] == 0 and len(times) >= 3
-    assert all(t == 30 for t in times[:-1]) and evidence['result'] == 'unconfirmed'
+    assert code == 2 and times[-1] == 0 and times.count(0) == 1 and len(times) >= 3
+    assert all(0 < t <= 30 for t in times[:-1]) and evidence['result'] == 'unconfirmed'
+    assert sum(times[:-1]) <= 100 and evidence['closed_by'] in ('campaign_end', 'deadline')
 
 
 def test_unrelated_inventory_republish_does_not_end_the_campaign(tmp_path, monkeypatch):
@@ -247,8 +262,16 @@ def test_network_wide_window_has_no_router_and_a_tighter_budget(tmp_path, monkey
         validate_recovery(IEEE, IEEE, 'KitchenSocketRight', INVENTORY, False, LOCK, True)
     with pytest.raises(ValueError, match='requires a permit-via'):
         validate_recovery(IEEE, IEEE, None, INVENTORY, False, LOCK)
-    target, router = validate_recovery(IEEE, IEEE, None, INVENTORY, False, LOCK, True)
+    target, router = validate_recovery(IEEE, IEEE, None, INVENTORY, False, LOCK, True,
+                                       'Router', 'EndDevice')
     assert target['ieee_address'] == IEEE and router is None
+    # Network-wide is only for a role migration whose cached type is the source role.
+    with pytest.raises(ValueError, match='only for a role migration'):
+        validate_recovery(IEEE, IEEE, None, INVENTORY, False, LOCK, True)
+    with pytest.raises(ValueError, match='only for a role migration'):
+        validate_recovery(IEEE, IEEE, None, INVENTORY, False, LOCK, True, 'Router', 'Router')
+    with pytest.raises(ValueError, match='Cached inventory type'):
+        validate_recovery(IEEE, IEEE, None, INVENTORY, False, LOCK, True, 'EndDevice', 'Router')
 
     def on_open(n, schedule, inventory):
         schedule('bridge/event', {'type': 'device_announce', 'data': {'ieee_address': IEEE}}, False)
@@ -275,3 +298,53 @@ def test_foreign_join_aborts_and_closes_immediately(tmp_path, monkeypatch):
     assert code == 2 and times == [30, 0]
     assert evidence['foreign_join'] == '0x00000000deadbeef'
     assert evidence['result'] == 'foreign_join_aborted'
+
+
+def test_window_lengths_never_pass_the_deadline():
+    from bseed_z2m_rejoin_window import window_seconds_left
+    assert window_seconds_left(30, 100, 0) == 30
+    assert window_seconds_left(30, 100, 85) == 15
+    assert window_seconds_left(30, 100, 99.5) == 0
+    assert window_seconds_left(30, 100, 130) == 0
+
+
+def test_last_window_is_shortened_to_the_deadline(tmp_path, monkeypatch):
+    code, times, evidence = _run_campaign(tmp_path, monkeypatch, total=45,
+                                          on_open=lambda *args: None, network_wide=True)
+    opens = [w['seconds'] for w in evidence['windows']]
+    assert code == 2 and times[-1] == 0 and opens[0] == 30
+    assert all(0 < s <= 30 for s in opens) and sum(opens) <= 45
+    (seconds, _callback), = _run_campaign.deadline
+    assert 0 < seconds <= 45   # the timer covers the same single deadline
+
+
+def test_deadline_closes_while_a_live_check_blocks(tmp_path, monkeypatch):
+    seen = {}
+    def node(*args):
+        # The deadline timer fires while the descriptor read is still blocked.
+        _seconds, callback = _run_campaign.deadline[0]
+        callback()
+        seen['closed_during_check'] = _run_campaign.requests_now[-1]['time'] == 0
+        return {'role': 'Router'}
+    def on_open(n, schedule, inventory):
+        schedule('bridge/event', {'type': 'device_announce', 'data': {'ieee_address': IEEE}}, False)
+    code, times, evidence = _run_campaign(tmp_path, monkeypatch, total=600, on_open=on_open,
+                                          node=node, network_wide=True)
+    assert seen['closed_during_check'] is True
+    assert code == 2 and times == [30, 0] and evidence['closed_by'] == 'deadline'
+
+
+def test_foreign_join_closes_while_a_live_check_blocks(tmp_path, monkeypatch):
+    seen = {}
+    def node(*args):
+        _run_campaign.client.instance.emit('bridge/event', {
+            'type': 'device_joined', 'data': {'ieee_address': '0x00000000deadbeef'}})
+        seen['closed_during_check'] = _run_campaign.requests_now[-1]['time'] == 0
+        return {'role': 'Router'}
+    def on_open(n, schedule, inventory):
+        schedule('bridge/event', {'type': 'device_announce', 'data': {'ieee_address': IEEE}}, False)
+    code, times, evidence = _run_campaign(tmp_path, monkeypatch, total=600, on_open=on_open,
+                                          node=node, network_wide=True)
+    assert seen['closed_during_check'] is True
+    assert code == 2 and times == [30, 0] and evidence['result'] == 'foreign_join_aborted'
+    assert evidence['closed_by'] == 'foreign_join'

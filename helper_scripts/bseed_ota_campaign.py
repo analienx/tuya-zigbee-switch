@@ -207,12 +207,22 @@ JOIN_MODES = ('network-wide', 'scoped')
 def join_mode(profile):
     """How the post-OTA rejoin window is opened.
 
-    network-wide (default): coordinator and every Router permit joining, for
-    at most the rejoin tool's network-wide budget, aborting on a foreign join.
-    Owner experience 2026-11-18: windows scoped to one parent Router never got
-    WindowLeft or CabinetL back; opening the whole network did. scoped: only
-    the Router named by join_via permits joining (explicit opt-in).
+    Only a role migration (preflash_role != postflash_role) needs a fresh
+    association and therefore a permit-join window at all; a same-role
+    update rejoins with its retained key, so it has no join mode and may not
+    request one.
+
+    network-wide (default for role migrations): coordinator and every Router
+    permit joining until one deadline, at most the rejoin tool's network-wide
+    budget, closing at once on a foreign join. Owner experience 2026-11-18:
+    windows scoped to one parent Router never got WindowLeft or CabinetL
+    back; opening the whole network did. scoped: only the Router named by
+    join_via permits joining (explicit opt-in).
     """
+    if profile.get('preflash_role') == profile.get('postflash_role'):
+        if profile.get('join_mode') is not None:
+            raise ValueError('join_mode is only for a role migration that needs a fresh association')
+        return None
     mode = profile.get('join_mode', 'network-wide')
     if mode not in JOIN_MODES:
         raise ValueError('join_mode must be one of %s' % ', '.join(JOIN_MODES))
@@ -430,7 +440,8 @@ def rejoin_cmd(profile, confirmation, evidence_path):
         via = ['--permit-via', profile['join_via']]
     else:
         from bseed_z2m_rejoin_window import MAX_NETWORK_WIDE_SECONDS
-        via, total = ['--network-wide'], min(total, MAX_NETWORK_WIDE_SECONDS)
+        via = ['--network-wide', '--from-role', profile['preflash_role']]
+        total = min(total, MAX_NETWORK_WIDE_SECONDS)
     return [sys.executable, '-u', str(ROOT/'helper_scripts/bseed_z2m_rejoin_window.py'),
             '--target', profile['device'], '--ieee', profile['ieee'],
             '--confirm-ieee', confirmation, *via,

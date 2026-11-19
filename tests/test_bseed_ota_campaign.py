@@ -230,7 +230,23 @@ def test_rejoin_defaults_to_a_network_wide_window_within_its_budget(tmp_path):
     cmd=campaign.rejoin_cmd(cfg,cfg['ieee'],tmp_path/'e.json')
     assert cmd[cmd.index('--permit-via')+1]=='KnownRouter' and '--network-wide' not in cmd
     with pytest.raises(ValueError,match='join_mode must be'):
-        campaign.join_mode({'join_mode':'all'})
+        campaign.join_mode({'preflash_role':'Router','postflash_role':'EndDevice','join_mode':'all'})
+
+
+def test_same_role_updates_never_open_a_join_window(tmp_path):
+    cfg=profile(tmp_path);cfg['postflash_role']=cfg['preflash_role']
+    assert campaign.join_mode(cfg) is None
+    cfg['join_mode']='network-wide'
+    with pytest.raises(ValueError,match='only for a role migration'):
+        campaign.join_mode(cfg)
+    with pytest.raises(ValueError,match='only for an explicit cross-role OTA'):
+        campaign.rejoin_cmd(cfg,cfg['ieee'],tmp_path/'e.json')
+
+
+def test_network_wide_rejoin_names_the_source_role(tmp_path):
+    cfg=profile(tmp_path)
+    cmd=campaign.rejoin_cmd(cfg,cfg['ieee'],tmp_path/'e.json')
+    assert cmd[cmd.index('--from-role')+1]==cfg['preflash_role']!=cfg['postflash_role']
 
 
 def test_transition_orders_flash_join_metadata_postflash(tmp_path,monkeypatch):
