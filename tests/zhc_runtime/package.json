@@ -3,8 +3,8 @@
   "private": true,
   "version": "1.0.0",
   "dependencies": {
-    "zigbee-herdsman": "10.9.1",
-    "zigbee-herdsman-converters": "26.103.0"
+    "zigbee-herdsman": "10.10.0",
+    "zigbee-herdsman-converters": "26.115.1"
   },
   "overrides": {"zigbee-herdsman": "$zigbee-herdsman"}
 }
