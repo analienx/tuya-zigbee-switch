@@ -8,7 +8,7 @@ read, write, boot or electrical qualification is claimed by this record.
 
 | Finding | Repair | Regression coverage |
 | --- | --- | --- |
-| A baseline-backed stage reset the target after its backup | Attach without reset for baseline-backed staging as well as separate activation; preserve the existing reset route for TX-only sessions | Chip model asserts zero resets through staged write and held activation |
+| A baseline-backed stage reset the target after its backup, and could also request a power cycle | Attach without reset for baseline-backed staging as well as separate activation; reject power cycling after a baseline and make dry-run trace match | Chip model asserts zero resets through staged write and held activation; power-cycle refusal and dry-run trace |
 | A `read --halt` double backup invoked the pvvx soft reset again between reads | Halt only before the first read and observe the CPU stopped before the second, without a reset; reject older halted receipts lacking that proof | Model checks for no reset, target still stopped, stopped-before-second-read failures and old-receipt rejection |
 | ED-009 release was refused and the Gledopto wired guide was tied to the old canary | Admit only the exact published ED-009 native hash, document per-unit inspection and held write, and provide optional hosted artifact checks | Pin admission and unpinned rejection; hosted artifact check covers both OTA and native image when dispatched |
 | A normal held readback had to be read twice despite the operator's preference | Permit a fresh receipt-bound single full read after each ordinary write; retain double-read baselines and mandatory double-read reconciliation | Single reads, wrong port/digest/path/range/reset, and uncertain-write reconciliation |

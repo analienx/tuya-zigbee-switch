@@ -1855,7 +1855,8 @@ def run_phase(writer, phase, image, passes):
         writer.activate()
 
 
-def dry_run(action, plan, image, passes, power_cycle, path, out, *, slot='A', full_slot=False, hold=False):
+def dry_run(action, plan, image, passes, power_cycle, path, out, *, slot='A', full_slot=False, hold=False,
+            attach_only=False):
     """Write the exact UART stream and an operation trace to files instead of a port."""
     path = Path(path)
     trace_path = path.with_name(path.name + '.trace.jsonl')
@@ -1867,6 +1868,7 @@ def dry_run(action, plan, image, passes, power_cycle, path, out, *, slot='A', fu
         writer = TxOnlyWriter(sink, sleep=lambda _: None, trace=trace,
                               power_on=(lambda: None) if power_cycle else None,
                               slot=slot, full_slot=full_slot, hold=hold)
+        writer.attach_only = attach_only
         writer.clock = writer.elapsed           # the flood lasts as long as it would on the wire
         for phase in PHASES[action]:
             run_phase(writer, phase, image, passes)
@@ -1896,6 +1898,9 @@ def run_write(action, folder, port, provided, passes=PASSES, *, power_cycle=Fals
     if slot == 'B' and not baseline:
         raise RecoveryError('slot B requires --baseline from a matching double read with slot A disabled')
     if baseline:
+        if power_cycle:
+            raise RecoveryError('a baseline-backed recovery cannot power-cycle after the backup',
+                                code='RESET_FORBIDDEN')
         before = matched_backup(baseline, port=None if dry_run_path else port)
         if slot == 'B' and before[8:12] != b'\x00NLT':
             raise RecoveryError('slot A is not explicitly disabled; slot B cannot take boot priority. Stop and inspect')
@@ -1916,7 +1921,8 @@ def run_write(action, folder, port, provided, passes=PASSES, *, power_cycle=Fals
                                 code='HOLD_REQUIRED')
     if dry_run_path:
         return dry_run(action, plan, image, passes, power_cycle, dry_run_path, out,
-                       slot=slot, full_slot=full_slot, hold=hold)
+                       slot=slot, full_slot=full_slot, hold=hold,
+                       attach_only=action == 'activate' or bool(baseline))
     interactive = sys.stdin.isatty() if interactive is None else interactive
     if power_cycle and (not interactive or action == 'activate'):
         raise RecoveryError('--power-cycle requires an interactive stage/flash; activation never resets the chip')

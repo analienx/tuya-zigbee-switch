@@ -939,6 +939,18 @@ def test_verified_session_requires_matching_readback_before_activation(tmp_path)
     assert tool.session_status(session)['nextActions'] == ['manual_bench_start']
 
 
+def test_baseline_stage_forbids_power_cycle_and_dry_run_matches_no_reset(tmp_path):
+    kit, chip, _session, options, token = agent_fixture(tmp_path, baseline=True)
+    with pytest.raises(RecoveryError, match='cannot power-cycle'):
+        tool.run_write('stage', kit, 'COM5', token('stage'), power_cycle=True, **options)
+    assert chip.restarts == 0 and not chip.erases
+    trace = tmp_path / 'stage.uart'
+    tool.run_write('stage', kit, 'COM5', token('stage'), dry_run_path=trace, **options)
+    events = [json.loads(line) for line in trace.with_name(trace.name + '.trace.jsonl').read_text().splitlines()]
+    assert any(event['operation'] == 'attach-without-reset' for event in events)
+    assert not any(event['operation'] == 'restart' for event in events)
+
+
 def single_readback(path, data, port='COM5'):
     path = Path(path)
     path.write_bytes(bytes(data))
