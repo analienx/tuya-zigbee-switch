@@ -33,6 +33,8 @@ def base_profile(tmp_path, **changes):
            'join_via': 'KnownRouter', 'join_mode': 'network-wide',
            'preserve_device_state': True}
     cfg.update(changes)
+    if cfg['preflash_role'] == cfg['postflash_role']:
+        cfg.pop('join_mode', None)  # same-role updates have no join window
     return cfg
 
 
