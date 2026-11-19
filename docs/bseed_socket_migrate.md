@@ -21,7 +21,8 @@ tooling already uses. The migration flow additionally reads:
 
 1. `plan --device NAME --to client|router|same` reads the Zigbee2MQTT
    inventory and, for a role change, the target's Mgmt_Lqi neighbour table
-   (one read-only ZDO request). It chooses the route and candidate, refuses
+   (one read-only ZDO request). Role changes rejoin network-wide
+   (`join_mode`), never through one chosen parent Router. It chooses the route and candidate, refuses
    unsupported cases with a reason, writes `profile.json`, the image (native,
    or a header-only wrapper whose only changed bytes are 12–17), the template
    index and `MIGRATION.json`, and runs the campaign's own `load_profile`,
@@ -52,7 +53,7 @@ because the next OTA cannot start while that lease is held.
 |---|---|---|
 | stock `_TZ3000_b28wrpvx` / `TS011F` Router | `client` | stock wrapper 54179 / 0xFFFFFFFF → `cli` Client, `physically_unloaded` proof by verified relay OFF |
 | custom `b28wrpvx` / `TS011F-BS-PM` | `same` | native image, meter proof |
-| custom PM Client ↔ Router | `router` / `client` | FORCE wrapper on the source query type, scoped rejoin via `join_via` |
+| custom PM Client ↔ Router | `router` / `client` | FORCE wrapper on the source query type, network-wide rejoin |
 | custom `o1jzcxou` / `TS011F-BS` | `same` | native image; runs only where the non-PM recovery gate admits it |
 
 Refused: stock → Router (no reviewed route yet), non-PM role changes, other
@@ -60,10 +61,8 @@ boards. All transfers use 48-byte blocks with 1200 ms response pacing.
 
 ## When the socket does not rejoin
 
-`run` ends with the scoped rejoin window. If the target never announces
-(both LEDs flashing together for more than about 10 minutes), follow
-"A converted socket that never comes back" in the skill: owner network reset
-(10 quick presses), then one `bseed_z2m_rejoin_window.py --network-wide`
+`run` ends with a network-wide rejoin window (at most 20 minutes). If the
+target still never announces (both LEDs flashing together), follow "A
+converted socket that never comes back" in the skill: owner network reset (10
+quick presses), then one more `bseed_z2m_rejoin_window.py --network-wide`
 window, then `metadata`, `restore-state`, `provision-pm` and `postflash`.
-The candidate check in the rejoin tool now survives unrelated inventory
-republishes, so a scoped campaign runs its full `--total-seconds`.

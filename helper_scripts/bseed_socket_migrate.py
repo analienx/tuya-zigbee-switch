@@ -158,8 +158,11 @@ def build_profile(site, live, route, candidate, *, image, sha256, native_image=N
         p.update(image_type=route['wrapper_type'], file_version='0xffffffff',
                  native_image=str(native_image), native_sha256=native_sha256)
     if role_change:
-        p.update(join_via=join_via, join_seconds=120, join_total_seconds=2100,
+        # Owner rule: rejoin network-wide, never scoped to one parent Router.
+        p.update(join_mode='network-wide', join_seconds=120, join_total_seconds=1200,
                  allow_join_all_fallback=False, source_rejoin_strategy='scoped')
+        if join_via:
+            p['join_via'] = join_via  # informational: strongest Router neighbour at plan time
     pm = route['board'] == CUSTOM_PM
     if pm:
         p.update(require_pm=True, non_pm=False, pm_ssh_host=site['pm_ssh_host'],
@@ -349,8 +352,11 @@ def cmd_plan(site, args):
         from bseed_zdo_live import read_neighbor_table
         neighbors = read_neighbor_table(site['mqtt_config'], site['broker'], live['ieee_address'],
                                         live['network_address'])
-        join_via, lqi, children = choose_join_via(neighbors, devices, live['ieee_address'])
-        print('JOIN_VIA', join_via, 'lqi', lqi)
+        try:
+            join_via, lqi, children = choose_join_via(neighbors, devices, live['ieee_address'])
+            print('STRONGEST_ROUTER_NEIGHBOUR', join_via, 'lqi', lqi)
+        except Refused as error:
+            print('NO_ROUTER_NEIGHBOUR', error)  # the network-wide rejoin does not need one
         if route['target'] == 'EndDevice' and children:
             print('CHILDREN_WILL_REPARENT', ', '.join(children))
     transport = native if route['wrapper_type'] is None else wrap(native, route['wrapper_type'])

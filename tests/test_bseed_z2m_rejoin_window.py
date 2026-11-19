@@ -239,9 +239,9 @@ def test_network_wide_window_has_no_router_and_a_tighter_budget(tmp_path, monkey
     from bseed_z2m_rejoin_window import window_budget, permit_payload, MAX_NETWORK_WIDE_SECONDS
     assert permit_payload(60, None, 't') == {'time': 60, 'transaction': 't'}
     assert permit_payload(60, 'R', 't')['device'] == 'R'
-    assert window_budget(120, MAX_NETWORK_WIDE_SECONDS, True)[1] == 600
+    assert window_budget(120, MAX_NETWORK_WIDE_SECONDS, True)[1] == 1200
     with pytest.raises(ValueError):
-        window_budget(120, 601, True)
+        window_budget(120, 1201, True)
     assert window_budget(120, 2100, False)[1] == 2100
     with pytest.raises(ValueError, match='no permit-via'):
         validate_recovery(IEEE, IEEE, 'KitchenSocketRight', INVENTORY, False, LOCK, True)

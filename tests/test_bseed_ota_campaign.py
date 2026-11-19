@@ -211,12 +211,26 @@ def test_cross_role_flash_is_refused_without_rejoin_orchestration(tmp_path, monk
 
 
 def test_transition_requires_scoped_rejoin_route_before_flashing(tmp_path,monkeypatch):
-    cfg=profile(tmp_path);path=tmp_path/'role.json';path.write_text(json.dumps(cfg))
+    cfg=profile(tmp_path);cfg['join_mode']='scoped';path=tmp_path/'role.json';path.write_text(json.dumps(cfg))
     monkeypatch.setattr(sys,'argv',['campaign','--profile',str(path),'--mode','transition',
                                     '--confirm-ieee',cfg['ieee']])
     with patch('bseed_ota_campaign.subprocess.call') as call:
         with pytest.raises(ValueError,match='join_via'):campaign.main()
         call.assert_not_called()
+
+
+def test_rejoin_defaults_to_a_network_wide_window_within_its_budget(tmp_path):
+    from bseed_z2m_rejoin_window import MAX_NETWORK_WIDE_SECONDS
+    cfg=profile(tmp_path)
+    cmd=campaign.rejoin_cmd(cfg,cfg['ieee'],tmp_path/'e.json')
+    assert '--network-wide' in cmd and '--permit-via' not in cmd
+    assert int(cmd[cmd.index('--total-seconds')+1])==min(campaign.DEFAULT_JOIN_TOTAL_SECONDS,
+                                                         MAX_NETWORK_WIDE_SECONDS)
+    cfg.update(join_mode='scoped',join_via='KnownRouter')
+    cmd=campaign.rejoin_cmd(cfg,cfg['ieee'],tmp_path/'e.json')
+    assert cmd[cmd.index('--permit-via')+1]=='KnownRouter' and '--network-wide' not in cmd
+    with pytest.raises(ValueError,match='join_mode must be'):
+        campaign.join_mode({'join_mode':'all'})
 
 
 def test_transition_orders_flash_join_metadata_postflash(tmp_path,monkeypatch):

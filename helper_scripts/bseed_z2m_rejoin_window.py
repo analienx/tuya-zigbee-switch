@@ -17,12 +17,13 @@ republish closed windows early (WindowLeft, 2026-11-18, three times). After a
 rejected inventory candidate, further inventory republishes are ignored until
 the next window; the target's own join/announce events always count.
 
-`--network-wide` (operator recovery, never a profile fallback) opens joining
-on the coordinator and every Router for at most MAX_NETWORK_WIDE_SECONDS in
-total, with the same foreign-join abort. WindowLeft (stock -> cli26) never
-announced after its OTA; 70 min of scoped windows and a power cycle did
-nothing, and after an owner network reset (10 presses) it joined 16 s into
-one network-wide window.
+`--network-wide` opens joining on the coordinator and every Router for at
+most MAX_NETWORK_WIDE_SECONDS in total, with the same foreign-join abort. It
+is the campaign default (profile `join_mode`); `--permit-via` is the explicit
+scoped opt-in. WindowLeft (stock -> cli26) never announced after its OTA; 70
+min of scoped windows and a power cycle did nothing, and after an owner
+network reset (10 presses) it joined 16 s into one network-wide window.
+CabinetL (2026-11-18) likewise stayed silent through 15 min of scoped windows.
 """
 import argparse
 import datetime as dt
@@ -37,7 +38,7 @@ from bseed_zdo_live import read_node_descriptor
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_TOTAL_SECONDS = 2700
-MAX_NETWORK_WIDE_SECONDS = 600
+MAX_NETWORK_WIDE_SECONDS = 1200  # 20 min: covers firmware boot + one steering rescue
 JOIN_EVENTS = ('device_joined', 'device_interview', 'device_announce')
 
 

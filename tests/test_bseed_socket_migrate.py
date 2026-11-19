@@ -70,7 +70,9 @@ def test_every_route_builds_a_profile_the_campaign_accepts(tmp_path, row, to, ki
     assert route['kind'] == kind
     assert relay.validate(loaded) is True and loaded['expect_relay'] == 'OFF'
     assert loaded['block_bytes'] == 48 and loaded['response_delay_ms'] >= 1200
-    assert (loaded.get('join_via') is not None) == (route['source'] != route['target'])
+    if route['source'] != route['target']:
+        assert campaign.join_mode(loaded) == 'network-wide'
+        assert '--network-wide' in campaign.rejoin_cmd(loaded, loaded['ieee'], tmp_path / 'e.json')
     assert loaded['preserve_device_state'] is True
 
 
