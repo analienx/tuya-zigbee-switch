@@ -34,15 +34,23 @@ These fresh identities are defined in `helper_scripts/bseed_pm_release.py` and `
 <!-- current-candidate-matrix:start -->
 | Board | Role | Current candidate | Native FILEVER | OTA image type | Publication / acceptance |
 | --- | --- | --- | --- | ---: | --- |
-| PM TS011F-BS-PM | Router | `1.2.5-bseedr24` | `0x12053026` | 43556 | Candidate (PR #144) · not yet sealed · not public · hardware acceptance pending |
-| PM TS011F-BS-PM | mains Client | `1.2.5-bseedcli27` | `0x12053026` | 65024 | Candidate (PR #144) · not yet sealed · not public · hardware acceptance pending |
-| non-PM TS011F-BS | Router | `1.1.3-bseedr21` | `0x11023020` | 43555 | Candidate (PR #144) · not yet sealed · not public · hardware acceptance pending |
-| non-PM TS011F-BS | mains Client | `1.1.3-bseedc19` | `0x11023020` | 65026 | Candidate (PR #144) · not yet sealed · not public · hardware acceptance pending |
+| PM TS011F-BS-PM | Router | `1.2.5-bseedr24` | `0x12053026` | 43556 | Sealed 2026-11-19 from exact-SHA CI at `0e82e3bb` (PR #144) · not public · hardware acceptance pending |
+| PM TS011F-BS-PM | mains Client | `1.2.5-bseedcli27` | `0x12053026` | 65024 | Sealed 2026-11-19 from exact-SHA CI at `0e82e3bb` (PR #144) · not public · hardware acceptance pending |
+| non-PM TS011F-BS | Router | `1.1.3-bseedr21` | `0x11023020` | 43555 | Sealed 2026-11-19 from exact-SHA CI at `0e82e3bb` (PR #144) · not public · hardware acceptance pending |
+| non-PM TS011F-BS | mains Client | `1.1.3-bseedc19` | `0x11023020` | 65026 | Sealed 2026-11-19 from exact-SHA CI at `0e82e3bb` (PR #144) · not public · hardware acceptance pending |
 <!-- current-candidate-matrix:end -->
 
 The r24/cli27 and r21/c19 candidates (2026-11-19) add the pairing/rejoin-only
 join blink and LED dimming (Basic `0xFF03`, BSEED default 50 %). The non-PM
 Router moves to the compact `-Os -fno-jump-tables` flags to fit its OTA slot.
+They were sealed on 2026-11-19 from exact-SHA CI at `0e82e3bb` (sealing fixes
+the bytes, it is not hardware acceptance).
+
+The Zigbee2MQTT converter shows each socket's uplink from the Basic `0xFF13`
+link snapshot that every link-policy build (PM r19/cli22, non-PM r18/c16 and
+later) already carries: the Client's parent or the Router's next hop, its LQI
+and cost as the socket measures them, and link failures in the last hour. It is
+read every 5 minutes; no firmware change is involved.
 The sealed r23/cli26 and r20/c18 set (`2a5b0d08`) stays deployable and is
 never relabelled.
 

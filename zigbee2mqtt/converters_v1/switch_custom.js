@@ -10,6 +10,7 @@ const {
     deviceAddCustomCluster,
     commandsOnOff,
     commandsLevelCtrl,
+    poll,
 } = require("zigbee-herdsman-converters/lib/modernExtend");
 const {assertString, determineEndpoint} = require("zigbee-herdsman-converters/lib/utils");
 const reporting = require("zigbee-herdsman-converters/lib/reporting");
@@ -311,6 +312,109 @@ Changing this setting can immediately switch mains power. The setting is stored 
         }));
         return {...base, toZigbee, exposes: [(device, options) => supported(device) ?
             base.exposes.flatMap(e => typeof e === "function" ? e(device, options) : [e]) : []]};
+    },
+    linkDiagnostics: () => {
+        // Basic 0xFF13 link snapshot (layout: src/telink/hal/zigbee_network.c,
+        // schema 1), present from PM r19/cli22 and non-PM r18/c16 on. Read-only
+        // diagnostics: what the socket itself sees of its uplink, i.e. a
+        // Client's parent or a Router's next hop towards the coordinator.
+        const exposes = require("zigbee-herdsman-converters/lib/exposes");
+        const ea = exposes.access;
+        const ATTR = 0xff13;
+        const first = {"1.2.5": {r: 19, cli: 22}, "1.1.3": {r: 18, c: 16}};
+        const supported = device => {
+            if (!device) return true;  // definition listing without a device
+            const match = /^(1\.2\.5|1\.1\.3)-bseed(r|cli|c)(\d+)$/.exec(device.softwareBuildID || "");
+            const minimum = match && first[match[1]][match[2]];
+            return Boolean(minimum) && Number(match[3]) >= minimum;
+        };
+        // Friendly names live in Zigbee2MQTT's settings, which converters
+        // cannot reach. Read them (names only) from its data directory at most
+        // once a minute; any failure falls back to the IEEE address.
+        const names = {at: -Infinity, map: new Map()};
+        const friendlyName = ieee => {
+            if (Date.now() - names.at > 60_000) {
+                names.at = Date.now();
+                try {
+                    const fs = require("fs");
+                    const path = require("path");
+                    const yaml = require("js-yaml");
+                    const dir = process.env.ZIGBEE2MQTT_DATA || path.join(process.cwd(), "data");
+                    const load = file => yaml.load(fs.readFileSync(path.join(dir, file), "utf8")) || {};
+                    const settings = load("configuration.yaml");
+                    const files = [].concat(settings.devices || []);
+                    const devices = typeof settings.devices === "object" && !Array.isArray(settings.devices) ?
+                        [settings.devices] : files.filter(f => typeof f === "string").map(load);
+                    const map = new Map();
+                    for (const group of devices)
+                        for (const [key, value] of Object.entries(group || {}))
+                            if (value && typeof value.friendly_name === "string") map.set(key.toLowerCase(), value.friendly_name);
+                    names.map = map;
+                } catch (error) {
+                    names.map = new Map();
+                }
+            }
+            return names.map.get(ieee.toLowerCase());
+        };
+        const uplinkName = (device, nwk) => {
+            if (nwk === 0x0000) return "Coordinator";
+            let ieee;
+            try {
+                ieee = device?.constructor?.byNetworkAddress?.(nwk)?.ieeeAddr;
+            } catch (error) {
+                ieee = undefined;
+            }
+            const hex = `0x${nwk.toString(16).padStart(4, "0")}`;
+            if (!ieee) return hex;
+            return friendlyName(ieee) || ieee;
+        };
+        const decode = (value, device) => {
+            const bytes = Buffer.isBuffer(value) ? value : Array.isArray(value) ? Buffer.from(value) : null;
+            if (!bytes || bytes.length < 16 || bytes[0] !== 1) return {};
+            const known = (bytes[1] & 0x04) !== 0;
+            const nwk = bytes.readUInt16LE(2);
+            return {
+                zigbee_uplink: nwk === 0xffff ? "none" : uplinkName(device, nwk),
+                zigbee_uplink_lqi: known ? bytes[4] : null,
+                zigbee_uplink_cost: known ? bytes[5] : null,
+                zigbee_link_failures_1h: bytes[6],
+            };
+        };
+        const fromZigbee = [{
+            cluster: "genBasic",
+            type: ["attributeReport", "readResponse"],
+            convert: (model, msg, publish, options, meta) => {
+                if (!(ATTR in (msg.data || {})) || !supported(msg.device)) return;
+                return decode(msg.data[ATTR], msg.device);
+            },
+        }];
+        const list = [
+            new exposes.Text("zigbee_uplink", ea.STATE).withLabel("Zigbee parent / next hop")
+                .withDescription("Client: the Router it is joined through. Router: the next hop towards the coordinator. Refreshed every few minutes.")
+                .withCategory("diagnostic"),
+            new exposes.Numeric("zigbee_uplink_lqi", ea.STATE).withLabel("Uplink LQI").withValueMin(0).withValueMax(255)
+                .withDescription("Link quality this socket measures on frames from its parent / next hop (0-255).")
+                .withCategory("diagnostic"),
+            new exposes.Numeric("zigbee_uplink_cost", ea.STATE).withLabel("Uplink cost").withValueMin(0).withValueMax(7)
+                .withDescription("Zigbee link cost to the parent / next hop (1 best, 7 worst).")
+                .withCategory("diagnostic"),
+            new exposes.Numeric("zigbee_link_failures_1h", ea.STATE).withLabel("Link failures (last hour)").withValueMin(0)
+                .withDescription("Client: parent losses in the last hour. Router: failed coordinator probes.")
+                .withCategory("diagnostic"),
+        ];
+        const result = {fromZigbee, isModernExtend: true,
+            exposes: [(device, options) => supported(device) ? list : []]};
+        // poll() is missing from old Zigbee2MQTT 1.x converter libraries.
+        if (typeof poll === "function") {
+            result.onEvent = poll({
+                key: "bseed_link_diagnostics",
+                defaultIntervalSeconds: 300,
+                poll: async device => {
+                    if (supported(device)) await device.getEndpoint(1)?.read("genBasic", [ATTR]);
+                },
+            }).onEvent;
+        }
+        return result;
     },
     deviceConfig: (name, endpointName) =>
         withExposeLabel(text({
@@ -8503,6 +8607,7 @@ const definitions = [
             romasku.deviceConfig("device_config", "switch"),
             romasku.multiPressResetCount("multi_press_reset_count", "switch"),
             romasku.ledBrightness("led_brightness", "switch"),
+            romasku.linkDiagnostics(),
             romasku.networkIndicator("network_led", "switch"),
             bseedSocketRelayOnOff(),
             // BSEED PM fallback: bounded freshness, not a substitute for change reports.
@@ -8630,6 +8735,7 @@ const definitions = [
             romasku.deviceConfig("device_config", "switch"),
             romasku.multiPressResetCount("multi_press_reset_count", "switch"),
             romasku.ledBrightness("led_brightness", "switch"),
+            romasku.linkDiagnostics(),
             romasku.networkIndicator("network_led", "switch"),
             bseedSocketRelayOnOff(),
             romasku.relayIndicatorMode("relay_indicator_mode", "relay"),
