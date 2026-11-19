@@ -58,7 +58,7 @@ def test_stock_client_profile_loads_with_physical_proof_and_48_byte_blocks(tmp_p
     ({'require_pm': False}, 'require_pm'),
     ({'native_sha256': None}, 'native_image and native_sha256'),
     ({'preflash_build': '1.0.13'}, 'preflash_build'),
-    ({'join_via': None}, 'join_via'),
+    ({'join_mode': 'scoped', 'join_via': None}, 'join_via'),
     ({'force_test_transition': True}, 'non-FORCE'),
 ])
 def test_stock_client_profile_rejects_any_other_shape(tmp_path, changes, match):

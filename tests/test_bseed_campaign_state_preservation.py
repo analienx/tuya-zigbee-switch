@@ -81,7 +81,10 @@ def test_transition_snapshots_before_flash_and_restores_before_postflash(tmp_pat
     assert restore[restore.index('--confirm-ieee') + 1] == cfg['ieee']
     assert '--configure' not in restore  # Router -> Client: PM provisioning owns reporting
     join = calls[2][1]
-    assert join[join.index('--total-seconds') + 1] == str(campaign.DEFAULT_JOIN_TOTAL_SECONDS)
+    from bseed_z2m_rejoin_window import MAX_NETWORK_WIDE_SECONDS
+    assert '--network-wide' in join and '--permit-via' not in join  # owner rule: join from all
+    assert join[join.index('--total-seconds') + 1] == str(
+        min(campaign.DEFAULT_JOIN_TOTAL_SECONDS, MAX_NETWORK_WIDE_SECONDS))
 
 
 def test_client_to_router_transition_reconfigures_by_default(tmp_path, monkeypatch):
