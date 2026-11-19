@@ -1,0 +1,77 @@
+name: ZG-204ZL v0.1.4.1 reliability canary (hosted build)
+
+on:
+  pull_request:
+    paths:
+      - "firmware/zg204zl_reliability/**"
+      - ".github/workflows/zg204zl-reliability-build.yml"
+  push:
+    branches:
+      - codex/zg204zl-rejoin-rf-v0141-20261119
+    paths:
+      - "firmware/zg204zl_reliability/**"
+      - ".github/workflows/zg204zl-reliability-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout this overlay and hosted tests
+        uses: actions/checkout@v4
+        with:
+          path: control
+      - name: Checkout immutable upstream firmware
+        uses: actions/checkout@v4
+        with:
+          repository: pvvx/ZigbeeTLc
+          ref: c249d8a7caddb5012d06aba580d4a53d1957f9c1
+          persist-credentials: false
+          path: upstream
+      - name: Python interpreter
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify exact upstream provenance and source-level regression tests
+        env:
+          ZG204ZL_SOURCE: ${{ github.workspace }}/upstream
+        run: |
+          test "$(git -C upstream rev-parse HEAD)" = "c249d8a7caddb5012d06aba580d4a53d1957f9c1"
+          python -m unittest discover -s control/firmware/zg204zl_reliability -p test_overlay.py -v
+      - name: Apply board-specific, fail-closed source changes
+        run: |
+          python control/firmware/zg204zl_reliability/apply.py --source upstream |
+            tee "${RUNNER_TEMP}/zg204zl-overlay.json"
+      - name: Install Telink TC32 SDK/toolchain prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends make unzip bzip2 libc6-i386 lib32z1
+          make -C upstream install
+      - name: Build only ZG-204ZL v0.1.4.1 (never flash)
+        run: |
+          make -C upstream clean
+          make -C upstream -j2 PROJECT_NAME=ZG204ZL \
+            POJECT_DEF="-DBOARD=BOARD_ZG204ZL" \
+            VERSION_BIN=_v0141 \
+            ZNAME="Sonoff:ZG-204ZL-z"
+      - name: Verify OTA and native firmware with strict image bounds and CRC
+        run: |
+          mkdir -p "${RUNNER_TEMP}/zg204zl-v0141"
+          cp upstream/bin/ZG204ZL_v0141.bin "${RUNNER_TEMP}/zg204zl-v0141/"
+          cp upstream/bin/1141-0232-01413001-ZG204ZL.zigbee "${RUNNER_TEMP}/zg204zl-v0141/"
+          cp "${RUNNER_TEMP}/zg204zl-overlay.json" "${RUNNER_TEMP}/zg204zl-v0141/source-overlay.json"
+          python control/firmware/zg204zl_reliability/verify_image.py \
+            --bin "${RUNNER_TEMP}/zg204zl-v0141/ZG204ZL_v0141.bin" \
+            --ota "${RUNNER_TEMP}/zg204zl-v0141/1141-0232-01413001-ZG204ZL.zigbee" \
+            --manifest "${RUNNER_TEMP}/zg204zl-v0141/manifest.json"
+      - name: Upload canary candidate (hosted-built; NOT hardware approved)
+        uses: actions/upload-artifact@v4
+        with:
+          name: zg204zl-v0141-reliability-candidate-${{ github.sha }}
+          path: ${{ runner.temp }}/zg204zl-v0141/
+          retention-days: 30
+          if-no-files-found: error
