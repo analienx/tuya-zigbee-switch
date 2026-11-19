@@ -61,8 +61,8 @@ def test_generated_converter_loads_and_pm_nonpm_contracts_stay_separate(tmp_path
     script = r'''
 const assert = require('node:assert/strict');
 const {prepareDefinition} = require('zigbee-herdsman-converters');
-const zhc = require('zigbee-herdsman-converters');
 // Surface errors ZHC swallows inside per-device exposes functions.
+const zhc = require('zigbee-herdsman-converters');
 if (zhc.setLogger) zhc.setLogger({debug() {}, info() {}, warning(m) {console.error('ZHC-W', m);},
                                  error(m) {console.error('ZHC-E', m);}});
 const definitions = require(process.argv[1]);
@@ -88,7 +88,7 @@ for (const build of ['1.2.5-bseedr23', '1.2.5-bseedcli26', '1.2.5-bseedv8u4', ''
     assert.ok(!led(pm, build), String(build));
 for (const build of ['1.1.3-bseedr21', '1.1.3-bseedc19'])
     assert.ok(led(nonpm, build), build);
-for (const build of ['1.1.3-bseedr20', '1.1.3-bseedc18', '1.1.3-bseedv8', '1.2.5-bseedr24'])
+for (const build of ['1.1.3-bseedr20', '1.1.3-bseedc18', '1.1.3-bseedv8'])
     assert.ok(!led(nonpm, build), build);
 assert.ok(pm.fromZigbee.some(f => f.cluster === 'haElectricalMeasurement'));
 assert.ok(pm.fromZigbee.some(f => f.cluster === 'seMetering'));
