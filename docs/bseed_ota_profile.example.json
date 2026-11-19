@@ -25,7 +25,7 @@
   "template_index": "/repo/zigbee2mqtt/ota/index_bseed.json",
   "postflash_role": "EndDevice",
   "postflash_build": "REPLACE_WITH_EXPECTED_CUSTOM_BUILD",
-  "join_via": "VERIFIED_NEIGHBOR_ROUTER_FRIENDLY_NAME",
+  "join_mode": "network-wide",
   "join_seconds": 120,
   "join_total_seconds": 2100,
   "preserve_device_state": true,

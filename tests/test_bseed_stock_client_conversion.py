@@ -32,7 +32,7 @@ def profile(tmp_path, **changes):
         'expect_relay': 'OFF', 'relay_get_key': 'state',
         'index_url': 'http://example.invalid/i.json', 'index_output': str(tmp_path / 'index.json'),
         'template_index': str(tmp_path / 'template.json'),
-        'postflash_build': '1.2.5-bseedcli26', 'join_via': 'KnownRouter',
+        'postflash_build': '1.2.5-bseedcli26', 'join_via': 'KnownRouter', 'join_mode': 'scoped',
         'block_bytes': 48, 'response_delay_ms': 1200,
     }
     data.update(changes)

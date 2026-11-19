@@ -356,10 +356,12 @@ def cmd_plan(site, args):
         from bseed_zdo_live import read_neighbor_table
         neighbors = read_neighbor_table(site['mqtt_config'], site['broker'], live['ieee_address'],
                                         live['network_address'])
-        if not any(entry.get('eui64') in {d.get('ieee_address') for d in devices}
-                   for entry in neighbors or []):
-            # An empty or unreadable table cannot say which children must
-            # re-parent; refuse rather than plan blind.
+        known = {d.get('ieee_address') for d in devices}
+        if (route['target'] == 'EndDevice' and
+                not any(entry.get('eui64') in known for entry in neighbors or [])):
+            # A Router becoming a Client orphans its children: an empty or
+            # unreadable table cannot list them, so refuse rather than plan
+            # blind. A Client source has no children to lose.
             raise Refused('Neighbour table empty or unreadable; retry plan')
         join_via, lqi, children = choose_join_via(neighbors, devices, live['ieee_address'])
         print('STRONGEST_ROUTER_NEIGHBOUR' if join_via else 'NO_ROUTER_NEIGHBOUR', join_via, 'lqi', lqi)

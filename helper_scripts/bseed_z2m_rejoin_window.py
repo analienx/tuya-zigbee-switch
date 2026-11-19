@@ -45,8 +45,9 @@ import time
 import uuid
 import paho.mqtt.client as mqtt
 import yaml
-from bseed_join_policy import (MAX_NETWORK_WIDE_SECONDS, MAX_SCOPED_TOTAL_SECONDS,
-                               MAX_WINDOW_SECONDS, MIN_WINDOW_SECONDS)
+from bseed_join_policy import (DEFAULT_WINDOW_SECONDS, MAX_NETWORK_WIDE_SECONDS,
+                               MAX_SCOPED_TOTAL_SECONDS, MAX_WINDOW_SECONDS,
+                               MIN_WINDOW_SECONDS, OPEN_SETTLE_SECONDS)
 from bseed_zdo_live import read_node_descriptor
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -143,7 +144,7 @@ def arguments():
     via.add_argument('--network-wide',action='store_true',
                      help='Role migrations: coordinator and every Router, at most %d s in total'
                           % MAX_NETWORK_WIDE_SECONDS)
-    p.add_argument('--seconds',type=int,default=120)
+    p.add_argument('--seconds',type=int,default=DEFAULT_WINDOW_SECONDS)
     p.add_argument('--total-seconds',type=int,default=None,
                    help='re-open the window until this many seconds have passed')
     p.add_argument('--expect-build',required=True)
@@ -165,8 +166,8 @@ def main():
     base=config.get('base_topic','zigbee2mqtt');token='bseed-rejoin-'+uuid.uuid4().hex
     state={'info':None,'inventory':None,'response':{},'events':[],'target_state':None,'candidate':None,
            'window_open':False,'fresh_inventory':False,'known':None,'foreign':None,'ignore_inventory':False,
-           'opened':False,'closed':None,'close_tokens':[],'info_seq':0,'close_info_seq':None,
-           'late_open_closes':set(),'open_tokens':[]}
+           'opened':False,'closed':None,'close_tokens':[],'info_seq':0,
+           'late_open_closes':set(),'open_sent':{}}
     ready=threading.Event();wake=threading.Event()
     gate=threading.RLock()  # serializes opening and closing; never held while verifying
     permit_topic=base+'/bridge/request/permit_join'
@@ -174,7 +175,6 @@ def main():
         with gate:
             close_token=token+suffix+'-'+str(len(state['close_tokens']))
             state['close_tokens'].append(close_token)
-            state['close_info_seq']=state['info_seq']
             c.publish(permit_topic,json.dumps({'time':0,'transaction':close_token}),qos=1)
     def close_now(reason):
         # Close joining once, immediately, from any thread. Never waits.
@@ -219,6 +219,9 @@ def main():
             joiner=foreign_joiner(data,state['known'],a.ieee)
             if joiner and state['foreign'] is None:
                 state['foreign']=joiner;print('FOREIGN_JOIN_ABORT',joiner,flush=True)
+                # This tool never removes devices; the operator must.
+                print('FOREIGN_DEVICE_MUST_BE_REMOVED',joiner,
+                      'via Zigbee2MQTT bridge/request/device/remove {"id": "%s"}'%joiner,flush=True)
                 close_now('foreign_join');wake.set()
             elif target_join_event(data,a.ieee) and state['opened']:
                 # Also just after closing: a join accepted in the last moment
@@ -262,7 +265,8 @@ def main():
         verified=False
         while not verified and state['foreign'] is None and state['closed'] is None:
             with gate:
-                if state['closed'] is not None:break
+                # The callback sets foreign before it can take the gate.
+                if state['closed'] is not None or state['foreign'] is not None:break
                 sent_at=time.monotonic()
                 if campaign_stop is None:
                     # The single deadline is fixed as the first request is
@@ -272,7 +276,7 @@ def main():
                 seconds=window_seconds_left(window_seconds,campaign_stop,sent_at)
                 if seconds<=0:break
                 open_token=token+'-open-'+str(len(windows))
-                state['opened']=True;state['open_tokens'].append(open_token)
+                state['opened']=True;state['open_sent'][open_token]=sent_at
                 c.publish(permit_topic,json.dumps(permit_payload(seconds,permit_via,open_token)),qos=1)
             deadline=time.monotonic()+15
             while (time.monotonic()<deadline and open_token not in state['response'] and
@@ -330,11 +334,15 @@ def main():
                     return next((state['response'][t] for t in state['close_tokens']
                                  if (state['response'].get(t) or {}).get('status')=='ok'),None)
                 def bridge_closed():
-                    # Every open answered (a late one re-closes), and a
-                    # bridge/info published after the last close says off.
-                    return (all(t in state['response'] for t in state['open_tokens']) and
-                            state['info_seq']>state['close_info_seq'] and
-                            state['info'].get('permit_join') is False)
+                    # Every open settled (answered, a late answer re-closes,
+                    # or old enough that the bridge has handled it) and the
+                    # bridge's latest state says joining is off. Zigbee2MQTT
+                    # republishes bridge/info on every change, including a
+                    # window expiring, so a no-op close needs no new info.
+                    now=time.monotonic()
+                    settled=all(t in state['response'] or now-sent>=OPEN_SETTLE_SECONDS
+                                for t,sent in state['open_sent'].items())
+                    return settled and state['info'].get('permit_join') is False
                 for attempt in range(2):
                     deadline=time.monotonic()+12
                     while time.monotonic()<deadline and not (close_ok() and bridge_closed()):

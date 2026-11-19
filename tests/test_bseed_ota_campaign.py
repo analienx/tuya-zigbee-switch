@@ -243,12 +243,16 @@ def test_network_wide_total_is_refused_above_its_cap_not_cut(tmp_path):
     assert campaign.join_total_seconds(cfg)==2100   # boot + both steering rescues
 
 
-def test_old_contract_profile_with_join_via_stays_scoped(tmp_path):
-    """join_via without join_mode meant 'scoped through this Router': never widen it."""
+def test_old_contract_profile_needs_an_explicit_join_mode(tmp_path):
+    """join_via without join_mode meant 'scoped through this Router', which the owner no
+    longer wants: never widen it nor keep it scoped silently; refuse before any window."""
     cfg=profile(tmp_path);cfg.update(join_via='KnownRouter',join_total_seconds=2100)
-    assert campaign.join_mode(cfg)=='scoped'
-    cmd=campaign.rejoin_cmd(cfg,cfg['ieee'],tmp_path/'e.json')
-    assert cmd[cmd.index('--permit-via')+1]=='KnownRouter' and '--network-wide' not in cmd
+    path=tmp_path/'old.json';path.write_text(json.dumps(cfg))
+    campaign.load_profile(path)   # other modes (metadata, postflash) still load it
+    with pytest.raises(ValueError,match='set join_mode'):
+        campaign.rejoin_cmd(cfg,cfg['ieee'],tmp_path/'e.json')
+    cfg['join_mode']='network-wide'
+    assert '--network-wide' in campaign.rejoin_cmd(cfg,cfg['ieee'],tmp_path/'e.json')
 
 
 def test_same_role_updates_never_open_a_join_window(tmp_path):
@@ -268,7 +272,7 @@ def test_network_wide_rejoin_names_the_source_role(tmp_path):
 
 
 def test_transition_orders_flash_join_metadata_postflash(tmp_path,monkeypatch):
-    cfg=profile(tmp_path);cfg['join_via']='KnownRouter';path=tmp_path/'role.json'
+    cfg=profile(tmp_path);cfg.update(join_via='KnownRouter',join_mode='scoped');path=tmp_path/'role.json'
     _seed_transfer_locks(cfg)
     path.write_text(json.dumps(cfg));monkeypatch.setattr(sys,'argv',
         ['campaign','--profile',str(path),'--mode','transition','--confirm-ieee',cfg['ieee']])
@@ -304,7 +308,7 @@ def test_pm_provision_command_requires_exact_target_and_private_ssh(tmp_path):
 
 
 def test_pm_transition_fails_before_firmware_write_if_provision_unavailable(tmp_path,monkeypatch):
-    cfg=profile(tmp_path);cfg.update(require_pm=True,join_via='KnownRouter')
+    cfg=profile(tmp_path);cfg.update(require_pm=True,join_via='KnownRouter',join_mode='scoped',join_mode='scoped')
     path=tmp_path/'role.json';path.write_text(json.dumps(cfg))
     monkeypatch.setattr(sys,'argv',['campaign','--profile',str(path),'--mode','transition',
                                     '--confirm-ieee',cfg['ieee']])
@@ -314,7 +318,7 @@ def test_pm_transition_fails_before_firmware_write_if_provision_unavailable(tmp_
 
 
 def test_pm_transition_orders_provision_before_postflash(tmp_path,monkeypatch):
-    cfg=profile(tmp_path);cfg.update(require_pm=True,join_via='KnownRouter',
+    cfg=profile(tmp_path);cfg.update(require_pm=True,join_via='KnownRouter',join_mode='scoped',
            pm_ssh_host='127.0.0.1',pm_ssh_key=str(tmp_path/'key'))
     _seed_transfer_locks(cfg)
     path=tmp_path/'role.json';path.write_text(json.dumps(cfg))
@@ -662,7 +666,7 @@ def test_force_pm_client_to_router_transition_uses_audit_not_client_provisioner(
     cfg.update(require_pm=True, preflash_role='EndDevice', postflash_role='Router',
                postflash_build='1.2.5-bseedr9', force_test_transition=True,
                native_image=str(native), native_sha256=hashlib.sha256(native.read_bytes()).hexdigest(),
-               join_via='KnownRouter', pm_ssh_host='127.0.0.1',
+               join_via='KnownRouter', join_mode='scoped', pm_ssh_host='127.0.0.1',
                pm_ssh_key=str(tmp_path / 'private.key'))
     source = _write_profile(tmp_path, cfg, 'pm-force-router.json')
     monkeypatch.setattr(sys, 'argv', ['campaign', '--profile', str(source), '--mode', 'transition',
@@ -682,7 +686,7 @@ def test_force_pm_client_to_router_transition_uses_audit_not_client_provisioner(
 def test_nonforce_pm_client_to_router_transition_remains_blocked(tmp_path, monkeypatch):
     cfg = _pm_profile(tmp_path)
     cfg.update(require_pm=True, preflash_role='EndDevice', postflash_role='Router',
-               postflash_build='1.2.5-bseedr9', join_via='KnownRouter',
+               postflash_build='1.2.5-bseedr9', join_via='KnownRouter', join_mode='scoped',
                pm_ssh_host='127.0.0.1', pm_ssh_key=str(tmp_path / 'private.key'))
     source = _write_profile(tmp_path, cfg, 'pm-normal-router-transition.json')
     monkeypatch.setattr(sys, 'argv', ['campaign', '--profile', str(source), '--mode', 'transition',
@@ -696,7 +700,7 @@ def test_nonforce_pm_client_to_router_transition_remains_blocked(tmp_path, monke
 def _pm_transition_profile(tmp_path):
     cfg = _pm_profile(tmp_path)
     cfg.update(require_pm=True, preflash_role='Router', postflash_role='EndDevice',
-               postflash_build='1.2.5-bseedcli11', join_via='KnownRouter',
+               postflash_build='1.2.5-bseedcli11', join_via='KnownRouter', join_mode='scoped',
                pm_ssh_host='127.0.0.1', pm_ssh_key=str(tmp_path / 'key'))
     return cfg
 

@@ -33,7 +33,7 @@ def test_canonical_transition_reaches_submission_only_with_exact_recovery(tmp_pa
     p, _, _, _ = fixture(tmp_path, preflash_build='1.1.3-bseedv8')
     cfg = base_profile(tmp_path)
     cfg.update(p, preflash_role='Router', postflash_role='EndDevice', require_pm=False,
-               preflash_relay_physical_mode='follow_state', join_via='VerifiedParent')
+               preflash_relay_physical_mode='follow_state', join_via='VerifiedParent', join_mode='scoped')
     path = tmp_path / 'transition.json'; path.write_text(json.dumps(cfg))
     argv = ['campaign', '--profile', str(path), '--mode', 'transition', '--confirm-ieee', cfg['ieee']]
     monkeypatch.setattr(sys, 'argv', argv)
