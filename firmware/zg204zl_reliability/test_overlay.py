@@ -10,6 +10,8 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+import subprocess
+import json
 from unittest.mock import patch
 
 MODULE = Path(__file__).with_name("apply.py")
@@ -52,16 +54,17 @@ class VariantTests(unittest.TestCase):
             power = (root / "src/app_cfg.h").read_text(encoding="utf-8")
             cfg = (root / "src/includes/zb_config.h").read_text(encoding="utf-8")
             version = (root / "src/version_cfg.h").read_text(encoding="utf-8")
-            self.assertIn("5*1000, 10*1000, 20*1000, 45*1000, 90*1000", zd)
-            self.assertIn("3*60*1000, 5*60*1000, 10*60*1000", zd)
+            self.assertIn("5000, 10000, 20000, 45000, 90000, 180000, 300000, 600000", zd)
             self.assertIn("app_rejoinOnMotion(void)", zd)
-            self.assertIn("clock_time_exceed(zg204zl_motion_rejoin_tick", zd)
+            self.assertNotIn("clock_time_exceed", zd)
+            self.assertEqual(zd.count('app_motionCooldownClear();'), 3)
+            self.assertIn('g_sensorAppCtx.linkDown = 1;\n        rj_secMode = REJOIN_INSECURITY;', zd)
             self.assertIn("app_rejoinOnMotion();", pir)
             self.assertIn("remoteCmdOnOff(SENSOR_DEVICE_ENDPOINT, ZCL_CMD_ONOFF_ON)", pir)
             self.assertIn("RF_POWER_INDEX_P3p01dBm", power)
             self.assertIn("ZDO_NWK_SCAN_ATTEMPTS\t\t\t\t\t\t3", cfg)
             self.assertIn("#define APP_BUILD\t\t\t\t0x41", version)
-            self.assertIn("zg204zl_parent_lost_or_scan_failures", zd)
+            self.assertIn('zb_isUnderRejoinMode()', zd)
 
     def test_fails_closed_before_writing_any_source_when_upstream_tampered(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -81,6 +84,62 @@ class VariantTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "wrong ZigbeeTLc source commit"):
                     fw.apply(root)
             self.assertEqual(before, (root / "src/app_cfg.h").read_bytes())
+
+
+class SchedulerBehavior(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.temp.cleanup)
+        root = Path(cls.temp.name)
+        upstream = Path(os.environ['ZG204ZL_SOURCE']).resolve()
+        original = (upstream / 'src/zb_appCb.c').read_text()
+        changed = fw.modified_sources(upstream)['src/zb_appCb.c'].decode()
+        end = '#if !USE_BLE\nstatic ev_timer_event_t *timerDevAnnceEvt;'
+        sections = {
+            'baseline': original[original.index('/* Rejoin period, ms.'):original.index(end)],
+            'candidate': changed[changed.index('/* Injected only'):changed.index(end)],
+        }
+        cls.binaries = {}
+        for name, section in sections.items():
+            folder = root / name
+            folder.mkdir()
+            (folder / 'scheduler_under_test.inc').write_text(section)
+            binary = folder / 'scheduler'
+            subprocess.run(['cc', '-std=c99', '-Wall', '-Wextra', '-Werror',
+                            '-Wno-unused-function', '-Wno-unused-parameter',
+                            '-Wno-unused-variable', '-Wno-sign-compare',
+                            '-DBASELINE=' + ('1' if name == 'baseline' else '0'),
+                            '-I' + str(folder), str(MODULE.with_name('scheduler_harness.c')),
+                            '-o', str(binary)], check=True)
+            cls.binaries[name] = binary
+
+    def test_actual_c_scheduler_behaviors(self):
+        for scenario in ('schedule', 'motion_wrap', 'busy', 'success', 'pool', 'button'):
+            with self.subTest(scenario=scenario):
+                subprocess.run([str(self.binaries['candidate']), scenario], check=True, timeout=10)
+
+    def test_eight_hour_outage_request_budget(self):
+        results = {}
+        for name, binary in self.binaries.items():
+            results[name] = {}
+            for mode in ('quiet', 'motion'):
+                output = subprocess.check_output([str(binary), mode], text=True, timeout=10)
+                results[name][mode] = json.loads(output)
+        self.assertEqual(results['baseline']['quiet']['requests'], 21)
+        self.assertEqual(results['candidate']['quiet']['requests'], 54)
+        # Motion does not reset the sequence or starve the full-channel mask.
+        moving = results['candidate']['motion']
+        self.assertLessEqual(moving['requests'], 490)
+        self.assertGreater(moving['full_scans'], 100)
+        self.assertGreaterEqual(moving['full_scans'], (moving['requests'] - 3) // 4)
+        evidence = os.environ.get('ZG204ZL_BATTERY_MODEL')
+        if evidence:
+            Path(evidence).write_text(json.dumps({
+                'assumptions': '8 hours; accepted requests last 2 s; known channel 11; all-channel mask 11..26; motion every 60 s; no RF model or measured current',
+                'results': results,
+            }, indent=2) + '\n')
+        print('Battery request-count model:', json.dumps(results))
 
 
 if __name__ == "__main__":

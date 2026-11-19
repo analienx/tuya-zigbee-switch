@@ -20,10 +20,13 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout this overlay and hosted tests
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           path: control
       - name: Checkout immutable upstream firmware
         uses: actions/checkout@v4
@@ -36,12 +39,15 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Verify exact candidate source
+        run: test "$(git -C control rev-parse HEAD)" = "$EXPECTED_HEAD"
       - name: Verify exact upstream provenance and source-level regression tests
         env:
           ZG204ZL_SOURCE: ${{ github.workspace }}/upstream
+          ZG204ZL_BATTERY_MODEL: ${{ runner.temp }}/zg204zl-battery-model.json
         run: |
           test "$(git -C upstream rev-parse HEAD)" = "c249d8a7caddb5012d06aba580d4a53d1957f9c1"
-          python -m unittest discover -s control/firmware/zg204zl_reliability -p test_overlay.py -v
+          python -m unittest discover -s control/firmware/zg204zl_reliability -p 'test_*.py' -v
       - name: Apply board-specific, fail-closed source changes
         run: |
           python control/firmware/zg204zl_reliability/apply.py --source upstream |
@@ -64,14 +70,17 @@ jobs:
           cp upstream/bin/ZG204ZL_v0141.bin "${RUNNER_TEMP}/zg204zl-v0141/"
           cp upstream/bin/1141-0232-01413001-ZG204ZL.zigbee "${RUNNER_TEMP}/zg204zl-v0141/"
           cp "${RUNNER_TEMP}/zg204zl-overlay.json" "${RUNNER_TEMP}/zg204zl-v0141/source-overlay.json"
+          cp "${RUNNER_TEMP}/zg204zl-battery-model.json" "${RUNNER_TEMP}/zg204zl-v0141/"
           python control/firmware/zg204zl_reliability/verify_image.py \
+            --source-commit "$EXPECTED_HEAD" \
             --bin "${RUNNER_TEMP}/zg204zl-v0141/ZG204ZL_v0141.bin" \
             --ota "${RUNNER_TEMP}/zg204zl-v0141/1141-0232-01413001-ZG204ZL.zigbee" \
             --manifest "${RUNNER_TEMP}/zg204zl-v0141/manifest.json"
+          git -C upstream ls-tree HEAD tools/SDK_z.zip tools/linux/tc32_gcc_v2.0.tar.bz2 > "${RUNNER_TEMP}/zg204zl-v0141/sdk-toolchain-blobs.txt"
       - name: Upload canary candidate (hosted-built; NOT hardware approved)
         uses: actions/upload-artifact@v4
         with:
-          name: zg204zl-v0141-reliability-candidate-${{ github.sha }}
+          name: zg204zl-v0141-reliability-candidate-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/zg204zl-v0141/
           retention-days: 30
           if-no-files-found: error

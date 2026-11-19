@@ -11,6 +11,7 @@ import hashlib
 import json
 from pathlib import Path
 import struct
+import re
 
 VERSION = 0x01413001
 MFG = 0x1141
@@ -73,8 +74,13 @@ def main():
     p.add_argument("--bin", type=Path, required=True)
     p.add_argument("--ota", type=Path, required=True)
     p.add_argument("--manifest", type=Path, required=True)
+    p.add_argument("--source-commit", required=True)
     args = p.parse_args()
+    if not re.fullmatch(r'[0-9a-f]{40}', args.source_commit):
+        p.error('--source-commit must be the exact candidate SHA')
     result = verify(args.bin, args.ota)
+    result['sourceCommit'] = args.source_commit
+    result['upstreamCommit'] = 'c249d8a7caddb5012d06aba580d4a53d1957f9c1'
     args.manifest.parent.mkdir(parents=True, exist_ok=True)
     args.manifest.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, indent=2))
