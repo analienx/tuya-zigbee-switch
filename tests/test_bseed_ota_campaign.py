@@ -308,7 +308,7 @@ def test_pm_provision_command_requires_exact_target_and_private_ssh(tmp_path):
 
 
 def test_pm_transition_fails_before_firmware_write_if_provision_unavailable(tmp_path,monkeypatch):
-    cfg=profile(tmp_path);cfg.update(require_pm=True,join_via='KnownRouter',join_mode='scoped',join_mode='scoped')
+    cfg=profile(tmp_path);cfg.update(require_pm=True,join_via='KnownRouter',join_mode='scoped')
     path=tmp_path/'role.json';path.write_text(json.dumps(cfg))
     monkeypatch.setattr(sys,'argv',['campaign','--profile',str(path),'--mode','transition',
                                     '--confirm-ieee',cfg['ieee']])
