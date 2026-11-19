@@ -13,7 +13,7 @@ import z2m_converter_deploy as deploy  # noqa: E402
 
 def artifact(tmp_path, data, listed=None):
     d = tmp_path / 'artifact'
-    d.mkdir()
+    d.mkdir(parents=True)
     (d / 'switch_custom.js').write_bytes(data)
     digest = listed or hashlib.sha256(data).hexdigest()
     (d / 'SHA256SUMS').write_text(digest + '  converter-canary/switch_custom.js\n'
