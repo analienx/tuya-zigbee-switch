@@ -107,6 +107,13 @@ void hal_register_on_network_status_change_callback(
     network_status_change_callback = callback;
 }
 
+static hal_join_activity_callback_t join_activity_callback = NULL;
+
+void hal_register_on_join_activity_callback(
+    hal_join_activity_callback_t callback) {
+    join_activity_callback = callback;
+}
+
 void hal_zigbee_leave_network(void) {
     if (network_status == HAL_ZIGBEE_NETWORK_NOT_JOINED) {
         io_log("ZIGBEE", "Cannot leave network - not joined");
@@ -126,6 +133,9 @@ void hal_zigbee_start_network_steering() {
     network_status = HAL_ZIGBEE_NETWORK_JOINING;
     if (network_status_change_callback != NULL) {
         network_status_change_callback(hal_zigbee_get_network_status());
+    }
+    if (join_activity_callback != NULL) {
+        join_activity_callback(HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING);
     }
 }
 

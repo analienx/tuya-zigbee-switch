@@ -38,6 +38,7 @@
 #define ZCL_ATTR_BASIC_DEVICE_CONFIG                                    0xff00
 #define ZCL_ATTR_BASIC_STATUS_LED_STATE                                 0xff01
 #define ZCL_ATTR_BASIC_MULTI_PRESS_RESET_COUNT                          0xff02
+#define ZCL_ATTR_BASIC_LED_BRIGHTNESS                                   0xff03
 
 // Power Configuration cluster
 #define ZCL_ATTR_POWER_CFG_BATTERY_VOLTAGE                              0x0020

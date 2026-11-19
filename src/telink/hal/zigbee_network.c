@@ -269,6 +269,14 @@ static void network_start_attempt(void) {
 
 static hal_network_status_change_callback_t network_status_change_callback =
     NULL;
+static hal_join_activity_callback_t join_activity_callback = NULL;
+
+/* Tells the network indicator what the radio is really doing: steering
+ * (pairing) while it runs, and the start of each rejoin attempt. */
+static void notify_join_activity(hal_zigbee_join_activity_t activity) {
+    if (join_activity_callback != NULL)
+        join_activity_callback(activity);
+}
 
 static bool request_rejoin_with_backoff(bool parent_stale);
 
@@ -914,6 +922,7 @@ void telink_zigbee_hal_router_recovery_tick(void) {
             printf("Router: secure one-shot rejoin rejected: %u\r\n", status);
         } else {
             link_router_rejoin_started(now);
+            notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING);
             printf("Router: coordinator unreachable; secure one-shot rejoin\r\n");
         }
         return;
@@ -1359,6 +1368,7 @@ static bool request_rejoin_with_backoff_impl(bool allow_joined,
     }
 
     printf("Starting network rejoin/backoff\r\n");
+    notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING);
     return true;
 }
 
@@ -1514,6 +1524,10 @@ void bdb_commissioning_callback(u8 status, void *arg) {
             network_steering_terminal_seen = true;
             network_steering_terminal_ms   = hal_millis();
         }
+        /* Steering reached a terminal outcome: pairing is no longer
+         * running, so the pairing blink stops until the next attempt. */
+        if (network_recovery_state == TELINK_NETWORK_RECOVERY_STEERING)
+            notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_IDLE);
         // These are terminal outcomes for the current BDB attempt. In
         // particular, NO_SCAN_RESPONSE on a factory-new device must return to
         // normal steering rather than pretending there is an old network to
@@ -1551,6 +1565,10 @@ void bdb_commissioning_callback(u8 status, void *arg) {
         break;
     case BDB_COMMISSION_STA_REJOIN_FAILURE:
         firmware_health_increment(&firmware_health.rejoin_failure);
+        /* The SDK backoff retries on its own; each failure precedes its
+         * next attempt. The indicator rate-limits how often it blinks. */
+        if (!zb_isDeviceJoinedNwk())
+            notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING);
         // zb_rejoinReqWithBackOff() is documented to continue its backoff
         // sequence until rejoin success. Intermediate failures therefore do
         // not terminate our REJOIN state or start another recovery sequence.
@@ -1591,6 +1609,11 @@ void hal_register_on_network_status_change_callback(
     hal_network_status_change_callback_t callback) {
     network_status_change_callback = callback;
     notify_about_network_status_change();
+}
+
+void hal_register_on_join_activity_callback(
+    hal_join_activity_callback_t callback) {
+    join_activity_callback = callback;
 }
 
 void hal_zigbee_leave_network(void) {
@@ -1683,12 +1706,16 @@ void hal_zigbee_start_network_steering(void) {
     network_recovery_state            = TELINK_NETWORK_RECOVERY_STEERING;
     network_sdk_steering_started_once = true;
     network_steering_terminal_seen    = false;
+    /* Announce before the SDK call: completion may be synchronous, and its
+     * terminal IDLE must not be overtaken by a late PAIRING. */
+    notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING);
     u8 res = bdb_networkSteerStart();
     if (res != RET_OK) {
         if (network_recovery_state == TELINK_NETWORK_RECOVERY_STEERING) {
             network_recovery_state            = TELINK_NETWORK_RECOVERY_IDLE;
             network_sdk_steering_started_once = false;
         }
+        notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_IDLE);
         printf("Failed to start network steering, status: %d\r\n", res);
     }
 }

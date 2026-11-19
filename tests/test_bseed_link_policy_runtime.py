@@ -176,4 +176,4 @@ def test_policy_is_enabled_for_every_telink_build():
     basic = (ROOT / "src/zigbee/basic_cluster.c").read_text(encoding="utf-8")
     assert "0xFF13" in basic and "firmware_link_snapshot" in basic
     header = (ROOT / "src/zigbee/basic_cluster.h").read_text(encoding="utf-8")
-    assert "attr_infos[18]" in header
+    assert "attr_infos[19]" in header  # + 0xFF13 link snapshot + 0xFF03 LED brightness

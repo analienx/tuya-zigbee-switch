@@ -412,6 +412,18 @@ void hal_register_on_network_status_change_callback(
     network_status_change_callback = callback;
 }
 
+static hal_join_activity_callback_t join_activity_callback = NULL;
+
+void hal_register_on_join_activity_callback(
+    hal_join_activity_callback_t callback) {
+    join_activity_callback = callback;
+}
+
+static void notify_join_activity(hal_zigbee_join_activity_t activity) {
+    if (join_activity_callback != NULL)
+        join_activity_callback(activity);
+}
+
 void sl_zigbee_af_stack_status_cb(sl_status_t status) {
     /* A successful secure rejoin can occur without the application seeing a
      * NOT_JOINED interval; explicitly rearm the per-epoch Device Announce. */
@@ -464,6 +476,7 @@ void hal_zigbee_start_network_steering() {
         if (st == SL_STATUS_OK) {
             silabs_router_rejoin_pending     = true;
             silabs_router_rejoin_down_events = 0;
+            notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING);
         }
         return;
     }
@@ -493,6 +506,8 @@ void hal_zigbee_start_network_steering() {
         network_steering_in_progress = false;
         printf("Silabs network steering start rejected: 0x%lx\n",
                (unsigned long)status);
+    } else {
+        notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING);
     }
 }
 
@@ -506,6 +521,7 @@ void sl_zigbee_af_network_steering_complete_cb(sl_status_t status,
     (void)joinAttempts;
     (void)finalState;
     network_steering_in_progress = false;
+    notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_IDLE);
 
     /* Even if steering reports success, don't immediately start it again
      * when the stack has not yet transitioned to JOINED. */

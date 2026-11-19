@@ -6,18 +6,45 @@
 
 #include <stdio.h>
 
+static uint8_t led_brightness = LED_DEFAULT_BRIGHTNESS;
+
+void led_set_brightness(uint8_t percent) {
+    if (percent < LED_MIN_BRIGHTNESS)
+        percent = LED_MIN_BRIGHTNESS;
+    if (percent > LED_MAX_BRIGHTNESS)
+        percent = LED_MAX_BRIGHTNESS;
+    led_brightness = percent;
+}
+
+uint8_t led_get_brightness(void) {
+    return led_brightness;
+}
+
+/* Lit: the LED's active level for `brightness` percent of each PWM period.
+ * Dark: the inactive level at full drive, so an off LED never glows. */
+static void led_drive(led_t *led, uint8_t lit) {
+    if (lit)
+        hal_gpio_write_duty(led->pin, led->on_high, led_brightness);
+    else
+        hal_gpio_write_duty(led->pin, !led->on_high, LED_MAX_BRIGHTNESS);
+}
+
+void led_refresh(led_t *led) {
+    led_drive(led, led->on);
+}
+
 void led_init(led_t *led) {
     led_off(led);
 }
 
 void led_on(led_t *led) {
-    hal_gpio_write(led->pin, led->on_high);
+    led_drive(led, 1);
     led->on = 1;
     led->blink_times_left = 0;
 }
 
 void led_off(led_t *led) {
-    hal_gpio_write(led->pin, !led->on_high);
+    led_drive(led, 0);
     led->on = 0;
     led->blink_times_left = 0;
 }
@@ -30,14 +57,14 @@ static void led_blink_handler(void *arg) {
 
     if (led->on) {
         led->on = 0;
-        hal_gpio_write(led->pin, !led->on_high);
+        led_drive(led, 0);
         if (led->blink_times_left != LED_BLINK_FOREVER) {
             led->blink_times_left--;
         }
         hal_tasks_schedule(&led->blink_task, led->blink_time_off);
     } else {
         led->on = 1;
-        hal_gpio_write(led->pin, led->on_high);
+        led_drive(led, 1);
         hal_tasks_schedule(&led->blink_task, led->blink_time_on);
     }
 }
@@ -60,7 +87,7 @@ void led_blink(led_t *led, uint16_t on_time_ms, uint16_t off_time_ms,
     if (led->blink_task.handler == led_blink_handler)
         hal_tasks_unschedule(&led->blink_task);
 
-    hal_gpio_write(led->pin, led->on_high);
+    led_drive(led, 1);
     led->on = 1;
     led->blink_times_left   = times;
     led->blink_task.handler = led_blink_handler;

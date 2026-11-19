@@ -33,15 +33,31 @@
 
 void peripherals_init(void);
 
+/* A join blink ended: give relay indicator LEDs back to the relay state. */
+static void network_indicator_quiet(void) {
+    update_relay_clusters();
+}
+
 network_indicator_t network_indicator = {
     .leds                        = { NULL, NULL, NULL, NULL },
     .search_leds                 = { NULL, NULL, NULL, NULL },
     .has_dedicated_led           = 0,
     .manual_state_when_connected = 1,
+    .on_quiet                    = network_indicator_quiet,
 };
 
 led_t   leds[5];
 uint8_t leds_cnt = 0;
+
+void peripherals_refresh_leds(void) {
+    for (int index = 0; index < leds_cnt; index++)
+        led_refresh(&leds[index]);
+}
+
+static void network_indicator_on_join_activity(
+    hal_zigbee_join_activity_t activity) {
+    network_indicator_join_activity(&network_indicator, activity);
+}
 
 button_t buttons[11];
 uint8_t  buttons_cnt = 0;
@@ -537,6 +553,7 @@ void peripherals_init() {
     }
     hal_register_on_network_status_change_callback(
         network_indicator_on_network_status_change);
+    hal_register_on_join_activity_callback(network_indicator_on_join_activity);
 }
 
 char *seek_until(char *cursor, char needle) {

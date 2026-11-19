@@ -98,6 +98,28 @@ typedef void (*hal_network_status_change_callback_t)(
 void hal_register_on_network_status_change_callback(
     hal_network_status_change_callback_t callback);
 
+/** What the radio is doing to get onto a network right now. */
+typedef enum {
+    /* No join attempt is running (searching ended, or joined). */
+    HAL_ZIGBEE_JOIN_ACTIVITY_IDLE = 0,
+    /* Factory-new device: BDB network steering (pairing) is running. */
+    HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING = 1,
+    /* Commissioned device: a rejoin attempt to its network started. */
+    HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING = 2,
+} hal_zigbee_join_activity_t;
+
+typedef void (*hal_join_activity_callback_t)(
+    hal_zigbee_join_activity_t activity);
+
+/**
+ * Register callback for join activity. PAIRING is reported when steering
+ * starts and IDLE when it reaches a terminal outcome; REJOINING is reported
+ * at the start of every rejoin attempt the platform can observe (it may be
+ * reported repeatedly during one outage).
+ */
+void hal_register_on_join_activity_callback(
+    hal_join_activity_callback_t callback);
+
 /** Leave current Zigbee network */
 void hal_zigbee_leave_network(void);
 

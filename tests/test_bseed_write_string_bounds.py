@@ -303,6 +303,9 @@ void hal_tasks_unschedule(hal_task_t *t) { (void)t; }
 void schedule_reboot(uint16_t delay_ms) { (void)delay_ms; reboots++; }
 network_indicator_t network_indicator;
 void network_indicator_from_manual_state(network_indicator_t *indicator) { (void)indicator; }
+void led_set_brightness(uint8_t percent) { (void)percent; }
+uint8_t led_get_brightness(void) { return LED_DEFAULT_BRIGHTNESS; }
+void peripherals_refresh_leds(void) {}
 void device_params_set_multi_press_reset_count(uint8_t value) { (void)value; }
 
 static void seed_last_good(const char *text) {

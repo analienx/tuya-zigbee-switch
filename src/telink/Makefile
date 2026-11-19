@@ -124,11 +124,13 @@ ifeq ($(strip $(BSEED_LINK_POLICY)),1)
 DEVICE_DEFS += -DBSEED_LINK_POLICY
 endif
 
-# BSEED sockets: relay indicator LEDs flash with the status LED while not
-# joined. Explicit build input so other boards keep their indicator behavior.
+# BSEED sockets: relay indicator LEDs flash with the status LED during a join
+# blink, and LEDs default to 50% brightness (owner request 2026-11-19; the
+# Basic 0xFF03 attribute changes it at runtime). Explicit build input so other
+# boards keep their indicator behavior and full brightness.
 BSEED_SEARCH_LEDS ?=
 ifeq ($(strip $(BSEED_SEARCH_LEDS)),1)
-DEVICE_DEFS += -DBSEED_SEARCH_LEDS
+DEVICE_DEFS += -DBSEED_SEARCH_LEDS -DLED_DEFAULT_BRIGHTNESS=50
 endif
 
 # Unified PM target options. They are explicit build inputs rather than global

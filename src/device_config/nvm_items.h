@@ -68,4 +68,8 @@
  * once capped the legacy items are quarantined and the boot proceeds. */
 #define NV_ITEM_PM_MIGRATION_ATTEMPTS    52
 
+/* LED brightness (1-byte percent). Separate from NV_ITEM_BASIC_CLUSTER_DATA so
+ * the legacy one-byte basic-cluster record keeps its ABI. */
+#define NV_ITEM_LED_BRIGHTNESS           53
+
 #endif /* DEVICE_CONFIG_NVM_ITEMS_H_ */

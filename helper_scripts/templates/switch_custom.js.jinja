@@ -366,6 +366,20 @@ Changing this setting can immediately switch mains power. The setting is stored 
             valueMax: 255,
             entityCategory: "config",
         }),
+    ledBrightness: (name, endpointName) =>
+        numeric({
+            name,
+            endpointNames: [endpointName],
+            cluster: "genBasic",
+            attribute: { ID: 0xff03, type: 0x20 }, // uint8
+            label: "LED brightness",
+            description: "Brightness of the indicator LEDs while lit, in percent (firmware with LED dimming only).",
+            unit: "%",
+            valueMin: 1,
+            valueMax: 100,
+            valueStep: 1,
+            entityCategory: "config",
+        }),
     deviceConfig: (name, endpointName) =>
         withExposeLabel(text({
             name,
@@ -613,6 +627,7 @@ const definitions = [
             {% set first_endpoint = device.switchNames[0] if device.switchNames else (device.relayNames[0] if device.relayNames else (device.coverSwitchNames[0] if device.coverSwitchNames else device.coverNames[0])) %}
             romasku.deviceConfig("device_config", "{{first_endpoint}}"),
             romasku.multiPressResetCount("multi_press_reset_count", "{{first_endpoint}}"),
+            romasku.ledBrightness("led_brightness", "{{first_endpoint}}"),
             {% if device.has_dedicated_net_led %}
             romasku.networkIndicator("network_led", "{{first_endpoint}}"),
             {% endif%}
