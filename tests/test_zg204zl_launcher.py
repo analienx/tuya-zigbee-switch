@@ -132,7 +132,8 @@ def test_verify_only_recovers_failed_read_without_write_or_halt(bench, monkeypat
     assert state['phase'] == 'VERIFIED' and state['verificationAttempts'][-1]['status'] == 'VERIFIED'
 
 
-def test_verification_reuses_exact_divider_without_reset_flags(tmp_path, monkeypatch):
+@pytest.mark.parametrize('fallback', [False, True])
+def test_verification_reuses_exact_divider_without_reset_flags(tmp_path, monkeypatch, fallback):
     import subprocess
     commands = []
     monkeypatch.setattr(launcher, 'confirm_stopped', lambda port, divider: commands.append((port, divider)))
@@ -141,12 +142,18 @@ def test_verification_reuses_exact_divider_without_reset_flags(tmp_path, monkeyp
         kwargs['runner']([sys.executable, 'reader.py', '-p', port, 'rf', '0', '0x80000', str(output)])
     def child(command, **kwargs):
         commands.append(command)
-        kwargs['log_path'].write_text('SWire speed for CLK 25.0 MHz... ok.\n')
+        kwargs['log_path'].write_text('SWire speed for CLK 24.0 MHz... ok.\n' if fallback
+                                     else 'SWire speed for CLK 25.0 MHz... ok.\n')
         return subprocess.CompletedProcess(command, 0)
     monkeypatch.setattr(launcher.swire, '_read_flash', read)
     monkeypatch.setattr(launcher.swire, 'run_reader_with_progress', child)
-    launcher.readback('COM3', tmp_path / 'after.bin', tmp_path / 'reader.py',
-                      {'haltChecks': [{'cpuControls': [5, 5], 'divider': 54}]}, lambda _: None)
+    arguments = ('COM3', tmp_path / 'after.bin', tmp_path / 'reader.py',
+                 {'haltChecks': [{'cpuControls': [5, 5], 'divider': 54}]}, lambda _: None)
+    if fallback:
+        with pytest.raises(RuntimeError, match='did not confirm'):
+            launcher.readback(*arguments)
+    else:
+        launcher.readback(*arguments)
     assert commands[0] == ('COM3', 54)
     assert commands[1][2:4] == ['-c', '25']
     assert not {'-t', '-r', 'wf', 'we', 'es', 'ea'} & set(commands[1])
