@@ -7,10 +7,11 @@ RELEASE_DATE = '20261003'
 BOARD = 'OUTLET_BSEED_TS011F'
 CONFIG = 'o1jzcxou;TS011F-BS;LC2;SB4u;RC3;ID2;M;'
 # Fresh shared version allocated by the canonical allocator on GitHub Actions.
-ROUTER = dict(role='Router', build='1.1.3-bseedr20', version=0x1102301F, type=43555,
-              artifact='forward.ota', board=BOARD, config=CONFIG, date='20261117')
-CLIENT = dict(role='EndDevice', build='1.1.3-bseedc18', version=0x1102301F, type=65026,
-              artifact='forward.ota', board=BOARD, config=CONFIG, date='20261117')
+# Join blink + LED dimming set (2026-11-19); sealed r20/c18 (0x1102301F) stay as is.
+ROUTER = dict(role='Router', build='1.1.3-bseedr21', version=0x11023020, type=43555,
+              artifact='forward.ota', board=BOARD, config=CONFIG, date='20261119')
+CLIENT = dict(role='EndDevice', build='1.1.3-bseedc19', version=0x11023020, type=65026,
+              artifact='forward.ota', board=BOARD, config=CONFIG, date='20261119')
 CANDIDATES = {'router': ROUTER, 'client': CLIENT}
 
 

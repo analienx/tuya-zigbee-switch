@@ -41,14 +41,47 @@ extern network_indicator_t network_indicator;
 void basic_cluster_store_attrs_to_nv();
 void basic_cluster_load_attrs_from_nv();
 
-/* LED brightness percent (1..100) for every LED while lit. */
+#ifdef LED_DIMMING
+/* LED brightness percent (1..100) for every LED while lit. Only builds that
+ * can dim (LED_DIMMING: Telink PWM, never with PM_ENABLE) expose it. */
 static uint8_t led_brightness_attr = LED_DEFAULT_BRIGHTNESS;
 
-static void led_brightness_apply(void) {
-    led_set_brightness(led_brightness_attr);
-    led_brightness_attr = led_get_brightness();  /* clamped */
+static uint8_t led_brightness_clamp(uint8_t percent) {
+    if (percent < LED_MIN_BRIGHTNESS)
+        return LED_MIN_BRIGHTNESS;
+    if (percent > LED_MAX_BRIGHTNESS)
+        return LED_MAX_BRIGHTNESS;
+    return percent;
+}
+
+/* A written brightness takes effect only once it is stored, so it can never
+ * appear to work and then revert at the next reboot. If the write fails the
+ * attribute reads back the brightness still in effect. */
+static void led_brightness_commit(void) {
+    uint8_t requested = led_brightness_clamp(led_brightness_attr);
+
+    if (requested != led_get_brightness() &&
+        hal_nvm_write(NV_ITEM_LED_BRIGHTNESS, sizeof(requested), &requested) !=
+        HAL_NVM_SUCCESS) {
+        led_brightness_attr = led_get_brightness();
+        return;
+    }
+    led_set_brightness(requested);
+    led_brightness_attr = requested;
     peripherals_refresh_leds();
 }
+
+static void led_brightness_load(void) {
+    uint8_t stored = 0;
+
+    if (hal_nvm_read(NV_ITEM_LED_BRIGHTNESS, sizeof(stored), &stored) ==
+        HAL_NVM_SUCCESS && stored >= LED_MIN_BRIGHTNESS &&
+        stored <= LED_MAX_BRIGHTNESS)
+        led_set_brightness(stored);
+    led_brightness_attr = led_get_brightness();
+    peripherals_refresh_leds();
+}
+#endif
 
 #define DEVICE_CONFIG_STAGE_CHUNK_MAX    24
 
@@ -197,11 +230,11 @@ void basic_cluster_callback_attr_write_trampoline(uint16_t attribute_id) {
     if (attribute_id == ZCL_ATTR_BASIC_STATUS_LED_STATE) {
         network_indicator_from_manual_state(&network_indicator);
     }
+#ifdef LED_DIMMING
     if (attribute_id == ZCL_ATTR_BASIC_LED_BRIGHTNESS) {
-        led_brightness_apply();
-        hal_nvm_write(NV_ITEM_LED_BRIGHTNESS, sizeof(led_brightness_attr),
-                      &led_brightness_attr);
+        led_brightness_commit();
     }
+#endif
     if (attribute_id == ZCL_ATTR_BASIC_MULTI_PRESS_RESET_COUNT) {
         device_params_set_multi_press_reset_count(g_multi_press_reset_count);
     }
@@ -255,13 +288,15 @@ void basic_cluster_add_to_endpoint(zigbee_basic_cluster *cluster,
                    network_indicator.manual_state_when_connected);
         attr_count++;
     }
+#ifdef LED_DIMMING
     SETUP_ATTR(attr_count, ZCL_ATTR_BASIC_LED_BRIGHTNESS, ZCL_DATA_TYPE_UINT8,
                ATTR_WRITABLE, led_brightness_attr);
     attr_count++;
+#endif
 
     endpoint->clusters[endpoint->cluster_count].cluster_id      = ZCL_CLUSTER_BASIC;
     endpoint->clusters[endpoint->cluster_count].attribute_count = attr_count;
-    endpoint->clusters[endpoint->cluster_count].attributes = cluster->attr_infos;
+    endpoint->clusters[endpoint->cluster_count].attributes      = cluster->attr_infos;
 #ifdef HAL_TELINK
     uint8_t health_index = attr_count;
     SETUP_ATTR(health_index, 0xFF10, ZCL_DATA_TYPE_OCTET_STR, ATTR_DIAGNOSTIC,
@@ -318,11 +353,7 @@ void basic_cluster_load_attrs_from_nv() {
             nv_config_buffer.network_led_on;
     }
 
-    uint8_t brightness = 0;
-    if (hal_nvm_read(NV_ITEM_LED_BRIGHTNESS, sizeof(brightness), &brightness) ==
-        HAL_NVM_SUCCESS && brightness >= LED_MIN_BRIGHTNESS &&
-        brightness <= LED_MAX_BRIGHTNESS) {
-        led_brightness_attr = brightness;
-    }
-    led_brightness_apply();
+#ifdef LED_DIMMING
+    led_brightness_load();
+#endif
 }

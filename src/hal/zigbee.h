@@ -101,9 +101,9 @@ void hal_register_on_network_status_change_callback(
 /** What the radio is doing to get onto a network right now. */
 typedef enum {
     /* No join attempt is running (searching ended, or joined). */
-    HAL_ZIGBEE_JOIN_ACTIVITY_IDLE = 0,
+    HAL_ZIGBEE_JOIN_ACTIVITY_IDLE      = 0,
     /* Factory-new device: BDB network steering (pairing) is running. */
-    HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING = 1,
+    HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING   = 1,
     /* Commissioned device: a rejoin attempt to its network started. */
     HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING = 2,
 } hal_zigbee_join_activity_t;

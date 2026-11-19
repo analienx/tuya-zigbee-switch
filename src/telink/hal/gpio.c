@@ -155,13 +155,17 @@ void hal_gpio_clear(hal_gpio_pin_t gpio_pin) {
     }
 }
 
+#ifdef LED_DIMMING
+#if PM_ENABLE
+#error "LED_DIMMING needs a non-sleeping build: PWM stops in sleep"
+#endif
 /* LED dimming on the TLSR8258 hardware PWM channels.
- *
- * Pin-to-channel map from the SDK's gpio_set_func() (chip_8258/gpio.c), only
- * the non-inverted outputs. Two pins sharing a channel cannot be dimmed
- * independently: the first pin to use a channel owns it, any other pin on
- * that channel stays on plain full-level GPIO. With PM_ENABLE the PWM block
- * stops in sleep, so sleeping builds never use it. */
+*
+* Pin-to-channel map from the SDK's gpio_set_func() (chip_8258/gpio.c), only
+* the non-inverted outputs. Two pins sharing a channel cannot be dimmed
+* independently: the first pin to use a channel owns it, any other pin on
+* that channel stays on plain full-level GPIO. The PWM block stops in sleep,
+* so a PM_ENABLE build with LED_DIMMING is a compile error above. */
 #define HAL_PWM_CLOCK_HZ    1000000u
 #define HAL_PWM_CYCLE       1000u /* 1 kHz: no visible flicker */
 
@@ -186,14 +190,10 @@ static hal_gpio_pin_t hal_pwm_owner[HAL_PWM_CHANNELS] = {
     HAL_INVALID_PIN, HAL_INVALID_PIN, HAL_INVALID_PIN,
     HAL_INVALID_PIN, HAL_INVALID_PIN, HAL_INVALID_PIN,
 };
-static uint8_t hal_pwm_active[HAL_PWM_CHANNELS];
-static uint8_t hal_pwm_clock_ready;
+static uint8_t        hal_pwm_active[HAL_PWM_CHANNELS];
+static uint8_t        hal_pwm_clock_ready;
 
 static const hal_pwm_pin_t *hal_pwm_for_pin(hal_gpio_pin_t pin) {
-#if PM_ENABLE
-    (void)pin;
-    return NULL;
-#else
     for (uint8_t i = 0; i < sizeof(hal_pwm_pins) / sizeof(hal_pwm_pins[0]);
          i++) {
         if (hal_pwm_pins[i].pin != pin)
@@ -201,10 +201,10 @@ static const hal_pwm_pin_t *hal_pwm_for_pin(hal_gpio_pin_t pin) {
         hal_gpio_pin_t owner = hal_pwm_owner[hal_pwm_pins[i].channel];
         if (owner != HAL_INVALID_PIN && owner != pin)
             return NULL;  /* channel already drives another LED */
+
         return &hal_pwm_pins[i];
     }
     return NULL;
-#endif
 }
 
 void hal_gpio_write_duty(hal_gpio_pin_t gpio_pin, uint8_t value,
@@ -250,6 +250,13 @@ void hal_gpio_write_duty(hal_gpio_pin_t gpio_pin, uint8_t value,
     if (config)
         config->value = value ? 1 : 0;
 }
+#else
+void hal_gpio_write_duty(hal_gpio_pin_t gpio_pin, uint8_t value,
+                         uint8_t duty_pct) {
+    (void)duty_pct;
+    hal_gpio_write(gpio_pin, value);
+}
+#endif
 
 uint8_t hal_gpio_read(hal_gpio_pin_t gpio_pin) {
     return gpio_read((GPIO_PinTypeDef)gpio_pin) ? 1 : 0;

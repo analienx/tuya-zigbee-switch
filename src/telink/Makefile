@@ -130,7 +130,7 @@ endif
 # boards keep their indicator behavior and full brightness.
 BSEED_SEARCH_LEDS ?=
 ifeq ($(strip $(BSEED_SEARCH_LEDS)),1)
-DEVICE_DEFS += -DBSEED_SEARCH_LEDS -DLED_DEFAULT_BRIGHTNESS=50
+DEVICE_DEFS += -DBSEED_SEARCH_LEDS -DLED_DIMMING=1 -DLED_DEFAULT_BRIGHTNESS=50
 endif
 
 # Unified PM target options. They are explicit build inputs rather than global

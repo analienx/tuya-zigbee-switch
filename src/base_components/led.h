@@ -38,8 +38,9 @@ void led_off(led_t *led);
 
 #define LED_BLINK_FOREVER    0xFFFF
 
-/* Brightness of every LED while lit, percent of full drive (1..100). Builds
- * may override the default; 100 keeps plain on/off GPIO. */
+/* Brightness of every LED while lit, percent of full drive (1..100). Only
+ * LED_DIMMING builds (Telink hardware PWM, never with PM_ENABLE) apply it;
+ * every other build drives plain on/off GPIO. */
 #ifndef LED_DEFAULT_BRIGHTNESS
 #define LED_DEFAULT_BRIGHTNESS    100
 #endif

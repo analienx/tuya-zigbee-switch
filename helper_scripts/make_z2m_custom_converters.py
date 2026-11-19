@@ -116,6 +116,9 @@ def collect_devices(db):
                 "power_monitoring": bool(device.get("power_monitoring", False)),
                 "bseed_unsuffixed_meter": db_key.startswith("OUTLET_BSEED_PM_TS011F") and bool(device.get("power_monitoring", False)),
                 "bseed_socket_relay_read": db_key in {"OUTLET_BSEED_PM_TS011F", "OUTLET_BSEED_TS011F"},
+                # LED dimming (Basic 0xFF03) exists only in the BSEED socket
+                # builds (LED_DIMMING); never expose a setting without effect.
+                "led_dimming": db_key in {"OUTLET_BSEED_PM_TS011F", "OUTLET_BSEED_TS011F"},
                 "model": device.get("override_z2m_device")
                 or device["stock_converter_model"],
                 "switchNames": switch_names,

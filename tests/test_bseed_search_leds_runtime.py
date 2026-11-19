@@ -187,7 +187,7 @@ int main(void) {
 def test_join_blink_policy_and_brightness(tmp_path):
     binary = tmp_path / 'search-leds'
     subprocess.run(
-        ['cc', '-std=c99', '-Wall', '-Werror', '-DHAL_STUB',
+        ['cc', '-std=c99', '-Wall', '-Werror', '-DHAL_STUB', '-DLED_DIMMING=1',
          '-I', str(ROOT / 'src'), '-x', 'c', '-', '-o', str(binary),
          '-lpthread'],
         input=CODE, text=True, check=True,
@@ -202,7 +202,7 @@ def test_search_leds_are_bseed_only():
     assert '#ifdef BSEED_SEARCH_LEDS\n            else {' in parser
     assert '#ifdef BSEED_SEARCH_LEDS\n    // The network-search blink' in relay
     assert 'DEVICE_DEFS += -DBSEED_SEARCH_LEDS' in makefile
-    assert 'LED_DEFAULT_BRIGHTNESS=50' in makefile
+    assert '-DLED_DIMMING=1 -DLED_DEFAULT_BRIGHTNESS=50' in makefile
     for script in ('build_bseed_ts011f_pm_v8.sh', 'build_bseed_mains_client.sh',
                    'build_bseed_ts011f_nonpm_router.sh'):
         build = (ROOT / 'make_scripts' / script).read_text()
@@ -212,11 +212,16 @@ def test_search_leds_are_bseed_only():
 
 def test_join_activity_is_reported_where_the_radio_acts():
     net = (ROOT / 'src/telink/hal/zigbee_network.c').read_text()
-    # Pairing is announced before steering starts and ends at its terminal
-    # outcome; every rejoin start and SDK retry is reported.
-    assert net.index('notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING)') < \
-        net.index('u8 res = bdb_networkSteerStart();')
-    assert net.count('notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING)') >= 3
-    assert net.count('notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_IDLE)') >= 2
+    # Only accepted, still-running starts are reported (runtime coverage in
+    # test_factory_new_steering_owner_runtime.py): PAIRING after the SDK
+    # accepted steering, REJOINING after an accepted backoff or one-shot
+    # rejoin, IDLE at the terminal steering outcome. SDK retry failures never
+    # report.
+    assert net.index('u8 res = bdb_networkSteerStart();') < \
+        net.index('notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING)')
+    assert net.count('notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING)') == 2
+    assert net.count('notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_IDLE)') == 1
+    failure = net.split('case BDB_COMMISSION_STA_REJOIN_FAILURE:', 1)[1].split('default:', 1)[0]
+    assert 'notify_join_activity' not in failure
     parser = (ROOT / 'src/device_config/config_parser.c').read_text()
     assert 'hal_register_on_join_activity_callback(network_indicator_on_join_activity)' in parser

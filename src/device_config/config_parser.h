@@ -13,6 +13,7 @@ extern uint8_t             allow_simultaneous_latching_pulses;
 extern battery_t           battery;
 
 void parse_config();
+
 /* Re-drive every configured LED (after an LED brightness change). */
 void peripherals_refresh_leds(void);
 void init_reporting();

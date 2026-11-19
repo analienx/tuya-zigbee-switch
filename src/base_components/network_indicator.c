@@ -20,6 +20,7 @@ static void blink_stop(network_indicator_t *indicator) {
     indicator->blink = NETWORK_INDICATOR_QUIET;
     if (!was_blinking)
         return;
+
     stop_set(indicator->leds);
     stop_set(indicator->search_leds);
     if (indicator->on_quiet != NULL)
@@ -85,13 +86,14 @@ void network_indicator_commission_success(network_indicator_t *indicator) {
 void network_indicator_not_connected(network_indicator_t *indicator) {
     if (indicator->blink != NETWORK_INDICATOR_QUIET)
         return;  // a join blink owns the LEDs
+
     // Quiet while disconnected: a dedicated status LED is dark. Relay
     // indicator LEDs are left to the relay state.
     if (indicator->has_dedicated_led)
         stop_set(indicator->leds);
 }
 
-void network_indicator_join_activity(network_indicator_t      *indicator,
+void network_indicator_join_activity(network_indicator_t *indicator,
                                      hal_zigbee_join_activity_t activity) {
     switch (activity) {
     case HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING:

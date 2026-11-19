@@ -31,18 +31,18 @@ typedef enum {
 } network_indicator_blink_t;
 
 typedef struct {
-    led_t *leds[4];
+    led_t *                   leds[4];
     // Extra LEDs that blink in phase with leds[] only during a join blink.
-    led_t *search_leds[4];
-    bool   has_dedicated_led;
-    bool   manual_state_when_connected;
+    led_t *                   search_leds[4];
+    bool                      has_dedicated_led;
+    bool                      manual_state_when_connected;
 
     network_indicator_blink_t blink;
     bool                      rejoin_blinked;  // this outage
     uint32_t                  rejoin_blink_started_ms;
     hal_task_t                rejoin_stop_task;
     // Called when a join blink ends, so the owner re-syncs relay LEDs.
-    void                      (*on_quiet)(void);
+    void (*on_quiet)(void);
 } network_indicator_t;
 
 void network_indicator_connected(network_indicator_t *indicator);
@@ -55,7 +55,7 @@ void network_indicator_commission_success(network_indicator_t *indicator);
 void network_indicator_not_connected(network_indicator_t *indicator);
 
 /* What the radio is doing (see hal_register_on_join_activity_callback). */
-void network_indicator_join_activity(network_indicator_t      *indicator,
+void network_indicator_join_activity(network_indicator_t *indicator,
                                      hal_zigbee_join_activity_t activity);
 
 #endif

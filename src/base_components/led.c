@@ -23,10 +23,14 @@ uint8_t led_get_brightness(void) {
 /* Lit: the LED's active level for `brightness` percent of each PWM period.
  * Dark: the inactive level at full drive, so an off LED never glows. */
 static void led_drive(led_t *led, uint8_t lit) {
+#ifdef LED_DIMMING
     if (lit)
         hal_gpio_write_duty(led->pin, led->on_high, led_brightness);
     else
         hal_gpio_write_duty(led->pin, !led->on_high, LED_MAX_BRIGHTNESS);
+#else
+    hal_gpio_write(led->pin, lit ? led->on_high : !led->on_high);
+#endif
 }
 
 void led_refresh(led_t *led) {
