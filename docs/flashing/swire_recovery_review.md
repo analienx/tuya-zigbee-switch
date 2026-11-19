@@ -8,6 +8,7 @@ read, write, boot or electrical qualification is claimed by this record.
 
 | Finding | Repair | Regression coverage |
 | --- | --- | --- |
+| The ED-009 OTA carries an optional hardware-version range in a 60-byte header | Parse the standard range only when its field-control bit and length agree; retain all native and OTA identity, size and CRC checks | Real ED-009 artifact cross-check plus malformed length/flags/range, tag and wrapper rejection |
 | A baseline-backed stage reset the target after its backup, and could also request a power cycle | Attach without reset for baseline-backed staging as well as separate activation; reject power cycling after a baseline and make dry-run trace match | Chip model asserts zero resets through staged write and held activation; power-cycle refusal and dry-run trace |
 | A `read --halt` double backup invoked the pvvx soft reset again between reads | Halt only before the first read and observe the CPU stopped before the second, without a reset; reject older halted receipts lacking that proof | Model checks for no reset, target still stopped, stopped-before-second-read failures and old-receipt rejection |
 | ED-009 release was refused and the Gledopto wired guide was tied to the old canary | Admit only the exact published ED-009 native hash, document per-unit inspection and held write, and provide optional hosted artifact checks | Pin admission and unpinned rejection; hosted artifact check covers both OTA and native image when dispatched |

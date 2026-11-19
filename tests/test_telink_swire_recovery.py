@@ -47,13 +47,15 @@ def make_image(size=0x3000, *, version=0x12053024, manufacturer=0x1141, image_ty
     return bytes(body) + struct.pack('<I', tool.telink_crc(bytes(body)))
 
 
-def make_ota(image, *, version=None, manufacturer=None, image_type=None):
+def make_ota(image, *, version=None, manufacturer=None, image_type=None, hardware_version=None):
     version = u32(image, 2) if version is None else version
     manufacturer = struct.unpack_from('<H', image, 0x12)[0] if manufacturer is None else manufacturer
     image_type = struct.unpack_from('<H', image, 0x14)[0] if image_type is None else image_type
-    header = struct.pack('<IHHHHHIH32sI', tool.OTA_MAGIC, 0x100, 56, 0, manufacturer, image_type,
-                         version, 2, b'test'.ljust(32, b'\0'), 56 + 6 + len(image))
-    return header + struct.pack('<HI', 0, len(image)) + image
+    optional = struct.pack('<HH', *hardware_version) if hardware_version is not None else b''
+    header = struct.pack('<IHHHHHIH32sI', tool.OTA_MAGIC, 0x100, 56 + len(optional),
+                         4 if optional else 0, manufacturer, image_type,
+                         version, 2, b'test'.ljust(32, b'\0'), 56 + len(optional) + 6 + len(image))
+    return header + optional + struct.pack('<HI', 0, len(image)) + image
 
 
 def u32(data, offset):
@@ -356,6 +358,25 @@ def test_ota_extraction_and_rejections():
     struct.pack_into('<I', ota, 52, len(ota) + 1)
     with pytest.raises(RecoveryError, match='total size'):
         tool.image_from_ota(bytes(ota))
+
+
+def test_ota_hardware_version_range_is_parsed_without_weakening_identity_checks():
+    image = make_image(manufacturer=0x124F, image_type=0x1416, version=0x7F0A0001)
+    ota = make_ota(image, hardware_version=(2, 2))
+    assert tool.image_from_ota(ota)[0] == image
+    with pytest.raises(RecoveryError, match='wrapper'):
+        tool.image_from_ota(make_ota(image, version=0xFFFFFFFF, hardware_version=(2, 2)))
+    with pytest.raises(RecoveryError, match='reversed'):
+        tool.image_from_ota(make_ota(image, hardware_version=(3, 2)))
+    for offset, value, message in ((6, 56, 'header length'), (8, 5, 'field control')):
+        malformed = bytearray(ota)
+        struct.pack_into('<H', malformed, offset, value)
+        with pytest.raises(RecoveryError, match=message):
+            tool.image_from_ota(bytes(malformed))
+    malformed = bytearray(ota)
+    malformed[60] = 1
+    with pytest.raises(RecoveryError, match='sub-element'):
+        tool.image_from_ota(bytes(malformed))
 
 
 CLIENT_SHA = 'c' * 64

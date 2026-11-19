@@ -129,6 +129,9 @@ jobs:
           print('GL-SD-301P stock image matches the Gledopto kit:', image['sha256'])
           EOF
       - name: Prepare every released board image from the committed OTA index
+        # Push/PR jobs cover the complete catalogue. An artifact-specific
+        # dispatch keeps its independent cross-repository check prompt.
+        if: github.event_name != 'workflow_dispatch' || inputs.gledopto_ed009_artifact_run == ''
         shell: bash
         run: |
           set -euo pipefail

@@ -313,14 +313,23 @@ def image_from_ota(ota):
     """Return the native image inside a single-image Zigbee OTA file."""
     if len(ota) < OTA_HEADER + 6 or u32(ota, 0) != OTA_MAGIC:
         raise RecoveryError('not a Zigbee OTA file')
-    if u16(ota, 6) != OTA_HEADER:
+    field_control = u16(ota, 8)
+    # Accept the ordinary header or the standard four-byte hardware-version
+    # range used by the released Gledopto ED-009 OTA. Do not guess offsets for
+    # other optional fields or accept inconsistent field-control bits.
+    if field_control not in (0, 4):
+        raise RecoveryError('unsupported OTA header field control')
+    header_length = OTA_HEADER + (4 if field_control == 4 else 0)
+    if u16(ota, 6) != header_length or len(ota) < header_length + 6:
         raise RecoveryError('unsupported OTA header length')
     if u32(ota, 52) != len(ota):
         raise RecoveryError('OTA total size does not match the file')
-    tag, size = struct.unpack_from('<HI', ota, OTA_HEADER)
-    if tag != 0 or size != len(ota) - OTA_HEADER - 6:
+    if field_control == 4 and u16(ota, OTA_HEADER) > u16(ota, OTA_HEADER + 2):
+        raise RecoveryError('OTA hardware version range is reversed')
+    tag, size = struct.unpack_from('<HI', ota, header_length)
+    if tag != 0 or size != len(ota) - header_length - 6:
         raise RecoveryError('expected exactly one firmware sub-element')
-    image = ota[OTA_HEADER + 6:]
+    image = ota[header_length + 6:]
     info = check_image(image)
     header = {'manufacturerCode': u16(ota, 10), 'imageType': u16(ota, 12),
               'fileVersion': u32(ota, 14)}
