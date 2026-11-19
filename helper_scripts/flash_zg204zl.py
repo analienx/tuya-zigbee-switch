@@ -77,6 +77,95 @@ def writer(reader, image, port, folder, report):
             raise RuntimeError(f'Programmer exited {child.returncode}. See write.log; do not retry the write.')
 
 
+def confirm_stopped(port, divider):
+    with swire.open_port(port, timeout=0.02, baud=921600) as connection:
+        probe = swire.SwireDiagnostic(connection, 921600)
+        probe.write_register(0xB2, bytes([divider]))
+        if [probe.read_register(0xB2)[0] for _ in range(3)] != [divider] * 3:
+            raise RuntimeError('Saved SWire divider is not stable; no flash read started.')
+        if [probe.read_register(0x602)[0] for _ in range(2)] != [5, 5]:
+            raise RuntimeError('CPU is no longer stopped; no reset or flash read attempted.')
+
+
+def readback(port, output, reader, backup_receipt, report):
+    """Use the backup's qualified divider instead of a marginal auto-scan."""
+    checks = backup_receipt.get('haltChecks', [])
+    if not checks or checks[-1].get('cpuControls') != [5, 5]:
+        raise RuntimeError('Backup has no confirmed stopped-CPU/divider evidence.')
+    divider = checks[-1]['divider']
+    clock_mhz = round(divider * 921600 / 2_000_000)
+    if round(clock_mhz * 2_000_000 / 921600) != divider:
+        raise RuntimeError('Saved divider cannot be represented by the pinned reader clock option; inspect before reading.')
+    confirm_stopped(port, divider)
+    report(f'  Reusing backup divider {divider} (-c {clock_mhz}); no reset or activation.')
+    def runner(command, **_kwargs):
+        # Only rf is permitted; no -t, -r or write/erase command is added.
+        command = [*command[:2], '-c', str(clock_mhz), *command[2:]]
+        result = swire.run_reader_with_progress(command, log_path=output.with_name(output.name + '.clock.log'),
+                                                size=FLASH_BYTES, label='Verify read', out=report)
+        # Upstream may silently fall back to another clock after -c fails.
+        # Keep that as failed evidence rather than claiming this timing worked.
+        log = output.with_name(output.name + '.clock.log').read_text(encoding='utf-8', errors='replace')
+        expected = f'SWire speed for CLK {clock_mhz:.1f} MHz... ok.'
+        if result.returncode == 0 and expected not in log:
+            raise RuntimeError('Pinned reader did not confirm the saved timing; inspect its clock log.')
+        return result
+    return swire._read_flash(port, output, reader=reader, halt=False, reads=1, runner=runner, out=report)
+
+
+def verify_only(port):
+    """Resume comparison of the existing write; never call the writer or HALT."""
+    state_path = swire.STATE_ROOT / 'zg204zl' / (swire.port_key(port) + '.json')
+    with swire.PortGuard(port):
+        state = swire.read_json(state_path)
+        if state.get('port') != port or state.get('device') != 'ZG-204ZL' or not state.get('writeAttempted'):
+            raise RuntimeError('No matching sensor write is recorded for this port.')
+        folder = swire.private_output(state['folder'])
+        authority = swire.authority_path(port)
+        if authority.exists() and swire.read_json(authority)['phase'] not in swire.HALT_READ_PHASES:
+            raise RuntimeError('An existing recovery owns this port.')
+        image = (folder / 'ZG204ZL_v0140.bin').read_bytes()
+        before = (folder / 'before.bin').read_bytes()
+        if (len(image) != IMAGE_BYTES or digest(image) != IMAGE_SHA or state.get('imageSha256') != IMAGE_SHA
+                or len(before) != FLASH_BYTES or digest(before) != state.get('backupSha256')):
+            raise RuntimeError('Original image/backup evidence changed; verification stopped.')
+        receipt = swire.read_json(folder / 'before.bin.json')
+        if (receipt.get('port') != port or receipt.get('status') != 'READ_SINGLE'
+                or [r.get('sha256') for r in receipt.get('reads', [])] != [digest(before)]):
+            raise RuntimeError('Original backup receipt does not match this sensor operation.')
+        def report(message):
+            print(message, file=sys.stderr, flush=True)
+            with (folder / 'progress.log').open('a', encoding='utf-8') as stream:
+                stream.write(datetime.datetime.now().isoformat(timespec='seconds') + ' ' + message + '\n')
+        output = folder / ('verify-' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S-') + uuid.uuid4().hex[:6] + '.bin')
+        reader = Path(swire.ensure_reader(out=report)['reader'])
+        report('VERIFICATION ONLY: read existing flash; no erase, programming or CPU reset.')
+        report('Keep the same sensor powered and attached.')
+        attempt = {'output': str(output), 'status': 'STARTED', 'cpuResetRequested': False, 'flashWriteAttempted': False}
+        state.setdefault('verificationAttempts', []).append(attempt)
+        def save():
+            swire.atomic_json(folder / 'summary.json', state)
+            swire.atomic_json(state_path, state)
+        save()
+        try:
+            readback(port, output, reader, receipt, report)
+            after = output.read_bytes()
+            verify(before, after, image)
+            attempt['status'] = 'VERIFIED'
+            state.update(phase='VERIFIED', afterSha256=digest(after), preservationVerified=True,
+                         verifiedReadback=str(output), bootVerified=False)
+            save()
+            report('SUCCESS: firmware, erased tail and all preserved data match.')
+            report('The comparison passed. Power-cycle the sensor to boot and check Zigbee pairing/motion.')
+        except BaseException as error:
+            attempt.update(status='FAILED', error=str(error))
+            state['phase'] = 'FAILED'
+            save()
+            raise
+        finally:
+            report('Evidence: ' + str(folder))
+
+
 def run(port, seconds):
     from serial.tools import list_ports
     deadline = time.monotonic() + seconds
@@ -144,8 +233,10 @@ def run(port, seconds):
             writer(reader, snapshot, port, folder, report)
             report('[3/4] Reading back ONCE (512 KiB), keeping the CPU stopped.')
             save('READBACK')
-            swire._read_flash(port, folder / 'after.bin', reader=reader, halt=False, reads=1, out=report)
+            readback(port, folder / 'after.bin', reader,
+                     swire.read_json(folder / 'before.bin.json'), report)
             report('[4/4] Comparing firmware, erased tail and ALL preserved bytes.')
+            save('COMPARISON')
             after = (folder / 'after.bin').read_bytes()
             verify(before, after, image)
             state['afterSha256'] = digest(after)
@@ -153,10 +244,15 @@ def run(port, seconds):
             save('VERIFIED')
             report('SUCCESS: firmware and preserved data verified. CPU is still stopped.')
             report('Power-cycle the sensor to boot; then check pairing and motion in Zigbee2MQTT.')
-        except BaseException:
+        except BaseException as error:
+            state['failedPhase'] = state['phase']
+            state['lastError'] = str(error)
             save('FAILED')
             report('STOPPED. ' + ('Write may have changed flash. Do not retry or power-cycle until inspected.'
                                   if state['writeAttempted'] else 'No firmware write was attempted.'))
+            if state['failedPhase'] == 'READBACK' and isinstance(error, Exception):
+                raise RuntimeError('Write was sent, but verification read failed. Resume with --verify-only; '
+                                   'do not run the flash operation again. Details are saved in the read receipt.') from error
             raise
         finally:
             report('Backup, receipt and logs: ' + str(folder))
@@ -166,11 +262,15 @@ def main():
     parser = argparse.ArgumentParser(description='ZG-204ZL only: one backup, flash, one verifying read. No automatic restart.')
     parser.add_argument('port', nargs='?', default='COM3', help='adapter COM port (default COM3)')
     parser.add_argument('--seconds', type=int, default=300, help='USB/target connection window, 1..900 seconds')
+    parser.add_argument('--verify-only', action='store_true', help='read and verify the last write on this port, WITHOUT rewriting/resetting')
     args = parser.parse_args()
     if not 1 <= args.seconds <= 900 or not re.fullmatch(r'COM\d+', args.port, re.I):
         parser.error('use a COM port and --seconds 1..900')
     try:
-        run(args.port.upper(), args.seconds)
+        if args.verify_only:
+            verify_only(args.port.upper())
+        else:
+            run(args.port.upper(), args.seconds)
         return 0
     except KeyboardInterrupt:
         print('\nCancelled. Read the saved summary before another write.', file=sys.stderr)

@@ -63,6 +63,14 @@ writes leave a durable stop at `~/.telink-swire/zg204zl/PORTKEY.json` and cannot
 be automatically retried by changing output folders. Inspect actual flash and
 assess recovery before retiring that stop. Do not delete state to bypass it.
 
+If a write finishes but the verification read fails, keep the same sensor powered
+and connected, then run `flash_zg204zl.py COM3 --verify-only`. This reads once and
+compares against the saved original backup and pinned image. It never programs,
+erases, resets or re-halts the CPU. It checks that the CPU remains stopped and
+reuses the backup's verified SWire divider instead of accepting a new marginal
+auto-speed result. Each attempt has its own file; failed evidence is retained.
+Only a successful complete comparison changes the durable stop to VERIFIED.
+
 Hosted model tests cover read/write order, one read per phase, image/tail/data
 mismatches, failed backups, failed writes and durable stops, and other recovery
 ownership. Hosted CI also downloads the original pinned upstream image. Those

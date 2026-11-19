@@ -22,13 +22,19 @@ def bench(tmp_path, monkeypatch):
     monkeypatch.setattr(launcher, 'IMAGE_SHA', hashlib.sha256(image).hexdigest())
     monkeypatch.setattr(list_ports, 'comports', lambda: [SimpleNamespace(device='COM3')])
     monkeypatch.setattr(tool, 'ensure_reader', lambda **_: {'reader': str(tmp_path / 'reader.py')})
+    monkeypatch.setattr(launcher, 'confirm_stopped', lambda *_: None)
     before = bytes((i * 17) % 255 for i in range(launcher.FLASH_BYTES))
     expected = image + b'\xff' * (launcher.ERASE_END - len(image)) + before[launcher.ERASE_END:]
     events = []
     def read(port, output, **kwargs):
         assert kwargs['reads'] == 1
         events.append('backup' if kwargs['halt'] else 'readback')
-        output.write_bytes(before if kwargs['halt'] else expected)
+        data = before if kwargs['halt'] else expected
+        output.write_bytes(data)
+        tool.atomic_json(output.with_name(output.name + '.json'), {
+            'status': 'READ_SINGLE', 'port': port, 'reads': [{'sha256': launcher.digest(data)}],
+            'haltChecks': [{'cpuControls': [5, 5], 'divider': 54}],
+        })
     def write(reader, snapshot, port, folder, report):
         events.append('write')
         state = tool.read_json(folder / 'summary.json')
@@ -105,6 +111,45 @@ def test_failed_comparison_retains_stop_and_evidence(bench, monkeypatch):
     assert state['phase'] == 'FAILED' and state['writeAttempted']
     assert Path(state['folder'], 'before.bin').exists()
     assert Path(state['folder'], 'after.bin').exists()
+
+
+def test_verify_only_recovers_failed_read_without_write_or_halt(bench, monkeypatch):
+    events, *_ = bench
+    original = launcher.swire._read_flash
+    def fail_after_write(port, output, **kwargs):
+        if not kwargs['halt']:
+            raise RuntimeError('first readback failed')
+        return original(port, output, **kwargs)
+    monkeypatch.setattr(launcher.swire, '_read_flash', fail_after_write)
+    with pytest.raises(RuntimeError, match='verification read failed'):
+        launcher.run('COM3', 300)
+    assert events == ['backup', 'write']
+    monkeypatch.setattr(launcher.swire, '_read_flash', original)
+    monkeypatch.setattr(launcher, 'writer', lambda *_: pytest.fail('verification must never write'))
+    launcher.verify_only('COM3')
+    assert events == ['backup', 'write', 'readback']
+    state = launcher.swire.read_json(next(launcher.RUNS.glob('*/summary.json')))
+    assert state['phase'] == 'VERIFIED' and state['verificationAttempts'][-1]['status'] == 'VERIFIED'
+
+
+def test_verification_reuses_exact_divider_without_reset_flags(tmp_path, monkeypatch):
+    import subprocess
+    commands = []
+    monkeypatch.setattr(launcher, 'confirm_stopped', lambda port, divider: commands.append((port, divider)))
+    def read(port, output, **kwargs):
+        assert kwargs['halt'] is False and kwargs['reads'] == 1
+        kwargs['runner']([sys.executable, 'reader.py', '-p', port, 'rf', '0', '0x80000', str(output)])
+    def child(command, **kwargs):
+        commands.append(command)
+        kwargs['log_path'].write_text('SWire speed for CLK 25.0 MHz... ok.\n')
+        return subprocess.CompletedProcess(command, 0)
+    monkeypatch.setattr(launcher.swire, '_read_flash', read)
+    monkeypatch.setattr(launcher.swire, 'run_reader_with_progress', child)
+    launcher.readback('COM3', tmp_path / 'after.bin', tmp_path / 'reader.py',
+                      {'haltChecks': [{'cpuControls': [5, 5], 'divider': 54}]}, lambda _: None)
+    assert commands[0] == ('COM3', 54)
+    assert commands[1][2:4] == ['-c', '25']
+    assert not {'-t', '-r', 'wf', 'we', 'es', 'ea'} & set(commands[1])
 
 
 def test_existing_recovery_ownership_blocks_sensor(bench):
