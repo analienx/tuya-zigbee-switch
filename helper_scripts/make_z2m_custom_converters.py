@@ -120,6 +120,10 @@ def collect_devices(db):
                 # converter still exposes the setting only for firmware builds
                 # that have Basic 0xFF03 (see romasku.ledBrightness).
                 "led_dimming": bool(device.get("led_dimming", False)),
+                # device_db `link_diagnostics`: BSEED sockets whose link-policy
+                # builds carry the Basic 0xFF13 snapshot (romasku.linkDiagnostics
+                # gates on the reported build).
+                "link_diagnostics": bool(device.get("link_diagnostics", False)),
                 "model": device.get("override_z2m_device")
                 or device["stock_converter_model"],
                 "switchNames": switch_names,
