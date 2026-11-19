@@ -52,6 +52,9 @@ typedef struct {void (*handler)(void *); void *arg;} hal_task_t;
 typedef enum {HAL_ZIGBEE_NETWORK_NOT_JOINED, HAL_ZIGBEE_NETWORK_JOINED,
               HAL_ZIGBEE_NETWORK_JOINING} hal_zigbee_network_status_t;
 typedef void (*hal_network_status_change_callback_t)(hal_zigbee_network_status_t);
+typedef enum { HAL_ZIGBEE_JOIN_ACTIVITY_IDLE, HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING,
+               HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING } hal_zigbee_join_activity_t;
+typedef void (*hal_join_activity_callback_t)(hal_zigbee_join_activity_t);
 hal_zigbee_network_status_t hal_zigbee_get_network_status(void);
 void bdb_commissioning_callback(u8 status,void *arg);
 #define BSEED_MAINS_CLIENT 1

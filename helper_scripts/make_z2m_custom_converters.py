@@ -116,6 +116,10 @@ def collect_devices(db):
                 "power_monitoring": bool(device.get("power_monitoring", False)),
                 "bseed_unsuffixed_meter": db_key.startswith("OUTLET_BSEED_PM_TS011F") and bool(device.get("power_monitoring", False)),
                 "bseed_socket_relay_read": db_key in {"OUTLET_BSEED_PM_TS011F", "OUTLET_BSEED_TS011F"},
+                # device_db `led_dimming`: boards built with LED_DIMMING. The
+                # converter still exposes the setting only for firmware builds
+                # that have Basic 0xFF03 (see romasku.ledBrightness).
+                "led_dimming": bool(device.get("led_dimming", False)),
                 "model": device.get("override_z2m_device")
                 or device["stock_converter_model"],
                 "switchNames": switch_names,

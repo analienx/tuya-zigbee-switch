@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "src/telink/hal/zigbee_network.c"
 
 
-def test_factory_steering_quarantine_and_safe_checkpoint(tmp_path):
+def _harness_parts():
     source = SOURCE.read_text(encoding="utf-8")
     state = "typedef enum {" + source.split("typedef enum {", 1)[1].split(
         "// Telink ZDO callbacks", 1
@@ -28,7 +28,26 @@ def test_factory_steering_quarantine_and_safe_checkpoint(tmp_path):
     )[1].split("hal_zigbee_status_t hal_zigbee_send_announce", 1)[0]
     constants = sorted(set(re.findall(r"BDB_COMMISSION_STA_\w+", callback)))
     defines = "\n".join(f"#define {name} {i + 1}" for i, name in enumerate(constants))
-    prelude = r"""
+    return state, rejoin, callback, ensure, defines
+
+
+def _build_and_run(tmp_path, name, cases):
+    state, rejoin, callback, ensure, defines = _harness_parts()
+    path=tmp_path/(name+".c")
+    binary=tmp_path/name
+    path.write_text(PRELUDE+defines+"\n"+state+rejoin+callback+ensure+cases,
+                    encoding="utf-8")
+    built=subprocess.run(["cc","-std=c11","-Wall","-Wextra","-Werror",
+                          "-Wno-unused-parameter","-Wno-unused-function",
+                          "-Wno-unused-variable","-I",str(ROOT/"src"),
+                          str(path),"-o",str(binary)],
+                         capture_output=True,text=True,timeout=30)
+    assert built.returncode==0,built.stdout+built.stderr
+    ran=subprocess.run([str(binary)],capture_output=True,text=True,timeout=15)
+    assert ran.returncode==0,ran.stdout+ran.stderr
+
+
+PRELUDE = r"""
 #include <assert.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -46,6 +65,9 @@ typedef enum { HAL_ZIGBEE_NETWORK_NOT_JOINED,
                HAL_ZIGBEE_NETWORK_JOINED,
                HAL_ZIGBEE_NETWORK_JOINING } hal_zigbee_network_status_t;
 typedef void (*hal_network_status_change_callback_t)(hal_zigbee_network_status_t);
+typedef enum { HAL_ZIGBEE_JOIN_ACTIVITY_IDLE, HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING,
+               HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING } hal_zigbee_join_activity_t;
+typedef void (*hal_join_activity_callback_t)(hal_zigbee_join_activity_t);
 static bool joined, factory_new=true, sync_terminal, reject_steer;
 static uint8_t sync_terminal_status;
 static uint32_t now, steer_calls, rejoin_calls, rescue_calls, budget_used;
@@ -56,8 +78,10 @@ uint32_t hal_millis(void) { return now; }
 static bool zb_isDeviceJoinedNwk(void) { return joined; }
 static bool zb_isDeviceFactoryNew(void) { return factory_new; }
 static uint32_t zb_apsChannelMaskGet(void) { return 0u; }
+static bool reject_rejoin;
 static u8 zb_rejoinReqWithBackOff(uint32_t channel,u8 duration) {
-    (void)channel; (void)duration; rejoin_calls++; return RET_OK;
+    (void)channel; (void)duration; rejoin_calls++;
+    return reject_rejoin ? 0x80u : RET_OK;
 }
 void bdb_commissioning_callback(u8 status, void *arg);
 static u8 bdb_networkSteerStart(void) {
@@ -87,6 +111,9 @@ static hal_zigbee_network_status_t hal_zigbee_get_network_status(void) {
     return joined ? HAL_ZIGBEE_NETWORK_JOINED : HAL_ZIGBEE_NETWORK_NOT_JOINED;
 }
 """
+
+
+def test_factory_steering_quarantine_and_safe_checkpoint(tmp_path):
     cases = r"""
 int main(void) {
     /* Accepted A then terminal failure. A second B cannot be handed the
@@ -158,15 +185,82 @@ int main(void) {
     return 0;
 }
 """
-    path=tmp_path/"factory_steering_owner.c"
-    binary=tmp_path/"factory_steering_owner"
-    path.write_text(prelude+defines+"\n"+state+rejoin+callback+ensure+cases,
-                    encoding="utf-8")
-    built=subprocess.run(["cc","-std=c11","-Wall","-Wextra","-Werror",
-                          "-Wno-unused-parameter","-Wno-unused-function",
-                          "-Wno-unused-variable","-I",str(ROOT/"src"),
-                          str(path),"-o",str(binary)],
-                         capture_output=True,text=True,timeout=30)
-    assert built.returncode==0,built.stdout+built.stderr
-    ran=subprocess.run([str(binary)],capture_output=True,text=True,timeout=15)
-    assert ran.returncode==0,ran.stdout+ran.stderr
+    _build_and_run(tmp_path, "factory_steering_owner", cases)
+
+
+def test_join_activity_reports_only_accepted_running_attempts(tmp_path):
+    """The network indicator is driven by the real HAL paths: an accepted
+    steering start reports PAIRING and its terminal outcome IDLE; a rejected
+    or synchronously completed start reports no PAIRING; an accepted rejoin
+    reports REJOINING once, a rejected one nothing, and SDK retry failures
+    never report (the SDK keeps ownership of its backoff)."""
+    cases = r"""
+static unsigned reports[3];
+static void record(hal_zigbee_join_activity_t a) { reports[a]++; }
+static void fresh(void) {
+    network_sdk_steering_started_once=false;
+    network_sdk_backoff_started_once=false;
+    network_steering_checkpoint_scheduled=false;
+    network_steering_terminal_seen=false;
+    network_recovery_state=TELINK_NETWORK_RECOVERY_IDLE;
+    network_start_retry_pending=false;
+    now+=100u;
+}
+int main(void) {
+    join_activity_callback=record;
+
+    /* Accepted steering: PAIRING; terminal outcome: IDLE. */
+    hal_zigbee_start_network_steering();
+    assert(reports[HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING]==1u);
+    bdb_commissioning_callback(BDB_COMMISSION_STA_NO_SCAN_RESPONSE,0);
+    assert(reports[HAL_ZIGBEE_JOIN_ACTIVITY_IDLE]==1u);
+    /* Held re-arm (no SDK request): nothing reported. */
+    now+=5000u; hal_zigbee_start_network_steering();
+    assert(reports[HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING]==1u);
+
+    /* Rejected steering start: no PAIRING. */
+    fresh(); reject_steer=true;
+    hal_zigbee_start_network_steering();
+    assert(reports[HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING]==1u);
+    reject_steer=false;
+
+    /* Synchronous terminal completion inside the SDK call: IDLE only. */
+    fresh(); sync_terminal=true; sync_terminal_status=BDB_COMMISSION_STA_NO_NETWORK;
+    hal_zigbee_start_network_steering();
+    assert(reports[HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING]==1u);
+    assert(reports[HAL_ZIGBEE_JOIN_ACTIVITY_IDLE]==2u);
+    sync_terminal=false;
+
+    /* Commissioned device: accepted rejoin reports REJOINING once. */
+    fresh(); factory_new=false;
+    hal_zigbee_start_network_steering();
+    assert(rejoin_calls==1u);
+    assert(reports[HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING]==1u);
+    /* SDK backoff retry failures keep SDK ownership and report nothing. */
+    bdb_commissioning_callback(BDB_COMMISSION_STA_REJOIN_FAILURE,0);
+    bdb_commissioning_callback(BDB_COMMISSION_STA_REJOIN_FAILURE,0);
+    assert(network_recovery_state==TELINK_NETWORK_RECOVERY_REJOIN);
+    assert(reports[HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING]==1u);
+    assert(reports[HAL_ZIGBEE_JOIN_ACTIVITY_IDLE]==2u);
+
+    /* Success while membership stayed joined still reports completion, so
+     * the indicator discards a pending still-joined rejoin. */
+    joined=true;
+    bdb_commissioning_callback(BDB_COMMISSION_STA_SUCCESS,0);
+    assert(reports[HAL_ZIGBEE_JOIN_ACTIVITY_IDLE]==3u);
+
+    /* Accepted rejoin from a stale joined parent reports its start too. */
+    fresh();
+    assert(request_rejoin_with_backoff_impl(true, true));
+    assert(reports[HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING]==2u);
+    assert(rejoin_calls==2u);
+
+    /* Rejected rejoin request: nothing reported. */
+    fresh(); joined=false; reject_rejoin=true;
+    hal_zigbee_start_network_steering();
+    assert(rejoin_calls==3u);
+    assert(reports[HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING]==2u);
+    return 0;
+}
+"""
+    _build_and_run(tmp_path, "join_activity", cases)

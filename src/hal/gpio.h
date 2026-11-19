@@ -62,6 +62,18 @@ static inline void hal_gpio_write(hal_gpio_pin_t gpio_pin, uint8_t value) {
 }
 
 /**
+ * Drive an output to `value` for duty_pct percent of each ~1 kHz period and
+ * to the opposite level for the rest, using a hardware PWM channel where the
+ * platform has a free one on this pin. duty_pct >= 100, or a pin without a
+ * usable PWM channel, is exactly hal_gpio_write(gpio_pin, value).
+ * @param gpio_pin GPIO pin identifier
+ * @param value Level held during the active part of each period
+ * @param duty_pct Active share of each period, 1..100
+ */
+void hal_gpio_write_duty(hal_gpio_pin_t gpio_pin, uint8_t value,
+                         uint8_t duty_pct);
+
+/**
  * Read input pin state (0=low, 1=high)
  * @param gpio_pin GPIO pin identifier
  * @return Pin state (0=low, 1=high)

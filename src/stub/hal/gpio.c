@@ -79,6 +79,16 @@ void hal_gpio_clear(hal_gpio_pin_t gpio_pin) {
     io_evt("gpio pin=%d value=%d", gpio_pin, 0);
 }
 
+/* The stub has no PWM: it logs the requested duty and drives the level, so
+ * simulations and tests see an LED as plainly on or off. */
+void hal_gpio_write_duty(hal_gpio_pin_t gpio_pin, uint8_t value,
+                         uint8_t duty_pct) {
+    if (duty_pct < 100)
+        io_evt("gpio_duty pin=%d value=%d duty=%d", gpio_pin, value ? 1 : 0,
+               duty_pct);
+    hal_gpio_write(gpio_pin, value);
+}
+
 uint8_t hal_gpio_read(hal_gpio_pin_t gpio_pin) {
     ensure_valid_input_pin(gpio_pin);
     io_log("GPIO", "Read pin %d = %d", gpio_pin, gpio_pins[gpio_pin].value);

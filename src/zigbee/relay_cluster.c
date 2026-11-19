@@ -238,11 +238,8 @@ uint8_t relay_cluster_is_physically_on(const zigbee_relay_cluster *cluster) {
     }
 }
 
-void sync_indicator_led(zigbee_relay_cluster *cluster) {
-    if (cluster->indicator_led == NULL) {
-        return;
-    }
-
+/* Recompute and drive the indicator LED from the relay state. */
+static void drive_indicator_led(zigbee_relay_cluster *cluster) {
     switch (cluster->indicator_led_mode) {
     case ZCL_ONOFF_INDICATOR_MODE_SAME:
         cluster->indicator_state = cluster->relay->on ? 1 : 0;
@@ -272,9 +269,23 @@ void sync_indicator_led(zigbee_relay_cluster *cluster) {
 #endif
     cluster->indicator_state ? led_on(cluster->indicator_led)
                            : led_off(cluster->indicator_led);
+}
 
+void sync_indicator_led(zigbee_relay_cluster *cluster) {
+    if (cluster->indicator_led == NULL) {
+        return;
+    }
+    drive_indicator_led(cluster);
     hal_zigbee_notify_attribute_changed(cluster->endpoint, ZCL_CLUSTER_ON_OFF,
                                         ZCL_ATTR_ONOFF_INDICATOR_STATE);
+}
+
+void update_relay_indicator_leds(void) {
+    for (int i = 0; i < 10; i++) {
+        zigbee_relay_cluster *cluster = relay_cluster_by_endpoint[i];
+        if (cluster != NULL && cluster->indicator_led != NULL)
+            drive_indicator_led(cluster);
+    }
 }
 
 static void relay_cluster_set_virtual_state(zigbee_relay_cluster *cluster,

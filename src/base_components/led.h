@@ -38,6 +38,33 @@ void led_off(led_t *led);
 
 #define LED_BLINK_FOREVER    0xFFFF
 
+/* Brightness of every LED while lit, percent of full drive (1..100). Only
+* LED_DIMMING builds (Telink hardware PWM, never with PM_ENABLE) apply it;
+* every other build drives plain on/off GPIO. A second LED on a PWM channel
+* that another LED already uses stays at full brightness (logged once). */
+#ifndef LED_DEFAULT_BRIGHTNESS
+#define LED_DEFAULT_BRIGHTNESS    100
+#endif
+#define LED_MIN_BRIGHTNESS        1
+#define LED_MAX_BRIGHTNESS        100
+
+/**
+ * @brief      Set the brightness used by every LED while lit (clamped to
+ *             1..100). Call led_refresh() on lit LEDs to apply it at once.
+ */
+void led_set_brightness(uint8_t percent);
+
+/** The brightness led_set_brightness() would apply for `percent`. */
+uint8_t led_clamp_brightness(uint8_t percent);
+
+uint8_t led_get_brightness(void);
+
+/**
+ * @brief      Re-drive the LED's current level (e.g. after a brightness
+ *             change) without touching its blink state.
+ */
+void led_refresh(led_t *led);
+
 /**
  * @brief      Start led blinking, will go to off when finished
  * @param	     *led - Led to use

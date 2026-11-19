@@ -1,4 +1,5 @@
 #include "basic_cluster.h"
+#include "base_components/led.h"
 #include "base_components/network_indicator.h"
 #include "build_date.h"
 #include "cluster_common.h"
@@ -39,6 +40,50 @@ extern network_indicator_t network_indicator;
 
 void basic_cluster_store_attrs_to_nv();
 void basic_cluster_load_attrs_from_nv();
+
+#ifdef LED_DIMMING
+
+/* LED brightness percent (1..100) for every LED while lit. Only builds that
+ * can dim (LED_DIMMING: Telink PWM, never with PM_ENABLE) expose it. The ZCL
+ * write lands here first; led.c's brightness changes only once it is stored,
+ * which is why this is a separate copy. */
+static uint8_t led_brightness_attr = LED_DEFAULT_BRIGHTNESS;
+static uint8_t basic_endpoint;
+
+/* A written brightness takes effect only once it is stored, so it can never
+ * appear to work and then revert at the next reboot. If the write fails the
+ * attribute reads back the brightness still in effect. The converter reads
+ * it after writing; notify configured reporters too if it was corrected. */
+static void led_brightness_commit(void) {
+    uint8_t written   = led_brightness_attr;
+    uint8_t requested = led_clamp_brightness(written);
+
+    if (requested != led_get_brightness() &&
+        hal_nvm_write(NV_ITEM_LED_BRIGHTNESS, sizeof(requested), &requested) !=
+        HAL_NVM_SUCCESS) {
+        requested = led_get_brightness();
+    } else {
+        led_set_brightness(requested);
+        peripherals_refresh_leds();
+    }
+    led_brightness_attr = requested;
+    if (led_brightness_attr != written)
+        hal_zigbee_notify_attribute_changed(basic_endpoint, ZCL_CLUSTER_BASIC,
+                                            ZCL_ATTR_BASIC_LED_BRIGHTNESS);
+}
+
+static void led_brightness_load(void) {
+    uint8_t stored = 0;
+
+    if (hal_nvm_read(NV_ITEM_LED_BRIGHTNESS, sizeof(stored), &stored) ==
+        HAL_NVM_SUCCESS && stored >= LED_MIN_BRIGHTNESS &&
+        stored <= LED_MAX_BRIGHTNESS)
+        led_set_brightness(stored);
+    led_brightness_attr = led_get_brightness();
+    peripherals_refresh_leds();
+}
+
+#endif
 
 #define DEVICE_CONFIG_STAGE_CHUNK_MAX    24
 
@@ -170,7 +215,9 @@ hal_zigbee_cmd_result_t basic_cluster_callback_trampoline(
 }
 
 void basic_cluster_callback_attr_write_trampoline(uint16_t attribute_id) {
-    basic_cluster_store_attrs_to_nv();
+    // LED brightness has its own NV record; do not rewrite the basic one.
+    if (attribute_id != ZCL_ATTR_BASIC_LED_BRIGHTNESS)
+        basic_cluster_store_attrs_to_nv();
     if (attribute_id == ZCL_ATTR_BASIC_DEVICE_CONFIG) {
         // Preserve the legacy writable attribute ABI for tools/debugging, but
         // never persist malformed or truncated input. Ordinary Z2M uses the
@@ -187,6 +234,11 @@ void basic_cluster_callback_attr_write_trampoline(uint16_t attribute_id) {
     if (attribute_id == ZCL_ATTR_BASIC_STATUS_LED_STATE) {
         network_indicator_from_manual_state(&network_indicator);
     }
+#ifdef LED_DIMMING
+    if (attribute_id == ZCL_ATTR_BASIC_LED_BRIGHTNESS) {
+        led_brightness_commit();
+    }
+#endif
     if (attribute_id == ZCL_ATTR_BASIC_MULTI_PRESS_RESET_COUNT) {
         device_params_set_multi_press_reset_count(g_multi_press_reset_count);
     }
@@ -233,17 +285,25 @@ void basic_cluster_add_to_endpoint(zigbee_basic_cluster *cluster,
         (uint16_t)(2u + sizeof(device_config_str.data) - 1u);
     SETUP_ATTR(12, ZCL_ATTR_BASIC_MULTI_PRESS_RESET_COUNT, ZCL_DATA_TYPE_UINT8,
                ATTR_WRITABLE, g_multi_press_reset_count);
+    uint8_t attr_count = 13;
     if (network_indicator.has_dedicated_led) {
-        SETUP_ATTR(13, ZCL_ATTR_BASIC_STATUS_LED_STATE, ZCL_DATA_TYPE_BOOLEAN,
-                   ATTR_WRITABLE, network_indicator.manual_state_when_connected);
+        SETUP_ATTR(attr_count, ZCL_ATTR_BASIC_STATUS_LED_STATE,
+                   ZCL_DATA_TYPE_BOOLEAN, ATTR_WRITABLE,
+                   network_indicator.manual_state_when_connected);
+        attr_count++;
     }
+#ifdef LED_DIMMING
+    basic_endpoint = endpoint->endpoint;
+    SETUP_ATTR(attr_count, ZCL_ATTR_BASIC_LED_BRIGHTNESS, ZCL_DATA_TYPE_UINT8,
+               ATTR_WRITABLE, led_brightness_attr);
+    attr_count++;
+#endif
 
     endpoint->clusters[endpoint->cluster_count].cluster_id      = ZCL_CLUSTER_BASIC;
-    endpoint->clusters[endpoint->cluster_count].attribute_count =
-        network_indicator.has_dedicated_led ? 14 : 13;
-    endpoint->clusters[endpoint->cluster_count].attributes = cluster->attr_infos;
+    endpoint->clusters[endpoint->cluster_count].attribute_count = attr_count;
+    endpoint->clusters[endpoint->cluster_count].attributes      = cluster->attr_infos;
 #ifdef HAL_TELINK
-    uint8_t health_index = network_indicator.has_dedicated_led ? 14 : 13;
+    uint8_t health_index = attr_count;
     SETUP_ATTR(health_index, 0xFF10, ZCL_DATA_TYPE_OCTET_STR, ATTR_DIAGNOSTIC,
                firmware_health_snapshot);
     SETUP_ATTR(health_index + 1, 0xFF12, ZCL_DATA_TYPE_OCTET_STR, ATTR_DIAGNOSTIC,
@@ -293,9 +353,12 @@ void basic_cluster_load_attrs_from_nv() {
                                        sizeof(zigbee_basic_cluster_config),
                                        (uint8_t *)&nv_config_buffer);
 
-    if (st != HAL_NVM_SUCCESS) {
-        return;
+    if (st == HAL_NVM_SUCCESS) {
+        network_indicator.manual_state_when_connected =
+            nv_config_buffer.network_led_on;
     }
-    network_indicator.manual_state_when_connected =
-        nv_config_buffer.network_led_on;
+
+#ifdef LED_DIMMING
+    led_brightness_load();
+#endif
 }

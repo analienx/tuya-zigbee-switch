@@ -72,6 +72,10 @@ bool relay_cluster_nv_delete_physical_mode(uint8_t relay_idx);
 
 void update_relay_clusters();
 
+/* Re-drive relay indicator LEDs from relay state, without attribute
+ * reports (e.g. after a network-indicator blink ends). */
+void update_relay_indicator_leds(void);
+
 void relay_cluster_callback_attr_write_trampoline(uint8_t endpoint,
                                                   uint16_t attribute_id);
 

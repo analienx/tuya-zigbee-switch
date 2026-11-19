@@ -124,11 +124,30 @@ ifeq ($(strip $(BSEED_LINK_POLICY)),1)
 DEVICE_DEFS += -DBSEED_LINK_POLICY
 endif
 
-# BSEED sockets: relay indicator LEDs flash with the status LED while not
-# joined. Explicit build input so other boards keep their indicator behavior.
+# BSEED sockets: relay indicator LEDs flash with the status LED during a join
+# blink. Explicit build input so other boards keep their indicator behavior.
 BSEED_SEARCH_LEDS ?=
 ifeq ($(strip $(BSEED_SEARCH_LEDS)),1)
 DEVICE_DEFS += -DBSEED_SEARCH_LEDS
+endif
+
+# Quiet join blink (owner request 2026-11-19, BSEED sockets for now): blink
+# fast only while pairing (steering) runs, slowly for a few minutes when a
+# rejoin starts, otherwise stay quiet. Without it a board blinks for as long
+# as it is not joined.
+QUIET_JOIN_BLINK ?=
+ifeq ($(strip $(QUIET_JOIN_BLINK)),1)
+DEVICE_DEFS += -DQUIET_JOIN_BLINK
+endif
+
+# LED dimming: Telink hardware PWM plus the Basic 0xFF03 brightness
+# attribute. Explicit build input for boards whose LED pins have PWM channels
+# and that never sleep (PM_ENABLE with LED_DIMMING is a compile error).
+# LED_DEFAULT_BRIGHTNESS applies until the attribute is written.
+LED_DIMMING ?=
+LED_DEFAULT_BRIGHTNESS ?= 100
+ifeq ($(strip $(LED_DIMMING)),1)
+DEVICE_DEFS += -DLED_DIMMING=1 -DLED_DEFAULT_BRIGHTNESS=$(strip $(LED_DEFAULT_BRIGHTNESS))
 endif
 
 # Unified PM target options. They are explicit build inputs rather than global

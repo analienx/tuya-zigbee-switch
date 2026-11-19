@@ -23,6 +23,13 @@ PRELUDE = r"""
 bool bseed_recovery_diag_record(bseed_rescue_reason_t reason, uint8_t sdk_state) {
     (void)reason; (void)sdk_state; return true;
 }
+typedef enum { HAL_ZIGBEE_JOIN_ACTIVITY_IDLE, HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING,
+               HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING } hal_zigbee_join_activity_t;
+typedef void (*hal_join_activity_callback_t)(hal_zigbee_join_activity_t);
+static unsigned join_activity_reports[3];
+static void notify_join_activity(hal_zigbee_join_activity_t activity) {
+    join_activity_reports[activity]++;
+}
 typedef enum { BSEED_BUDGET_CONSUMED, BSEED_BUDGET_EXHAUSTED,
                BSEED_BUDGET_STORAGE_ERROR } bseed_budget_result_t;
 #define ZB_ROUTER_ROLE 1

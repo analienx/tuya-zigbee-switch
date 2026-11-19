@@ -33,15 +33,37 @@
 
 void peripherals_init(void);
 
+/* A join blink ended: give relay indicator LEDs back to the relay state, and
+ * the status LED back to its manual state if the device is still joined (a
+ * rejoin that started while joined and never reported completion). */
+extern network_indicator_t network_indicator;
+
+static void network_indicator_quiet(void) {
+    if (hal_zigbee_get_network_status() == HAL_ZIGBEE_NETWORK_JOINED)
+        network_indicator_from_manual_state(&network_indicator);
+    update_relay_indicator_leds();
+}
+
 network_indicator_t network_indicator = {
     .leds                        = { NULL, NULL, NULL, NULL },
     .search_leds                 = { NULL, NULL, NULL, NULL },
     .has_dedicated_led           = 0,
     .manual_state_when_connected = 1,
+    .on_quiet                    = network_indicator_quiet,
 };
 
 led_t   leds[5];
 uint8_t leds_cnt = 0;
+
+void peripherals_refresh_leds(void) {
+    for (int index = 0; index < leds_cnt; index++)
+        led_refresh(&leds[index]);
+}
+
+static void network_indicator_on_join_activity(
+    hal_zigbee_join_activity_t activity) {
+    network_indicator_join_activity(&network_indicator, activity);
+}
 
 button_t buttons[11];
 uint8_t  buttons_cnt = 0;
@@ -511,6 +533,9 @@ void network_indicator_on_network_status_change(
     hal_zigbee_network_status_t new_status) {
     printf("Network status changed to %d\r\n", new_status);
     if (new_status == HAL_ZIGBEE_NETWORK_JOINED) {
+        if (network_indicator.joined)
+            return;
+
         if (battery.pin != HAL_INVALID_PIN)
             network_indicator.manual_state_when_connected = 0;
         network_indicator_connected(&network_indicator);
@@ -537,6 +562,7 @@ void peripherals_init() {
     }
     hal_register_on_network_status_change_callback(
         network_indicator_on_network_status_change);
+    hal_register_on_join_activity_callback(network_indicator_on_join_activity);
 }
 
 char *seek_until(char *cursor, char needle) {

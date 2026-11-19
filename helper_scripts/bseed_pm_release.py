@@ -6,12 +6,14 @@ import struct
 
 from bseed_ota_identity import IdentityError, parse_ota_header, require_embedded_string
 
-CLIENT = {'role': 'EndDevice', 'build': '1.2.5-bseedcli26',
-          'version': 0x12053025, 'type': 65024, 'artifact': 'forward.ota',
-          'date': '20261117'}
-ROUTER = {'role': 'Router', 'build': '1.2.5-bseedr23',
-          'version': 0x12053025, 'type': 43556, 'artifact': 'forward.ota',
-          'date': '20261117'}
+# Join blink + LED dimming set (2026-11-19). The sealed r23/cli26
+# (0x12053025) bytes are never relabelled with this changed firmware.
+CLIENT = {'role': 'EndDevice', 'build': '1.2.5-bseedcli27',
+          'version': 0x12053026, 'type': 65024, 'artifact': 'forward.ota',
+          'date': '20261119'}
+ROUTER = {'role': 'Router', 'build': '1.2.5-bseedr24',
+          'version': 0x12053026, 'type': 43556, 'artifact': 'forward.ota',
+          'date': '20261119'}
 CANDIDATES = {'client': CLIENT, 'router': ROUTER}
 RELEASE_DATE = '20261003'  # Immutable input for this candidate set, not wall-clock build time.
 PM_OTA_MAX_BYTES = 0x34000  # Telink V3.7.2.0, 512 KiB layout, no bootloader.

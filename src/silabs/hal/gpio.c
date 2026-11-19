@@ -139,6 +139,13 @@ void hal_gpio_clear(hal_gpio_pin_t gpio_pin) {
     sl_gpio_clear_pin(&sl_gpio);
 }
 
+/* No PWM routing on Silabs yet: LEDs keep full brightness. */
+void hal_gpio_write_duty(hal_gpio_pin_t gpio_pin, uint8_t value,
+                         uint8_t duty_pct) {
+    (void)duty_pct;
+    hal_gpio_write(gpio_pin, value);
+}
+
 uint8_t hal_gpio_read(hal_gpio_pin_t gpio_pin) {
     const sl_gpio_t sl_gpio = silabs_hal_gpio_to_sl_gpio(gpio_pin);
     bool            value   = 0;

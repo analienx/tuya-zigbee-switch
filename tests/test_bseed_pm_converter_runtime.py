@@ -7,6 +7,7 @@ from test_bseed_socket_converter_exposes import ROOT, _render
 sys.path.insert(0, str(ROOT / 'helper_scripts'))
 from bseed_pm_provision import REPORTS, missing_reports
 from bseed_pm_release import CANDIDATES
+from bseed_nonpm_release import CANDIDATES as NONPM_CANDIDATES
 
 
 def test_real_converter_dispatch_reads_relay_for_plain_and_scoped_state(tmp_path):
@@ -61,14 +62,40 @@ def test_generated_converter_loads_and_pm_nonpm_contracts_stay_separate(tmp_path
     script = r'''
 const assert = require('node:assert/strict');
 const {prepareDefinition} = require('zigbee-herdsman-converters');
+// Surface errors ZHC swallows inside per-device exposes functions.
+const zhc = require('zigbee-herdsman-converters');
+if (zhc.setLogger) zhc.setLogger({debug() {}, info() {}, warning(m) {console.error('ZHC-W', m);},
+                                 error(m) {console.error('ZHC-E', m);}});
 const definitions = require(process.argv[1]);
 const find = name => prepareDefinition(definitions.find(d => d.zigbeeModel?.includes(name)));
 const pm = find('TS011F-BS-PM'), nonpm = find('TS011F-BS');
+// Exposes depend on the device's build (LED brightness): resolve per device.
+const exposed = (def, build) => typeof def.exposes === 'function' ?
+    def.exposes({softwareBuildID: build, endpoints: []}, {}) : def.exposes;
 assert.deepEqual(pm.endpoint({}), {switch: 1, relay: 2});
 for (const property of ['power', 'current', 'voltage', 'energy']) {
-    assert.ok(pm.exposes.some(e => e.property === property));
+    assert.ok(exposed(pm, '1.2.5-bseedcli27').some(e => e.property === property));
     assert.ok(pm.meta.multiEndpointSkip.includes(property));
-    assert.ok(!nonpm.exposes.some(e => e.property === property));
+    assert.ok(!exposed(nonpm, '1.1.3-bseedr21').some(e => e.property === property));
+}
+// LED brightness only for builds that have Basic 0xFF03.
+// Endpoint-scoped: the property carries the endpoint suffix, the name does not.
+const led = (def, build) => exposed(def, build).some(e => e.name === 'led_brightness');
+const names = (def, build) => JSON.stringify(exposed(def, build).map(
+    e => typeof e === 'function' ? 'fn' : `${e.name}/${e.property}`));
+for (const build of ['1.2.5-bseedr24', '1.2.5-bseedcli27', '1.2.5-bseedr30'])
+    assert.ok(led(pm, build), `${build}: ${names(pm, build)}`);
+for (const build of ['1.2.5-bseedr23', '1.2.5-bseedcli26', '1.2.5-bseedv8u4', '', undefined])
+    assert.ok(!led(pm, build), String(build));
+for (const build of ['1.1.3-bseedr21', '1.1.3-bseedc19'])
+    assert.ok(led(nonpm, build), build);
+for (const build of ['1.1.3-bseedr20', '1.1.3-bseedc18', '1.1.3-bseedv8'])
+    assert.ok(!led(nonpm, build), build);
+// Check the actual release definitions too: changing a future build family
+// must update the converter rather than silently dropping this setting.
+const candidates = JSON.parse(process.argv[2]);
+for (const [family, builds] of Object.entries(candidates)) {
+    for (const build of builds) assert.ok(led(family === 'pm' ? pm : nonpm, build), build);
 }
 assert.ok(pm.fromZigbee.some(f => f.cluster === 'haElectricalMeasurement'));
 assert.ok(pm.fromZigbee.some(f => f.cluster === 'seMetering'));
@@ -77,7 +104,9 @@ assert.equal(typeof pm.configure, 'function');
 assert.ok(pm.options.some(o => o.property === 'bseed_pm_telemetry_quarantine'));
 assert.ok(!nonpm.options.some(o => o.property === 'bseed_pm_telemetry_quarantine'));
 '''
-    subprocess.run(['node', '-e', script, str(converter)], cwd=ROOT,
+    candidates = {'pm': [c['build'] for c in CANDIDATES.values()],
+                  'nonpm': [c['build'] for c in NONPM_CANDIDATES.values()]}
+    subprocess.run(['node', '-e', script, str(converter), json.dumps(candidates)], cwd=ROOT,
                    check=True, capture_output=True, text=True)
 
 

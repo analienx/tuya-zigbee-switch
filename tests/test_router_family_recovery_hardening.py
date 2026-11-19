@@ -328,8 +328,9 @@ def test_silabs_secure_retry_never_falls_back_to_steering():
     assert "silabs_router_rejoin_pending = false" in callback
     steering = silabs.split("void hal_zigbee_start_network_steering()", 1)[1]
     assert "silabs_router_rejoin_attempted" in steering
-    assert "sl_zigbee_find_and_rejoin_network(" in steering
-    assert steering.index("sl_zigbee_find_and_rejoin_network(") < steering.index(
+    # The secure retry goes through the single reporting rejoin helper.
+    assert "silabs_router_start_secure_rejoin()" in steering
+    assert steering.index("silabs_router_start_secure_rejoin()") < steering.index(
         "sl_zigbee_af_network_steering_start()"
     )
     assert "SILABS_ROUTER_REJOIN_GAP_MS" in steering

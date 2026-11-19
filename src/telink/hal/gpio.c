@@ -155,6 +155,131 @@ void hal_gpio_clear(hal_gpio_pin_t gpio_pin) {
     }
 }
 
+#ifdef LED_DIMMING
+#if PM_ENABLE
+#error "LED_DIMMING needs a non-sleeping build: PWM stops in sleep"
+#endif
+
+/* LED dimming on the TLSR8258 hardware PWM channels.
+ *
+ * Pin-to-channel map from the SDK's gpio_set_func() (chip_8258/gpio.c), only
+ * the non-inverted outputs. Two pins sharing a channel cannot be dimmed
+ * independently: the first pin to use a channel owns it, any other pin on
+ * that channel stays on plain full-level GPIO. The PWM block stops in sleep,
+ * so a PM_ENABLE build with LED_DIMMING is a compile error above. */
+#define HAL_PWM_CLOCK_HZ    1000000u
+#define HAL_PWM_CYCLE       1000u /* 1 kHz: no visible flicker */
+
+typedef struct {
+    hal_gpio_pin_t   pin;
+    uint8_t          channel;
+    GPIO_FuncTypeDef func;
+} hal_pwm_pin_t;
+
+static const hal_pwm_pin_t hal_pwm_pins[] = {
+    { GPIO_PA2, PWM0_ID, AS_PWM0 }, { GPIO_PA3, PWM1_ID, AS_PWM1 },
+    { GPIO_PA4, PWM2_ID, AS_PWM2 }, { GPIO_PB0, PWM3_ID, AS_PWM3 },
+    { GPIO_PB1, PWM4_ID, AS_PWM4 }, { GPIO_PB2, PWM5_ID, AS_PWM5 },
+    { GPIO_PB4, PWM4_ID, AS_PWM4 }, { GPIO_PB5, PWM5_ID, AS_PWM5 },
+    { GPIO_PC1, PWM0_ID, AS_PWM0 }, { GPIO_PC2, PWM0_ID, AS_PWM0 },
+    { GPIO_PC3, PWM1_ID, AS_PWM1 }, { GPIO_PC4, PWM2_ID, AS_PWM2 },
+    { GPIO_PD2, PWM3_ID, AS_PWM3 }, { GPIO_PD5, PWM0_ID, AS_PWM0 },
+};
+
+#define HAL_PWM_CHANNELS    6
+static hal_gpio_pin_t hal_pwm_owner[HAL_PWM_CHANNELS] = {
+    HAL_INVALID_PIN, HAL_INVALID_PIN, HAL_INVALID_PIN,
+    HAL_INVALID_PIN, HAL_INVALID_PIN, HAL_INVALID_PIN,
+};
+static uint8_t        hal_pwm_active[HAL_PWM_CHANNELS];
+static uint16_t       hal_pwm_high[HAL_PWM_CHANNELS];  // 0: never programmed
+static uint8_t        hal_pwm_conflict_logged[HAL_PWM_CHANNELS];
+static uint8_t        hal_pwm_clock_ready;
+
+static const hal_pwm_pin_t *hal_pwm_for_pin(hal_gpio_pin_t pin) {
+    for (uint8_t i = 0; i < sizeof(hal_pwm_pins) / sizeof(hal_pwm_pins[0]);
+         i++) {
+        if (hal_pwm_pins[i].pin != pin)
+            continue;
+        uint8_t        ch    = hal_pwm_pins[i].channel;
+        hal_gpio_pin_t owner = hal_pwm_owner[ch];
+        if (owner != HAL_INVALID_PIN && owner != pin) {
+            /* Channel already drives another LED: this one stays at full
+             * brightness. No BSEED board shares a channel (PM C3/B4, non-PM
+             * C2/D2), but say so once on boards that do. */
+            if (!hal_pwm_conflict_logged[ch]) {
+                hal_pwm_conflict_logged[ch] = 1;
+                printf("LED: pin 0x%x shares PWM%u, not dimmed\r\n",
+                       (unsigned)pin, (unsigned)ch);
+            }
+            return NULL;
+        }
+
+        return &hal_pwm_pins[i];
+    }
+    return NULL;
+}
+
+void hal_gpio_write_duty(hal_gpio_pin_t gpio_pin, uint8_t value,
+                         uint8_t duty_pct) {
+    const hal_pwm_pin_t *pwm = duty_pct < 100 ? hal_pwm_for_pin(gpio_pin) : NULL;
+
+    if (pwm == NULL) {
+        /* Full level. Write the level before handing the pin back to GPIO
+         * so leaving PWM never glitches through the opposite level. */
+        hal_gpio_write(gpio_pin, value);
+        for (uint8_t ch = 0; ch < HAL_PWM_CHANNELS; ch++) {
+            if (hal_pwm_owner[ch] == gpio_pin && hal_pwm_active[ch]) {
+                gpio_set_func((GPIO_PinTypeDef)gpio_pin, AS_GPIO);
+                pwm_stop((pwm_id)ch);
+                hal_pwm_active[ch] = 0;
+            }
+        }
+        return;
+    }
+
+    if (duty_pct == 0)
+        duty_pct = 1;
+    if (!hal_pwm_clock_ready) {
+        pwm_set_clk(CLOCK_SYS_CLOCK_HZ, HAL_PWM_CLOCK_HZ);
+        hal_pwm_clock_ready = 1;
+    }
+    /* Normal mode: high for cmp ticks, then low until the cycle ends. */
+    uint16_t high = (uint16_t)((HAL_PWM_CYCLE * duty_pct) / 100u);
+    if (!value)
+        high = (uint16_t)(HAL_PWM_CYCLE - high);
+    pwm_id id = (pwm_id)pwm->channel;
+    if (hal_pwm_high[pwm->channel] != high) {
+        /* Program only when the duty changes (claim or brightness write),
+         * not on every blink. */
+        if (hal_pwm_high[pwm->channel] == 0) {
+            pwm_set_mode(id, PWM_NORMAL_MODE);
+            pwm_set_phase(id, 0);
+        }
+        pwm_set_cycle_and_duty(id, HAL_PWM_CYCLE, high);
+        hal_pwm_high[pwm->channel] = high;
+    }
+    if (!hal_pwm_active[pwm->channel]) {
+        pwm_start(id);
+        gpio_set_func((GPIO_PinTypeDef)gpio_pin, pwm->func);
+        hal_pwm_owner[pwm->channel]  = gpio_pin;
+        hal_pwm_active[pwm->channel] = 1;
+    }
+    /* Retention bookkeeping keeps the logical level (unused without PM). */
+    gpio_config_t *config = find_gpio_config(gpio_pin);
+    if (config)
+        config->value = value ? 1 : 0;
+}
+
+#else
+void hal_gpio_write_duty(hal_gpio_pin_t gpio_pin, uint8_t value,
+                         uint8_t duty_pct) {
+    (void)duty_pct;
+    hal_gpio_write(gpio_pin, value);
+}
+
+#endif
+
 uint8_t hal_gpio_read(hal_gpio_pin_t gpio_pin) {
     return gpio_read((GPIO_PinTypeDef)gpio_pin) ? 1 : 0;
 }

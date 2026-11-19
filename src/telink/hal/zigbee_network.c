@@ -269,6 +269,17 @@ static void network_start_attempt(void) {
 
 static hal_network_status_change_callback_t network_status_change_callback =
     NULL;
+static hal_join_activity_callback_t join_activity_callback = NULL;
+
+/* Tells the network indicator what the radio is really doing. Only starts
+* the SDK accepted (RET_OK) and that did not already complete synchronously
+* are reported, plus the terminal steering outcome; SDK-internal backoff
+* retries are never inferred from failure callbacks. Reporting never
+* touches recovery state, so SDK rejoin/backoff ownership is unchanged. */
+static void notify_join_activity(hal_zigbee_join_activity_t activity) {
+    if (join_activity_callback != NULL)
+        join_activity_callback(activity);
+}
 
 static bool request_rejoin_with_backoff(bool parent_stale);
 
@@ -914,6 +925,8 @@ void telink_zigbee_hal_router_recovery_tick(void) {
             printf("Router: secure one-shot rejoin rejected: %u\r\n", status);
         } else {
             link_router_rejoin_started(now);
+            if (router_one_shot_active)  // not completed synchronously
+                notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING);
             printf("Router: coordinator unreachable; secure one-shot rejoin\r\n");
         }
         return;
@@ -1359,6 +1372,10 @@ static bool request_rejoin_with_backoff_impl(bool allow_joined,
     }
 
     printf("Starting network rejoin/backoff\r\n");
+    // Not completed synchronously. Reported while still joined too: the
+    // indicator blinks once the device actually reports not joined.
+    if (network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN)
+        notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING);
     return true;
 }
 
@@ -1452,6 +1469,7 @@ void bdb_commissioning_callback(u8 status, void *arg) {
 #ifdef BSEED_LINK_POLICY
         PRE_PARENT_FIRST_WHEN_REJOIN = TRUE;
 #endif
+        notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_IDLE);  // one-shot done
     }
 #endif
     switch (status) {
@@ -1476,6 +1494,7 @@ void bdb_commissioning_callback(u8 status, void *arg) {
         /* A Router can complete a secure rejoin while zb_isDeviceJoinedNwk()
          * never became false in the main loop. Do not miss this join epoch. */
         app_rearm_network_announcement();
+        notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_IDLE);  // attempt done
         if (network_recovery_state == TELINK_NETWORK_RECOVERY_REJOIN)
             firmware_health_increment(&firmware_health.rejoin_success);
         network_recovery_state      = TELINK_NETWORK_RECOVERY_IDLE;
@@ -1514,6 +1533,11 @@ void bdb_commissioning_callback(u8 status, void *arg) {
             network_steering_terminal_seen = true;
             network_steering_terminal_ms   = hal_millis();
         }
+
+        /* Steering reached a terminal outcome: pairing is no longer
+         * running, so the pairing blink stops until the next attempt. */
+        if (network_recovery_state == TELINK_NETWORK_RECOVERY_STEERING)
+            notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_IDLE);
         // These are terminal outcomes for the current BDB attempt. In
         // particular, NO_SCAN_RESPONSE on a factory-new device must return to
         // normal steering rather than pretending there is an old network to
@@ -1591,6 +1615,11 @@ void hal_register_on_network_status_change_callback(
     hal_network_status_change_callback_t callback) {
     network_status_change_callback = callback;
     notify_about_network_status_change();
+}
+
+void hal_register_on_join_activity_callback(
+    hal_join_activity_callback_t callback) {
+    join_activity_callback = callback;
 }
 
 void hal_zigbee_leave_network(void) {
@@ -1690,6 +1719,10 @@ void hal_zigbee_start_network_steering(void) {
             network_sdk_steering_started_once = false;
         }
         printf("Failed to start network steering, status: %d\r\n", res);
+    } else if (network_recovery_state == TELINK_NETWORK_RECOVERY_STEERING) {
+        /* Accepted and still running: a synchronous terminal callback has
+         * already left STEERING and must not be followed by a late PAIRING. */
+        notify_join_activity(HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING);
     }
 }
 

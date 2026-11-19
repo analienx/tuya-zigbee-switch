@@ -42,8 +42,17 @@ PY
 BIN="$OUT_DIR/forward.bin"
 OTA="$OUT_DIR/forward.ota"
 FROM_TUYA_OTA="$OUT_DIR/from_tuya.ota"
+# From r21 (a new identity) the Router uses the compact TC32 flags that
+# already fit the PM Router: -O2 overflowed the 212992-byte OTA slot by 594
+# bytes once LED dimming was added. -fno-jump-tables avoids the r21
+# flash-calibration boot defect; the non-PM matrix boots both roles in the
+# TC32 emulator before sealing.
 COMMON_ARGS=(
   BSEED_SEARCH_LEDS=1
+  LED_DIMMING=1
+  LED_DEFAULT_BRIGHTNESS=50
+  QUIET_JOIN_BLINK=1
+  OPT_LEVEL="-Os -fno-jump-tables"
   VERSION_STR="$SW_BUILD"
   FILE_VERSION="$FILE_VERSION_HEX"
   BSEED_BUILD_DATE="$RELEASE_DATE_OVERRIDE"

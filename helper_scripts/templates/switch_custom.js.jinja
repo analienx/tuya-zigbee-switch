@@ -11,7 +11,7 @@ const {
     commandsOnOff,
     commandsLevelCtrl,
 } = require("zigbee-herdsman-converters/lib/modernExtend");
-const {assertString} = require("zigbee-herdsman-converters/lib/utils");
+const {assertString, determineEndpoint} = require("zigbee-herdsman-converters/lib/utils");
 const reporting = require("zigbee-herdsman-converters/lib/reporting");
 const constants = require("zigbee-herdsman-converters/lib/constants");
 const Zcl = require('zigbee-herdsman').Zcl;
@@ -366,6 +366,46 @@ Changing this setting can immediately switch mains power. The setting is stored 
             valueMax: 255,
             entityCategory: "config",
         }),
+    ledBrightness: (name, endpointName) => {
+        // Basic 0xFF03 exists from PM r24/cli27 and non-PM r21/c19 on; older
+        // builds of the same models would answer UNSUPPORTED_ATTRIBUTE, so
+        // the setting is exposed per device, from its reported build.
+        const first = {"1.2.5": {r: 24, cli: 27}, "1.1.3": {r: 21, c: 19}};
+        const supported = device => {
+            if (!device) return true;  // definition listing without a device
+            const match = /^(1\.2\.5|1\.1\.3)-bseed(r|cli|c)(\d+)$/.exec(device.softwareBuildID || "");
+            const minimum = match && first[match[1]][match[2]];
+            return Boolean(minimum) && Number(match[3]) >= minimum;
+        };
+        const base = numeric({
+            name,
+            endpointNames: [endpointName],
+            cluster: "genBasic",
+            attribute: { ID: 0xff03, type: 0x20 }, // uint8
+            label: "LED brightness",
+            description: "Brightness of the indicator LEDs while lit, in percent.",
+            unit: "%",
+            valueMin: 1,
+            valueMax: 100,
+            valueStep: 1,
+            entityCategory: "config",
+        });
+        // A successful ZCL write does not prove the NV commit succeeded.
+        // Read the value actually in effect instead of publishing the numeric
+        // extension's optimistic value (also handles firmware clamping).
+        const toZigbee = base.toZigbee.map(converter => ({...converter,
+            convertSet: async (entity, key, value, meta) => {
+                await converter.convertSet(entity, key, value, meta);
+                const response = await determineEndpoint(entity, meta, "genBasic").read("genBasic", [0xff03]);
+                const actual = response[0xff03];
+                if (!Number.isInteger(actual) || actual < 1 || actual > 100)
+                    throw new Error("LED brightness readback is missing or invalid");
+                return {state: {[key]: actual}};
+            },
+        }));
+        return {...base, toZigbee, exposes: [(device, options) => supported(device) ?
+            base.exposes.flatMap(e => typeof e === "function" ? e(device, options) : [e]) : []]};
+    },
     deviceConfig: (name, endpointName) =>
         withExposeLabel(text({
             name,
@@ -613,6 +653,9 @@ const definitions = [
             {% set first_endpoint = device.switchNames[0] if device.switchNames else (device.relayNames[0] if device.relayNames else (device.coverSwitchNames[0] if device.coverSwitchNames else device.coverNames[0])) %}
             romasku.deviceConfig("device_config", "{{first_endpoint}}"),
             romasku.multiPressResetCount("multi_press_reset_count", "{{first_endpoint}}"),
+            {% if device.led_dimming %}
+            romasku.ledBrightness("led_brightness", "{{first_endpoint}}"),
+            {% endif %}
             {% if device.has_dedicated_net_led %}
             romasku.networkIndicator("network_led", "{{first_endpoint}}"),
             {% endif%}
