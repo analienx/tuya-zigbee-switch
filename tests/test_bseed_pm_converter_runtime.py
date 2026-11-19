@@ -74,7 +74,8 @@ for (const property of ['power', 'current', 'voltage', 'energy']) {
     assert.ok(!exposed(nonpm, '1.1.3-bseedr21').some(e => e.property === property));
 }
 // LED brightness only for builds that have Basic 0xFF03.
-const led = (def, build) => exposed(def, build).some(e => e.property === 'led_brightness');
+// Endpoint-scoped: the property carries the endpoint suffix, the name does not.
+const led = (def, build) => exposed(def, build).some(e => e.name === 'led_brightness');
 for (const build of ['1.2.5-bseedr24', '1.2.5-bseedcli27', '1.2.5-bseedr30'])
     assert.ok(led(pm, build), build);
 for (const build of ['1.2.5-bseedr23', '1.2.5-bseedcli26', '1.2.5-bseedv8u4', '', undefined])

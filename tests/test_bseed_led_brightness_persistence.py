@@ -124,7 +124,8 @@ def test_brightness_is_applied_only_once_stored_and_survives_reboot(tmp_path):
 def test_builds_without_dimming_register_no_brightness_attribute():
     basic = (ROOT / 'src/zigbee/basic_cluster.c').read_text()
     setup = basic.split('SETUP_ATTR(attr_count, ZCL_ATTR_BASIC_LED_BRIGHTNESS', 1)[0]
-    assert setup.rstrip().endswith('#ifdef LED_DIMMING')
+    # The registration sits inside an open #ifdef LED_DIMMING block.
+    assert setup.rindex('#ifdef LED_DIMMING') > setup.rindex('#endif')
     gpio = (ROOT / 'src/telink/hal/gpio.c').read_text()
     assert '#ifdef LED_DIMMING\n#if PM_ENABLE\n#error' in gpio
     makefile = (ROOT / 'src/telink/Makefile').read_text()
