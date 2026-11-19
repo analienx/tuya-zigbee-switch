@@ -91,8 +91,6 @@ def stock_client_conversion(data):
         raise ValueError('stock_client_conversion requires native_image and native_sha256')
     if data.get('preflash_build') not in (None, ''):
         raise ValueError('Stock firmware has no custom build; do not pin a preflash_build')
-    if not data.get('join_via'):
-        raise ValueError('stock_client_conversion changes role and requires a verified join_via Router')
     return True
 
 
@@ -135,7 +133,7 @@ def load_profile(path):
     if preserve_state(data):
         relay_endpoints(data)
         post_ota_configure(data)
-    join_total_seconds(data)
+    join_total_seconds(data)  # also validates join_mode
     if (data.get('force_test_transition') is True and data.get('non_pm') is True and
             data.get('device') == 'BedroomSocketCabinetRight' and
             data.get('ieee') == '0xa4c13824a7005afb'):
@@ -152,7 +150,7 @@ def load_profile(path):
 
 
 STATE_SNAPSHOT = 'DEVICE_STATE_SNAPSHOT.json'
-DEFAULT_JOIN_TOTAL_SECONDS = 2100  # firmware boot + both orphaned-steering rescues
+from bseed_join_policy import DEFAULT_TOTAL_SECONDS as DEFAULT_JOIN_TOTAL_SECONDS
 
 
 def _optional_boolean(profile, key):
@@ -194,12 +192,63 @@ def post_ota_configure(profile):
 
 
 def join_total_seconds(profile):
+    """Whole-campaign permit-join time. Network-wide windows default to, and
+    may not exceed, MAX_NETWORK_WIDE_SECONDS; a larger value is refused when
+    the profile loads instead of being cut silently when the window opens."""
+    from bseed_join_policy import (DEFAULT_WINDOW_SECONDS, MAX_NETWORK_WIDE_SECONDS,
+                                   MAX_SCOPED_TOTAL_SECONDS, MIN_WINDOW_SECONDS)
+    network_wide = join_mode(profile, strict=False) == 'network-wide'
     value = profile.get('join_total_seconds', DEFAULT_JOIN_TOTAL_SECONDS)
-    if not isinstance(value, int) or isinstance(value, bool) or not 30 <= value <= 2700:
-        raise ValueError('join_total_seconds must be an integer 30..2700')
-    if value < int(profile.get('join_seconds', 120)):
+    if (not isinstance(value, int) or isinstance(value, bool) or
+            not MIN_WINDOW_SECONDS <= value <= MAX_SCOPED_TOTAL_SECONDS):
+        raise ValueError('join_total_seconds must be an integer %d..%d'
+                         % (MIN_WINDOW_SECONDS, MAX_SCOPED_TOTAL_SECONDS))
+    if value < int(profile.get('join_seconds', DEFAULT_WINDOW_SECONDS)):
         raise ValueError('join_total_seconds must cover at least one join_seconds window')
+    if network_wide and value > MAX_NETWORK_WIDE_SECONDS:
+        raise ValueError('join_total_seconds may be at most %d for a network-wide window'
+                         % MAX_NETWORK_WIDE_SECONDS)
     return value
+
+
+JOIN_MODES = ('network-wide', 'scoped')
+
+
+def join_mode(profile, strict=True):
+    """How the post-OTA rejoin window is opened.
+
+    Only a role migration (preflash_role != postflash_role) needs a fresh
+    association and therefore a permit-join window at all; a same-role
+    update rejoins with its retained key, so it has no join mode and may not
+    request one.
+
+    network-wide (default for role migrations): coordinator and every Router
+    permit joining until one deadline, at most the rejoin tool's network-wide
+    budget, closing at once on a foreign join. Owner experience 2026-11-18:
+    windows scoped to one parent Router never got WindowLeft or CabinetL
+    back; opening the whole network did. scoped: only the Router named by
+    join_via permits joining (explicit opt-in).
+    """
+    if profile.get('preflash_role') == profile.get('postflash_role'):
+        if profile.get('join_mode') is not None:
+            raise ValueError('join_mode is only for a role migration that needs a fresh association')
+        return None
+    # A profile written for the old contract (join_via, no join_mode) meant
+    # "scoped through this Router", which the owner no longer wants. Never
+    # widen it silently and never keep it scoped silently: opening a window
+    # needs an explicit choice (strict). Loading it for other modes (metadata,
+    # postflash) still works, budgeted like a scoped profile.
+    if profile.get('join_via') and profile.get('join_mode') is None:
+        if strict:
+            raise ValueError('Profile names join_via but no join_mode: set join_mode to '
+                             '"network-wide" (owner default) or "scoped"')
+        return 'scoped'
+    mode = profile.get('join_mode', 'network-wide')
+    if mode not in JOIN_MODES:
+        raise ValueError('join_mode must be one of %s' % ', '.join(JOIN_MODES))
+    if mode == 'scoped' and not profile.get('join_via'):
+        raise ValueError('join_mode scoped requires a verified Router name: join_via')
+    return mode
 
 
 def state_snapshot_cmd(profile, evidence):
@@ -404,15 +453,19 @@ def runner_args(profile, mode, *, confirm_unloaded=False, relay_off_record=None)
 
 
 def rejoin_cmd(profile, confirmation, evidence_path):
+    from bseed_join_policy import DEFAULT_WINDOW_SECONDS
     if profile['preflash_role'] == profile['postflash_role']:
-        raise ValueError('Scoped rejoin is only for an explicit cross-role OTA')
-    if not profile.get('join_via'):
-        raise ValueError('Cross-role rejoin requires verified scoped Router name: join_via')
+        raise ValueError('Rejoin window is only for an explicit cross-role OTA')
+    total = join_total_seconds(profile)
+    if join_mode(profile) == 'scoped':
+        via = ['--permit-via', profile['join_via']]
+    else:
+        via = ['--network-wide', '--from-role', profile['preflash_role']]
     return [sys.executable, '-u', str(ROOT/'helper_scripts/bseed_z2m_rejoin_window.py'),
             '--target', profile['device'], '--ieee', profile['ieee'],
-            '--confirm-ieee', confirmation, '--permit-via', profile['join_via'],
-            '--seconds', str(profile.get('join_seconds', 120)),
-            '--total-seconds', str(join_total_seconds(profile)),
+            '--confirm-ieee', confirmation, *via,
+            '--seconds', str(profile.get('join_seconds', DEFAULT_WINDOW_SECONDS)),
+            '--total-seconds', str(total),
             '--expect-build', profile['postflash_build'], '--expect-role', profile['postflash_role'],
             '--mqtt-config', profile['mqtt_config'], '--broker', profile['broker'],
             '--campaign-lock', str(Path(profile['workdir'])/'ACTIVE_LOCK.json'),
@@ -709,7 +762,7 @@ def main():
                     print('TELEMETRY_GUARD_STAYS_ACTIVE', repr(error), flush=True)
                     raise SystemExit(3)
             return
-        # Resolve the scoped recovery route *before* submitting a firmware image.
+        # Resolve the rejoin route *before* submitting a firmware image.
         planned_join = rejoin_cmd(profile, args.confirm_ieee, work / ('rejoin_' + uuid.uuid4().hex + '.json'))
         if profile.get('require_pm'):
             if profile['postflash_role'] == 'EndDevice':

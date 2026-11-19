@@ -30,8 +30,11 @@ def base_profile(tmp_path, **changes):
            'index_url': 'http://example.invalid/index.json',
            'index_output': str(tmp_path / 'index.json'), 'template_index': str(template),
            'postflash_role': 'EndDevice', 'postflash_build': 'expected-client',
-           'join_via': 'KnownRouter', 'preserve_device_state': True}
+           'join_via': 'KnownRouter', 'join_mode': 'network-wide',
+           'preserve_device_state': True}
     cfg.update(changes)
+    if cfg['preflash_role'] == cfg['postflash_role']:
+        cfg.pop('join_mode', None)  # same-role updates have no join window
     return cfg
 
 
@@ -81,7 +84,10 @@ def test_transition_snapshots_before_flash_and_restores_before_postflash(tmp_pat
     assert restore[restore.index('--confirm-ieee') + 1] == cfg['ieee']
     assert '--configure' not in restore  # Router -> Client: PM provisioning owns reporting
     join = calls[2][1]
-    assert join[join.index('--total-seconds') + 1] == str(campaign.DEFAULT_JOIN_TOTAL_SECONDS)
+    from bseed_z2m_rejoin_window import MAX_NETWORK_WIDE_SECONDS
+    assert '--network-wide' in join and '--permit-via' not in join  # owner rule: join from all
+    assert join[join.index('--total-seconds') + 1] == str(
+        min(campaign.DEFAULT_JOIN_TOTAL_SECONDS, MAX_NETWORK_WIDE_SECONDS))
 
 
 def test_client_to_router_transition_reconfigures_by_default(tmp_path, monkeypatch):

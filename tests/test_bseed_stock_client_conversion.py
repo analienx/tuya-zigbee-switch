@@ -32,7 +32,7 @@ def profile(tmp_path, **changes):
         'expect_relay': 'OFF', 'relay_get_key': 'state',
         'index_url': 'http://example.invalid/i.json', 'index_output': str(tmp_path / 'index.json'),
         'template_index': str(tmp_path / 'template.json'),
-        'postflash_build': '1.2.5-bseedcli26', 'join_via': 'KnownRouter',
+        'postflash_build': '1.2.5-bseedcli26', 'join_via': 'KnownRouter', 'join_mode': 'scoped',
         'block_bytes': 48, 'response_delay_ms': 1200,
     }
     data.update(changes)
@@ -58,7 +58,7 @@ def test_stock_client_profile_loads_with_physical_proof_and_48_byte_blocks(tmp_p
     ({'require_pm': False}, 'require_pm'),
     ({'native_sha256': None}, 'native_image and native_sha256'),
     ({'preflash_build': '1.0.13'}, 'preflash_build'),
-    ({'join_via': None}, 'join_via'),
+    ({'join_mode': 'scoped', 'join_via': None}, 'join_via'),
     ({'force_test_transition': True}, 'non-FORCE'),
 ])
 def test_stock_client_profile_rejects_any_other_shape(tmp_path, changes, match):

@@ -70,7 +70,9 @@ def test_every_route_builds_a_profile_the_campaign_accepts(tmp_path, row, to, ki
     assert route['kind'] == kind
     assert relay.validate(loaded) is True and loaded['expect_relay'] == 'OFF'
     assert loaded['block_bytes'] == 48 and loaded['response_delay_ms'] >= 1200
-    assert (loaded.get('join_via') is not None) == (route['source'] != route['target'])
+    if route['source'] != route['target']:
+        assert campaign.join_mode(loaded) == 'network-wide'
+        assert '--network-wide' in campaign.rejoin_cmd(loaded, loaded['ieee'], tmp_path / 'e.json')
     assert loaded['preserve_device_state'] is True
 
 
@@ -117,8 +119,9 @@ def test_join_via_is_strongest_router_and_children_are_reported():
     assert mig.choose_join_via(neighbors, devices, IEEE) == ('Custom', 150, ['Dimmer'])
     neighbors[0]['lqi'] = 200
     assert mig.choose_join_via(neighbors, devices, IEEE)[0] == 'Stock'
-    with pytest.raises(mig.Refused, match='No Router'):
-        mig.choose_join_via([dict(eui64='0x3', lqi=9, relationship=1)], devices, IEEE)
+    # No Router neighbour: the network-wide rejoin needs none, and the
+    # children that will have to re-parent are still reported.
+    assert mig.choose_join_via([dict(eui64='0x3', lqi=9, relationship=1)], devices, IEEE)[:2] == (None, None)
 
 
 def test_resume_only_while_progress_increases_and_budget_remains():
