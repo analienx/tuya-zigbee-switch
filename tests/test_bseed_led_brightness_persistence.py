@@ -18,6 +18,7 @@ CODE = r'''
 #include "zigbee/basic_cluster.c"
 
 uint8_t g_multi_press_reset_count;
+bool g_machine_mode;
 static uint8_t stored_brightness;
 static bool brightness_present, fail_writes;
 static unsigned brightness_writes, refreshes, basic_writes, notifications;

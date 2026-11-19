@@ -535,6 +535,7 @@ void network_indicator_on_network_status_change(
     if (new_status == HAL_ZIGBEE_NETWORK_JOINED) {
         if (network_indicator.joined)
             return;
+
         if (battery.pin != HAL_INVALID_PIN)
             network_indicator.manual_state_when_connected = 0;
         network_indicator_connected(&network_indicator);
