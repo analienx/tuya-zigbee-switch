@@ -199,7 +199,7 @@ int main(void) {
 def test_join_blink_policy_and_brightness(tmp_path):
     binary = tmp_path / 'search-leds'
     subprocess.run(
-        ['cc', '-std=c99', '-Wall', '-Werror', '-DHAL_STUB', '-DLED_DIMMING=1',
+        ['cc', '-std=c99', '-Wall', '-Werror', '-DHAL_STUB', '-DLED_DIMMING=1', '-DQUIET_JOIN_BLINK',
          '-I', str(ROOT / 'src'), '-x', 'c', '-', '-o', str(binary),
          '-lpthread'],
         input=CODE, text=True, check=True,
@@ -231,6 +231,13 @@ def test_search_leds_are_bseed_only():
                for name in ('pm', 'nonpm', 'ts0726')}
     assert 'LED_DIMMING=1' in targets['pm'] and 'LED_DIMMING=1' in targets['nonpm']
     assert 'LED_DIMMING' not in targets['ts0726']   # TS0726 keeps plain LEDs
+    # Quiet join blink: BSEED sockets only for now (owner, 2026-11-19).
+    assert 'ifeq ($(strip $(QUIET_JOIN_BLINK)),1)' in makefile
+    assert 'QUIET_JOIN_BLINK=1' in targets['pm'] and 'QUIET_JOIN_BLINK=1' in targets['nonpm']
+    assert 'QUIET_JOIN_BLINK' not in targets['ts0726']
+    for script in ('build_bseed_ts011f_pm_v8.sh', 'build_bseed_ts011f_nonpm_router.sh'):
+        common = (ROOT / 'make_scripts' / script).read_text().split('COMMON_ARGS=(', 1)[1]
+        assert 'QUIET_JOIN_BLINK=1' in common.split('\n)', 1)[0], script
 
 
 def test_join_activity_is_reported_where_the_radio_acts():
@@ -248,3 +255,60 @@ def test_join_activity_is_reported_where_the_radio_acts():
     assert 'notify_join_activity' not in failure
     parser = (ROOT / 'src/device_config/config_parser.c').read_text()
     assert 'hal_register_on_join_activity_callback(network_indicator_on_join_activity)' in parser
+
+
+LEGACY_CODE = r'''
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include "stub/hal/tasks.c"
+#include "base_components/led.c"
+#include "base_components/network_indicator.c"
+
+bool g_machine_mode;
+static uint32_t now_ms;
+uint32_t hal_millis(void) { return now_ms; }
+static uint8_t pin_level[4];
+void hal_gpio_set(hal_gpio_pin_t pin) { pin_level[pin] = 1; }
+void hal_gpio_clear(hal_gpio_pin_t pin) { pin_level[pin] = 0; }
+
+static void step(uint32_t ms) {
+    for (uint32_t i = 0; i < ms; i += 10) { now_ms += 10; stub_tasks_poll(); }
+}
+
+int main(void) {
+    led_t status = { .pin = 1, .on_high = 1 };
+    led_t relay  = { .pin = 2, .on_high = 1 };
+    network_indicator_t ind = {
+        .leds = { &status, NULL, NULL, NULL },
+        .search_leds = { &relay, NULL, NULL, NULL },
+        .has_dedicated_led = true,
+        .manual_state_when_connected = 1,
+    };
+    /* Without QUIET_JOIN_BLINK: blink in phase for as long as not joined. */
+    network_indicator_not_connected(&ind);
+    for (int i = 0; i < 20; i++) {
+        uint8_t before = pin_level[1];
+        step(500);
+        assert(pin_level[1] != before && pin_level[1] == pin_level[2]);
+    }
+    step(10u * 60u * 1000u);
+    assert(status.blink_times_left == LED_BLINK_FOREVER);
+    /* Join activity reports change nothing here. */
+    network_indicator_join_activity(&ind, HAL_ZIGBEE_JOIN_ACTIVITY_IDLE);
+    assert(status.blink_times_left == LED_BLINK_FOREVER);
+    network_indicator_connected(&ind);
+    assert(status.blink_times_left == 0 && relay.blink_times_left == 0 && pin_level[1] == 1);
+    return 0;
+}
+'''
+
+
+def test_other_boards_keep_blinking_until_joined(tmp_path):
+    binary = tmp_path / 'legacy-leds'
+    subprocess.run(
+        ['cc', '-std=c99', '-Wall', '-Werror', '-DHAL_STUB',
+         '-I', str(ROOT / 'src'), '-x', 'c', '-', '-o', str(binary), '-lpthread'],
+        input=LEGACY_CODE, text=True, check=True,
+    )
+    subprocess.run([str(binary)], check=True, timeout=30)

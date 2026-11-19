@@ -7,6 +7,15 @@ static void stop_set(led_t *const *set) {
         led_stop(set[i]);
 }
 
+static bool all_blinking_forever(led_t *const *set) {
+    for (int i = 0; i < 4 && set[i] != NULL; i++) {
+        if (set[i]->blink_times_left != LED_BLINK_FOREVER)
+            return false;
+    }
+    return true;
+}
+
+#ifdef QUIET_JOIN_BLINK
 static void cancel_rejoin_stop(network_indicator_t *indicator) {
     if (indicator->rejoin_stop_task.handler != NULL)
         hal_tasks_unschedule(&indicator->rejoin_stop_task);
@@ -50,14 +59,6 @@ static void blink_set(network_indicator_t *indicator) {
             led_blink(sets[s][i], on_ms, off_ms, LED_BLINK_FOREVER);
 }
 
-static bool all_blinking_forever(led_t *const *set) {
-    for (int i = 0; i < 4 && set[i] != NULL; i++) {
-        if (set[i]->blink_times_left != LED_BLINK_FOREVER)
-            return false;
-    }
-    return true;
-}
-
 /* A relay sync outside this module (e.g. a button press on a board whose
  * relay LEDs are its network LEDs) can cancel one LED's blink. Repair the
  * set in phase, without extending a running rejoin blink. */
@@ -74,8 +75,12 @@ static void blink_start(network_indicator_t *indicator,
     blink_set(indicator);
 }
 
+#endif
+
 void network_indicator_connected(network_indicator_t *indicator) {
+#ifdef QUIET_JOIN_BLINK
     cancel_rejoin_stop(indicator);
+#endif
     indicator->blink          = NETWORK_INDICATOR_QUIET;
     indicator->rejoin_blinked = false;
     network_indicator_from_manual_state(indicator);
@@ -108,6 +113,7 @@ void network_indicator_commission_success(network_indicator_t *indicator) {
     }
 }
 
+#ifdef QUIET_JOIN_BLINK
 void network_indicator_not_connected(network_indicator_t *indicator) {
     if (indicator->blink != NETWORK_INDICATOR_QUIET) {
         blink_resync(indicator);  // a join blink owns the LEDs
@@ -160,3 +166,39 @@ void network_indicator_join_activity(network_indicator_t *indicator,
         break;
     }
 }
+
+#else
+/* Original behavior for boards without QUIET_JOIN_BLINK: every network LED
+ * (and search LED) blinks for as long as the device is not joined; join
+ * activity reports are not used. */
+void network_indicator_not_connected(network_indicator_t *indicator) {
+    led_t **led = indicator->leds;
+
+    if (indicator->search_leds[0] != NULL) {
+        // Restart the whole set together so every LED flashes in phase.
+        if (!all_blinking_forever(indicator->leds) ||
+            !all_blinking_forever(indicator->search_leds)) {
+            led_t *const *sets[2] = { indicator->leds, indicator->search_leds };
+            for (int s = 0; s < 2; s++)
+                stop_set(sets[s]);
+            for (int s = 0; s < 2; s++)
+                for (int i = 0; i < 4 && sets[s][i] != NULL; i++)
+                    led_blink(sets[s][i], 500, 500, LED_BLINK_FOREVER);
+        }
+        return;
+    }
+
+    while (*led != NULL && (led - indicator->leds) < 4) {
+        if ((*led)->blink_times_left != LED_BLINK_FOREVER) {
+            led_blink(*led, 500, 500, LED_BLINK_FOREVER);
+        }
+        led++;
+    }
+}
+
+void network_indicator_join_activity(network_indicator_t *indicator,
+                                     hal_zigbee_join_activity_t activity) {
+    (void)indicator;
+    (void)activity;
+}
+#endif

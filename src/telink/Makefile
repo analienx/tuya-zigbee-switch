@@ -125,11 +125,19 @@ DEVICE_DEFS += -DBSEED_LINK_POLICY
 endif
 
 # BSEED sockets: relay indicator LEDs flash with the status LED during a join
-# blink. The join blink policy itself (pairing only while steering runs,
-# rejoin briefly; owner request 2026-11-19) applies to every board.
+# blink. Explicit build input so other boards keep their indicator behavior.
 BSEED_SEARCH_LEDS ?=
 ifeq ($(strip $(BSEED_SEARCH_LEDS)),1)
 DEVICE_DEFS += -DBSEED_SEARCH_LEDS
+endif
+
+# Quiet join blink (owner request 2026-11-19, BSEED sockets for now): blink
+# fast only while pairing (steering) runs, slowly for a few minutes when a
+# rejoin starts, otherwise stay quiet. Without it a board blinks for as long
+# as it is not joined.
+QUIET_JOIN_BLINK ?=
+ifeq ($(strip $(QUIET_JOIN_BLINK)),1)
+DEVICE_DEFS += -DQUIET_JOIN_BLINK
 endif
 
 # LED dimming: Telink hardware PWM plus the Basic 0xFF03 brightness

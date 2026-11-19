@@ -7,7 +7,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Blink policy while not joined (owner request 2026-11-19), every board:
+/* QUIET_JOIN_BLINK builds (BSEED sockets, owner request 2026-11-19); every
+ * other board keeps the original "blink for as long as not joined":
  * - pairing (factory-new steering): fast blink for exactly as long as the
  *   radio is steering; it stops when steering ends and restarts with the
  *   next steering attempt;
