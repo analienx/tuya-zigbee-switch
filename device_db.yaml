@@ -3012,6 +3012,7 @@ OUTLET_BSEED_PM_TS011F:
   mcu: TLSR8258
   config_str: b28wrpvx;TS011F-BS-PM;LC3;SB5u;RD2;IB4;M;
   alt_config_str: null
+  led_dimming: true
   old_manufacturer_names: null
   old_zb_models: null
   stock_manufacturer_id: 4417
@@ -3103,6 +3104,7 @@ OUTLET_BSEED_TS011F:
   mcu: TLSR8258
   config_str: o1jzcxou;TS011F-BS;LC2;SB4u;RC3;ID2;M;
   alt_config_str: null
+  led_dimming: true
   old_manufacturer_names: null
   old_zb_models: null
   stock_manufacturer_id: 4417

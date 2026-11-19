@@ -19,7 +19,7 @@ CODE = r'''
 uint8_t g_multi_press_reset_count;
 static uint8_t stored_brightness;
 static bool brightness_present, fail_writes;
-static unsigned brightness_writes, refreshes;
+static unsigned brightness_writes, refreshes, basic_writes, notifications;
 hal_nvm_status_t hal_nvm_read(uint8_t item, uint16_t size, uint8_t *data) {
     if (item == NV_ITEM_LED_BRIGHTNESS && brightness_present && size == 1) {
         *data = stored_brightness;
@@ -28,6 +28,8 @@ hal_nvm_status_t hal_nvm_read(uint8_t item, uint16_t size, uint8_t *data) {
     return HAL_NVM_NOT_FOUND;
 }
 hal_nvm_status_t hal_nvm_write(uint8_t item, uint16_t size, uint8_t *data) {
+    if (item == NV_ITEM_BASIC_CLUSTER_DATA)
+        basic_writes++;
     if (item != NV_ITEM_LED_BRIGHTNESS)
         return HAL_NVM_SUCCESS;
     brightness_writes++;
@@ -40,7 +42,9 @@ hal_nvm_status_t hal_nvm_write(uint8_t item, uint16_t size, uint8_t *data) {
 }
 hal_nvm_status_t hal_nvm_delete(uint8_t item) { (void)item; return HAL_NVM_SUCCESS; }
 void hal_zigbee_notify_attribute_changed(uint8_t ep, uint16_t cl, uint16_t at) {
-    (void)ep; (void)cl; (void)at;
+    (void)ep;
+    assert(cl == ZCL_CLUSTER_BASIC && at == ZCL_ATTR_BASIC_LED_BRIGHTNESS);
+    notifications++;
 }
 void hal_tasks_init(hal_task_t *t) { (void)t; }
 void hal_tasks_schedule(hal_task_t *t, uint32_t ms) { (void)t; (void)ms; }
@@ -66,12 +70,15 @@ int main(void) {
     write_brightness(30);
     assert(brightness_writes == 1 && stored_brightness == 30);
     assert(led_get_brightness() == 30 && led_brightness_attr == 30 && refreshes >= 2);
+    /* Its own NV record only; an unchanged accepted value is not reported. */
+    assert(basic_writes == 0 && notifications == 0);
 
     /* Failed NV write: nothing changes, readback is the value in effect. */
     fail_writes = true;
     write_brightness(80);
     assert(brightness_writes == 2);
     assert(led_get_brightness() == 30 && led_brightness_attr == 30 && stored_brightness == 30);
+    assert(notifications == 1);   /* the reverted value is reported */
     fail_writes = false;
 
     /* Out-of-range writes are clamped and stored clamped. */
@@ -79,6 +86,7 @@ int main(void) {
     assert(stored_brightness == LED_MIN_BRIGHTNESS && led_brightness_attr == LED_MIN_BRIGHTNESS);
     write_brightness(250);
     assert(stored_brightness == LED_MAX_BRIGHTNESS && led_get_brightness() == LED_MAX_BRIGHTNESS);
+    assert(notifications == 3);   /* both clamped values are reported */
 
     /* Rewriting the value in effect needs no NV write. */
     unsigned writes = brightness_writes;
@@ -122,7 +130,11 @@ def test_builds_without_dimming_register_no_brightness_attribute():
     makefile = (ROOT / 'src/telink/Makefile').read_text()
     assert '-DLED_DIMMING=1' in makefile
     gen = (ROOT / 'helper_scripts/make_z2m_custom_converters.py').read_text()
-    assert '"led_dimming": db_key in {"OUTLET_BSEED_PM_TS011F", "OUTLET_BSEED_TS011F"}' in gen
+    assert '"led_dimming": bool(device.get("led_dimming", False))' in gen
+    import yaml
+    db = yaml.safe_load((ROOT / 'device_db.yaml').read_text(encoding='utf-8'))
+    assert sorted(k for k, v in db.items() if isinstance(v, dict) and v.get('led_dimming')) == [
+        'OUTLET_BSEED_PM_TS011F', 'OUTLET_BSEED_TS011F']
     for path in ('zigbee2mqtt/converters/switch_custom.js',
                  'zigbee2mqtt/converters_v1/switch_custom.js'):
         assert (ROOT / path).read_text().count('romasku.ledBrightness("led_brightness"') == 2

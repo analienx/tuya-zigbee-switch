@@ -7,15 +7,19 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Blink policy while not joined (owner request 2026-11-19):
+/* Blink policy while not joined (owner request 2026-11-19), every board:
  * - pairing (factory-new steering): fast blink for exactly as long as the
  *   radio is steering; it stops when steering ends and restarts with the
  *   next steering attempt;
  * - network lost (commissioned device rejoining): slow blink for a few
- *   minutes when a rejoin attempt starts, then quiet; a later attempt blinks
- *   again only after a quiet gap, so a long outage is not a constant flash.
+ *   minutes when a rejoin attempt the platform can see starts, then quiet;
+ *   a later reported attempt blinks again only after a quiet gap. On Telink
+ *   the SDK runs its rejoin backoff retries internally, so a new blink comes
+ *   with each rejoin sequence the firmware starts (boot, rescue reboot,
+ *   Router one-shot), not with every SDK retry.
  * Otherwise a disconnected device stays quiet: the relay LED keeps showing
- * the relay state and a dedicated status LED is off. */
+ * the relay state and a dedicated status LED is off. A relay sync that
+ * interrupts a blink is repaired at the next status or activity report. */
 #define NETWORK_INDICATOR_PAIRING_ON_MS       200
 #define NETWORK_INDICATOR_PAIRING_OFF_MS      200
 #define NETWORK_INDICATOR_REJOIN_ON_MS        1000
@@ -41,7 +45,8 @@ typedef struct {
     bool                      rejoin_blinked;  // this outage
     uint32_t                  rejoin_blink_started_ms;
     hal_task_t                rejoin_stop_task;
-    // Called when a join blink ends, so the owner re-syncs relay LEDs.
+    // Called when a join blink ends: the owner re-syncs relay LEDs and, if
+    // still joined (a rejoin started while joined), the status LED.
     void (*on_quiet)(void);
 } network_indicator_t;
 

@@ -273,10 +273,14 @@ static uint32_t silabs_router_last_rejoin_ms;
  * neighboring children, no insecure fallback, BDB steering, permit-join or
  * factory reset. Join activity is reported only when the stack accepted the
  * request. */
+static bool silabs_router_channel_valid(uint8_t channel) {
+    return channel >= 11u && channel <= 26u;
+}
+
 static bool silabs_router_start_secure_rejoin(void) {
     uint8_t channel = sl_zigbee_get_radio_channel();
 
-    if (channel < 11u || channel > 26u) {
+    if (!silabs_router_channel_valid(channel)) {
         printf("Silabs Router: invalid current channel, no rejoin\n");
         return false;
     }
@@ -471,6 +475,10 @@ void hal_zigbee_start_network_steering() {
             SILABS_ROUTER_REJOIN_GAP_MS)
             return;
 
+        // As before the refactor: an invalid channel does not stamp the
+        // retry gap, so the next call can try again.
+        if (!silabs_router_channel_valid(sl_zigbee_get_radio_channel()))
+            return;
         silabs_router_last_rejoin_ms = hal_millis();
         (void)silabs_router_start_secure_rejoin();
         return;

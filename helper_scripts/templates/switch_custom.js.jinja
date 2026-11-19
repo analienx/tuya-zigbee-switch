@@ -366,8 +366,18 @@ Changing this setting can immediately switch mains power. The setting is stored 
             valueMax: 255,
             entityCategory: "config",
         }),
-    ledBrightness: (name, endpointName) =>
-        numeric({
+    ledBrightness: (name, endpointName) => {
+        // Basic 0xFF03 exists from PM r24/cli27 and non-PM r21/c19 on; older
+        // builds of the same models would answer UNSUPPORTED_ATTRIBUTE, so
+        // the setting is exposed per device, from its reported build.
+        const first = {"1.2.5": {r: 24, cli: 27}, "1.1.3": {r: 21, c: 19}};
+        const supported = device => {
+            if (!device) return true;  // definition listing without a device
+            const match = /^(1\.2\.5|1\.1\.3)-bseed(r|cli|c)(\d+)$/.exec(device.softwareBuildID || "");
+            const minimum = match && first[match[1]][match[2]];
+            return Boolean(minimum) && Number(match[3]) >= minimum;
+        };
+        const base = numeric({
             name,
             endpointNames: [endpointName],
             cluster: "genBasic",
@@ -379,7 +389,10 @@ Changing this setting can immediately switch mains power. The setting is stored 
             valueMax: 100,
             valueStep: 1,
             entityCategory: "config",
-        }),
+        });
+        return {...base, exposes: [(device, options) => supported(device) ?
+            base.exposes.flatMap(e => typeof e === "function" ? e(device, options) : [e]) : []]};
+    },
     deviceConfig: (name, endpointName) =>
         withExposeLabel(text({
             name,

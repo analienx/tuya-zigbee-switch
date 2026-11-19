@@ -96,6 +96,16 @@ int main(void) {
     /* The next steering attempt blinks again. */
     network_indicator_join_activity(&ind, HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING);
     assert_blinking(NETWORK_INDICATOR_PAIRING_ON_MS, 6);
+    /* A relay sync cancelled one LED's blink mid-attempt (button press on a
+     * board whose relay LEDs are its network LEDs): the next report repairs
+     * the set in phase. */
+    step(100);
+    led_on(&relay);
+    network_indicator_join_activity(&ind, HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING);
+    assert_blinking(NETWORK_INDICATOR_PAIRING_ON_MS, 4);
+    led_off(&status);
+    network_indicator_not_connected(&ind);
+    assert_blinking(NETWORK_INDICATOR_PAIRING_ON_MS, 4);
 
     /* Joined: status LED follows manual state, relay LED is released. */
     network_indicator_connected(&ind);
@@ -110,8 +120,10 @@ int main(void) {
     network_indicator_join_activity(&ind, HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING);
     assert(ind.blink == NETWORK_INDICATOR_REJOIN);
     assert_blinking(NETWORK_INDICATOR_REJOIN_ON_MS, 6);
-    /* Further attempts during the blink do not extend it. */
+    /* Further attempts during the blink do not extend it, but repair it. */
+    led_off(&relay);
     network_indicator_join_activity(&ind, HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING);
+    assert(relay.blink_times_left == LED_BLINK_FOREVER);
     step(NETWORK_INDICATOR_REJOIN_BLINK_MS - (now_ms - outage) + 20);
     assert(ind.blink == NETWORK_INDICATOR_QUIET && quiet_calls == 1);
     assert(pin_level[1] == 0);  /* status LED dark while disconnected */
@@ -202,12 +214,23 @@ def test_search_leds_are_bseed_only():
     assert '#ifdef BSEED_SEARCH_LEDS\n            else {' in parser
     assert '#ifdef BSEED_SEARCH_LEDS\n    // The network-search blink' in relay
     assert 'DEVICE_DEFS += -DBSEED_SEARCH_LEDS' in makefile
-    assert '-DLED_DIMMING=1 -DLED_DEFAULT_BRIGHTNESS=50' in makefile
+    # Dimming is its own build input, not implied by the search LEDs.
+    assert 'ifeq ($(strip $(LED_DIMMING)),1)' in makefile
+    assert 'DEVICE_DEFS += -DBSEED_SEARCH_LEDS\n' in makefile
     for script in ('build_bseed_ts011f_pm_v8.sh', 'build_bseed_mains_client.sh',
                    'build_bseed_ts011f_nonpm_router.sh'):
         build = (ROOT / 'make_scripts' / script).read_text()
         common = build.split('COMMON_ARGS=(', 1)[1].split('\n)', 1)[0]
         assert 'BSEED_SEARCH_LEDS=1' in common, script
+    for script in ('build_bseed_ts011f_pm_v8.sh', 'build_bseed_ts011f_nonpm_router.sh'):
+        common = (ROOT / 'make_scripts' / script).read_text().split('COMMON_ARGS=(', 1)[1]
+        common = common.split('\n)', 1)[0]
+        assert 'LED_DIMMING=1' in common and 'LED_DEFAULT_BRIGHTNESS=50' in common, script
+    client = (ROOT / 'make_scripts/build_bseed_mains_client.sh').read_text()
+    targets = {name: client.split('\n' + name + ')', 1)[1].split(';;', 1)[0]
+               for name in ('pm', 'nonpm', 'ts0726')}
+    assert 'LED_DIMMING=1' in targets['pm'] and 'LED_DIMMING=1' in targets['nonpm']
+    assert 'LED_DIMMING' not in targets['ts0726']   # TS0726 keeps plain LEDs
 
 
 def test_join_activity_is_reported_where_the_radio_acts():

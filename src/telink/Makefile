@@ -125,12 +125,21 @@ DEVICE_DEFS += -DBSEED_LINK_POLICY
 endif
 
 # BSEED sockets: relay indicator LEDs flash with the status LED during a join
-# blink, and LEDs default to 50% brightness (owner request 2026-11-19; the
-# Basic 0xFF03 attribute changes it at runtime). Explicit build input so other
-# boards keep their indicator behavior and full brightness.
+# blink. The join blink policy itself (pairing only while steering runs,
+# rejoin briefly; owner request 2026-11-19) applies to every board.
 BSEED_SEARCH_LEDS ?=
 ifeq ($(strip $(BSEED_SEARCH_LEDS)),1)
-DEVICE_DEFS += -DBSEED_SEARCH_LEDS -DLED_DIMMING=1 -DLED_DEFAULT_BRIGHTNESS=50
+DEVICE_DEFS += -DBSEED_SEARCH_LEDS
+endif
+
+# LED dimming: Telink hardware PWM plus the Basic 0xFF03 brightness
+# attribute. Explicit build input for boards whose LED pins have PWM channels
+# and that never sleep (PM_ENABLE with LED_DIMMING is a compile error).
+# LED_DEFAULT_BRIGHTNESS applies until the attribute is written.
+LED_DIMMING ?=
+LED_DEFAULT_BRIGHTNESS ?= 100
+ifeq ($(strip $(LED_DIMMING)),1)
+DEVICE_DEFS += -DLED_DIMMING=1 -DLED_DEFAULT_BRIGHTNESS=$(strip $(LED_DEFAULT_BRIGHTNESS))
 endif
 
 # Unified PM target options. They are explicit build inputs rather than global

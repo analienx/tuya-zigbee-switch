@@ -34,19 +34,44 @@ static void rejoin_stop_handler(void *arg) {
         blink_stop(indicator);
 }
 
-/* Restart the whole set together so every LED flashes in phase. */
-static void blink_start(network_indicator_t *indicator,
-                        network_indicator_blink_t mode, uint16_t on_ms,
-                        uint16_t off_ms) {
+static void blink_set(network_indicator_t *indicator) {
     led_t *const *sets[2] = { indicator->leds, indicator->search_leds };
+    bool          pairing = indicator->blink == NETWORK_INDICATOR_PAIRING;
+    uint16_t      on_ms   = pairing ? NETWORK_INDICATOR_PAIRING_ON_MS :
+                            NETWORK_INDICATOR_REJOIN_ON_MS;
+    uint16_t      off_ms  = pairing ? NETWORK_INDICATOR_PAIRING_OFF_MS :
+                            NETWORK_INDICATOR_REJOIN_OFF_MS;
 
-    cancel_rejoin_stop(indicator);
-    indicator->blink = mode;
+    // Restart the whole set together so every LED flashes in phase.
     for (int s = 0; s < 2; s++)
         stop_set(sets[s]);
     for (int s = 0; s < 2; s++)
         for (int i = 0; i < 4 && sets[s][i] != NULL; i++)
             led_blink(sets[s][i], on_ms, off_ms, LED_BLINK_FOREVER);
+}
+
+static bool all_blinking_forever(led_t *const *set) {
+    for (int i = 0; i < 4 && set[i] != NULL; i++) {
+        if (set[i]->blink_times_left != LED_BLINK_FOREVER)
+            return false;
+    }
+    return true;
+}
+
+/* A relay sync outside this module (e.g. a button press on a board whose
+ * relay LEDs are its network LEDs) can cancel one LED's blink. Repair the
+ * set in phase, without extending a running rejoin blink. */
+static void blink_resync(network_indicator_t *indicator) {
+    if (!all_blinking_forever(indicator->leds) ||
+        !all_blinking_forever(indicator->search_leds))
+        blink_set(indicator);
+}
+
+static void blink_start(network_indicator_t *indicator,
+                        network_indicator_blink_t mode) {
+    cancel_rejoin_stop(indicator);
+    indicator->blink = mode;
+    blink_set(indicator);
 }
 
 void network_indicator_connected(network_indicator_t *indicator) {
@@ -84,8 +109,10 @@ void network_indicator_commission_success(network_indicator_t *indicator) {
 }
 
 void network_indicator_not_connected(network_indicator_t *indicator) {
-    if (indicator->blink != NETWORK_INDICATOR_QUIET)
-        return;  // a join blink owns the LEDs
+    if (indicator->blink != NETWORK_INDICATOR_QUIET) {
+        blink_resync(indicator);  // a join blink owns the LEDs
+        return;
+    }
 
     // Quiet while disconnected: a dedicated status LED is dark. Relay
     // indicator LEDs are left to the relay state.
@@ -98,17 +125,19 @@ void network_indicator_join_activity(network_indicator_t *indicator,
     switch (activity) {
     case HAL_ZIGBEE_JOIN_ACTIVITY_PAIRING:
         if (indicator->blink != NETWORK_INDICATOR_PAIRING)
-            blink_start(indicator, NETWORK_INDICATOR_PAIRING,
-                        NETWORK_INDICATOR_PAIRING_ON_MS,
-                        NETWORK_INDICATOR_PAIRING_OFF_MS);
+            blink_start(indicator, NETWORK_INDICATOR_PAIRING);
+        else
+            blink_resync(indicator);
         break;
     case HAL_ZIGBEE_JOIN_ACTIVITY_IDLE:
         if (indicator->blink == NETWORK_INDICATOR_PAIRING)
             blink_stop(indicator);
         break;
     case HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING: {
-        if (indicator->blink != NETWORK_INDICATOR_QUIET)
-            break;  // already blinking for this attempt
+        if (indicator->blink != NETWORK_INDICATOR_QUIET) {
+            blink_resync(indicator);  // already blinking for this attempt
+            break;
+        }
         uint32_t now = hal_millis();
         if (indicator->rejoin_blinked &&
             (uint32_t)(now - indicator->rejoin_blink_started_ms) <
@@ -116,9 +145,7 @@ void network_indicator_join_activity(network_indicator_t *indicator,
             break;  // retried too soon after the last blink: stay quiet
         indicator->rejoin_blinked          = true;
         indicator->rejoin_blink_started_ms = now;
-        blink_start(indicator, NETWORK_INDICATOR_REJOIN,
-                    NETWORK_INDICATOR_REJOIN_ON_MS,
-                    NETWORK_INDICATOR_REJOIN_OFF_MS);
+        blink_start(indicator, NETWORK_INDICATOR_REJOIN);
         // led_blink() pattern: never re-init a task that may still be linked.
         if (indicator->rejoin_stop_task.handler != rejoin_stop_handler) {
             indicator->rejoin_stop_task.handler = rejoin_stop_handler;

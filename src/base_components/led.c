@@ -8,12 +8,16 @@
 
 static uint8_t led_brightness = LED_DEFAULT_BRIGHTNESS;
 
-void led_set_brightness(uint8_t percent) {
+uint8_t led_clamp_brightness(uint8_t percent) {
     if (percent < LED_MIN_BRIGHTNESS)
-        percent = LED_MIN_BRIGHTNESS;
+        return LED_MIN_BRIGHTNESS;
     if (percent > LED_MAX_BRIGHTNESS)
-        percent = LED_MAX_BRIGHTNESS;
-    led_brightness = percent;
+        return LED_MAX_BRIGHTNESS;
+    return percent;
+}
+
+void led_set_brightness(uint8_t percent) {
+    led_brightness = led_clamp_brightness(percent);
 }
 
 uint8_t led_get_brightness(void) {

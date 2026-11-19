@@ -119,6 +119,16 @@ int main(void) {
     /* Pending rejoin: no new request, no report. */
     hal_zigbee_start_network_steering();
     assert(rejoin_requests == 3u && reports[HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING] == 2u);
+    /* Invalid channel on the steering path: no request and no stamped gap,
+     * so the next call can retry at once. */
+    silabs_router_rejoin_pending = false; now += SILABS_ROUTER_REJOIN_GAP_MS;
+    channel = 5;
+    uint32_t stamp = silabs_router_last_rejoin_ms;
+    hal_zigbee_start_network_steering();
+    assert(rejoin_requests == 3u && silabs_router_last_rejoin_ms == stamp);
+    channel = 15;
+    hal_zigbee_start_network_steering();
+    assert(rejoin_requests == 4u && reports[HAL_ZIGBEE_JOIN_ACTIVITY_REJOINING] == 3u);
     return 0;
 }
 """
@@ -128,7 +138,7 @@ def test_silabs_join_activity_follows_accepted_requests(tmp_path):
     source = SILABS.read_text(encoding="utf-8")
     storage = _between(source, "static bool     network_steering_in_progress = false;",
                        "/* A full Silicon Labs Router")
-    helper = _between(source, "static bool silabs_router_start_secure_rejoin(void) {",
+    helper = _between(source, "static bool silabs_router_channel_valid(uint8_t channel) {",
                       "void silabs_router_recovery_tick(void) {")
     register = _between(source, "void hal_register_on_join_activity_callback(",
                         "void sl_zigbee_af_stack_status_cb")

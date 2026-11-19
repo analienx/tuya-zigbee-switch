@@ -64,12 +64,25 @@ const {prepareDefinition} = require('zigbee-herdsman-converters');
 const definitions = require(process.argv[1]);
 const find = name => prepareDefinition(definitions.find(d => d.zigbeeModel?.includes(name)));
 const pm = find('TS011F-BS-PM'), nonpm = find('TS011F-BS');
+// Exposes depend on the device's build (LED brightness): resolve per device.
+const exposed = (def, build) => typeof def.exposes === 'function' ?
+    def.exposes({softwareBuildID: build, endpoints: []}, {}) : def.exposes;
 assert.deepEqual(pm.endpoint({}), {switch: 1, relay: 2});
 for (const property of ['power', 'current', 'voltage', 'energy']) {
-    assert.ok(pm.exposes.some(e => e.property === property));
+    assert.ok(exposed(pm, '1.2.5-bseedcli27').some(e => e.property === property));
     assert.ok(pm.meta.multiEndpointSkip.includes(property));
-    assert.ok(!nonpm.exposes.some(e => e.property === property));
+    assert.ok(!exposed(nonpm, '1.1.3-bseedr21').some(e => e.property === property));
 }
+// LED brightness only for builds that have Basic 0xFF03.
+const led = (def, build) => exposed(def, build).some(e => e.property === 'led_brightness');
+for (const build of ['1.2.5-bseedr24', '1.2.5-bseedcli27', '1.2.5-bseedr30'])
+    assert.ok(led(pm, build), build);
+for (const build of ['1.2.5-bseedr23', '1.2.5-bseedcli26', '1.2.5-bseedv8u4', '', undefined])
+    assert.ok(!led(pm, build), String(build));
+for (const build of ['1.1.3-bseedr21', '1.1.3-bseedc19'])
+    assert.ok(led(nonpm, build), build);
+for (const build of ['1.1.3-bseedr20', '1.1.3-bseedc18', '1.1.3-bseedv8', '1.2.5-bseedr24'])
+    assert.ok(!led(nonpm, build), build);
 assert.ok(pm.fromZigbee.some(f => f.cluster === 'haElectricalMeasurement'));
 assert.ok(pm.fromZigbee.some(f => f.cluster === 'seMetering'));
 assert.ok(!nonpm.fromZigbee.some(f => f.cluster === 'haElectricalMeasurement' || f.cluster === 'seMetering'));

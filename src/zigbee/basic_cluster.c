@@ -43,32 +43,32 @@ void basic_cluster_load_attrs_from_nv();
 
 #ifdef LED_DIMMING
 /* LED brightness percent (1..100) for every LED while lit. Only builds that
- * can dim (LED_DIMMING: Telink PWM, never with PM_ENABLE) expose it. */
+ * can dim (LED_DIMMING: Telink PWM, never with PM_ENABLE) expose it. The ZCL
+ * write lands here first; led.c's brightness changes only once it is stored,
+ * which is why this is a separate copy. */
 static uint8_t led_brightness_attr = LED_DEFAULT_BRIGHTNESS;
-
-static uint8_t led_brightness_clamp(uint8_t percent) {
-    if (percent < LED_MIN_BRIGHTNESS)
-        return LED_MIN_BRIGHTNESS;
-    if (percent > LED_MAX_BRIGHTNESS)
-        return LED_MAX_BRIGHTNESS;
-    return percent;
-}
+static uint8_t basic_endpoint;
 
 /* A written brightness takes effect only once it is stored, so it can never
  * appear to work and then revert at the next reboot. If the write fails the
- * attribute reads back the brightness still in effect. */
+ * attribute reads back the brightness still in effect; a clamped or reverted
+ * value is reported so controllers do not keep showing what was written. */
 static void led_brightness_commit(void) {
-    uint8_t requested = led_brightness_clamp(led_brightness_attr);
+    uint8_t written   = led_brightness_attr;
+    uint8_t requested = led_clamp_brightness(written);
 
     if (requested != led_get_brightness() &&
         hal_nvm_write(NV_ITEM_LED_BRIGHTNESS, sizeof(requested), &requested) !=
         HAL_NVM_SUCCESS) {
-        led_brightness_attr = led_get_brightness();
-        return;
+        requested = led_get_brightness();
+    } else {
+        led_set_brightness(requested);
+        peripherals_refresh_leds();
     }
-    led_set_brightness(requested);
     led_brightness_attr = requested;
-    peripherals_refresh_leds();
+    if (led_brightness_attr != written)
+        hal_zigbee_notify_attribute_changed(basic_endpoint, ZCL_CLUSTER_BASIC,
+                                            ZCL_ATTR_BASIC_LED_BRIGHTNESS);
 }
 
 static void led_brightness_load(void) {
@@ -213,7 +213,9 @@ hal_zigbee_cmd_result_t basic_cluster_callback_trampoline(
 }
 
 void basic_cluster_callback_attr_write_trampoline(uint16_t attribute_id) {
-    basic_cluster_store_attrs_to_nv();
+    // LED brightness has its own NV record; do not rewrite the basic one.
+    if (attribute_id != ZCL_ATTR_BASIC_LED_BRIGHTNESS)
+        basic_cluster_store_attrs_to_nv();
     if (attribute_id == ZCL_ATTR_BASIC_DEVICE_CONFIG) {
         // Preserve the legacy writable attribute ABI for tools/debugging, but
         // never persist malformed or truncated input. Ordinary Z2M uses the
@@ -289,6 +291,7 @@ void basic_cluster_add_to_endpoint(zigbee_basic_cluster *cluster,
         attr_count++;
     }
 #ifdef LED_DIMMING
+    basic_endpoint = endpoint->endpoint;
     SETUP_ATTR(attr_count, ZCL_ATTR_BASIC_LED_BRIGHTNESS, ZCL_DATA_TYPE_UINT8,
                ATTR_WRITABLE, led_brightness_attr);
     attr_count++;

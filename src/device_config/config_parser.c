@@ -33,8 +33,12 @@
 
 void peripherals_init(void);
 
-/* A join blink ended: give relay indicator LEDs back to the relay state. */
+/* A join blink ended: give relay indicator LEDs back to the relay state, and
+ * the status LED back to its manual state if the device is still joined (a
+ * rejoin that started while joined and never reported completion). */
 static void network_indicator_quiet(void) {
+    if (hal_zigbee_get_network_status() == HAL_ZIGBEE_NETWORK_JOINED)
+        network_indicator_from_manual_state(&network_indicator);
     update_relay_clusters();
 }
 

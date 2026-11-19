@@ -53,6 +53,9 @@ void led_off(led_t *led);
  */
 void led_set_brightness(uint8_t percent);
 
+/** The brightness led_set_brightness() would apply for `percent`. */
+uint8_t led_clamp_brightness(uint8_t percent);
+
 uint8_t led_get_brightness(void);
 
 /**
