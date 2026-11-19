@@ -156,6 +156,10 @@ DEVICES = {
             # analienx/gledopto 1dec734c815fe7721958be818dfadf88bae944fe, run 42973182814.
             '8d90c745734e38c8686a8649bd859c77508bfc3c453aef43f3bf379e694837ff':
                 'GLSD-ED-008 custom End Device (gledopto 1dec734)',
+            # Released OTA and final native image from hosted run 43583914672.
+            # Exact-byte admission is not evidence of a wired flash or boot.
+            '07686fb96fe5bde0043cb4c4fb41219f83317552fc02756cc92c9b7b2887b4be':
+                'GLSD-ED-009 custom End Device (gledopto 15ffb75)',
         },
         'buildEvidence': 'gledopto',
         'stockOta': {
@@ -174,9 +178,9 @@ DEVICES = {
             'The GND | 3.3V | SWS order seen in photos is a visual guess. Prove every pad by continuity.',
             'Mini-hooks do not hold on flat pads. Solder thin temporary wires or use a pogo-pin fixture.',
             'If the 3.3 V rail sags below 3.0 V under load, use a separate current-limited 3.3 V supply.',
-            'Admitted images: the pinned vendor stock image and the pinned GLSD-ED-008 custom build. '
+            'Admitted images: pinned vendor stock and GLSD-ED-008/009 custom builds. '
             'Any other custom build is refused until its SHA-256 is added here.',
-            'GLSD-ED-008 clears the Zigbee stack state once at its first start: pair the dimmer again. '
+            'GLSD-ED-008/009 clear Zigbee stack state once per firmware line: pairing may be needed. '
             'Returning to stock also needs a new pairing.',
             'Preserving flash does not prove the retained network record is compatible with stock firmware.',
         ],
@@ -456,8 +460,7 @@ def check_device(device_id, info, source):
             raise RecoveryError('BSEED manifest and role matrix build IDs differ')
     images = device.get('images')
     if device_id == 'gledopto-gl-sd-301p' and info['sha256'] not in images:
-        raise RecoveryError('Gledopto custom firmware remains quarantined except for the exact pinned '
-                            'ED-008 candidate; this profile permits only pinned stock or ED-008 bytes')
+        raise RecoveryError('Gledopto profile permits only the exact pinned stock, ED-008 or ED-009 bytes')
     if images is not None and info['sha256'] not in images and not source.get('buildManifest'):
         raise RecoveryError(f'image {info["sha256"][:12]} is not a known {device_id} image and has no '
                             'CI build evidence (SHA256SUMS and manifest.txt next to it)')
@@ -1976,9 +1979,10 @@ def run_write(action, folder, port, provided, passes=PASSES, *, power_cycle=Fals
                 writer = TxOnlyWriter(com, power_on=(lambda: out('Connect 3.3 V NOW')) if power_cycle else None,
                                       progress=progress, slot=slot, full_slot=full_slot, hold=hold)
                 writer.baseline_sha = context['baselineSha256']
-                # A separate activation must reassert HALT without software reset.
-                # Never infer observed target execution from an in-memory flag.
-                writer.attach_only = action == 'activate'
+                # A baseline was captured while the CPU was held. Resetting it
+                # here can run the old image and mutate flash after that backup.
+                # Separate activation also must reassert HALT without a reset.
+                writer.attach_only = action == 'activate' or bool(baseline)
                 for phase in PHASES[action]:
                     state['activePhase'] = phase
                     save_session(path, state)
@@ -2184,6 +2188,24 @@ def verify_cpu_halted(port, reader, out=None):
     return record
 
 
+def verify_cpu_still_halted(port, _reader, out=None):
+    """Observe the stopped CPU without reset or another halt command."""
+    report = out or (lambda _message: None)
+    with open_port(port, timeout=0.02, baud=921600) as control:
+        control.write_timeout = 2
+        check = SwireDiagnostic(control, 921600)
+        divider = check.find_divider()
+        controls = [check.read_register(0x602)[0] for _ in range(2)]
+    record = {'divider': divider, 'cpuControls': controls,
+              'haltVerified': controls == [CPU_STOPPED] * 2,
+              'resetRequested': False, 'statistics': dict(check.stats)}
+    if not record['haltVerified']:
+        raise RecoveryError('CPU is no longer confirmed stopped; second read was not started',
+                            code='TARGET_NOT_HALTED', retry_safe=False, details=record)
+    report('  CPU remains stopped; continuing without a reset.')
+    return record
+
+
 def await_cpu_halted(port, reader, *, retry_seconds=0, halt_check=verify_cpu_halted, out=None,
                      clock=time.monotonic, sleep=time.sleep):
     """Retry the verified pause for up to retry_seconds, so a power-cycle can be caught.
@@ -2273,13 +2295,15 @@ def run_reader_with_progress(command, *, log_path, size, label, out=None, timeou
 
 def _read_flash(port, output, *, address=0, size=FLASH_BYTES, reader=None,
                halt=False, reads=2, retry_seconds=0, halt_check=verify_cpu_halted,
+               held_check=verify_cpu_still_halted,
                fetch=download, runner=None, out=None):
     """Independent rf invocations; never expose upstream erase/write commands.
 
     Requires the pvvx bidirectional circuit, NOT the TX-only hookup. Reading
     changes volatile SWire/SPI registers. With halt, the CPU is paused over
     SWire and the pause is proven (control 0x602 = 0x05 twice) before every
-    read; retry_seconds keeps trying so a power-cycle of the target can be
+    read. The second proof observes the CPU without resetting it;
+    retry_seconds keeps trying the first pause so a power-cycle can be
     caught. RTS/DTR stay unwired. No CPU restart is requested after reading.
     reads=1 gives a single read (READ_SINGLE) that is never accepted as a
     baseline. Partial and disagreeing dumps are retained.
@@ -2309,10 +2333,11 @@ def _read_flash(port, output, *, address=0, size=FLASH_BYTES, reader=None,
     try:
         for index, target in enumerate((output, second)[:reads]):
             if halt:
-                # Prove the pause before each read; only the first may wait for
-                # a power-cycle. The reader then runs without its own reset.
-                check = await_cpu_halted(port, reader, retry_seconds=retry_seconds if index == 0 else 0,
-                                         halt_check=halt_check, out=report)
+                # pvvx activate issues a soft reset, so use it only before the
+                # first read. A second activation can change persistent state.
+                check = (await_cpu_halted(port, reader, retry_seconds=retry_seconds,
+                                          halt_check=halt_check, out=report)
+                         if index == 0 else held_check(port, reader, report))
                 result['haltChecks'].append(check)
                 atomic_json(receipt, result)
             command = [sys.executable, str(reader), '-p', port, '-b', '921600',
@@ -2384,7 +2409,30 @@ def matched_backup(path, *, port=None):
             or digests != [sha256(data), sha256(data)]
             or (port is not None and receipt.get('port') != port)):
         raise RecoveryError('baseline must be an unchanged matching double read of full flash on this port')
+    if receipt.get('halt'):
+        checks = receipt.get('haltChecks', [])
+        if (len(checks) != 2 or not all(check.get('haltVerified') for check in checks)
+                or checks[1].get('resetRequested') is not False):
+            raise RecoveryError('halted double read lacks proof the second read was taken without another reset')
     return data
+
+
+def verified_readback(path, *, port, allow_single=False):
+    """Check the read receipt and bytes; a single read is never a baseline."""
+    path = Path(path)
+    receipt = read_json(path.with_name(path.name + '.json'))
+    if receipt.get('status') == 'READ_SINGLE' and allow_single:
+        data = path.read_bytes()
+        reads = receipt.get('reads', [])
+        if (len(data) != FLASH_BYTES or receipt.get('address') != 0
+                or receipt.get('bytes') != FLASH_BYTES or receipt.get('port') != port
+                or receipt.get('readsRequested') != 1 or len(reads) != 1
+                or reads[0].get('sha256') != sha256(data)
+                or str(Path(reads[0].get('file', '')).resolve()) != str(path.resolve())):
+            raise RecoveryError('single readback receipt or bytes do not match the full read on this port')
+        return receipt
+    matched_backup(path, port=port)
+    return receipt
 
 
 def inspect_slots(dump, references=(), *, replace=None, expect_other=None):
@@ -2498,8 +2546,10 @@ def verify_session(path, dump, *, folder, staged, baseline, slot, full_slot, rec
             raise RecoveryError('session is not awaiting held-flash verification', code='INVALID_PHASE')
         if state['phase'] == 'NEEDS_RECONCILIATION' and not reconcile:
             raise RecoveryError('interrupted operation requires reconcile with a fresh read', code='RECONCILIATION_REQUIRED')
-        matched_backup(dump, port=context['port'])
-        evidence = read_json(Path(dump).with_name(Path(dump).name + '.json'))
+        # Uncertain writes and failed verification require stronger independent
+        # evidence; ordinary held verification may compare one full read.
+        allow_single = not reconcile and state['phase'] not in ('NEEDS_RECONCILIATION', 'VERIFICATION_FAILED')
+        evidence = verified_readback(dump, port=context['port'], allow_single=allow_single)
         if context['baselineSha256'] and sha256(matched_backup(baseline, port=context['port'])) != context['baselineSha256']:
             raise RecoveryError('original baseline changed', code='BASELINE_CHANGED')
         plan, _ = load_bundle(folder)
@@ -2516,7 +2566,7 @@ def verify_session(path, dump, *, folder, staged, baseline, slot, full_slot, rec
                         datetime.datetime.fromisoformat(state.get('stageUtc', state['createdUtc'])))
         if (datetime.datetime.fromisoformat(evidence['utc']) < threshold
                 or evidence.get('halt')):
-            raise RecoveryError('use a fresh no-reset double read after the pending operation', code='STALE_EVIDENCE')
+            raise RecoveryError('use a fresh no-reset read after the pending operation', code='STALE_EVIDENCE')
         try:
             result = verify_dump(folder, dump, staged=staged, baseline=baseline, slot=slot, full_slot=full_slot)
         except (RecoveryError, OSError, ValueError) as error:
@@ -2529,6 +2579,7 @@ def verify_session(path, dump, *, folder, staged, baseline, slot, full_slot, rec
         if staged and state['phase'] in ('HELD', 'ACTIVATED_VERIFIED') and not reconcile:
             raise RecoveryError('marker is unexpectedly inactive after activation; reconcile explicitly', code='INVALID_PHASE')
         state['phase'] = 'VERIFIED' if staged else 'ACTIVATED_VERIFIED'
+        result['readCount'] = len(evidence['reads'])
         state['lastVerification'] = dict(result, dumpSha256=sha256(Path(dump).read_bytes()),
                                          dump=str(Path(dump).resolve()), readReceipt=evidence)
         if staged and reconcile:
@@ -2749,6 +2800,9 @@ def main(argv=None):
                        'stage', 'read', 'inspect', 'verify', 'activate', 'flash', 'status', 'reconcile', 'close', 'unlock'],
                       'jsonNeverPrompts': True, 'idempotentWrites': 'same session + operation ID + exact request',
                       'readOptional': True, 'baselineRequiresVerification': True,
+                      'heldVerification': {'normalReadCounts': [1, 2],
+                                           'baselineAndReconcile': 'matching full double read',
+                                           'singleReadRepeatabilityProven': False},
                       'diagnostics': {'adapterEcho': 'not proof of target connection',
                                       'adapterStressSeconds': {'default': 5, 'minimum': 0.1, 'maximum': 30},
                                       'liveProgress': 'human progress on stderr in JSON mode; bounded events in receipt',

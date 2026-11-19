@@ -662,7 +662,7 @@ def test_device_profiles_block_cross_device_and_quarantined_images():
     info = tool.check_image(make_image(manufacturer=0x124f, image_type=0x1416))
     with pytest.raises(RecoveryError, match='manufacturer'):
         tool.check_device('bseed-ts011f', info, {})
-    with pytest.raises(RecoveryError, match='quarantined'):
+    with pytest.raises(RecoveryError, match='exact pinned'):
         tool.check_device('gledopto-gl-sd-301p', info, {'buildManifest': {'DEPLOYABLE': '0'}})
     info['sha256'] = next(iter(tool.DEVICES['gledopto-gl-sd-301p']['images']))
     assert tool.check_device('gledopto-gl-sd-301p', info, {})
@@ -830,6 +830,21 @@ def test_backup_validation_rejects_changed_evidence(tmp_path):
         tool.inspect_slots(dump)
 
 
+def test_old_double_halt_receipt_cannot_prove_uninterrupted_baseline(tmp_path):
+    data, _ = two_known_slots()
+    dump = full_backup(tmp_path / 'dump', data)
+    receipt_path = dump.with_name(dump.name + '.json')
+    receipt = tool.read_json(receipt_path)
+    receipt['halt'] = True
+    receipt['haltChecks'] = [{'haltVerified': True}, {'haltVerified': True}]
+    tool.atomic_json(receipt_path, receipt)
+    with pytest.raises(RecoveryError, match='without another reset'):
+        tool.matched_backup(dump, port='COM5')
+    receipt['haltChecks'][1]['resetRequested'] = False
+    tool.atomic_json(receipt_path, receipt)
+    assert tool.matched_backup(dump, port='COM5') == data
+
+
 def agent_fixture(tmp_path, *, baseline=False):
     image = make_image()
     ci_artifact(tmp_path, image)
@@ -906,6 +921,7 @@ def test_separate_activation_never_resets_before_marker_and_is_consumed(tmp_path
 def test_verified_session_requires_matching_readback_before_activation(tmp_path):
     kit, chip, session, options, token = agent_fixture(tmp_path, baseline=True)
     tool.run_write('stage', kit, 'COM5', token('stage'), operation_id='stage-1', **options)
+    assert chip.restarts == 0, 'a verified stage must not reset after the baseline'
     with pytest.raises(RecoveryError, match='requires a successful'):
         tool.run_write('activate', kit, 'COM5', token('activate'), operation_id='activate-1', hold=True, **options)
     readback = full_backup(tmp_path / 'staged', chip.flash)
@@ -916,10 +932,82 @@ def test_verified_session_requires_matching_readback_before_activation(tmp_path)
                                 baseline=options['baseline'], session=session)
     assert repeated['replayed'] and repeated['phase'] == 'VERIFIED'
     tool.run_write('activate', kit, 'COM5', token('activate'), operation_id='activate-1', hold=True, **options)
+    assert chip.restarts == 0, 'held activation must not reset after staging'
     readback = full_backup(tmp_path / 'activated', chip.flash)
     result = tool.verify_dump(kit, readback, slot='B', full_slot=True, baseline=options['baseline'], session=session)
     assert result['phase'] == 'ACTIVATED_VERIFIED' and not result['bootVerified']
     assert tool.session_status(session)['nextActions'] == ['manual_bench_start']
+
+
+def single_readback(path, data, port='COM5'):
+    path = Path(path)
+    path.write_bytes(bytes(data))
+    tool.atomic_json(path.with_name(path.name + '.json'), {
+        'status': 'READ_SINGLE', 'address': 0, 'bytes': len(data), 'port': port,
+        'halt': False, 'readsRequested': 1, 'utc': tool.utc_now().isoformat(),
+        'reads': [{'file': str(path), 'sha256': tool.sha256(bytes(data))}],
+    })
+    return path
+
+
+def test_held_session_accepts_one_fresh_read_per_write_but_not_as_baseline(tmp_path):
+    kit, chip, session, options, token = agent_fixture(tmp_path, baseline=True)
+    tool.run_write('stage', kit, 'COM5', token('stage'), operation_id='stage-1', **options)
+    staged = single_readback(tmp_path / 'staged-single', chip.flash)
+    with pytest.raises(RecoveryError, match='double read'):
+        tool.matched_backup(staged, port='COM5')
+    result = tool.verify_dump(kit, staged, staged=True, slot='B', full_slot=True,
+                              baseline=options['baseline'], session=session)
+    assert result['phase'] == 'VERIFIED' and result['readCount'] == 1
+    tool.run_write('activate', kit, 'COM5', token('activate'), operation_id='activate-1', hold=True, **options)
+    activated = single_readback(tmp_path / 'activated-single', chip.flash)
+    result = tool.verify_dump(kit, activated, slot='B', full_slot=True,
+                              baseline=options['baseline'], session=session)
+    assert result['phase'] == 'ACTIVATED_VERIFIED' and result['readCount'] == 1
+    assert result['preservationVerified'] and not result['bootVerified']
+
+
+@pytest.mark.parametrize('fault', ['port', 'digest', 'address', 'file', 'halt'])
+def test_single_readback_rejects_wrong_or_reset_evidence(tmp_path, fault):
+    kit, chip, session, options, token = agent_fixture(tmp_path, baseline=True)
+    tool.run_write('stage', kit, 'COM5', token('stage'), operation_id='stage-1', **options)
+    dump = single_readback(tmp_path / 'single', chip.flash)
+    receipt_path = dump.with_name(dump.name + '.json')
+    receipt = tool.read_json(receipt_path)
+    if fault == 'port': receipt['port'] = 'COM7'
+    if fault == 'digest': receipt['reads'][0]['sha256'] = '0' * 64
+    if fault == 'address': receipt['address'] = 1
+    if fault == 'file': receipt['reads'][0]['file'] = str(tmp_path / 'other')
+    if fault == 'halt': receipt['halt'] = True
+    tool.atomic_json(receipt_path, receipt)
+    with pytest.raises(RecoveryError):
+        tool.verify_dump(kit, dump, staged=True, slot='B', full_slot=True,
+                         baseline=options['baseline'], session=session)
+
+
+def test_single_read_cannot_reconcile_uncertain_write(tmp_path):
+    kit, chip, session, options, token = agent_fixture(tmp_path, baseline=True)
+    tool.run_write('stage', kit, 'COM5', token('stage'), operation_id='stage-1', **options)
+    dump = single_readback(tmp_path / 'single', chip.flash)
+    with pytest.raises(RecoveryError, match='double read'):
+        tool.verify_dump(kit, dump, staged=True, slot='B', full_slot=True,
+                         baseline=options['baseline'], session=session, reconcile=True)
+
+
+def test_failed_single_comparison_requires_fresh_double_read(tmp_path):
+    kit, chip, session, options, token = agent_fixture(tmp_path, baseline=True)
+    tool.run_write('stage', kit, 'COM5', token('stage'), operation_id='stage-1', **options)
+    bad = bytearray(chip.flash)
+    bad[0x76000] ^= 1
+    first = single_readback(tmp_path / 'bad-single', bad)
+    with pytest.raises(RecoveryError, match='preserved'):
+        tool.verify_dump(kit, first, staged=True, slot='B', full_slot=True,
+                         baseline=options['baseline'], session=session)
+    assert tool.session_status(session)['phase'] == 'VERIFICATION_FAILED'
+    second = single_readback(tmp_path / 'good-single', chip.flash)
+    with pytest.raises(RecoveryError, match='double read'):
+        tool.verify_dump(kit, second, staged=True, slot='B', full_slot=True,
+                         baseline=options['baseline'], session=session)
 
 
 def test_failed_verification_blocks_activation(tmp_path):
@@ -1250,6 +1338,23 @@ def test_diagnostic_decoder_for_every_byte():
             tool.diagnostic_decode(word)
 
 
+@pytest.mark.parametrize('cpu', [0, 5])
+def test_still_halted_probe_never_resets_or_touches_flash(monkeypatch, cpu):
+    port = DiagnosticPort(cpu=cpu)
+    diagnostic_class = tool.SwireDiagnostic
+    monkeypatch.setattr(tool, 'open_port', lambda *_args, **_kwargs: port)
+    monkeypatch.setattr(tool, 'SwireDiagnostic',
+                        lambda target, baud: diagnostic_class(target, baud, sleep=lambda _: None,
+                                                               response_timeout=0.0001))
+    if cpu == 5:
+        result = tool.verify_cpu_still_halted('COM5', None)
+        assert result['haltVerified'] and result['resetRequested'] is False
+    else:
+        with pytest.raises(RecoveryError, match='no longer confirmed'):
+            tool.verify_cpu_still_halted('COM5', None)
+    assert not port.flash_reads and all(address == 0xB2 for address, _ in port.writes)
+
+
 def test_resistor_junction_echo_does_not_qualify_target(tmp_path):
     class ContextLoopback(Loopback):
         def __enter__(self):
@@ -1573,6 +1678,7 @@ def test_read_automatically_fetches_reader_before_first_serial_process(tmp_path,
 
 UPSTREAM = 'https://github.com/romasku/tuya-zigbee-switch/raw/0f2b99e5a0ebd72a2d7c3375cde69db4696e6f00'
 ED008_SHA = '8d90c745734e38c8686a8649bd859c77508bfc3c453aef43f3bf379e694837ff'
+ED009_SHA = '07686fb96fe5bde0043cb4c4fb41219f83317552fc02756cc92c9b7b2887b4be'
 
 
 def avatto_ota(**kwargs):
@@ -1758,14 +1864,18 @@ def test_index_options_only_apply_to_index_profiles(tmp_path, capsys):
     assert json.loads(capsys.readouterr().out)['errorCode'] == 'INVALID_ARGUMENT'
 
 
-def test_gledopto_ed008_is_admitted_only_by_its_exact_bytes():
-    info = tool.check_image(make_image(manufacturer=0x124F, image_type=0x1416, version=0x7F090001))
-    with pytest.raises(RecoveryError, match='quarantined'):
+@pytest.mark.parametrize('sha,version,label', [
+    (ED008_SHA, 0x7F090001, 'GLSD-ED-008'),
+    (ED009_SHA, 0x7F0A0001, 'GLSD-ED-009'),
+])
+def test_gledopto_custom_is_admitted_only_by_its_exact_bytes(sha, version, label):
+    info = tool.check_image(make_image(manufacturer=0x124F, image_type=0x1416, version=version))
+    with pytest.raises(RecoveryError, match='exact pinned'):
         tool.check_device('gledopto-gl-sd-301p', info, {'buildManifest': {'DEV_IDENTITY': 'GLSD-ED-009'}})
-    info['sha256'] = ED008_SHA
+    info['sha256'] = sha
     assert tool.check_device('gledopto-gl-sd-301p', info, {})
-    assert tool.image_label('gledopto-gl-sd-301p', info, {}).startswith('GLSD-ED-008')
-    assert 'pair the dimmer again' in tool.wiring('gledopto-gl-sd-301p')
+    assert tool.image_label('gledopto-gl-sd-301p', info, {}).startswith(label)
+    assert 'pairing may be needed' in tool.wiring('gledopto-gl-sd-301p')
 
 
 def test_generic_profile_points_tuya_images_to_their_profile():
@@ -2029,12 +2139,27 @@ def halt_fixture(tmp_path, monkeypatch, *, outcomes):
     return reader, events, halt_check, run
 
 
-def test_halt_read_proves_the_pause_before_each_read_and_never_passes_reset(tmp_path, monkeypatch):
-    reader, events, halt_check, run = halt_fixture(tmp_path, monkeypatch, outcomes=['paused', 'paused'])
+def test_halt_read_checks_second_pause_without_a_reset(tmp_path, monkeypatch):
+    reader, events, halt_check, run = halt_fixture(tmp_path, monkeypatch, outcomes=['paused'])
+    def held_check(*_args):
+        events.append('check-only')
+        return {'cpuControls': [5, 5], 'haltVerified': True, 'resetRequested': False}
     result = tool.read_flash('COM5', tmp_path / 'flash.bin', size=32, reader=reader, halt=True,
-                             halt_check=halt_check, runner=run)
-    assert result['status'] == 'READ_MATCHED' and events == ['halt', 'read', 'halt', 'read']
+                             halt_check=halt_check, held_check=held_check, runner=run)
+    assert result['status'] == 'READ_MATCHED' and events == ['halt', 'read', 'check-only', 'read']
     assert [check['cpuControls'] for check in result['haltChecks']] == [[5, 5], [5, 5]]
+
+
+def test_second_read_stops_if_cpu_no_longer_confirmed_halted(tmp_path, monkeypatch):
+    reader, events, halt_check, run = halt_fixture(tmp_path, monkeypatch, outcomes=['paused'])
+    def held_check(*_args):
+        events.append('check-only')
+        raise RecoveryError('CPU is running', code='TARGET_NOT_HALTED')
+    with pytest.raises(RecoveryError):
+        tool.read_flash('COM5', tmp_path / 'flash.bin', size=32, reader=reader, halt=True,
+                        halt_check=halt_check, held_check=held_check, runner=run)
+    assert events == ['halt', 'read', 'check-only']
+    assert tool.read_json(tmp_path / 'flash.bin.json')['status'] == 'READ_FAILED'
 
 
 def test_single_read_after_a_write_is_never_a_baseline(tmp_path, monkeypatch):

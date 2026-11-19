@@ -8,6 +8,10 @@ read, write, boot or electrical qualification is claimed by this record.
 
 | Finding | Repair | Regression coverage |
 | --- | --- | --- |
+| A baseline-backed stage reset the target after its backup | Attach without reset for baseline-backed staging as well as separate activation; preserve the existing reset route for TX-only sessions | Chip model asserts zero resets through staged write and held activation |
+| A `read --halt` double backup invoked the pvvx soft reset again between reads | Halt only before the first read and observe the CPU stopped before the second, without a reset; reject older halted receipts lacking that proof | Model checks for no reset, target still stopped, stopped-before-second-read failures and old-receipt rejection |
+| ED-009 release was refused and the Gledopto wired guide was tied to the old canary | Admit only the exact published ED-009 native hash, document per-unit inspection and held write, and provide optional hosted artifact checks | Pin admission and unpinned rejection; hosted artifact check covers both OTA and native image when dispatched |
+| A normal held readback had to be read twice despite the operator's preference | Permit a fresh receipt-bound single full read after each ordinary write; retain double-read baselines and mandatory double-read reconciliation | Single reads, wrong port/digest/path/range/reset, and uncertain-write reconciliation |
 | An external retry wrapper repeatedly reopened a failed Windows device and hid echo-only receive counts | Built-in bounded watch with identity-bound USB waiting, capped error backoff, serial-stage classification, per-attempt evidence and 1/9-sample diagnostics | Missing/reconnecting/renumbered USB, wrong/ambiguous adapters, persistent driver errors, Ctrl+C/lock stops, echo-only reads and no target flash/reset/halt |
 | Released-board CI checked the board database image type only for TS0726 | Compare each known board's prepared native image type with device_db.yaml while keeping MCU/gated refusals | Hosted real-image preparation of the complete committed release indexes |
 | New indexed profiles could silently substitute TS0726 boards or accept contradictory reopened provenance | Reject conflicting board arguments before fetching; bind native payload hash and recheck board, role, filename and source URL on prepare/load | Explicit wrong TS0726 board, altered ordinary board/role/URL/filename/hash and TS0726 firmware-line substitutions |
@@ -57,6 +61,11 @@ read, write, boot or electrical qualification is claimed by this record.
 9. A held activation can be byte-verified before a controlled bench start. Actual
    boot, expected Zigbee identity/role, relay behavior and metering remain separate
    live acceptance evidence.
+
+One readback comparison cannot demonstrate read repeatability. `readCount` records
+its proof level; an original baseline or uncertain/failed operation always needs
+the existing matching-double-read evidence. The ED-009 and single-read changes
+must pass the hosted workflow at their exact candidate SHA before use.
 
 ## Practical limits
 

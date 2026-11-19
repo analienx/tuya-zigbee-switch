@@ -135,7 +135,8 @@ until it prints that the chip restarted.
 
 `flash` is `stage` followed by `activate`. They can be run separately:
 
-- `stage` restarts and halts the chip, clears flash write protection and
+- `stage` halts the chip (without a reset when a baseline is supplied; otherwise
+  it requests a restart first), clears flash write protection and
   writes the image with the first byte of its start marker left at `0xFF`.
   It makes three passes: erase and write, erase and write again, then write
   only. Losing any one erase or page on the wire is repaired by a later
@@ -306,10 +307,13 @@ This compares every image byte (with the inactive marker), the erased tail and
 all bytes outside the erase range, including the other slot and factory/NVM data.
 Omit `--staged` to compare an activated image; omit `--baseline` for image-only
 verification. `FLASH_MATCHED` is a byte comparison, never proof of boot. The read
-receipt independently establishes whether the two source reads matched. Standalone
+receipt identifies whether one read or two matching reads were taken. Standalone
 `verify` is only an offline byte comparison; use `--session` to advance a recovery
-transaction. Session verification requires a fresh matching double read and refuses
-an older readback after a later verification failure.
+transaction. Normal held session verification accepts one fresh no-reset full read
+or two matching reads and records `readCount`. One read is faster but cannot check
+repeatability. The original baseline, reconciliation and recovery after a failed
+verification still require a fresh matching double read. Older readback cannot
+override a later failure.
 
 ## Device profiles and repeat use
 
@@ -322,24 +326,109 @@ vendor stock OTA and produces its finalized image. Local stock OTA or finalized
 stock BIN inputs are also accepted. The dedicated SWire workflow publishes a
 `gledopto-stock-wired-kit-<sha>` artifact containing image, plan, tool and guide.
 
-The same profile also admits one custom build, by its exact bytes: GLSD-ED-008
+The profile also admits GLSD-ED-008
 (`glsd301p-ed_0x00000.bin`, 142,820 bytes, SHA-256
 `8d90c745734e38c8686a8649bd859c77508bfc3c453aef43f3bf379e694837ff`, file
 version `0x7F090001`), built by analienx/gledopto at `1dec734` in run
 42973182814. The 2026-11-11 owner decision permits producing the wired artifact;
-it explicitly separates publication from live flash authorization. This profile
-admits its exact bytes for preparation and provenance checking. It does not lift
-the incident hold, establish hardware acceptance or authorize flashing, first-boot
-network clearing or pairing. Any other custom build remains refused.
+it explicitly separates publication from live flash authorization.
 
 ```text
 gh run download 42973182814 --repo analienx/gledopto -n glsd301p-ed-wired-1dec734c815fe7721958be818dfadf88bae944fe -D ed008
 python telink_swire_recovery.py prepare --device gledopto-gl-sd-301p --image ed008/glsd301p-ed_0x00000.bin --out gledopto-ed008
 ```
 
-GLSD-ED-008 clears its Zigbee stack state once at first start, so pair the
-dimmer again afterwards. The Gledopto artifact expires on 2026-12-11; a manual
-run of its TC32 job publishes the same bytes again.
+The current release is **GLSD-ED-009**, also admitted by exact native bytes:
+144,052 bytes, SHA-256
+`07686fb96fe5bde0043cb4c4fb41219f83317552fc02756cc92c9b7b2887b4be`,
+file version `0x7F0A0001`. The OTA container is 144,118 bytes and SHA-256
+`d93ed2f8d091dbca2f607da2d418767050f9fb0236fca5f5cf3e4629a63e3fd9`.
+These come from [successful hosted run 43583914672](https://github.com/analienx/gledopto/actions/runs/43583914672),
+source `15ffb75a2bce4581dd8f0dbf73bca97beb5ed5c4`. The original artifact expires;
+any replacement build must reproduce the exact pinned hashes. The ED-009 artifact
+retains older quarantine metadata; the later [device status](https://github.com/analienx/gledopto/blob/main/devices/gl-sd-301p/STATUS.md)
+records that its flash ban was lifted and ED-009 was installed by OTA on one unit.
+ED-009 has not been established as wired-flashed on a second unit. Unknown bytes
+remain refused. Admission does not prove boot or authorize a particular device.
+
+### GL-SD-301P: next wired flash
+
+Use the exact candidate-SHA hosted SWire kit for this tool, not an old local
+launcher from another dimmer. Use a **new private directory for each physical
+unit**. The following are Windows `cmd` examples; replace the paths and port.
+Do not execute the write steps until this tool revision has passed exact-SHA
+hosted CI and the connected target and image are established.
+
+1. Establish the target is the supported GL-SD-301P hardware revision and record
+   its own IEEE or physical asset ID. This conversion changes a stock Router into
+   an End Device: assess children and mesh impact first. Keep mains disconnected,
+   prove SWS/3V3/GND pads, measure the 3.3 V supply, and secure the contacts.
+   Use the previously demonstrated resistor-junction wiring only if the actual
+   adapter and target are electrically compatible; an adapter loop is not proof
+   of target communication. Never connect both mains and the USB setup.
+2. Obtain the released ED-009 artifact and prepare the finalized image. A file
+   name containing `quarantined` does not itself change the bytes or the later
+   decision; use the pinned hashes and current status, not the name alone.
+
+```cmd
+gh run download 43583914672 --repo analienx/gledopto -n glsd301p-ed-ota-15ffb75a2bce4581dd8f0dbf73bca97beb5ed5c4 -D C:\private\dimmer2\ed009
+python helper_scripts\telink_swire_recovery.py prepare --device gledopto-gl-sd-301p --ota C:\private\dimmer2\ed009\glsd301p-ed.quarantined.ota --expect-ota-sha256 d93ed2f8d091dbca2f607da2d418767050f9fb0236fca5f5cf3e4629a63e3fd9 --out C:\private\dimmer2\bundle
+```
+
+   When running from a downloaded kit, replace `helper_scripts\telink_swire_recovery.py`
+   with `telink_swire_recovery.py`. The tool extracts and checks the finalized
+   payload; never write the OTA container directly or a raw pre-finalization BIN.
+3. Find the port with `ports`, prefetch the pinned reader with `fetch-reader`,
+   then connect and use `watch-link` if needed. Make a new full double backup:
+
+```cmd
+python helper_scripts\telink_swire_recovery.py read --port COM5 --halt --retry-seconds 300 --out C:\private\dimmer2\before.bin
+python helper_scripts\telink_swire_recovery.py inspect --dump C:\private\dimmer2\before.bin --reference stock=C:\private\dimmer2\stock.ota --replace stock --json
+```
+
+   Replace `stock.ota` and `stock` with the exact known current firmware when
+   appropriate. To obtain the pinned stock reference, run
+   `python helper_scripts\telink_swire_recovery.py prepare --device gledopto-gl-sd-301p --out C:\private\dimmer2\stock`
+   and use `C:\private\dimmer2\stock\image.bin` in the reference argument.
+   `inspect`
+   requires a unique enabled exact reference and a valid disabled other image;
+   empty, unknown, corrupt or ambiguous layouts must stop for review. Do not use
+   the prior dimmer's backup, receipt, target ID or assumed slot. `--halt` retries
+   for the specified connection window, not indefinitely, and leaves the CPU stopped.
+   This version confirms the CPU remains stopped before the second read without
+   resetting it, and stages against a baseline without resetting afterwards.
+   Older `--halt` double-read receipts did not establish this and
+   must not be used as uninterrupted baselines.
+4. Substitute inspection's `replaceSlot` for `SLOT` (A or B) and the actual
+   physical target ID for `TARGET` in **every** command below. The plan shows the
+   erase range and confirmation tokens. Stage writes only that complete slot;
+   the original double-read baseline binds the session and preserves the rest.
+   This step writes flash. Keep the same board, power and contacts throughout.
+
+```cmd
+python helper_scripts\telink_swire_recovery.py plan --bundle C:\private\dimmer2\bundle --slot SLOT --full-slot --json
+python helper_scripts\telink_swire_recovery.py stage --bundle C:\private\dimmer2\bundle --port COM5 --slot SLOT --full-slot --baseline C:\private\dimmer2\before.bin --session C:\private\dimmer2\session.json --target-id TARGET --operation-id stage-1 --confirm TOKEN_FROM_PLAN --json
+python helper_scripts\telink_swire_recovery.py read --port COM5 --single --out C:\private\dimmer2\staged.bin
+python helper_scripts\telink_swire_recovery.py verify --session C:\private\dimmer2\session.json --dump C:\private\dimmer2\staged.bin --staged --json
+python helper_scripts\telink_swire_recovery.py activate --session C:\private\dimmer2\session.json --operation-id activate-1 --hold --confirm TOKEN_FROM_PLAN --json
+python helper_scripts\telink_swire_recovery.py read --port COM5 --single --out C:\private\dimmer2\activated.bin
+python helper_scripts\telink_swire_recovery.py verify --session C:\private\dimmer2\session.json --dump C:\private\dimmer2\activated.bin --json
+```
+
+   Use the **stage** and **activate** tokens returned by the plan respectively.
+   Do not use `--halt` on these readbacks: a reset between stage and activation
+   is forbidden. Each `--single` is one full comparison against the expected
+   image, erased tail and preserved baseline; it cannot detect a coincident read
+   error by repetition. Omit `--single` to read twice. If a write is uncertain,
+   or a comparison fails, stop and use `status` and the documented fresh double-read
+   reconciliation, not a new session or a blind retry.
+5. After `ACTIVATED_VERIFIED`, arrange a controlled low-voltage power cycle with
+   mains disconnected. ED-009 can clear old Zigbee stack state on first boot;
+   pairing may be needed; if so, enable a bounded join window and observe the
+   fresh join. Confirm fresh Zigbee interview, identity, build and role.
+   Byte verification is not proof of boot. Only after disconnecting the USB
+   equipment and safe reassembly can mains-dependent lamp and push-button behavior
+   be checked. Preserve private dumps and receipts outside Git.
 
 ### Avatto and other tuya-zigbee-switch boards
 
@@ -572,7 +661,8 @@ Errors include `errorCode`, `details`, `retrySafe`, `sideEffectsPossible` and
 `bootVerified: false`. `retrySafe` on a cached successful write applies only to
 repeating that exact operation ID. `SENT_UNVERIFIED`, `FLASH_MATCHED` and real boot
 acceptance are separate evidence levels. Standalone byte verification does not
-advance a session; session verification requires fresh double-read evidence.
+advance a session. Normal session verification accepts one fresh no-reset full
+read; the baseline and recovery from failures require matching double reads.
 
 
 The [logic and agent-interface review](swire_recovery_review.md) records the

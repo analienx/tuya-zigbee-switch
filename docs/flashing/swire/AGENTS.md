@@ -69,7 +69,7 @@ stderr. Argument failures also return JSON. Human `--help` is ordinary text.
 | Profile | Allowed input |
 | --- | --- |
 | `bseed-ts011f` | PM/non-PM Router/Client finalized OTA with matching manifest and role-matrix evidence |
-| `gledopto-gl-sd-301p` | Exact pinned vendor stock or GLSD-ED-008 candidate bytes; artifact publication and format admission do not authorize a live flash or lift incident holds |
+| `gledopto-gl-sd-301p` | Exact pinned vendor stock, GLSD-ED-008 or GLSD-ED-009 bytes; see the GL-SD-301P procedure and its current evidence |
 | `tuya-zigbee-switch` | `--board NAME --role router\|end_device`: the one released OTA for that board in `zigbee2mqtt/ota/index_<role>.json`, checked against its SHA-512 (Avatto, MHCOZY, Moes, BSEED switches, ...); BSEED sockets and the TS0726 3-gang are refused here |
 | `bseed-ts0726` | This fork's released TS0726 3-gang (`iedhxgyi`) Router image from `index_bseed.json`, checked against its SHA-512 |
 | `bseed-ts011f-pm-r19-recovery` | Exact pinned historical PM Router r19 incident fallback only |
@@ -113,12 +113,14 @@ Unexpected markers, mismatched references, corruption or ambiguous slots mean st
    confirmed `--target-id` for each new JSON write session. Keep the same physical
    board attached. TX-only cannot electronically identify it.
 3. For verified recovery: `stage` with the original `--baseline`, then a new
-   no-reset full `read`, then `verify --session PATH --dump FILE --staged --json`.
+   no-reset full `read --single`, then `verify --session PATH --dump FILE --staged --json`.
 4. Only after phase `VERIFIED`, use `activate --session PATH --operation-id ID
    --hold --confirm TOKEN --json`. Activation reasserts HALT without requesting a
    software reset. The verified route requires `--hold`.
-5. Take a new no-reset full read and run `verify --session PATH --dump FILE
-   --json`. `ACTIVATED_VERIFIED` proves bytes, not boot. Follow the incident's
+5. Take a new no-reset full `read --single` and run `verify --session PATH --dump FILE
+   --json`. A single read is compared byte for byte but does not independently
+   check read repeatability; use the default double read for greater confidence.
+   `ACTIVATED_VERIFIED` proves the comparison, not boot. Follow the incident's
    controlled low-voltage bench start, reassembly and independent Zigbee checks.
 6. For an expressly selected TX-only route, `flash` may combine stage/activation
    without a baseline. Its result is `SENT_UNVERIFIED`, never hardware acceptance.

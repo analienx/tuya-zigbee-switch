@@ -11,10 +11,16 @@ on:
         description: 'Optional original ED-008 hosted artifact run for exact candidate admission validation'
         required: false
         default: ''
+      gledopto_ed009_artifact_run:
+        description: 'Optional ED-009 hosted artifact run for exact release admission validation'
+        required: false
+        default: ''
   push:
     paths:
       - 'helper_scripts/telink_swire_recovery.py'
       - 'tests/test_telink_swire_recovery.py'
+      - 'docs/flashing/swire/**'
+      - 'docs/flashing/swire_recovery*.md'
       - '.github/workflows/telink-swire-recovery.yml'
       - 'zigbee2mqtt/ota/index_*.json'
       - 'device_db.yaml'
@@ -22,6 +28,8 @@ on:
     paths:
       - 'helper_scripts/telink_swire_recovery.py'
       - 'tests/test_telink_swire_recovery.py'
+      - 'docs/flashing/swire/**'
+      - 'docs/flashing/swire_recovery*.md'
       - '.github/workflows/telink-swire-recovery.yml'
       - 'zigbee2mqtt/ota/index_*.json'
       - 'device_db.yaml'
@@ -200,6 +208,37 @@ jobs:
               sys.exit('Original ED-008 bytes do not match the admitted candidate')
           tool.load_bundle(root / 'ed008-checked')
           print('Original ED-008 candidate prepared and reopened; no live flash authorization implied')
+          EOF
+      - name: Validate hosted Gledopto ED-009 OTA and native bytes when requested
+        if: github.event_name == 'workflow_dispatch' && inputs.gledopto_ed009_artifact_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ED009_RUN: ${{ inputs.gledopto_ed009_artifact_run }}
+        run: |
+          set -euo pipefail
+          test "$ED009_RUN" = 43583914672
+          test "$(gh api repos/analienx/gledopto/actions/runs/$ED009_RUN --jq .head_sha)" = 15ffb75a2bce4581dd8f0dbf73bca97beb5ed5c4
+          test "$(gh api repos/analienx/gledopto/actions/runs/$ED009_RUN --jq .conclusion)" = success
+          gh run download "$ED009_RUN" --repo analienx/gledopto \
+            -n glsd301p-ed-ota-15ffb75a2bce4581dd8f0dbf73bca97beb5ed5c4 -D "$RUNNER_TEMP/ed009-original"
+          python3 - "$RUNNER_TEMP" <<'EOF'
+          import hashlib, pathlib, sys
+          sys.path.insert(0, 'helper_scripts')
+          import telink_swire_recovery as tool
+          root = pathlib.Path(sys.argv[1])
+          original = root / 'ed009-original'
+          ota = original / 'glsd301p-ed.quarantined.ota'
+          native = original / 'glsd301p-ed.final.bin'
+          if hashlib.sha256(ota.read_bytes()).hexdigest() != 'd93ed2f8d091dbca2f607da2d418767050f9fb0236fca5f5cf3e4629a63e3fd9':
+              sys.exit('ED-009 OTA hash mismatch')
+          for name, kwargs in [('ota', {'ota_path': ota}), ('native', {'image_path': native})]:
+              bundle = root / ('ed009-' + name)
+              plan = tool.prepare(out=bundle, device='gledopto-gl-sd-301p', **kwargs)
+              if (plan['image']['sha256'] != '07686fb96fe5bde0043cb4c4fb41219f83317552fc02756cc92c9b7b2887b4be'
+                      or plan['image']['bytes'] != 144052 or plan['image']['fileVersion'] != 0x7F0A0001):
+                  sys.exit('ED-009 native image does not match the release')
+              tool.load_bundle(bundle)
+          print('ED-009 OTA and native bytes admitted; no live flash or boot claimed')
           EOF
       - name: Package stock recovery tool and guide
         run: |
