@@ -193,11 +193,21 @@ def post_ota_configure(profile):
 
 
 def join_total_seconds(profile):
-    value = profile.get('join_total_seconds', DEFAULT_JOIN_TOTAL_SECONDS)
-    if not isinstance(value, int) or isinstance(value, bool) or not 30 <= value <= 2700:
+    """Whole-campaign permit-join time. Network-wide windows default to, and
+    may not exceed, MAX_NETWORK_WIDE_SECONDS; a larger value is refused when
+    the profile loads instead of being cut silently when the window opens."""
+    from bseed_join_policy import MAX_NETWORK_WIDE_SECONDS, MAX_SCOPED_TOTAL_SECONDS
+    network_wide = join_mode(profile) == 'network-wide'
+    default = MAX_NETWORK_WIDE_SECONDS if network_wide else DEFAULT_JOIN_TOTAL_SECONDS
+    value = profile.get('join_total_seconds', default)
+    if (not isinstance(value, int) or isinstance(value, bool) or
+            not 30 <= value <= MAX_SCOPED_TOTAL_SECONDS):
         raise ValueError('join_total_seconds must be an integer 30..2700')
     if value < int(profile.get('join_seconds', 120)):
         raise ValueError('join_total_seconds must cover at least one join_seconds window')
+    if network_wide and value > MAX_NETWORK_WIDE_SECONDS:
+        raise ValueError('join_total_seconds may be at most %d for a network-wide window'
+                         % MAX_NETWORK_WIDE_SECONDS)
     return value
 
 
@@ -439,9 +449,7 @@ def rejoin_cmd(profile, confirmation, evidence_path):
     if join_mode(profile) == 'scoped':
         via = ['--permit-via', profile['join_via']]
     else:
-        from bseed_z2m_rejoin_window import MAX_NETWORK_WIDE_SECONDS
         via = ['--network-wide', '--from-role', profile['preflash_role']]
-        total = min(total, MAX_NETWORK_WIDE_SECONDS)
     return [sys.executable, '-u', str(ROOT/'helper_scripts/bseed_z2m_rejoin_window.py'),
             '--target', profile['device'], '--ieee', profile['ieee'],
             '--confirm-ieee', confirmation, *via,

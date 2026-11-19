@@ -233,6 +233,16 @@ def test_rejoin_defaults_to_a_network_wide_window_within_its_budget(tmp_path):
         campaign.join_mode({'preflash_role':'Router','postflash_role':'EndDevice','join_mode':'all'})
 
 
+def test_network_wide_total_is_refused_above_its_cap_not_cut(tmp_path):
+    cfg=profile(tmp_path);cfg['join_total_seconds']=2100
+    with pytest.raises(ValueError,match='at most 1200'):
+        campaign.join_total_seconds(cfg)
+    cfg.update(join_mode='scoped',join_via='KnownRouter')
+    assert campaign.join_total_seconds(cfg)==2100
+    del cfg['join_total_seconds'];cfg.pop('join_mode');cfg.pop('join_via')
+    assert campaign.join_total_seconds(cfg)==1200   # network-wide default
+
+
 def test_same_role_updates_never_open_a_join_window(tmp_path):
     cfg=profile(tmp_path);cfg['postflash_role']=cfg['preflash_role']
     assert campaign.join_mode(cfg) is None

@@ -119,8 +119,9 @@ def test_join_via_is_strongest_router_and_children_are_reported():
     assert mig.choose_join_via(neighbors, devices, IEEE) == ('Custom', 150, ['Dimmer'])
     neighbors[0]['lqi'] = 200
     assert mig.choose_join_via(neighbors, devices, IEEE)[0] == 'Stock'
-    with pytest.raises(mig.Refused, match='No Router'):
-        mig.choose_join_via([dict(eui64='0x3', lqi=9, relationship=1)], devices, IEEE)
+    # No Router neighbour: the network-wide rejoin needs none, and the
+    # children that will have to re-parent are still reported.
+    assert mig.choose_join_via([dict(eui64='0x3', lqi=9, relationship=1)], devices, IEEE)[:2] == (None, None)
 
 
 def test_resume_only_while_progress_increases_and_budget_remains():

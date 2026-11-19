@@ -125,7 +125,7 @@ def choose_join_via(neighbors, devices, target_ieee):
             custom = 'bseed' in str(d.get('software_build_id') or '')
             routers.append((int(entry.get('lqi') or 0), custom, d['friendly_name']))
     if not routers:
-        raise Refused('No Router neighbour to scope the rejoin window to')
+        return None, None, sorted(children)  # network-wide rejoin needs none
     lqi, _custom, name = max(routers)
     return name, lqi, sorted(children)
 
@@ -159,8 +159,12 @@ def build_profile(site, live, route, candidate, *, image, sha256, native_image=N
                  native_image=str(native_image), native_sha256=native_sha256)
     if role_change:
         # Owner rule: rejoin network-wide, never scoped to one parent Router.
-        p.update(join_mode='network-wide', join_seconds=120, join_total_seconds=1200,
-                 allow_join_all_fallback=False, source_rejoin_strategy='scoped')
+        from bseed_join_policy import MAX_NETWORK_WIDE_SECONDS
+        # Source recovery (resume) keeps its narrow mechanisms: scoped through
+        # the strongest Router when there is one, else coordinator-only.
+        p.update(join_mode='network-wide', join_seconds=120,
+                 join_total_seconds=MAX_NETWORK_WIDE_SECONDS, allow_join_all_fallback=False,
+                 source_rejoin_strategy='scoped' if join_via else 'coordinator')
         if join_via:
             p['join_via'] = join_via  # informational: strongest Router neighbour at plan time
     pm = route['board'] == CUSTOM_PM
@@ -352,11 +356,8 @@ def cmd_plan(site, args):
         from bseed_zdo_live import read_neighbor_table
         neighbors = read_neighbor_table(site['mqtt_config'], site['broker'], live['ieee_address'],
                                         live['network_address'])
-        try:
-            join_via, lqi, children = choose_join_via(neighbors, devices, live['ieee_address'])
-            print('STRONGEST_ROUTER_NEIGHBOUR', join_via, 'lqi', lqi)
-        except Refused as error:
-            print('NO_ROUTER_NEIGHBOUR', error)  # the network-wide rejoin does not need one
+        join_via, lqi, children = choose_join_via(neighbors, devices, live['ieee_address'])
+        print('STRONGEST_ROUTER_NEIGHBOUR' if join_via else 'NO_ROUTER_NEIGHBOUR', join_via, 'lqi', lqi)
         if route['target'] == 'EndDevice' and children:
             print('CHILDREN_WILL_REPARENT', ', '.join(children))
     transport = native if route['wrapper_type'] is None else wrap(native, route['wrapper_type'])

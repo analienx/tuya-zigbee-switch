@@ -123,7 +123,7 @@ def test_only_a_device_new_to_the_network_counts_as_foreign_join():
 
 
 def _run_campaign(tmp_path, monkeypatch, *, total, on_open, live_role='EndDevice',
-                  node=None, network_wide=False):
+                  node=None, network_wide=False, refuse_open=False):
     import itertools
     import json
     from types import SimpleNamespace
@@ -165,8 +165,10 @@ def _run_campaign(tmp_path, monkeypatch, *, total, on_open, live_role='EndDevice
         def publish(self, topic, payload, **kwargs):
             data = json.loads(payload)
             requests.append(data)
-            self.emit('bridge/response/permit_join', {'status': 'ok', 'transaction': data['transaction']})
-            if data['time']:
+            refused = refuse_open and data['time']
+            self.emit('bridge/response/permit_join', {'status': 'error' if refused else 'ok',
+                                                     'transaction': data['transaction']})
+            if data['time'] and not refused:
                 Client.opens += 1
                 on_open(Client.opens, lambda *event: pending.append(lambda: self.emit(*event)), inventory)
             return SimpleNamespace(wait_for_publish=lambda *args: None)
@@ -198,7 +200,6 @@ def _run_campaign(tmp_path, monkeypatch, *, total, on_open, live_role='EndDevice
     except SystemExit as error:
         code = error.code
     _run_campaign.requests = requests
-    _run_campaign.requests_ref = requests
     return code, [r['time'] for r in requests], json.loads(output.read_text())
 
 
@@ -270,8 +271,13 @@ def test_network_wide_window_has_no_router_and_a_tighter_budget(tmp_path, monkey
         validate_recovery(IEEE, IEEE, None, INVENTORY, False, LOCK, True)
     with pytest.raises(ValueError, match='only for a role migration'):
         validate_recovery(IEEE, IEEE, None, INVENTORY, False, LOCK, True, 'Router', 'Router')
+    # Already re-interviewed in the new role: still the same migration.
+    reinterviewed = [{**INVENTORY[0], 'type': 'EndDevice'}, INVENTORY[1]]
+    assert validate_recovery(IEEE, IEEE, None, reinterviewed, False, LOCK, True,
+                             'Router', 'EndDevice')[0]['type'] == 'EndDevice'
+    unknown = [{**INVENTORY[0], 'type': 'Unknown'}, INVENTORY[1]]
     with pytest.raises(ValueError, match='Cached inventory type'):
-        validate_recovery(IEEE, IEEE, None, INVENTORY, False, LOCK, True, 'EndDevice', 'Router')
+        validate_recovery(IEEE, IEEE, None, unknown, False, LOCK, True, 'Router', 'EndDevice')
 
     def on_open(n, schedule, inventory):
         schedule('bridge/event', {'type': 'device_announce', 'data': {'ieee_address': IEEE}}, False)
@@ -300,20 +306,21 @@ def test_foreign_join_aborts_and_closes_immediately(tmp_path, monkeypatch):
     assert evidence['result'] == 'foreign_join_aborted'
 
 
-def test_window_lengths_never_pass_the_deadline():
+def test_window_lengths_never_pass_the_deadline_or_go_below_the_minimum():
     from bseed_z2m_rejoin_window import window_seconds_left
     assert window_seconds_left(30, 100, 0) == 30
-    assert window_seconds_left(30, 100, 85) == 15
+    assert window_seconds_left(120, 100, 35) == 65   # last window shortened
+    assert window_seconds_left(30, 100, 71) == 0     # 29 s left: not opened
     assert window_seconds_left(30, 100, 99.5) == 0
     assert window_seconds_left(30, 100, 130) == 0
 
 
-def test_last_window_is_shortened_to_the_deadline(tmp_path, monkeypatch):
+def test_campaign_windows_stay_inside_the_deadline(tmp_path, monkeypatch):
     code, times, evidence = _run_campaign(tmp_path, monkeypatch, total=45,
                                           on_open=lambda *args: None, network_wide=True)
     opens = [w['seconds'] for w in evidence['windows']]
-    assert code == 2 and times[-1] == 0 and opens[0] == 30
-    assert all(0 < s <= 30 for s in opens) and sum(opens) <= 45
+    assert code == 2 and times[-1] == 0 and opens == [30]   # 12 s left: no tail window
+    assert sum(opens) <= 45
     (seconds, _callback), = _run_campaign.deadline
     assert 0 < seconds <= 45   # the timer covers the same single deadline
 
@@ -348,3 +355,26 @@ def test_foreign_join_closes_while_a_live_check_blocks(tmp_path, monkeypatch):
     assert seen['closed_during_check'] is True
     assert code == 2 and times == [30, 0] and evidence['result'] == 'foreign_join_aborted'
     assert evidence['closed_by'] == 'foreign_join'
+
+
+def test_announce_just_after_closing_is_still_checked(tmp_path, monkeypatch):
+    """A join accepted in the last moment of the final window announces a
+    little later; it must still be checked, not dropped as out-of-window."""
+    def on_open(n, schedule, inventory):
+        if n == 1:
+            _run_campaign.deadline[0][1]()   # the deadline fires as the window opens
+            schedule('bridge/event', {'type': 'device_announce', 'data': {'ieee_address': IEEE}}, False)
+    code, times, evidence = _run_campaign(tmp_path, monkeypatch, total=600, on_open=on_open,
+                                          network_wide=True)
+    assert code == 0 and times == [30, 0]
+    assert evidence['closed_by'] == 'deadline' and evidence['result'] == 'rejoin_candidate'
+
+
+def test_unconfirmed_open_still_writes_evidence(tmp_path, monkeypatch):
+    code, times, evidence = _run_campaign(tmp_path, monkeypatch, total=300,
+                                          on_open=lambda *args: None, network_wide=True,
+                                          refuse_open=True)
+    assert code == 2 and times == [30, 0]
+    assert evidence['result'] == 'unconfirmed'
+    assert evidence['failure'].startswith('permit_join_unconfirmed')
+    assert evidence['closed_by'] == 'permit_join_unconfirmed'
