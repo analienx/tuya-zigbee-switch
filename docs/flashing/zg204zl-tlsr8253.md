@@ -1,6 +1,6 @@
 # HOBEIAN / Tuya ZG-204ZL PIR + lux: TLSR8258 SWire / Zigbee OTA preflight
 
-**Status: inspection-only. No device flash, erase, OTA update, or production deployment authorized by this document.**
+**Status: inspection-only programming profile; no further flashing is authorized by this document.** On 2026-11-15 the Hall sensor yielded two matching full factory reads and a later first post-flash read matching the pinned application image, but the second post-flash read was interrupted and preservation outside the application region is **not** verified. **Current verified evidence and exact photographed pinout: [ZG-204ZL Hall pinout and pinned firmware](zg204zl-hall-pinout-firmware.md).**
 
 ## Ownership and hardware
 
@@ -49,8 +49,7 @@ Upstream: https://github.com/pvvx/ZigbeeTLc/tree/master/bin
 | Subsequent **ZigbeeTLc OTA** | `1141-0232-01403001-ZG204ZL.zigbee` | Manufacturer 0x1141; image type 0x0232 |
 | Native **programmer** image | `ZG204ZL_v0140.bin` | Not a Zigbee OTA container |
 
-These filenames are identified from pvvx v0.1.4.0 source and build scripts;
-they are **not yet locally downloaded, hash-pinned, or hardware-accepted**.
+These filenames were independently staged and hash-pinned in the user-selected Hall workstream on 2026-11-15; the raw native image is **129140 bytes, SHA-256 `792bb4452a249e1408e316d37a0daadf11626343f7f625ebaa9815497d04807a`**. See the dedicated [immutable firmware manifest and readback evidence](zg204zl-hall-pinout-firmware.md). They are **not yet fully hardware-accepted**, and the binary and private flash dumps are **not** committed to this public repository.
 Never feed a `.zigbee` container directly into a SWire writer, and do not
 assume a native `.bin` is compatible with the existing TLSR8258 dual-slot
 `KNLT` image validator.
@@ -100,10 +99,9 @@ BSEED boards**. They have not been qualified for this TLSR8258 PIR.
 ## Gates to enable writing later
 
 1. Confirm exact PCB/chip and connector orientation on the selected sensor.
-2. Demonstrate **target** SWire replies, JEDEC capacity and two identical
-   full reads. The adapter loopback alone is not acceptable.
+2. **Completed in Hall bench receipts:** genuine target SWire replies and two identical 512 KiB stock reads (SHA-256 `bf9b35331591bbb8a01b6c5b6cd07fc0d667a2deb01fbc5b0f43fa8b4ef910c5`). **Still required:** independently establish JEDEC capacity and post-flash two-read integrity. Adapter loopback alone is not acceptable.
 3. Decode factory flash: boot marker/slot layout, NVM, IEEE identity, factory
-   calibration and any secure/application settings, with independent evidence.
+   calibration and any secure/application settings, with independent evidence. A later post-flash read found **3600 changed bytes across `0x34000`, `0x35000`, `0x36000`, `0x39000`, and `0x3D000`**, so preservation needs explicit investigation.
 4. Validate the exact pvvx image by immutable commit + SHA-256, header/native
    image consistency and supported flash geometry.
 5. Implement an **independent TLSR8258** flash layout strategy and fail-closed
