@@ -6,6 +6,33 @@ Use only the same physically qualified ZG-204ZL board/interface as the first
 sensor. It cannot identify the connected PCB electrically. The regulated 2.1 V
 rail is not a 3.3 V input. Follow the device-specific voltage/pad record.
 
+## ZG-204ZL-3.0 programming pins
+
+Owner-confirmed orientation, recorded 2026-11-19: look at the **component side**,
+with the **five programming holes along the top** and the **small push button
+toward the upper-right corner**. From **left to right**:
+
+| Pin | Signal | MCU pin / net |
+| --- | --- | --- |
+| 5 (leftmost) | RX | PB7 |
+| 4 | TX | PB1 |
+| 3 (middle) | SWS | PA7 |
+| 2 | GND | Ground |
+| 1 (rightmost) | +VBAT | Battery input |
+
+```text
+Component side, programming holes at top:
+   [5 RX/PB7] [4 TX/PB1] [3 SWS/PA7] [2 GND] [1 +VBAT]
+                                             button ↗
+```
+
+The reverse-side view is mirrored. SWire uses pin 3 (SWS), pin 2 (GND), and
+the board's qualified supply connection. Pins 4 and 5 are the separate UART;
+they are not substitutes for SWS. +VBAT is the battery input, not the regulated
+2.1 V output; this pin map does not establish a safe externally applied voltage.
+
+## Read, write and verify
+
 The owner explicitly selected ONE full pre-write backup and ONE full post-write
 read on 2026-11-19. This is a dedicated sensor procedure; it does not change the
 BSEED verified-session double-read policy. A single backup does not prove read
