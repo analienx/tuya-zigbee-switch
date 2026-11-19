@@ -168,6 +168,7 @@ void network_indicator_join_activity(network_indicator_t *indicator,
 }
 
 #else
+
 /* Original behavior for boards without QUIET_JOIN_BLINK: every network LED
  * (and search LED) blinks for as long as the device is not joined; join
  * activity reports are not used. */
@@ -201,4 +202,5 @@ void network_indicator_join_activity(network_indicator_t *indicator,
     (void)indicator;
     (void)activity;
 }
+
 #endif
