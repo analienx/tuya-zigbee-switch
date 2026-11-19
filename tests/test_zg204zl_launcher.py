@@ -113,3 +113,42 @@ def test_existing_recovery_ownership_blocks_sensor(bench):
     with pytest.raises(RuntimeError, match='existing recovery'):
         launcher.run('COM3', 300)
     assert events == []
+
+
+@pytest.mark.parametrize('exit_code', [0, 1])
+def test_real_programmer_child_gets_only_bounded_write_command(tmp_path, monkeypatch, exit_code):
+    import json
+    reader = tmp_path / 'reader.py'
+    reader.write_text('import sys,json,pathlib\n'
+                      'pathlib.Path(__file__).with_suffix(".args").write_text(json.dumps(sys.argv[1:]))\n'
+                      f'print("Write to 0x000100...", flush=True)\nsys.exit({exit_code})\n')
+    monkeypatch.setattr(launcher.swire, 'READER_SHA256', launcher.digest(reader.read_bytes()))
+    image = tmp_path / 'image.bin'
+    image.write_bytes(b'test')
+    if exit_code:
+        with pytest.raises(RuntimeError, match='Programmer exited 1'):
+            launcher.writer(reader, image, 'COM3', tmp_path, lambda _: None)
+    else:
+        launcher.writer(reader, image, 'COM3', tmp_path, lambda _: None)
+    arguments = json.loads(reader.with_suffix('.args').read_text())
+    assert arguments == ['-p', 'COM3', '-b', '921600', 'wf', '0x0', str(image)]
+    assert (tmp_path / 'write.log').is_file()
+
+
+def test_stalled_programmer_child_is_stopped_before_return(tmp_path, monkeypatch):
+    import subprocess
+    reader = tmp_path / 'reader.py'
+    reader.write_text('import time\ntime.sleep(60)\n')
+    monkeypatch.setattr(launcher.swire, 'READER_SHA256', launcher.digest(reader.read_bytes()))
+    children = []
+    original = subprocess.Popen
+    def launch(*args, **kwargs):
+        child = original(*args, **kwargs)
+        children.append(child)
+        return child
+    monkeypatch.setattr(launcher.subprocess, 'Popen', launch)
+    ticks = iter(range(0, 10000, 121))
+    monkeypatch.setattr(launcher.time, 'monotonic', lambda: next(ticks))
+    with pytest.raises(RuntimeError, match='stopped making progress'):
+        launcher.writer(reader, tmp_path / 'image.bin', 'COM3', tmp_path, lambda _: None)
+    assert len(children) == 1 and children[0].poll() is not None
