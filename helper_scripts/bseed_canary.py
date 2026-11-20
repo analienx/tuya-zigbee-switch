@@ -491,8 +491,8 @@ def require_flash_confirmation(profile, confirm_ieee, confirm_unloaded):
     if confirm_ieee != profile['ieee']:
         raise CanaryError('Flash refused: --confirm-ieee must equal %s exactly' % profile['ieee'])
     physical = profile['non_pm'] or profile.get('pm_preflash_load_proof') == 'physically_unloaded'
-    if physical and not confirm_unloaded:
-        raise CanaryError('Flash refused: this board needs a fresh --confirm-load-unplugged')
+    if physical and not (confirm_unloaded or profile.get('auto_relay_off') is True):
+        raise CanaryError('Flash refused: require fresh --confirm-load-unplugged or verified automatic relay OFF')
     if not physical and confirm_unloaded:
         raise CanaryError('--confirm-load-unplugged applies only to physical-proof boards')
 
