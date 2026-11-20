@@ -5,12 +5,13 @@
 #endif
 
 static const u32 rejoinBackoffTbl[] = {
-    5000, 10000, 20000, 45000, 90000, 180000, 300000, 600000
+    2000, 3000, 5000, 10000, 20000, 40000, 80000, 300000, 900000, 1800000
 };
 #define REJOIN_BACKOFF_STEPS (sizeof(rejoinBackoffTbl) / sizeof(rejoinBackoffTbl[0]))
 static u8 rj_step;
 static u8 rj_chan;
 static ev_timer_event_t *timerMotionCooldownEvt;
+static bool motionRetryReady;
 #if !USE_BLE
 static bool rj_secMode = REJOIN_SECURITY;
 #endif
@@ -22,13 +23,35 @@ static void app_saveNwkChannel(void) {
 }
 
 static u32 app_rejoinChannelMask(void) {
-    if (rj_chan && (rj_step & 3) != 3)
+    /* Pair known-channel attempts, then full-channel attempts. Alternating
+     * security can now cover BOTH modes on each mask, including early recovery. */
+    if (rj_chan && (rj_step & 3) < 2)
         return 1UL << rj_chan;
     return zb_apsChannelMaskGet();
 }
 
 static bool app_rejoinBusy(void) {
     return !bdb_isIdle() || zb_isUnderRejoinMode() || tl_stackBusy();
+}
+
+static s32 app_motionCooldownDone(void *arg) {
+    (void)arg;
+    timerMotionCooldownEvt = NULL;
+    motionRetryReady = true;
+    return -1;
+}
+
+static void app_motionCooldownClear(void) {
+    motionRetryReady = false;
+    if (timerMotionCooldownEvt)
+        TL_ZB_TIMER_CANCEL(&timerMotionCooldownEvt);
+}
+
+static void app_motionCooldownStart(void) {
+    app_motionCooldownClear();
+    timerMotionCooldownEvt = TL_ZB_TIMER_SCHEDULE(app_motionCooldownDone, NULL, 300000);
+    /* Allocation failure leaves motion disabled; the owned automatic retry
+     * continues and can restore the cooldown on its next accepted request. */
 }
 
 static s32 sensorDevice_rejoinBackoff(void *arg) {
@@ -46,6 +69,7 @@ static s32 sensorDevice_rejoinBackoff(void *arg) {
 #endif
     if (zb_rejoinReq(app_rejoinChannelMask(), g_bdbAttrs.scanDuration) != RET_OK)
         return 1000;
+    app_motionCooldownStart();
 #if !USE_BLE
     rj_secMode = !rj_secMode;
 #endif
@@ -73,29 +97,16 @@ void app_rejoinNow(void) {
     app_rejoinSchedule(100);
 }
 
-static s32 app_motionCooldownDone(void *arg) {
-    (void)arg;
-    timerMotionCooldownEvt = NULL;
-    return -1;
-}
-
-static void app_motionCooldownClear(void) {
-    if (timerMotionCooldownEvt)
-        TL_ZB_TIMER_CANCEL(&timerMotionCooldownEvt);
-}
-
 void app_rejoinOnMotion(void) {
-    if (!g_sensorAppCtx.linkDown || zb_isDeviceFactoryNew() || app_rejoinBusy() || timerMotionCooldownEvt)
+    if (!g_sensorAppCtx.linkDown || zb_isDeviceFactoryNew() || app_rejoinBusy() || !motionRetryReady)
         return;
     if (g_sensorAppCtx.timerRejoinBackoffEvt && g_sensorAppCtx.timerRejoinBackoffEvt->timeout <= 100)
         return; /* A request is already due sooner; do not delay it. */
-    timerMotionCooldownEvt = TL_ZB_TIMER_SCHEDULE(app_motionCooldownDone, NULL, 60000);
-    if (!timerMotionCooldownEvt)
-        return; /* Fail bounded if the timer pool is exhausted. */
     if (g_sensorAppCtx.timerRejoinBackoffEvt)
-        TL_ZB_TIMER_CANCEL(&g_sensorAppCtx.timerRejoinBackoffEvt);
+        ev_on_timer(g_sensorAppCtx.timerRejoinBackoffEvt, 100);
+    else
+        app_rejoinSchedule(100);
     /* Crucially, do not reset rj_step or security/channel progression. */
-    app_rejoinSchedule(100);
-    if (!g_sensorAppCtx.timerRejoinBackoffEvt)
-        app_motionCooldownClear();
+    if (g_sensorAppCtx.timerRejoinBackoffEvt)
+        motionRetryReady = false;
 }

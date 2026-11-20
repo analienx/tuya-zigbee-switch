@@ -34,7 +34,7 @@ static uint64_t now_ms, inflight_until;
 static bool factory_new, forced_busy, bdb_busy, stack_busy, no_timers;
 static u8 request_status;
 static bool selected_security;
-static unsigned requests, full_scans;
+static unsigned requests, full_scans, secure_full_scans, insecure_full_scans;
 static u32 last_mask;
 static bool zb_isDeviceFactoryNew(void) { return factory_new; }
 static bool zb_isUnderRejoinMode(void) { return forced_busy || now_ms < inflight_until; }
@@ -49,6 +49,10 @@ static u8 zb_rejoinReq(u32 mask, u8 duration) {
     requests++;
     last_mask = mask;
     full_scans += mask == zb_apsChannelMaskGet();
+    if (mask == zb_apsChannelMaskGet()) {
+        secure_full_scans += selected_security;
+        insecure_full_scans += !selected_security;
+    }
     inflight_until = now_ms + 2000;
     return RET_OK;
 }
@@ -58,8 +62,11 @@ static ev_timer_event_t *schedule(s32 (*cb)(void *), void *data, u32 timeout) {
         timers[i] = (ev_timer_event_t){timeout, timeout, cb, data, true};
         return &timers[i];
     }
-    assert(!"timer pool leaked");
     return NULL;
+}
+static void ev_on_timer(ev_timer_event_t *timer, u32 timeout) {
+    assert(timer && timer->active);
+    timer->timeout = timer->period = timeout;
 }
 static void cancel(ev_timer_event_t **handle) {
     assert(*handle && (*handle)->active);
@@ -109,43 +116,46 @@ int main(int argc, char **argv) {
             if (!strcmp(scenario, "motion")) app_rejoinOnMotion();
             advance(60000);
         }
-        printf("{\"requests\":%u,\"full_scans\":%u}\n", requests, full_scans);
+        printf("{\"requests\":%u,\"full_scans\":%u,\"secure_full_scans\":%u,\"insecure_full_scans\":%u}\n",
+               requests, full_scans, secure_full_scans, insecure_full_scans);
         return 0;
     }
 #if !BASELINE
     if (!strcmp(scenario, "schedule")) {
         start();
         advance(100);
-        for (unsigned i = 0; i < 8; i++) {
+        for (unsigned i = 0; i < REJOIN_BACKOFF_STEPS; i++) {
             assert(requests == i + 1);
             assert(g_sensorAppCtx.timerRejoinBackoffEvt->timeout == rejoinBackoffTbl[i]);
-            assert(last_mask == ((i & 3) == 3 ? zb_apsChannelMaskGet() : 1UL << 11));
+            assert(last_mask == ((i & 3) >= 2 ? zb_apsChannelMaskGet() : 1UL << 11));
             advance(rejoinBackoffTbl[i]);
         }
     } else if (!strcmp(scenario, "motion_wrap")) {
         g_sensorAppCtx.linkDown = true;
         rj_chan = 11;
-        rj_step = 7;
-        app_rejoinSchedule(600000);
+        rj_step = 10;
+        motionRetryReady = true;
+        app_rejoinSchedule(1800000);
         app_rejoinOnMotion();
-        assert(rj_step == 7 && timerMotionCooldownEvt);
+        assert(rj_step == 10 && !motionRetryReady);
         advance(100);
-        assert(requests == 1 && rj_step == 8 && full_scans == 1);
+        assert(requests == 1 && rj_step == 11 && full_scans == 1 && timerMotionCooldownEvt);
         advance(2000);
         app_rejoinOnMotion();
         assert(g_sensorAppCtx.timerRejoinBackoffEvt->timeout > 100);
-        /* After 300 s (past the 268 s raw-clock wrap), motion must work. */
-        advance(297900);
-        assert(!timerMotionCooldownEvt);
+        /* After 600 s (past two raw-clock wraps), motion must work. */
+        advance(598000);
+        assert(!timerMotionCooldownEvt && motionRetryReady);
         app_rejoinOnMotion();
         advance(100);
-        assert(requests == 2 && rj_step == 9);
+        assert(requests == 2 && rj_step == 12);
         for (unsigned i = 0; i < 20; i++) {
-            advance(60000);
+            advance(300000);
             app_rejoinOnMotion();
             advance(100);
         }
-        assert(requests == 22 && full_scans >= 5);
+        assert(requests == 22 && full_scans >= 10);
+        assert(secure_full_scans && insecure_full_scans);
     } else if (!strcmp(scenario, "busy")) {
         start();
         for (unsigned reason = 0; reason < 3; reason++) {
@@ -165,11 +175,11 @@ int main(int argc, char **argv) {
         advance(1000);
         assert(requests == 1 && rj_step == 1 && rj_secMode != mode);
         app_rejoinOnMotion(); /* SDK rejoin is still active. */
-        assert(!timerMotionCooldownEvt);
+        assert(timerMotionCooldownEvt && !motionRetryReady);
     } else if (!strcmp(scenario, "success")) {
         start();
         advance(100);
-        advance(2000);
+        advance(1000);
         app_rejoinOnMotion();
         assert(timerMotionCooldownEvt);
         cancel(&g_sensorAppCtx.timerRejoinBackoffEvt);
@@ -190,6 +200,46 @@ int main(int argc, char **argv) {
         no_timers = true;
         app_rejoinOnMotion();
         assert(!timerMotionCooldownEvt && !g_sensorAppCtx.timerRejoinBackoffEvt && !requests);
+        no_timers = false;
+        start();
+        no_timers = true; /* Automatic timer survives cooldown allocation failure. */
+        advance(100);
+        assert(requests == 1 && !motionRetryReady && !timerMotionCooldownEvt);
+        no_timers = false;
+        advance(2000);
+        assert(requests == 2 && timerMotionCooldownEvt && !motionRetryReady);
+    } else if (!strcmp(scenario, "shared_floor")) {
+        start();
+        advance(160100);
+        assert(requests == 8);
+        advance(299900);
+        app_rejoinOnMotion();
+        assert(requests == 8 && !motionRetryReady);
+        advance(100); /* Automatic retry owns the same five-minute motion floor. */
+        assert(requests == 9 && !motionRetryReady);
+        advance(300000);
+        assert(motionRetryReady);
+        app_rejoinOnMotion();
+        advance(100);
+        assert(requests == 10 && !motionRetryReady);
+        assert(g_sensorAppCtx.timerRejoinBackoffEvt->timeout == 1800000);
+    } else if (!strcmp(scenario, "unknown_channel")) {
+        g_sensorAppCtx.linkDown = true;
+        app_rejoinSchedule(100);
+        advance(2100);
+        assert(requests == 2 && full_scans == 2);
+        assert(secure_full_scans == 1 && insecure_full_scans == 1);
+    } else if (!strcmp(scenario, "counter_wrap")) {
+        g_sensorAppCtx.linkDown = true;
+        rj_chan = 11;
+        rj_step = 254;
+        app_rejoinSchedule(100);
+        advance(100);
+        advance(1800000);
+        assert(requests == 2 && full_scans == 2 && rj_step == 252);
+        advance(1800000);
+        assert(requests == 3 && full_scans == 2 && rj_step == 253);
+        assert(secure_full_scans == 1 && insecure_full_scans == 1);
     } else if (!strcmp(scenario, "button")) {
         /* Button recovery remains usable before the lost-parent callback. */
         rj_step = 7;

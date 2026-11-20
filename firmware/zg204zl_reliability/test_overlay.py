@@ -38,10 +38,11 @@ class VariantTests(unittest.TestCase):
             root = self.make_copy(tmp)
             originals = {n: (root / n).read_bytes() for n in fw.BASE_BLOBS}
             result = fw.apply(root, dry_run=True, check_commit=False)
-            self.assertEqual(result["file_version"], "0x01413001")
-            self.assertEqual(result["rejoin_delays_s"], [5, 10, 20, 45, 90, 180, 300, 600])
+            self.assertEqual(result["file_version"], "0x01423001")
+            self.assertEqual(result["rejoin_delays_s"], [2, 3, 5, 10, 20, 40, 80, 300, 900, 1800])
             self.assertEqual(result["scan_attempts"], 3)
-            self.assertEqual(result["motion_rejoin_min_interval_s"], 60)
+            self.assertEqual(result["motion_rejoin_min_interval_s"], 300)
+            self.assertEqual(result["tx_power_new_dbm_nominal"], 10.46)
             self.assertEqual({n: (root / n).read_bytes() for n in originals}, originals)
 
     def test_implementation_is_board_only_and_keeps_direct_binding(self):
@@ -54,16 +55,16 @@ class VariantTests(unittest.TestCase):
             power = (root / "src/app_cfg.h").read_text(encoding="utf-8")
             cfg = (root / "src/includes/zb_config.h").read_text(encoding="utf-8")
             version = (root / "src/version_cfg.h").read_text(encoding="utf-8")
-            self.assertIn("5000, 10000, 20000, 45000, 90000, 180000, 300000, 600000", zd)
+            self.assertIn("2000, 3000, 5000, 10000, 20000, 40000, 80000, 300000, 900000, 1800000", zd)
             self.assertIn("app_rejoinOnMotion(void)", zd)
             self.assertNotIn("clock_time_exceed", zd)
             self.assertEqual(zd.count('app_motionCooldownClear();'), 3)
             self.assertIn('g_sensorAppCtx.linkDown = 1;\n        rj_secMode = REJOIN_INSECURITY;', zd)
             self.assertIn("app_rejoinOnMotion();", pir)
             self.assertIn("remoteCmdOnOff(SENSOR_DEVICE_ENDPOINT, ZCL_CMD_ONOFF_ON)", pir)
-            self.assertIn("RF_POWER_INDEX_P3p01dBm", power)
+            self.assertIn('#define ZB_TX_POWER_IDX_DEF\t\t\t\tRF_POWER_INDEX_P10p46dBm', power)
             self.assertIn("ZDO_NWK_SCAN_ATTEMPTS\t\t\t\t\t\t3", cfg)
-            self.assertIn("#define APP_BUILD\t\t\t\t0x41", version)
+            self.assertIn("#define APP_BUILD\t\t\t\t0x42", version)
             self.assertIn('zb_isUnderRejoinMode()', zd)
 
     def test_fails_closed_before_writing_any_source_when_upstream_tampered(self):
@@ -115,7 +116,8 @@ class SchedulerBehavior(unittest.TestCase):
             cls.binaries[name] = binary
 
     def test_actual_c_scheduler_behaviors(self):
-        for scenario in ('schedule', 'motion_wrap', 'busy', 'success', 'pool', 'button'):
+        for scenario in ('schedule', 'motion_wrap', 'busy', 'success', 'pool', 'button',
+                         'shared_floor', 'unknown_channel', 'counter_wrap'):
             with self.subTest(scenario=scenario):
                 subprocess.run([str(self.binaries['candidate']), scenario], check=True, timeout=10)
 
@@ -127,17 +129,34 @@ class SchedulerBehavior(unittest.TestCase):
                 output = subprocess.check_output([str(binary), mode], text=True, timeout=10)
                 results[name][mode] = json.loads(output)
         self.assertEqual(results['baseline']['quiet']['requests'], 21)
-        self.assertEqual(results['candidate']['quiet']['requests'], 54)
+        self.assertEqual(results['candidate']['quiet']['requests'], 25)
         # Motion does not reset the sequence or starve the full-channel mask.
         moving = results['candidate']['motion']
-        self.assertLessEqual(moving['requests'], 490)
-        self.assertGreater(moving['full_scans'], 100)
-        self.assertGreaterEqual(moving['full_scans'], (moving['requests'] - 3) // 4)
+        self.assertLessEqual(moving['requests'], 110)
+        self.assertGreater(moving['requests'], results['candidate']['quiet']['requests'])
+        self.assertGreaterEqual(moving['full_scans'], (moving['requests'] - 2) // 2)
+        self.assertGreater(moving['secure_full_scans'], 0)
+        self.assertGreater(moving['insecure_full_scans'], 0)
         evidence = os.environ.get('ZG204ZL_BATTERY_MODEL')
+        # Sensitivity examples only, including higher average active current.
+        # These assumptions are not a measurement or a bound for the 2.1 V PCB.
+        baseline_mah = results['baseline']['quiet']['requests'] * 8 / 3600
+        charge_examples = {}
+        for mode, counts in results['candidate'].items():
+            charge_examples[mode] = [
+                {'active_ma': ma, 'active_s_per_request': seconds,
+                 'extra_mah': counts['requests'] * ma * seconds / 3600 - baseline_mah}
+                for ma, seconds in ((8, 1), (16, 3))
+            ]
         if evidence:
             Path(evidence).write_text(json.dumps({
                 'assumptions': '8 hours; accepted requests last 2 s; known channel 11; all-channel mask 11..26; motion every 60 s; no RF model or measured current',
                 'results': results,
+                'charge_sensitivity': {
+                    'baseline_request_assumption': '8 mA for 1 second per upstream request',
+                    'candidate_assumptions': '8 mA for 1 second OR 16 mA for 3 seconds per request; not measured and not bounds',
+                    'extra_mah_per_eight_hour_outage': charge_examples,
+                },
             }, indent=2) + '\n')
         print('Battery request-count model:', json.dumps(results))
 
