@@ -99,6 +99,18 @@ def read_db(host, username, key, path, ieee):
     return matches[0]
 
 
+# Converter keys of the PM socket's electrical measurement and metering.
+PM_READ_KEYS = ('voltage', 'current', 'power', 'energy')
+IDLE_READ_GAP_SECONDS = 10
+
+
+def active_idle_reads(bridge, gap=IDLE_READ_GAP_SECONDS):
+    """Two fresh device reads `gap` s apart: an idle socket reports only on change."""
+    bridge.read_now()
+    time.sleep(gap)
+    bridge.read_now()
+
+
 class Bridge:
     def __init__(self, config, broker, name):
         self.base = config.get('base_topic', 'zigbee2mqtt')
@@ -145,6 +157,21 @@ class Bridge:
 
     def stop(self):
         self.client.loop_stop(); self.client.disconnect()
+
+    def read_now(self, keys=PM_READ_KEYS, timeout=20):
+        """Actively read PM attributes through the converter.
+
+        Only a non-retained state published after this read counts, so a
+        cached value can never pass as fresh; a failed read shows up in
+        bridge/logging (self.errors) and fails the caller.
+        """
+        since = time.monotonic()
+        message = self.client.publish(self.base + '/' + self.name + '/get',
+                                      json.dumps({key: '' for key in keys}), qos=1)
+        message.wait_for_publish(5)
+        if not message.is_published(): raise TimeoutError('PM read request publish not confirmed')
+        self.wait_for(lambda: any(t > since and all(k in d for k in keys) for t, d in self.states),
+                      timeout, 'No fresh PM read reply')
 
     def wait_for(self, predicate, seconds, error):
         deadline = time.monotonic() + seconds
@@ -304,9 +331,16 @@ def main():
             baseline = time.monotonic()
             evidence['observation_policy'] = {'deadline_seconds': observe_seconds,
                                               'minimum_span_seconds': minimum_span}
-            bridge.wait_for(lambda: (len([x for x in bridge.states if x[0] >= baseline]) >= 2
-                            and bridge.states[-1][0] - next(x[0] for x in bridge.states if x[0] >= baseline) >= minimum_span),
-                            observe_seconds, 'Insufficient passive PM telemetry over required interval')
+            if a.expect_idle:
+                # Relay OFF, nothing plugged in: the socket reports only on
+                # change, so read it. validate_states still requires mains
+                # voltage matching the raw cache and zero power/current.
+                active_idle_reads(bridge)
+                evidence['observation_policy']['mode'] = 'active_idle_reads'
+            else:
+                bridge.wait_for(lambda: (len([x for x in bridge.states if x[0] >= baseline]) >= 2
+                                and bridge.states[-1][0] - next(x[0] for x in bridge.states if x[0] >= baseline) >= minimum_span),
+                                observe_seconds, 'Insufficient passive PM telemetry over required interval')
             observed = [x for x in bridge.states if x[0] >= baseline]
             evidence['passive_mqtt'] = [{'offset_seconds': round(t - baseline, 1),
                     'metrics': {k: d.get(k) for k in ('power', 'current', 'voltage',
