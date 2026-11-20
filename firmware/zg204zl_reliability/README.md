@@ -1,4 +1,4 @@
-# ZG-204ZL-3.0 / TLSR8258 v0.1.4.4 with +6.14 dBm TX
+# ZG-204ZL-3.0 / TLSR8258 v0.1.4.5 with +6.14 dBm TX
 
 Development candidate for one hardware canary. Builds and tests run only on GitHub-hosted Actions. This branch has not flashed a sensor, changed Home Assistant or published an OTA index. A successful build establishes image integrity, not boot, pairing, battery life or RF acceptance.
 
@@ -8,10 +8,10 @@ This candidate uses nominal **+6.14 dBm** with battery-first recovery that backs
 
 The only upstream is [pvvx/ZigbeeTLc at c249d8a7](https://github.com/pvvx/ZigbeeTLc/tree/c249d8a7caddb5012d06aba580d4a53d1957f9c1). Board 50 is ZG-204ZL-3.0 with TLSR8258F512ET32 and a CR2450. The overlay verifies all seven original source blob IDs before writing anything and refuses other boards at compile time.
 
-| Setting | Upstream v0.1.4.0 | Candidate v0.1.4.4 |
+| Setting | Upstream v0.1.4.0 | Candidate v0.1.4.5 |
 |---|---|---|
 | Manufacturer / image type | `0x1141 / 0x0232` | Preserved |
-| File version | `0x01403001` | `0x01443001` |
+| File version | `0x01403001` | `0x01453001` |
 | TX setting | Nominal +2.61 dBm, VANT | Nominal **+6.14 dBm**, VBAT |
 | Normal RX gain | Maximum | Preserved |
 | Delays after accepted attempts | 30, 60, 120, 300, 600, 1200, 1800 s | **2, 3, 5, 10, 20, 40, 80, 300, 900, 1800 s**, then 1800 s |
@@ -24,7 +24,9 @@ The only upstream is [pvvx/ZigbeeTLc at c249d8a7](https://github.com/pvvx/Zigbee
 | Motion and pairing LED | 50 ms motion flash and pairing feedback | Preserved |
 | Debug printing | Disabled | Disabled; no new runtime diagnostics claimed |
 
-An idle SDK receives the first lost-parent request after 100 ms. In the deterministic two-second busy model, the opening requests occur at approximately 0.1, 2.1, 5.1, 10.1, 20.1, 40.1, 80.1 and 160.1 seconds. Full-channel attempts use both security modes within the opening burst. Actual scans/security exchanges can take longer: busy or rejected requests wait one second and do not advance channel, security or backoff progression.
+An idle SDK receives the first lost-parent request after 100 ms if the timer is available. In the deterministic two-second busy model, the opening requests occur at approximately 0.1, 2.1, 5.1, 10.1, 20.1, 40.1, 80.1 and 160.1 seconds. Full-channel attempts use both security modes within the opening burst. Three consecutive busy or rejected callbacks wait one second each, followed by 5, 15, 60 and then 300 seconds for sustained refusal. The next accepted request clears this separate delay counter. Refusals leave the channel, security and accepted-request schedule unchanged.
+
+If the first retry timer cannot be allocated, the app keeps the requested delay and retries allocation on its normal passes. While timer capacity is low it makes at most one allocation attempt per observed RTC second and adds no wake timer. Successful commissioning, restored connectivity and factory-new state clear the pending recovery.
 
 During a long quiet outage the timer eventually settles at one automatic request per 30 minutes. Motion after at least five minutes since the last accepted request advances the owned retry to 100 ms without restarting the rapid ladder. Continuous movement cannot produce one attempt per minute. Movement inside the five-minute budget does not queue an automatic future attempt; another PIR rising edge is needed after eligibility returns. A button can explicitly restart rapid recovery while the SDK is idle.
 
@@ -52,18 +54,18 @@ Removing the unjoined blink saves about **0.048 mAh of LED charge over eight hou
 
 ## Hosted build and review
 
-The workflow [zg204zl-reliability-build.yml](../../.github/workflows/zg204zl-reliability-build.yml) independently pins the overlay to the exact PR head and the external source to `c249d8a7caddb5012d06aba580d4a53d1957f9c1`. Artifact filenames and the embedded version identify this v0144 candidate.
+The workflow [zg204zl-reliability-build.yml](../../.github/workflows/zg204zl-reliability-build.yml) independently pins the overlay to the exact PR head and the external source to `c249d8a7caddb5012d06aba580d4a53d1957f9c1`. Artifact filenames and the embedded version identify this v0145 candidate.
 
-The compiled harness covers delays and masks, both full-channel security modes, busy/rejected calls, success/factory-new cleanup, cooldown allocation failure, shared automatic/motion budget, unknown channel, button recovery, long sleep beyond the raw-clock wrap and the long-running attempt-counter wrap. It tests the section extracted from the patched source, not a separate Python scheduler. Image tests reject independent CRC, identity, payload, size and truncation corruption.
+The compiled harness covers delays and masks, both full-channel security modes, persistent SDK refusal, resuming after first timer allocation failure, success/factory-new cleanup, cooldown allocation failure, shared automatic/motion budget, unknown channel, button recovery, long sleep beyond the raw-clock wrap and the long-running attempt-counter wrap. It runs the section extracted from the patched source. CI stops if the overlay script returns an error. Image tests reject independent CRC, identity, payload, size and truncation corruption.
 
 The target build runs the pinned TC32 toolchain and SDK. Native CRC, startup marker, length, version and OTA payload equality must pass, and native size must remain within the existing **0x20000** application erase footprint. Artifacts include:
 
-- `ZG204ZL_v0144.bin`: native SWire image.
-- `1141-0232-01443001-ZG204ZL.zigbee`: standard Zigbee OTA after conversion.
+- `ZG204ZL_v0145.bin`: native SWire image.
+- `1141-0232-01453001-ZG204ZL.zigbee`: standard Zigbee OTA after conversion.
 - `manifest.json`: candidate source SHA, upstream pin, sizes and SHA-256 hashes.
 - `source-overlay.json`, `sdk-toolchain-blobs.txt`, `zg204zl-battery-model.json`: source configuration, pinned dependencies and model evidence.
 
-v0.1.4.4 supersedes the v0.1.4.3 candidate (`e22fd6d5`), which still used the periodic unjoined blink. Keep the older artifacts for evidence.
+v0.1.4.5 supersedes v0.1.4.4 (`bf09bbc9`) with the retry fixes above. Keep the older artifacts for evidence.
 
 ## Physical canary
 

@@ -10,6 +10,9 @@ static const u32 rejoinBackoffTbl[] = {
 #define REJOIN_BACKOFF_STEPS (sizeof(rejoinBackoffTbl) / sizeof(rejoinBackoffTbl[0]))
 static u8 rj_step;
 static u8 rj_chan;
+static u8 rejoinDeferralStep;
+static u32 pendingRejoinDelayMs;
+static u32 lastRejoinAllocSecond;
 static ev_timer_event_t *timerMotionCooldownEvt;
 static bool motionRetryReady;
 #if !USE_BLE
@@ -54,21 +57,37 @@ static void app_motionCooldownStart(void) {
      * continues and can restore the cooldown on its next accepted request. */
 }
 
+static void app_rejoinReset(void) {
+    pendingRejoinDelayMs = 0;
+    rejoinDeferralStep = 0;
+    app_motionCooldownClear();
+}
+
+static s32 app_rejoinDefer(void) {
+    static const u32 delays[] = {1000, 1000, 1000, 5000, 15000, 60000, 300000};
+    u32 delay = delays[rejoinDeferralStep];
+    if (rejoinDeferralStep < sizeof(delays) / sizeof(delays[0]) - 1)
+        rejoinDeferralStep++;
+    return delay;
+}
+
 static s32 sensorDevice_rejoinBackoff(void *arg) {
     (void)arg;
     if (zb_isDeviceFactoryNew() || !g_sensorAppCtx.linkDown) {
         g_sensorAppCtx.timerRejoinBackoffEvt = NULL;
+        app_rejoinReset();
         return -1;
     }
     /* Leave progression and security mode untouched when the SDK is busy or
      * rejects the request. There is still only one owned retry timer. */
     if (app_rejoinBusy())
-        return 1000;
+        return app_rejoinDefer();
 #if !USE_BLE
     zb_rejoinSecModeSet(rj_secMode);
 #endif
     if (zb_rejoinReq(app_rejoinChannelMask(), g_bdbAttrs.scanDuration) != RET_OK)
-        return 1000;
+        return app_rejoinDefer();
+    rejoinDeferralStep = 0;
     app_motionCooldownStart();
 #if !USE_BLE
     rj_secMode = !rj_secMode;
@@ -81,8 +100,29 @@ static s32 sensorDevice_rejoinBackoff(void *arg) {
 }
 
 static void app_rejoinSchedule(u32 first_ms) {
-    if (!g_sensorAppCtx.timerRejoinBackoffEvt)
-        g_sensorAppCtx.timerRejoinBackoffEvt = TL_ZB_TIMER_SCHEDULE(sensorDevice_rejoinBackoff, NULL, first_ms);
+    if (g_sensorAppCtx.timerRejoinBackoffEvt || pendingRejoinDelayMs)
+        return;
+    g_sensorAppCtx.timerRejoinBackoffEvt = TL_ZB_TIMER_SCHEDULE(sensorDevice_rejoinBackoff, NULL, first_ms);
+    if (!g_sensorAppCtx.timerRejoinBackoffEvt) {
+        pendingRejoinDelayMs = first_ms;
+        lastRejoinAllocSecond = ev_rtc_secondsGet();
+    }
+}
+
+/* Service a failed allocation on normal app passes. While the SDK timer pool
+ * is under pressure, try at most once per RTC second without adding a wakeup. */
+void app_rejoinService(void) {
+    if (!pendingRejoinDelayMs)
+        return;
+    if (zb_isDeviceFactoryNew() || !g_sensorAppCtx.linkDown) {
+        app_rejoinReset();
+        return;
+    }
+    if (!ev_timer_enough() && ev_rtc_secondsGet() == lastRejoinAllocSecond)
+        return;
+    u32 delay = pendingRejoinDelayMs;
+    pendingRejoinDelayMs = 0;
+    app_rejoinSchedule(delay);
 }
 
 /* Button requests keep the upstream rapid-start behavior. They cannot interrupt
@@ -92,6 +132,8 @@ void app_rejoinNow(void) {
         return;
     g_sensorAppCtx.linkDown = 1;
     rj_step = 0;
+    pendingRejoinDelayMs = 0;
+    rejoinDeferralStep = 0;
     if (g_sensorAppCtx.timerRejoinBackoffEvt)
         TL_ZB_TIMER_CANCEL(&g_sensorAppCtx.timerRejoinBackoffEvt);
     app_rejoinSchedule(100);

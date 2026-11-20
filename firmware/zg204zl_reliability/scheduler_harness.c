@@ -32,20 +32,27 @@ static struct { u8 scanDuration; } g_bdbAttrs = {3};
 static ev_timer_event_t timers[8];
 static uint64_t now_ms, inflight_until;
 static bool factory_new, forced_busy, bdb_busy, stack_busy, no_timers;
+static bool timer_pool_pressure;
 static u8 request_status;
 static bool selected_security;
-static unsigned requests, full_scans, secure_full_scans, insecure_full_scans;
+static unsigned requests, rejected_requests, timer_allocations;
+static unsigned full_scans, secure_full_scans, insecure_full_scans;
 static u32 last_mask;
 static bool zb_isDeviceFactoryNew(void) { return factory_new; }
 static bool zb_isUnderRejoinMode(void) { return forced_busy || now_ms < inflight_until; }
 static bool bdb_isIdle(void) { return !bdb_busy; }
 static bool tl_stackBusy(void) { return stack_busy; }
+static bool ev_timer_enough(void) { return !no_timers && !timer_pool_pressure; }
+static u32 ev_rtc_secondsGet(void) { return (u32)(now_ms / 1000); }
 static u32 zb_apsChannelMaskGet(void) { return 0x07fff800UL; }
 static void zb_rejoinSecModeSet(bool secure) { selected_security = secure; }
 static u8 zb_rejoinReq(u32 mask, u8 duration) {
     assert(!zb_isUnderRejoinMode() && bdb_isIdle() && !tl_stackBusy());
     assert(duration == 3);
-    if (request_status != RET_OK) return request_status;
+    if (request_status != RET_OK) {
+        rejected_requests++;
+        return request_status;
+    }
     requests++;
     last_mask = mask;
     full_scans += mask == zb_apsChannelMaskGet();
@@ -57,6 +64,7 @@ static u8 zb_rejoinReq(u32 mask, u8 duration) {
     return RET_OK;
 }
 static ev_timer_event_t *schedule(s32 (*cb)(void *), void *data, u32 timeout) {
+    timer_allocations++;
     if (no_timers) return NULL;
     for (unsigned i = 0; i < 8; i++) if (!timers[i].active) {
         timers[i] = (ev_timer_event_t){timeout, timeout, cb, data, true};
@@ -172,8 +180,8 @@ int main(int argc, char **argv) {
         advance(1000);
         assert(!requests && !rj_step && rj_secMode == mode);
         request_status = RET_OK;
-        advance(1000);
-        assert(requests == 1 && rj_step == 1 && rj_secMode != mode);
+        advance(5000);
+        assert(requests == 1 && rj_step == 1 && rj_secMode != mode && !rejoinDeferralStep);
         app_rejoinOnMotion(); /* SDK rejoin is still active. */
         assert(timerMotionCooldownEvt && !motionRetryReady);
     } else if (!strcmp(scenario, "success")) {
@@ -185,7 +193,7 @@ int main(int argc, char **argv) {
         cancel(&g_sensorAppCtx.timerRejoinBackoffEvt);
         g_sensorAppCtx.linkDown = false;
         rj_step = 0;
-        app_motionCooldownClear();
+        app_rejoinReset();
         advance(1000000);
         app_rejoinOnMotion();
         assert(requests == 1 && !timerMotionCooldownEvt);
@@ -208,6 +216,53 @@ int main(int argc, char **argv) {
         no_timers = false;
         advance(2000);
         assert(requests == 2 && timerMotionCooldownEvt && !motionRetryReady);
+    } else if (!strcmp(scenario, "first_retry_allocation")) {
+        no_timers = true;
+        start(); /* The first unattended request has no timer slot. */
+        assert(timer_allocations == 1 && !g_sensorAppCtx.timerRejoinBackoffEvt);
+        for (unsigned i = 0; i < 100; i++) app_rejoinService();
+        assert(timer_allocations == 1);
+        advance(1000);
+        app_rejoinService();
+        assert(timer_allocations == 2 && pendingRejoinDelayMs == 100);
+        no_timers = false;
+        timer_pool_pressure = true; /* A slot is free, but SDK reservation is still low. */
+        advance(1000);
+        app_rejoinService();
+        app_rejoinService();
+        assert(timer_allocations == 3 && !pendingRejoinDelayMs);
+        advance(100);
+        assert(requests == 1 && rj_step == 1);
+
+        cancel(&g_sensorAppCtx.timerRejoinBackoffEvt);
+        no_timers = true;
+        app_rejoinSchedule(100);
+        assert(pendingRejoinDelayMs == 100);
+        g_sensorAppCtx.linkDown = false;
+        app_rejoinReset();
+        no_timers = timer_pool_pressure = false;
+        app_rejoinService();
+        advance(1000);
+        assert(requests == 1 && !pendingRejoinDelayMs && !g_sensorAppCtx.timerRejoinBackoffEvt);
+    } else if (!strcmp(scenario, "persistent_rejection")) {
+        const u32 expected[] = {1000, 1000, 1000, 5000, 15000, 60000, 300000, 300000};
+        start();
+        bool mode = rj_secMode;
+        request_status = 1;
+        u32 elapsed = 100;
+        for (unsigned i = 0; i < sizeof(expected) / sizeof(expected[0]); i++) {
+            advance(elapsed);
+            assert(rejected_requests == i + 1);
+            assert(!requests && !rj_step && rj_secMode == mode);
+            assert(g_sensorAppCtx.timerRejoinBackoffEvt->timeout == expected[i]);
+            elapsed = expected[i];
+        }
+        request_status = RET_OK;
+        advance(elapsed);
+        assert(requests == 1 && rj_step == 1 && !rejoinDeferralStep);
+        request_status = 1;
+        advance(2000);
+        assert(rejected_requests == 9 && g_sensorAppCtx.timerRejoinBackoffEvt->timeout == 1000);
     } else if (!strcmp(scenario, "shared_floor")) {
         start();
         advance(160100);

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed ZG-204ZL v0.1.4.4 overlay for one immutable upstream commit."""
+"""Fail-closed ZG-204ZL v0.1.4.5 overlay for one immutable upstream commit."""
 from __future__ import annotations
 import argparse
 import hashlib
@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 
 UPSTREAM_COMMIT = 'c249d8a7caddb5012d06aba580d4a53d1957f9c1'
-NEXT_FILE_VERSION = 0x01443001
+NEXT_FILE_VERSION = 0x01453001
 BASE_BLOBS = {
     'src/zb_appCb.c': '4d7db2b8563b91d6b3d56907c3277965f98ecf8a',
     'src/sensor_pir.c': 'f92b4b71ee95d690775b433800ce6dbd123c2e17',
@@ -40,7 +40,7 @@ def modified_sources(source: Path) -> dict[str, bytes]:
         edits[name] = raw.decode('utf-8')
     name = 'src/version_cfg.h'
     edits[name] = replace_once(edits[name], '#define APP_BUILD\t\t\t\t0x40',
-                               '#define APP_BUILD\t\t\t\t0x44', name)
+                               '#define APP_BUILD\t\t\t\t0x45', name)
     name = 'src/app_cfg.h'
     edits[name] = replace_once(edits[name],
         '#define ZB_TX_POWER_IDX_DEF\t\t\t\tRF_POWER_INDEX_P2p61dBm',
@@ -63,10 +63,10 @@ def modified_sources(source: Path) -> dict[str, bytes]:
     # completed commissioning. The latter already cancels the retry timer.
     edits[name] = replace_once(edits[name],
         '\t\t\tg_sensorAppCtx.linkDown = 0;\n\t\t\tapp_saveNwkChannel();',
-        '\t\t\tg_sensorAppCtx.linkDown = 0;\n\t\t\tapp_motionCooldownClear();\n\t\t\tapp_saveNwkChannel();', name)
+        '\t\t\tg_sensorAppCtx.linkDown = 0;\n\t\t\tapp_rejoinReset();\n\t\t\tapp_saveNwkChannel();', name)
     edits[name] = replace_once(edits[name],
         '\t\t\tg_sensorAppCtx.linkDown = 0;\n\t\t\trj_step = 0;',
-        '\t\t\tg_sensorAppCtx.linkDown = 0;\n\t\t\tapp_motionCooldownClear();\n\t\t\trj_step = 0;', name)
+        '\t\t\tg_sensorAppCtx.linkDown = 0;\n\t\t\tapp_rejoinReset();\n\t\t\trj_step = 0;', name)
     edits[name] = replace_once(edits[name],
         '\t\t\t\tzb_rejoinSecModeSet(REJOIN_SECURITY);\n#endif\n\t\t\t\tzb_rejoinReq(app_rejoinChannelMask(), g_bdbAttrs.scanDuration);\n\t\t\t\tapp_rejoinSchedule(rejoinBackoffTbl[0]);',
         '\t\t\t\trj_secMode = REJOIN_SECURITY;\n#endif\n\t\t\t\tapp_rejoinSchedule(100);', name)
@@ -77,11 +77,14 @@ def modified_sources(source: Path) -> dict[str, bytes]:
         '        g_sensorAppCtx.linkDown = 1;\n        rj_secMode = REJOIN_INSECURITY;\n        app_rejoinSchedule(1000);', name)
     name = 'src/app_main.h'
     edits[name] = replace_once(edits[name], 'void app_rejoinNow(void);\n',
-        'void app_rejoinNow(void);\nvoid app_rejoinOnMotion(void);\n', name)
+        'void app_rejoinNow(void);\nvoid app_rejoinOnMotion(void);\nvoid app_rejoinService(void);\n', name)
     name = 'src/sensor_pir.c'
     edits[name] = replace_once(edits[name], '\t\t\t\t// event On\n#if USE_SENSOR_RC2417',
         '\t\t\t\t// event On\n\t\t\t\tapp_rejoinOnMotion();\n#if USE_SENSOR_RC2417', name)
     name = 'src/app_main.c'
+    edits[name] = replace_once(edits[name],
+        '\tif(bdb_isIdle()) {\n\t\t// report handler',
+        '\tapp_rejoinService();\n\tif(bdb_isIdle()) {\n\t\t// report handler', name)
     # This overlay only builds the displayless ZG-204ZL. Remove its periodic
     # unjoined heartbeat. Motion and pairing feedback use other call sites.
     edits[name] = replace_once(edits[name],
@@ -123,6 +126,8 @@ def apply(source: Path, *, dry_run: bool = False, check_commit: bool = True) -> 
         'tx_power_caveat': 'SDK VBAT setting characterized at 3.3 V. Output and current on this 2.1 V board require measurement.',
         'receive_gain': 'unchanged (maximum normal RX gain)',
         'scan_attempts': 3, 'rejoin_delays_s': [2, 3, 5, 10, 20, 40, 80, 300, 900, 1800],
+        'sdk_deferral_delays_s': [1, 1, 1, 5, 15, 60, 300],
+        'retry_timer_allocation': 'retry on normal app passes after an allocation failure',
         'motion_rejoin_min_interval_s': 300,
         'motion_policy': 'accelerate one retry after 300 s since any accepted request; preserve progression; coalesce while busy',
         'channel_policy': 'known, known, full, full; both alternating security modes cover both masks',

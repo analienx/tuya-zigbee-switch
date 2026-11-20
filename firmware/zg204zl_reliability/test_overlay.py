@@ -38,7 +38,7 @@ class VariantTests(unittest.TestCase):
             root = self.make_copy(tmp)
             originals = {n: (root / n).read_bytes() for n in fw.BASE_BLOBS}
             result = fw.apply(root, dry_run=True, check_commit=False)
-            self.assertEqual(result["file_version"], "0x01443001")
+            self.assertEqual(result["file_version"], "0x01453001")
             self.assertEqual(result["rejoin_delays_s"], [2, 3, 5, 10, 20, 40, 80, 300, 900, 1800])
             self.assertEqual(result["scan_attempts"], 3)
             self.assertEqual(result["motion_rejoin_min_interval_s"], 300)
@@ -59,16 +59,17 @@ class VariantTests(unittest.TestCase):
             self.assertIn("2000, 3000, 5000, 10000, 20000, 40000, 80000, 300000, 900000, 1800000", zd)
             self.assertIn("app_rejoinOnMotion(void)", zd)
             self.assertNotIn("clock_time_exceed", zd)
-            self.assertEqual(zd.count('app_motionCooldownClear();'), 3)
+            self.assertEqual(zd.count('\t\t\tapp_rejoinReset();'), 2)
             self.assertIn('g_sensorAppCtx.linkDown = 1;\n        rj_secMode = REJOIN_INSECURITY;', zd)
             self.assertIn("app_rejoinOnMotion();", pir)
+            self.assertIn("app_rejoinService();\n\tif(bdb_isIdle())", main)
             self.assertNotIn("light_blink_start(1, 50, 10000)", main)
             self.assertIn("light_blink_start(1, 50, 50)", pir)
             self.assertIn("light_blink_start(10, 500, 500)", zd)
             self.assertIn("remoteCmdOnOff(SENSOR_DEVICE_ENDPOINT, ZCL_CMD_ONOFF_ON)", pir)
             self.assertIn('#define ZB_TX_POWER_IDX_DEF\t\t\t\tRF_POWER_INDEX_P6p14dBm', power)
             self.assertIn("ZDO_NWK_SCAN_ATTEMPTS\t\t\t\t\t\t3", cfg)
-            self.assertIn("#define APP_BUILD\t\t\t\t0x44", version)
+            self.assertIn("#define APP_BUILD\t\t\t\t0x45", version)
             self.assertIn('zb_isUnderRejoinMode()', zd)
 
     def test_fails_closed_before_writing_any_source_when_upstream_tampered(self):
@@ -121,7 +122,8 @@ class SchedulerBehavior(unittest.TestCase):
 
     def test_actual_c_scheduler_behaviors(self):
         for scenario in ('schedule', 'motion_wrap', 'busy', 'success', 'pool', 'button',
-                         'shared_floor', 'unknown_channel', 'counter_wrap'):
+                         'shared_floor', 'unknown_channel', 'counter_wrap',
+                         'first_retry_allocation', 'persistent_rejection'):
             with self.subTest(scenario=scenario):
                 subprocess.run([str(self.binaries['candidate']), scenario], check=True, timeout=10)
 
