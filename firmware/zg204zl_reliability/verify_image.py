@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed validation of a hosted ZG-204ZL v0.1.4.2 build output.
+"""Fail-closed validation of a hosted ZG-204ZL v0.1.4.3 build output.
 
 This does not authorize a physical firmware write or OTA deployment.
 """
@@ -13,7 +13,7 @@ from pathlib import Path
 import struct
 import re
 
-VERSION = 0x01423001
+VERSION = 0x01433001
 MFG = 0x1141
 IMAGE_TYPE = 0x0232
 MAX_APP_FOOTPRINT = 0x20000  # never expand the v0.1.4.0 SWire erase footprint
@@ -59,7 +59,7 @@ def verify(binary: Path, ota: Path) -> dict:
         "status": "HOSTED_BUILD_IMAGE_VERIFIED_NOT_HARDWARE_APPROVED",
         "board": "ZG-204ZL-3.0",
         "chip": "TLSR8258F512ET32",
-        "release": "ZG204ZL v0.1.4.2 high-TX battery-first canary",
+        "release": "ZG204ZL v0.1.4.3 +6.14 dBm battery-first canary",
         "manufacturer_code": f"0x{MFG:04x}",
         "image_type": f"0x{IMAGE_TYPE:04x}",
         "file_version": f"0x{VERSION:08x}",

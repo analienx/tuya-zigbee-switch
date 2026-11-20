@@ -1,18 +1,18 @@
-# ZG-204ZL-3.0 / TLSR8258 — v0.1.4.2 high-TX battery-first canary
+# ZG-204ZL-3.0 / TLSR8258 v0.1.4.3 with +6.14 dBm TX
 
 Development candidate for one hardware canary. Builds and tests run only on GitHub-hosted Actions. This branch has not flashed a sensor, changed Home Assistant or published an OTA index. A successful build establishes image integrity, not boot, pairing, battery life or RF acceptance.
 
 ## Firmware policy
 
-The owner requested a substantial TX increase and selected **battery first: back off longer and retry promptly on motion**. This candidate retains pvvx PIR, illuminance, battery reporting, configurable `pir_timeout`, local lux gating, direct Zigbee On/Off binding and standard ZigbeeTLc OTA.
+This candidate uses nominal **+6.14 dBm** with battery-first recovery that backs off during quiet outages and advances the next retry on eligible motion. It retains pvvx PIR, illuminance, battery reporting, configurable `pir_timeout`, local lux gating, direct Zigbee On/Off binding and standard ZigbeeTLc OTA.
 
 The only upstream is [pvvx/ZigbeeTLc at c249d8a7](https://github.com/pvvx/ZigbeeTLc/tree/c249d8a7caddb5012d06aba580d4a53d1957f9c1). Board 50 is ZG-204ZL-3.0 with TLSR8258F512ET32 and a CR2450. The overlay verifies all six original source blob IDs before writing anything and refuses other boards at compile time.
 
-| Setting | Upstream v0.1.4.0 | New v0.1.4.2 |
+| Setting | Upstream v0.1.4.0 | Candidate v0.1.4.3 |
 |---|---|---|
 | Manufacturer / image type | `0x1141 / 0x0232` | Preserved |
-| File version | `0x01403001` | `0x01423001` |
-| TX setting | Nominal +2.61 dBm, VANT | SDK maximum, nominal **+10.46 dBm**, VBAT |
+| File version | `0x01403001` | `0x01433001` |
+| TX setting | Nominal +2.61 dBm, VANT | Nominal **+6.14 dBm**, VBAT |
 | Normal RX gain | Maximum | Preserved |
 | Delays after accepted attempts | 30, 60, 120, 300, 600, 1200, 1800 s | **2, 3, 5, 10, 20, 40, 80, 300, 900, 1800 s**, then 1800 s |
 | Channel masks | Known except every fourth request | **Known, known, full, full**, repeated |
@@ -30,11 +30,11 @@ Without motion, recovery after a long outage can wait up to the 30-minute timer;
 
 ## TX and battery limits
 
-The pinned SDK's `platform/chip_8258/rf_drv.h` labels `RF_POWER_INDEX_P10p46dBm` as VBAT power and the old +2.61 dBm as VANT. This changes the PA supply mode as well as the index. [Telink's RF guide](https://wiki.telink-semi.cn/tools_and_sdk/Driver/doc/kite/html/md__project_1__table_of__content_14__t_s_i__r_f__features.html) specifies a maximum near +10 dBm; the [TLSR8258 datasheet, section 2.6.4](https://wiki.telink-semi.cn/doc/ds/DS_TLSR8258-E_Datasheet%20for%20Telink%20BLE%2BIEEE802.15.4%20Multi-Standard%20Wireless%20SoC%20TLSR8258.pdf) explains that VBAT output depends on supply voltage and falls below its nominal output below 3 V.
+The pinned SDK's `platform/chip_8258/rf_drv.h` labels `RF_POWER_INDEX_P6p14dBm` as VBAT and the upstream +2.61 dBm setting as VANT. The nominal difference is **3.53 dB**, or **2.25 times RF power** by `10^(3.53/10)`. Telink characterized the VBAT table at 3.3 V. The sensor's regulated 2.1 V rail therefore needs its own output and pulse current measurements. [TLSR8258 datasheet, section 2.6.4](https://www.mouser.com/datasheet/2/1039/DS_TLSR8258_E_Datasheet_for_Telink_BLE_2bIEEE802_1-2301271.pdf)
 
-**This PCB has a regulated 2.1 V logic rail. Neither +10.46 dBm radiated output nor TX pulse current is proven on this board.** The +7.85 dB nominal step corresponds to about 6.1 times radiated power under the SDK reference conditions, not 6.1 times range or battery current. Coin-cell/board voltage sag can erase the benefit or cause resets. Measure the actual rail during high-power transmissions on a fresh and partly discharged battery before hardware acceptance. Do not bypass the regulator or raise the supply as part of this source change.
+Use +2.61 dBm as the reference. Aim for a repeatable improvement of at least 2 dB in received signal strength at the same Zigbee receiver, channel, position and orientation. Capture the regulated rail and current during a burst of rejoin attempts with fresh and partly discharged cells. For example, a cell at 2.7 V with an effective resistance of 40 Ω would drop 0.6 V under a 15 mA pulse, leaving 2.1 V at the regulator input. This is an illustrative load calculation. Confirm rail stability and absence of resets during the test. [Energizer CR2450 pulse curves](https://energizer.com/wp-content/uploads/2023/11/cr2450.pdf)
 
-The [Panasonic CR2450 sheet](https://energy.panasonic.com/dam/master/pdf/en/datasheet/lithium/CR2450_Datasheet_EN.pdf) characterizes its own cell at low continuous drain. It does not qualify this unknown cell, board regulator or high-TX pulse load. Continuous-drain figures are not hard pulse-current limits.
+Characterize the actual CR2450 and board together. Continuous-drain ratings and pulse-test conditions describe different loads. [Panasonic CR2450 datasheet](https://energy.panasonic.com/dam/master/pdf/en/datasheet/lithium/CR2450_Datasheet_EN.pdf)
 
 ### Outage model and charge sensitivity
 
@@ -44,22 +44,22 @@ The quiet candidate is expected to issue **25 requests** versus upstream's **21*
 
 For sensitivity only, assume each old request uses 8 mA for one active second. Give each new request either 8 mA for one second or 16 mA for three seconds, to illustrate changes in both average active current and duration. The quiet 25-request case then adds **0.009–0.287 mAh per eight-hour outage**. Against an assumed healthy 20 microamp baseline (0.48 mAh/day), that is **about 2–60% extra daily charge** if this outage happens daily. These are assumptions, not measurements, confidence intervals or upper/lower bounds. Paired full-channel scans, unknown-channel operation and the real high-TX load can change the result substantially.
 
-When connected normally, recovery retries stop. Higher TX still affects ordinary traffic. For example, an assumed extra 10 mA during 1–10 transmit seconds per day adds **0.0028–0.0278 mAh/day**, or about **0.6–5.8%** of the same assumed baseline. Measure actual TX current and airtime before using either example as a battery-life prediction.
+At the default 20-second poll interval, 4,320 daily polls with one assumed 18-byte on-air frame each at 250 kbps use **2.49 seconds of TX per day**. An assumed extra 10 mA during those frames adds `10 × 2.49 / 3600`, or **0.0069 mAh/day**. That is **1.4%** of the assumed 20 µA baseline. This example covers poll transmissions alone. Measure actual current, airtime and charge across motion reports, retries and outage scans before estimating battery life. [Board poll setting](https://github.com/pvvx/ZigbeeTLc/blob/c249d8a7caddb5012d06aba580d4a53d1957f9c1/src/board_zg204zl.h) · [Zigbee data rate](https://docs.silabs.com/zigbee/9.1.2/zigbee-mesh-network-performance/01-introduction-and-background)
 
 ## Hosted build and review
 
-The workflow [zg204zl-reliability-build.yml](../../.github/workflows/zg204zl-reliability-build.yml) independently pins the overlay to the exact PR head and the external source to `c249d8a7caddb5012d06aba580d4a53d1957f9c1`. The branch name retains its original v0141 label; artifact names and embedded version identify this v0142 candidate.
+The workflow [zg204zl-reliability-build.yml](../../.github/workflows/zg204zl-reliability-build.yml) independently pins the overlay to the exact PR head and the external source to `c249d8a7caddb5012d06aba580d4a53d1957f9c1`. Artifact filenames and the embedded version identify this v0143 candidate.
 
 The compiled harness covers delays and masks, both full-channel security modes, busy/rejected calls, success/factory-new cleanup, cooldown allocation failure, shared automatic/motion budget, unknown channel, button recovery, long sleep beyond the raw-clock wrap and the long-running attempt-counter wrap. It tests the section extracted from the patched source, not a separate Python scheduler. Image tests reject independent CRC, identity, payload, size and truncation corruption.
 
 The target build runs the pinned TC32 toolchain and SDK. Native CRC, startup marker, length, version and OTA payload equality must pass, and native size must remain within the existing **0x20000** application erase footprint. Artifacts include:
 
-- `ZG204ZL_v0142.bin`: native SWire image.
-- `1141-0232-01423001-ZG204ZL.zigbee`: standard Zigbee OTA after conversion.
+- `ZG204ZL_v0143.bin`: native SWire image.
+- `1141-0232-01433001-ZG204ZL.zigbee`: standard Zigbee OTA after conversion.
 - `manifest.json`: candidate source SHA, upstream pin, sizes and SHA-256 hashes.
 - `source-overlay.json`, `sdk-toolchain-blobs.txt`, `zg204zl-battery-model.json`: source configuration, pinned dependencies and model evidence.
 
-The earlier v0.1.4.1 artifacts, both original source `526bd7e5` and reviewed source `fcb1447a`, are superseded for the owner's newly requested policy. Keep them immutable for evidence. The new embedded identity is higher to distinguish this policy and power change. No firmware bytes or household backups are committed.
+v0.1.4.3 supersedes the +10.46 dBm v0.1.4.2 candidate (`e7432aa9`) and the earlier v0.1.4.1 artifacts. Keep the older artifacts for evidence. The higher embedded version distinguishes the power change.
 
 ## Physical canary
 

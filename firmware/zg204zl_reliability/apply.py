@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed ZG-204ZL v0.1.4.2 overlay for one immutable upstream commit."""
+"""Fail-closed ZG-204ZL v0.1.4.3 overlay for one immutable upstream commit."""
 from __future__ import annotations
 import argparse
 import hashlib
@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 
 UPSTREAM_COMMIT = 'c249d8a7caddb5012d06aba580d4a53d1957f9c1'
-NEXT_FILE_VERSION = 0x01423001
+NEXT_FILE_VERSION = 0x01433001
 BASE_BLOBS = {
     'src/zb_appCb.c': '4d7db2b8563b91d6b3d56907c3277965f98ecf8a',
     'src/sensor_pir.c': 'f92b4b71ee95d690775b433800ce6dbd123c2e17',
@@ -39,11 +39,11 @@ def modified_sources(source: Path) -> dict[str, bytes]:
         edits[name] = raw.decode('utf-8')
     name = 'src/version_cfg.h'
     edits[name] = replace_once(edits[name], '#define APP_BUILD\t\t\t\t0x40',
-                               '#define APP_BUILD\t\t\t\t0x42', name)
+                               '#define APP_BUILD\t\t\t\t0x43', name)
     name = 'src/app_cfg.h'
     edits[name] = replace_once(edits[name],
         '#define ZB_TX_POWER_IDX_DEF\t\t\t\tRF_POWER_INDEX_P2p61dBm',
-        '#define ZB_TX_POWER_IDX_DEF\t\t\t\tRF_POWER_INDEX_P10p46dBm', name)
+        '#define ZB_TX_POWER_IDX_DEF\t\t\t\tRF_POWER_INDEX_P6p14dBm', name)
     name = 'src/includes/zb_config.h'
     edits[name] = replace_once(edits[name],
         '#define\tZDO_NWK_SCAN_ATTEMPTS\t\t\t\t\t\t1',
@@ -95,8 +95,8 @@ def apply(source: Path, *, dry_run: bool = False, check_commit: bool = True) -> 
     return {
         'status': 'SOURCE_OVERLAY_VALIDATED', 'base': UPSTREAM_COMMIT,
         'target_board': 'BOARD_ZG204ZL', 'file_version': f'0x{NEXT_FILE_VERSION:08x}',
-        'tx_power_old_dbm': 2.61, 'tx_power_new_dbm_nominal': 10.46,
-        'tx_power_caveat': 'SDK VBAT maximum; actual output/current on the 2.1 V board is unmeasured',
+        'tx_power_old_dbm': 2.61, 'tx_power_new_dbm_nominal': 6.14,
+        'tx_power_caveat': 'SDK VBAT setting characterized at 3.3 V. Output and current on this 2.1 V board require measurement.',
         'receive_gain': 'unchanged (maximum normal RX gain)',
         'scan_attempts': 3, 'rejoin_delays_s': [2, 3, 5, 10, 20, 40, 80, 300, 900, 1800],
         'motion_rejoin_min_interval_s': 300,
