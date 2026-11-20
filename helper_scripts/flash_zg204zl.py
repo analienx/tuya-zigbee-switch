@@ -29,6 +29,7 @@ V0145_FILENAME = 'ZG204ZL_v0145.bin'
 V0145_SHA = 'd31624949aeec6f95fd983899e1b679dbd7a44db209a690d6a2ded57e3cc1031'
 V0145_BYTES = 130628
 V0145_ARTIFACT = 'https://github.com/analienx/tuya-zigbee-switch/actions/runs/44706913369/artifacts/14615831032'
+VANT_BUILD = 'https://github.com/analienx/tuya-zigbee-switch/actions/runs/44788806210'
 
 
 class Firmware(NamedTuple):
@@ -37,13 +38,22 @@ class Firmware(NamedTuple):
     size: int
     cache: Path
     source: Optional[str] = None
+    artifact: Optional[str] = None
 
 
 def firmware_profiles():
     return {
         'v0140': Firmware('ZG204ZL_v0140.bin', IMAGE_SHA, IMAGE_BYTES, IMAGE, IMAGE_URL),
         'v0145': Firmware(V0145_FILENAME, V0145_SHA, V0145_BYTES,
-                          IMAGE.with_name(V0145_FILENAME)),
+                          IMAGE.with_name(V0145_FILENAME), artifact=V0145_ARTIFACT),
+        'v0146': Firmware('ZG204ZL_v0146.bin',
+                          '08ccff0e662f9f65fb9e2b486023a974ca0c075367d8edabe935a660567ba90e',
+                          130628, IMAGE.with_name('ZG204ZL_v0146.bin'),
+                          artifact=f'{VANT_BUILD}/artifacts/14654568352'),
+        'v0147': Firmware('ZG204ZL_v0147.bin',
+                          'cd9903e291c7052256c5471478300b763db2abcb49ec5194b974b10c1358bcce',
+                          130628, IMAGE.with_name('ZG204ZL_v0147.bin'),
+                          artifact=f'{VANT_BUILD}/artifacts/14655910771'),
     }
 
 
@@ -60,7 +70,7 @@ def load_firmware(firmware, image_path):
         print('Downloading the pinned ZG-204ZL firmware...', flush=True)
         data = swire.download(firmware.source, firmware.size)
     else:
-        raise RuntimeError(f'Download {firmware.filename} from {V0145_ARTIFACT} '
+        raise RuntimeError(f'Download {firmware.filename} from {firmware.artifact} '
                            'and pass its path with --image.')
     if len(data) != firmware.size or len(data) > ERASE_END or digest(data) != firmware.sha256:
         raise RuntimeError('ZG-204ZL firmware size/hash mismatch. Nothing written.')
@@ -72,7 +82,7 @@ def load_firmware(firmware, image_path):
     return data
 
 
-def require_v0145_layout(before):
+def require_candidate_layout(before):
     # The documented stock and ZigbeeTLc images both begin at zero on this board.
     identity = (int.from_bytes(before[18:20], 'little'), int.from_bytes(before[20:22], 'little'))
     size = int.from_bytes(before[24:28], 'little')
@@ -275,8 +285,8 @@ def run(port, seconds, version='v0140', image_path=None):
             state['backupSha256'] = digest(before)
             if before == b'\xff' * FLASH_BYTES or before == b'\x00' * FLASH_BYTES:
                 raise RuntimeError('Blank-looking backup; inspect wiring before any write.')
-            if version == 'v0145':
-                require_v0145_layout(before)
+            if version != 'v0140':
+                require_candidate_layout(before)
             if digest(snapshot.read_bytes()) != firmware.sha256:
                 raise RuntimeError('Prepared image changed; write cancelled.')
             report('[2/4] Writing firmware at 0x00000; erases only 0x00000..0x1FFFF.')

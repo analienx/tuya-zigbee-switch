@@ -18,16 +18,17 @@ def bench(tmp_path, monkeypatch, request):
     monkeypatch.setattr(launcher, 'RUNS', tmp_path / 'runs')
     monkeypatch.setattr(launcher, 'IMAGE', tmp_path / 'firmware.bin')
     version = getattr(request, 'param', 'v0140')
-    firmware = launcher.firmware_profiles()[version]
+    real_profiles = launcher.firmware_profiles()
+    firmware = real_profiles[version]
     image = bytes(i % 251 for i in range(firmware.size))
     launcher.IMAGE.write_bytes(image)
-    monkeypatch.setattr(launcher, 'V0145_SHA' if version == 'v0145' else 'IMAGE_SHA',
-                        hashlib.sha256(image).hexdigest())
+    real_profiles[version] = firmware._replace(sha256=hashlib.sha256(image).hexdigest())
+    monkeypatch.setattr(launcher, 'firmware_profiles', lambda: real_profiles)
     monkeypatch.setattr(list_ports, 'comports', lambda: [SimpleNamespace(device='COM3')])
     monkeypatch.setattr(tool, 'ensure_reader', lambda **_: {'reader': str(tmp_path / 'reader.py')})
     monkeypatch.setattr(launcher, 'confirm_stopped', lambda *_: None)
     before = bytearray((i * 17) % 255 for i in range(launcher.FLASH_BYTES))
-    if version == 'v0145':
+    if version != 'v0140':
         before[6:12] = b'\x5d\x02KNLT'
         before[18:22] = b'\x86\x12\x03\x02'
         before[24:28] = (121860).to_bytes(4, 'little')
@@ -62,10 +63,14 @@ def test_one_backup_and_one_readback_with_full_preservation(bench):
     assert state['bootVerified'] is False
 
 
-@pytest.mark.parametrize('bench', ['v0145'], indirect=True)
+CUSTOM_VARIANTS = [(version, version) for version in ('v0145', 'v0146', 'v0147')]
+
+
+@pytest.mark.parametrize('bench,version', CUSTOM_VARIANTS, indirect=['bench'])
 @pytest.mark.parametrize('use_cache', [False, True])
-def test_v0145_image_selection_and_verify_only_use_the_recorded_pin(bench, monkeypatch, use_cache):
+def test_candidate_image_selection_and_verify_only_use_the_recorded_pin(bench, version, monkeypatch, use_cache):
     events, *_ = bench
+    firmware = launcher.firmware_profiles()[version]
     original = launcher.swire._read_flash
     def fail_after_write(port, output, **kwargs):
         if not kwargs['halt']:
@@ -73,13 +78,13 @@ def test_v0145_image_selection_and_verify_only_use_the_recorded_pin(bench, monke
         return original(port, output, **kwargs)
     monkeypatch.setattr(launcher.swire, '_read_flash', fail_after_write)
     if use_cache:
-        launcher.IMAGE.replace(launcher.IMAGE.with_name(launcher.V0145_FILENAME))
+        launcher.IMAGE.replace(firmware.cache)
     with pytest.raises(RuntimeError, match='verification read failed'):
-        launcher.run('COM3', 300, 'v0145', None if use_cache else launcher.IMAGE)
+        launcher.run('COM3', 300, version, None if use_cache else launcher.IMAGE)
     summary = next(launcher.RUNS.glob('*/summary.json'))
     state = launcher.swire.read_json(summary)
-    assert state['imageVersion'] == 'v0145' and state['imageSha256'] == launcher.V0145_SHA
-    assert (summary.parent / launcher.V0145_FILENAME).is_file()
+    assert state['imageVersion'] == version and state['imageSha256'] == firmware.sha256
+    assert (summary.parent / firmware.filename).is_file()
     monkeypatch.setattr(launcher.swire, '_read_flash', original)
     monkeypatch.setattr(launcher, 'writer', lambda *_: pytest.fail('verification must never write'))
     launcher.verify_only('COM3')
@@ -87,9 +92,9 @@ def test_v0145_image_selection_and_verify_only_use_the_recorded_pin(bench, monke
     assert launcher.swire.read_json(summary)['phase'] == 'VERIFIED'
 
 
-@pytest.mark.parametrize('bench', ['v0145'], indirect=True)
+@pytest.mark.parametrize('bench,version', CUSTOM_VARIANTS, indirect=['bench'])
 @pytest.mark.parametrize('offset', [0, 0x20000, 0x40000])
-def test_v0145_refuses_unsupported_or_alternate_boot_layout(bench, monkeypatch, offset):
+def test_candidate_refuses_unsupported_or_alternate_boot_layout(bench, version, monkeypatch, offset):
     events, *_ = bench
     original = launcher.swire._read_flash
     def read(port, output, **kwargs):
@@ -99,7 +104,7 @@ def test_v0145_refuses_unsupported_or_alternate_boot_layout(bench, monkeypatch, 
         output.write_bytes(data)
     monkeypatch.setattr(launcher.swire, '_read_flash', read)
     with pytest.raises(RuntimeError, match='Inspect before writing'):
-        launcher.run('COM3', 300, 'v0145', launcher.IMAGE)
+        launcher.run('COM3', 300, version, launcher.IMAGE)
     assert events == ['backup']
     assert not launcher.swire.read_json(next(launcher.RUNS.glob('*/summary.json')))['writeAttempted']
 

@@ -6,30 +6,32 @@ Use only the same physically qualified ZG-204ZL board/interface as the first
 sensor. It cannot identify the connected PCB electrically. The regulated 2.1 V
 rail is not a 3.3 V input. Follow the device-specific voltage/pad record.
 
-## Flash the v0.1.4.5 test candidate
+## Select a VANT comparison image
 
 On the bench machine with the candidate already staged, run from Command Prompt
 or PowerShell:
 
 ```bat
-C:\Workspace\tools\telink-swire\flash-zg204zl.cmd COM3 --version v0145
+C:\Workspace\tools\telink-swire\flash-zg204zl.cmd COM3 --version v0146
 ```
 
-From a checkout of the launcher branch, download and extract the
-[GitHub Actions artifact](https://github.com/analienx/tuya-zigbee-switch/actions/runs/44706913369/artifacts/14615831032)
-for firmware source `2dab36974f11bb4120f076a094fcee37727fa14f`. Pass its native
-image path explicitly:
+Use v0146 (+2.61 dBm VANT) for the first coin-cell cold boot. Once it produces
+fresh motion reports on the cell alone, repeat with `--version v0147` for the
++3.01 dBm VANT trial. The two builds retain the v0145 retry logic.
+
+From a checkout of the launcher branch, download and extract the exact
+[GitHub Actions build](https://github.com/analienx/tuya-zigbee-switch/actions/runs/44788806210)
+from firmware source `e0d558b02343090b631a925589640c7fbad71b3b`. Pass the
+matching native image path explicitly:
 
 ```bat
-helper_scripts\flash-zg204zl.cmd COM3 --version v0145 --image "C:\path\to\ZG204ZL_v0145.bin"
+helper_scripts\flash-zg204zl.cmd COM3 --version v0146 --image "C:\path\to\ZG204ZL_v0146.bin"
 ```
 
-Replace `COM3` with the adapter's actual port. v0.1.4.5 is a hardware test
-candidate with firmware version `0x01453001`. The launcher checks the native
-image size and exact SHA-256 from the reviewed build before serial access.
-If there is no `--image` argument, v0145 uses the staged file at
-`~/.telink-swire/tools/zg204zl/ZG204ZL_v0145.bin`. The default without a
-version option remains the original v0.1.4.0 conversion image.
+Replace `COM3` with the adapter's actual port. The launcher checks each native
+image's size and exact SHA-256 before serial access. Without `--image`, custom
+versions use their staged file under `~/.telink-swire/tools/zg204zl/`. With no
+version option the launcher selects the original v0.1.4.0 conversion image.
 
 ## ZG-204ZL-3.0 programming pins
 
@@ -68,7 +70,7 @@ The launcher checks the selected native image and the pinned pvvx tool, waits
 up to five minutes for USB/target entry, then:
 
 1. Halts the CPU and reads the entire 512 KiB once into a new private run folder.
-2. Checks the v0145 backup for a supported ZG-204ZL image at zero and no active
+2. For v0145 and later, checks for a supported ZG-204ZL image at zero and no active
    alternate boot image at 0x20000 or 0x40000. It then calls only pvvx `wf 0x0`
    with the selected native image. It writes
    firmware sectors 0x00000..0x1FFFF, with no reset/run flag or erase-all.
