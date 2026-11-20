@@ -1,0 +1,52 @@
+name: ZG-204ZL incident symbols
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/zg204zl-rejoin-rf-v0141-20261119]
+    paths: ['.github/workflows/zg204zl-incident-symbols.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  symbols:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 2dab36974f11bb4120f076a094fcee37727fa14f
+          path: control
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: pvvx/ZigbeeTLc
+          ref: c249d8a7caddb5012d06aba580d4a53d1957f9c1
+          path: upstream
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Rebuild the exact installed v0145 image
+        shell: bash
+        run: |
+          python control/firmware/zg204zl_reliability/apply.py --source upstream > overlay.json
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends make unzip bzip2 libc6-i386 lib32z1
+          make -C upstream install
+          make -C upstream -j2 PROJECT_NAME=ZG204ZL POJECT_DEF='-DBOARD=BOARD_ZG204ZL' VERSION_BIN=_v0145 ZNAME='Sonoff:ZG-204ZL-z'
+          echo 'd31624949aeec6f95fd983899e1b679dbd7a44db209a690d6a2ded57e3cc1031  upstream/bin/ZG204ZL_v0145.bin' | sha256sum --check
+      - name: Collect SDK implementation and compiled symbols
+        shell: bash
+        run: |
+          mkdir evidence
+          cp upstream/build/ZG204ZL.elf upstream/build/ZG204ZL.lst overlay.json evidence/
+          cp upstream/src/patch_z_sdk/adc_drv.c upstream/src/patch_z_sdk/hw_drv.c upstream/src/patch_z_sdk/drv_nv.c evidence/
+          cp upstream/src/boot_z.link evidence/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zg204zl-v0145-incident-symbols
+          path: evidence/
+          retention-days: 14
+          if-no-files-found: error
