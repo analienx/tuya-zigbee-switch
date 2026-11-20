@@ -5,8 +5,8 @@ import json
 import math
 from pathlib import Path
 import time
-from bseed_pm_provision import (Bridge, CLUSTER_IDS, ROOT, SCALES, missing_reports,
-                                pm_snapshot, read_db, select_target)
+from bseed_pm_provision import (Bridge, CLUSTER_IDS, ROOT, SCALES, active_idle_reads,
+                                missing_reports, pm_snapshot, read_db, select_target)
 from bseed_zdo_live import read_node_descriptor
 import yaml
 
@@ -145,6 +145,9 @@ def main():
             if evidence['settings_drift']:raise ValueError('Settings drift relative to private baseline')
         else:evidence['settings_persistence']='no preflash baseline: not verified'
         end=time.monotonic()+a.observe_seconds
+        # An idle socket reports only on change: two active reads guarantee
+        # fresh samples; passive messages during the window still count.
+        active_idle_reads(bridge)
         while time.monotonic()<end:
             if bridge.errors:break
             time.sleep(min(.5,max(0,end-time.monotonic())))
