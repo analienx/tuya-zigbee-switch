@@ -63,7 +63,7 @@ def test_one_backup_and_one_readback_with_full_preservation(bench):
     assert state['bootVerified'] is False
 
 
-CUSTOM_VARIANTS = [(version, version) for version in ('v0145', 'v0146', 'v0147')]
+CUSTOM_VARIANTS = [(version, version) for version in ('v0145', 'v0146', 'v0147', 'v0148')]
 
 
 @pytest.mark.parametrize('bench,version', CUSTOM_VARIANTS, indirect=['bench'])

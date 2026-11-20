@@ -54,6 +54,10 @@ def firmware_profiles():
                           'cd9903e291c7052256c5471478300b763db2abcb49ec5194b974b10c1358bcce',
                           130628, IMAGE.with_name('ZG204ZL_v0147.bin'),
                           artifact=f'{VANT_BUILD}/artifacts/14655910771'),
+        'v0148': Firmware('ZG204ZL_v0148.bin',
+                          '161ae8a21a920a4156ddc82a7434266b2eae517a31e760e1078536a390c79537',
+                          130660, IMAGE.with_name('ZG204ZL_v0148.bin'),
+                          artifact='https://github.com/analienx/tuya-zigbee-switch/actions/runs/44793479388/artifacts/14657327700'),
     }
 
 

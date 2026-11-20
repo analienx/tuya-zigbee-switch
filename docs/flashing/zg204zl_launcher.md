@@ -6,26 +6,29 @@ Use only the same physically qualified ZG-204ZL board/interface as the first
 sensor. It cannot identify the connected PCB electrically. The regulated 2.1 V
 rail is not a 3.3 V input. Follow the device-specific voltage/pad record.
 
-## Select a VANT comparison image
+## Flash the v0148 coin-cell candidate
 
 On the bench machine with the candidate already staged, run from Command Prompt
 or PowerShell:
 
 ```bat
-C:\Workspace\tools\telink-swire\flash-zg204zl.cmd COM3 --version v0146
+C:\Workspace\tools\telink-swire\flash-zg204zl.cmd COM3 --version v0148
 ```
 
-Use v0146 (+2.61 dBm VANT) for the first coin-cell cold boot. Once it produces
-fresh motion reports on the cell alone, repeat with `--version v0147` for the
-+3.01 dBm VANT trial. The two builds retain the v0145 retry logic.
+v0148 uses nominal +2.61 dBm VANT, one discovery scan attempt, and the channel
+restored from NVM after a failed startup rejoin. v0146 and v0147 used three
+scan attempts and could lose knowledge of that channel after cold boot.
+The v0148 source changes reduce recovery receive load. The suspected
+voltage-sag and deep-sleep loop still needs measurement on the actual sensor.
 
 From a checkout of the launcher branch, download and extract the exact
-[GitHub Actions build](https://github.com/analienx/tuya-zigbee-switch/actions/runs/44788806210)
-from firmware source `e0d558b02343090b631a925589640c7fbad71b3b`. Pass the
+[GitHub Actions build](https://github.com/analienx/tuya-zigbee-switch/actions/runs/44793479388)
+from firmware source `efdb84019f6af53547fc32d764a0af2843a3462b` in
+[PR #152](https://github.com/analienx/tuya-zigbee-switch/pull/152). Pass the
 matching native image path explicitly:
 
 ```bat
-helper_scripts\flash-zg204zl.cmd COM3 --version v0146 --image "C:\path\to\ZG204ZL_v0146.bin"
+helper_scripts\flash-zg204zl.cmd COM3 --version v0148 --image "C:\path\to\ZG204ZL_v0148.bin"
 ```
 
 Replace `COM3` with the adapter's actual port. The launcher checks each native
