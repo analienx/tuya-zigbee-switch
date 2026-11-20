@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed ZG-204ZL v0.1.4.3 overlay for one immutable upstream commit."""
+"""Fail-closed ZG-204ZL v0.1.4.4 overlay for one immutable upstream commit."""
 from __future__ import annotations
 import argparse
 import hashlib
@@ -8,10 +8,11 @@ from pathlib import Path
 import subprocess
 
 UPSTREAM_COMMIT = 'c249d8a7caddb5012d06aba580d4a53d1957f9c1'
-NEXT_FILE_VERSION = 0x01433001
+NEXT_FILE_VERSION = 0x01443001
 BASE_BLOBS = {
     'src/zb_appCb.c': '4d7db2b8563b91d6b3d56907c3277965f98ecf8a',
     'src/sensor_pir.c': 'f92b4b71ee95d690775b433800ce6dbd123c2e17',
+    'src/app_main.c': '12305c8805ac6879cf94301d9418db2741009724',
     'src/app_main.h': 'c8e8bce5542d0fc66f7f855af2ab3fcc1aec7b46',
     'src/includes/zb_config.h': '8dbd01650f0ce2b8919d28d211ba0ca5365c2cc7',
     'src/app_cfg.h': 'd0e9e446da23bbfb1fe99a7729134dc8ace806c6',
@@ -39,7 +40,7 @@ def modified_sources(source: Path) -> dict[str, bytes]:
         edits[name] = raw.decode('utf-8')
     name = 'src/version_cfg.h'
     edits[name] = replace_once(edits[name], '#define APP_BUILD\t\t\t\t0x40',
-                               '#define APP_BUILD\t\t\t\t0x43', name)
+                               '#define APP_BUILD\t\t\t\t0x44', name)
     name = 'src/app_cfg.h'
     edits[name] = replace_once(edits[name],
         '#define ZB_TX_POWER_IDX_DEF\t\t\t\tRF_POWER_INDEX_P2p61dBm',
@@ -80,6 +81,29 @@ def modified_sources(source: Path) -> dict[str, bytes]:
     name = 'src/sensor_pir.c'
     edits[name] = replace_once(edits[name], '\t\t\t\t// event On\n#if USE_SENSOR_RC2417',
         '\t\t\t\t// event On\n\t\t\t\tapp_rejoinOnMotion();\n#if USE_SENSOR_RC2417', name)
+    name = 'src/app_main.c'
+    # This overlay only builds the displayless ZG-204ZL. Remove its periodic
+    # unjoined heartbeat. Motion and pairing feedback use other call sites.
+    edits[name] = replace_once(edits[name],
+        '\t\t} else { // Device not Joined\n'
+        '#if\tUSE_DISPLAY\n'
+        '\t\t\tif(!g_zcl_thermostatUICfgAttrs.display_off) {\n'
+        '\t\t\t\tif(!g_sensorAppCtx.timerLedEvt) {\n'
+        '\t\t\t\t\tshow_connected_symbol(false);\n'
+        '\t\t\t\t\tupdate_lcd();\n'
+        '\t\t\t\t}\n'
+        '\t\t\t}\n'
+        '#ifdef USE_BLINK_LED\n'
+        '\t\t\tif(!g_sensorAppCtx.timerLedEvt)\n'
+        '\t\t\t\tlight_blink_start(1, 50, 10000);\n'
+        '#endif // USE_BLINK_LED\n'
+        '#else // !USE_DISPLAY\n'
+        '\t\t\tif(!g_sensorAppCtx.timerLedEvt)\n'
+        '\t\t\t\tlight_blink_start(1, 50, 10000);\n'
+        '\t\t\t//gpio_write(GPIO_LED, LED_ON); // - не включать PIN_PULLUP/PULLDOWN !\n'
+        '#endif // USE_DISPLAY\n'
+        '\t\t}\n',
+        '\t\t}\n', name)
     return {name: text.encode('utf-8') for name, text in edits.items()}
 
 
@@ -102,6 +126,7 @@ def apply(source: Path, *, dry_run: bool = False, check_commit: bool = True) -> 
         'motion_rejoin_min_interval_s': 300,
         'motion_policy': 'accelerate one retry after 300 s since any accepted request; preserve progression; coalesce while busy',
         'channel_policy': 'known, known, full, full; both alternating security modes cover both masks',
+        'led_policy': 'periodic unjoined blink removed; retain motion and commissioning feedback',
         'diagnostics': 'printf disabled in the production candidate; no runtime counters claimed',
         'output_blobs': {name: git_blob_sha(data) for name, data in changed.items()},
     }

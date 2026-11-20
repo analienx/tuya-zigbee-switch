@@ -1,4 +1,4 @@
-name: ZG-204ZL v0.1.4.3 reliability canary (hosted build)
+name: ZG-204ZL v0.1.4.4 reliability canary (hosted build)
 
 on:
   pull_request:
@@ -57,30 +57,30 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends make unzip bzip2 libc6-i386 lib32z1
           make -C upstream install
-      - name: Build only ZG-204ZL v0.1.4.3 (never flash)
+      - name: Build only ZG-204ZL v0.1.4.4 (never flash)
         run: |
           make -C upstream clean
           make -C upstream -j2 PROJECT_NAME=ZG204ZL \
             POJECT_DEF="-DBOARD=BOARD_ZG204ZL" \
-            VERSION_BIN=_v0143 \
+            VERSION_BIN=_v0144 \
             ZNAME="Sonoff:ZG-204ZL-z"
       - name: Verify OTA and native firmware with strict image bounds and CRC
         run: |
-          mkdir -p "${RUNNER_TEMP}/zg204zl-v0143"
-          cp upstream/bin/ZG204ZL_v0143.bin "${RUNNER_TEMP}/zg204zl-v0143/"
-          cp upstream/bin/1141-0232-01433001-ZG204ZL.zigbee "${RUNNER_TEMP}/zg204zl-v0143/"
-          cp "${RUNNER_TEMP}/zg204zl-overlay.json" "${RUNNER_TEMP}/zg204zl-v0143/source-overlay.json"
-          cp "${RUNNER_TEMP}/zg204zl-battery-model.json" "${RUNNER_TEMP}/zg204zl-v0143/"
+          mkdir -p "${RUNNER_TEMP}/zg204zl-v0144"
+          cp upstream/bin/ZG204ZL_v0144.bin "${RUNNER_TEMP}/zg204zl-v0144/"
+          cp upstream/bin/1141-0232-01443001-ZG204ZL.zigbee "${RUNNER_TEMP}/zg204zl-v0144/"
+          cp "${RUNNER_TEMP}/zg204zl-overlay.json" "${RUNNER_TEMP}/zg204zl-v0144/source-overlay.json"
+          cp "${RUNNER_TEMP}/zg204zl-battery-model.json" "${RUNNER_TEMP}/zg204zl-v0144/"
           python control/firmware/zg204zl_reliability/verify_image.py \
             --source-commit "$EXPECTED_HEAD" \
-            --bin "${RUNNER_TEMP}/zg204zl-v0143/ZG204ZL_v0143.bin" \
-            --ota "${RUNNER_TEMP}/zg204zl-v0143/1141-0232-01433001-ZG204ZL.zigbee" \
-            --manifest "${RUNNER_TEMP}/zg204zl-v0143/manifest.json"
-          git -C upstream ls-tree HEAD tools/SDK_z.zip tools/linux/tc32_gcc_v2.0.tar.bz2 > "${RUNNER_TEMP}/zg204zl-v0143/sdk-toolchain-blobs.txt"
+            --bin "${RUNNER_TEMP}/zg204zl-v0144/ZG204ZL_v0144.bin" \
+            --ota "${RUNNER_TEMP}/zg204zl-v0144/1141-0232-01443001-ZG204ZL.zigbee" \
+            --manifest "${RUNNER_TEMP}/zg204zl-v0144/manifest.json"
+          git -C upstream ls-tree HEAD tools/SDK_z.zip tools/linux/tc32_gcc_v2.0.tar.bz2 > "${RUNNER_TEMP}/zg204zl-v0144/sdk-toolchain-blobs.txt"
       - name: Upload canary candidate (hosted-built; NOT hardware approved)
         uses: actions/upload-artifact@v4
         with:
-          name: zg204zl-v0143-reliability-candidate-${{ github.event.pull_request.head.sha || github.sha }}
-          path: ${{ runner.temp }}/zg204zl-v0143/
+          name: zg204zl-v0144-reliability-candidate-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/zg204zl-v0144/
           retention-days: 30
           if-no-files-found: error

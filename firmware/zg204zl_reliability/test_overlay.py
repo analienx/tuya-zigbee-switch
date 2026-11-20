@@ -38,7 +38,7 @@ class VariantTests(unittest.TestCase):
             root = self.make_copy(tmp)
             originals = {n: (root / n).read_bytes() for n in fw.BASE_BLOBS}
             result = fw.apply(root, dry_run=True, check_commit=False)
-            self.assertEqual(result["file_version"], "0x01433001")
+            self.assertEqual(result["file_version"], "0x01443001")
             self.assertEqual(result["rejoin_delays_s"], [2, 3, 5, 10, 20, 40, 80, 300, 900, 1800])
             self.assertEqual(result["scan_attempts"], 3)
             self.assertEqual(result["motion_rejoin_min_interval_s"], 300)
@@ -49,9 +49,10 @@ class VariantTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = self.make_copy(tmp)
             result = fw.apply(root, check_commit=False)
-            self.assertEqual(len(result["output_blobs"]), 6)
+            self.assertEqual(len(result["output_blobs"]), 7)
             zd = (root / "src/zb_appCb.c").read_text(encoding="utf-8")
             pir = (root / "src/sensor_pir.c").read_text(encoding="utf-8")
+            main = (root / "src/app_main.c").read_text(encoding="utf-8")
             power = (root / "src/app_cfg.h").read_text(encoding="utf-8")
             cfg = (root / "src/includes/zb_config.h").read_text(encoding="utf-8")
             version = (root / "src/version_cfg.h").read_text(encoding="utf-8")
@@ -61,10 +62,13 @@ class VariantTests(unittest.TestCase):
             self.assertEqual(zd.count('app_motionCooldownClear();'), 3)
             self.assertIn('g_sensorAppCtx.linkDown = 1;\n        rj_secMode = REJOIN_INSECURITY;', zd)
             self.assertIn("app_rejoinOnMotion();", pir)
+            self.assertNotIn("light_blink_start(1, 50, 10000)", main)
+            self.assertIn("light_blink_start(1, 50, 50)", pir)
+            self.assertIn("light_blink_start(10, 500, 500)", zd)
             self.assertIn("remoteCmdOnOff(SENSOR_DEVICE_ENDPOINT, ZCL_CMD_ONOFF_ON)", pir)
             self.assertIn('#define ZB_TX_POWER_IDX_DEF\t\t\t\tRF_POWER_INDEX_P6p14dBm', power)
             self.assertIn("ZDO_NWK_SCAN_ATTEMPTS\t\t\t\t\t\t3", cfg)
-            self.assertIn("#define APP_BUILD\t\t\t\t0x43", version)
+            self.assertIn("#define APP_BUILD\t\t\t\t0x44", version)
             self.assertIn('zb_isUnderRejoinMode()', zd)
 
     def test_fails_closed_before_writing_any_source_when_upstream_tampered(self):

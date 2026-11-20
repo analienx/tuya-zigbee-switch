@@ -1,4 +1,4 @@
-# ZG-204ZL-3.0 / TLSR8258 v0.1.4.3 with +6.14 dBm TX
+# ZG-204ZL-3.0 / TLSR8258 v0.1.4.4 with +6.14 dBm TX
 
 Development candidate for one hardware canary. Builds and tests run only on GitHub-hosted Actions. This branch has not flashed a sensor, changed Home Assistant or published an OTA index. A successful build establishes image integrity, not boot, pairing, battery life or RF acceptance.
 
@@ -6,12 +6,12 @@ Development candidate for one hardware canary. Builds and tests run only on GitH
 
 This candidate uses nominal **+6.14 dBm** with battery-first recovery that backs off during quiet outages and advances the next retry on eligible motion. It retains pvvx PIR, illuminance, battery reporting, configurable `pir_timeout`, local lux gating, direct Zigbee On/Off binding and standard ZigbeeTLc OTA.
 
-The only upstream is [pvvx/ZigbeeTLc at c249d8a7](https://github.com/pvvx/ZigbeeTLc/tree/c249d8a7caddb5012d06aba580d4a53d1957f9c1). Board 50 is ZG-204ZL-3.0 with TLSR8258F512ET32 and a CR2450. The overlay verifies all six original source blob IDs before writing anything and refuses other boards at compile time.
+The only upstream is [pvvx/ZigbeeTLc at c249d8a7](https://github.com/pvvx/ZigbeeTLc/tree/c249d8a7caddb5012d06aba580d4a53d1957f9c1). Board 50 is ZG-204ZL-3.0 with TLSR8258F512ET32 and a CR2450. The overlay verifies all seven original source blob IDs before writing anything and refuses other boards at compile time.
 
-| Setting | Upstream v0.1.4.0 | Candidate v0.1.4.3 |
+| Setting | Upstream v0.1.4.0 | Candidate v0.1.4.4 |
 |---|---|---|
 | Manufacturer / image type | `0x1141 / 0x0232` | Preserved |
-| File version | `0x01403001` | `0x01433001` |
+| File version | `0x01403001` | `0x01443001` |
 | TX setting | Nominal +2.61 dBm, VANT | Nominal **+6.14 dBm**, VBAT |
 | Normal RX gain | Maximum | Preserved |
 | Delays after accepted attempts | 30, 60, 120, 300, 600, 1200, 1800 s | **2, 3, 5, 10, 20, 40, 80, 300, 900, 1800 s**, then 1800 s |
@@ -20,6 +20,8 @@ The only upstream is [pvvx/ZigbeeTLc at c249d8a7](https://github.com/pvvx/Zigbee
 | SDK discovery scan attempts | 1 | 3 (not a claim that every secure rejoin scans three times) |
 | Motion recovery | None | Bring the next retry forward to 100 ms once eligible |
 | Motion budget | N/A | **Five minutes since any accepted automatic or motion request** |
+| LED while unjoined | 50 ms flash about every 10 seconds while the stack is idle | Periodic flash removed |
+| Motion and pairing LED | 50 ms motion flash and pairing feedback | Preserved |
 | Debug printing | Disabled | Disabled; no new runtime diagnostics claimed |
 
 An idle SDK receives the first lost-parent request after 100 ms. In the deterministic two-second busy model, the opening requests occur at approximately 0.1, 2.1, 5.1, 10.1, 20.1, 40.1, 80.1 and 160.1 seconds. Full-channel attempts use both security modes within the opening burst. Actual scans/security exchanges can take longer: busy or rejected requests wait one second and do not advance channel, security or backoff progression.
@@ -46,20 +48,22 @@ For sensitivity only, assume each old request uses 8 mA for one active second. G
 
 At the default 20-second poll interval, 4,320 daily polls with one assumed 18-byte on-air frame each at 250 kbps use **2.49 seconds of TX per day**. An assumed extra 10 mA during those frames adds `10 × 2.49 / 3600`, or **0.0069 mAh/day**. That is **1.4%** of the assumed 20 µA baseline. This example covers poll transmissions alone. Measure actual current, airtime and charge across motion reports, retries and outage scans before estimating battery life. [Board poll setting](https://github.com/pvvx/ZigbeeTLc/blob/c249d8a7caddb5012d06aba580d4a53d1957f9c1/src/board_zg204zl.h) · [Zigbee data rate](https://docs.silabs.com/zigbee/9.1.2/zigbee-mesh-network-performance/01-introduction-and-background)
 
+Removing the unjoined blink saves about **0.048 mAh of LED charge over eight hours** if the device would otherwise flash for 50 ms every 10 seconds at 1.2 mA. Savings depend on time spent unjoined and actual LED current. The recovery simulation counts requests and does not include this LED estimate. [Board LED circuit](https://pvvx.github.io/ZG-204ZL-3.0/)
+
 ## Hosted build and review
 
-The workflow [zg204zl-reliability-build.yml](../../.github/workflows/zg204zl-reliability-build.yml) independently pins the overlay to the exact PR head and the external source to `c249d8a7caddb5012d06aba580d4a53d1957f9c1`. Artifact filenames and the embedded version identify this v0143 candidate.
+The workflow [zg204zl-reliability-build.yml](../../.github/workflows/zg204zl-reliability-build.yml) independently pins the overlay to the exact PR head and the external source to `c249d8a7caddb5012d06aba580d4a53d1957f9c1`. Artifact filenames and the embedded version identify this v0144 candidate.
 
 The compiled harness covers delays and masks, both full-channel security modes, busy/rejected calls, success/factory-new cleanup, cooldown allocation failure, shared automatic/motion budget, unknown channel, button recovery, long sleep beyond the raw-clock wrap and the long-running attempt-counter wrap. It tests the section extracted from the patched source, not a separate Python scheduler. Image tests reject independent CRC, identity, payload, size and truncation corruption.
 
 The target build runs the pinned TC32 toolchain and SDK. Native CRC, startup marker, length, version and OTA payload equality must pass, and native size must remain within the existing **0x20000** application erase footprint. Artifacts include:
 
-- `ZG204ZL_v0143.bin`: native SWire image.
-- `1141-0232-01433001-ZG204ZL.zigbee`: standard Zigbee OTA after conversion.
+- `ZG204ZL_v0144.bin`: native SWire image.
+- `1141-0232-01443001-ZG204ZL.zigbee`: standard Zigbee OTA after conversion.
 - `manifest.json`: candidate source SHA, upstream pin, sizes and SHA-256 hashes.
 - `source-overlay.json`, `sdk-toolchain-blobs.txt`, `zg204zl-battery-model.json`: source configuration, pinned dependencies and model evidence.
 
-v0.1.4.3 supersedes the +10.46 dBm v0.1.4.2 candidate (`e7432aa9`) and the earlier v0.1.4.1 artifacts. Keep the older artifacts for evidence. The higher embedded version distinguishes the power change.
+v0.1.4.4 supersedes the v0.1.4.3 candidate (`e22fd6d5`), which still used the periodic unjoined blink. Keep the older artifacts for evidence.
 
 ## Physical canary
 
