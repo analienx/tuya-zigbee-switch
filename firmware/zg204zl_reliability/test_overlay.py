@@ -37,18 +37,18 @@ class VariantTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = self.make_copy(tmp)
             originals = {n: (root / n).read_bytes() for n in fw.BASE_BLOBS}
-            result = fw.apply(root, dry_run=True, check_commit=False)
-            self.assertEqual(result["file_version"], "0x01453001")
+            result = fw.apply(root, "v0146", dry_run=True, check_commit=False)
+            self.assertEqual(result["file_version"], "0x01463001")
             self.assertEqual(result["rejoin_delays_s"], [2, 3, 5, 10, 20, 40, 80, 300, 900, 1800])
             self.assertEqual(result["scan_attempts"], 3)
             self.assertEqual(result["motion_rejoin_min_interval_s"], 300)
-            self.assertEqual(result["tx_power_new_dbm_nominal"], 6.14)
+            self.assertEqual(result["tx_power_new_dbm_nominal"], 2.61)
             self.assertEqual({n: (root / n).read_bytes() for n in originals}, originals)
 
     def test_implementation_is_board_only_and_keeps_direct_binding(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = self.make_copy(tmp)
-            result = fw.apply(root, check_commit=False)
+            result = fw.apply(root, "v0147", check_commit=False)
             self.assertEqual(len(result["output_blobs"]), 7)
             zd = (root / "src/zb_appCb.c").read_text(encoding="utf-8")
             pir = (root / "src/sensor_pir.c").read_text(encoding="utf-8")
@@ -67,10 +67,19 @@ class VariantTests(unittest.TestCase):
             self.assertIn("light_blink_start(1, 50, 50)", pir)
             self.assertIn("light_blink_start(10, 500, 500)", zd)
             self.assertIn("remoteCmdOnOff(SENSOR_DEVICE_ENDPOINT, ZCL_CMD_ONOFF_ON)", pir)
-            self.assertIn('#define ZB_TX_POWER_IDX_DEF\t\t\t\tRF_POWER_INDEX_P6p14dBm', power)
+            self.assertIn('#define ZB_TX_POWER_IDX_DEF\t\t\t\tRF_POWER_INDEX_P3p01dBm', power)
             self.assertIn("ZDO_NWK_SCAN_ATTEMPTS\t\t\t\t\t\t3", cfg)
-            self.assertIn("#define APP_BUILD\t\t\t\t0x45", version)
+            self.assertIn("#define APP_BUILD\t\t\t\t0x47", version)
             self.assertIn('zb_isUnderRejoinMode()', zd)
+
+    def test_variants_differ_only_in_identity_and_tx_power(self):
+        control = fw.modified_sources(self.upstream, "v0146")
+        trial = fw.modified_sources(self.upstream, "v0147")
+        self.assertEqual(control["src/app_cfg.h"], (self.upstream / "src/app_cfg.h").read_bytes())
+        self.assertEqual(
+            {name for name in control if control[name] != trial[name]},
+            {"src/app_cfg.h", "src/version_cfg.h"},
+        )
 
     def test_fails_closed_before_writing_any_source_when_upstream_tampered(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -79,7 +88,7 @@ class VariantTests(unittest.TestCase):
             wrong.write_bytes(wrong.read_bytes() + b"\n/* tampered */\n")
             originals = {n: (root / n).read_bytes() for n in fw.BASE_BLOBS}
             with self.assertRaisesRegex(ValueError, "upstream blob mismatch"):
-                fw.apply(root, check_commit=False)
+                fw.apply(root, "v0146", check_commit=False)
             self.assertEqual({n: (root / n).read_bytes() for n in originals}, originals)
 
     def test_wrong_commit_rejected_before_writing(self):
@@ -88,7 +97,7 @@ class VariantTests(unittest.TestCase):
             before = (root / "src/app_cfg.h").read_bytes()
             with patch.object(fw.subprocess, "check_output", return_value="unexpected source sha"):
                 with self.assertRaisesRegex(ValueError, "wrong ZigbeeTLc source commit"):
-                    fw.apply(root)
+                    fw.apply(root, "v0146")
             self.assertEqual(before, (root / "src/app_cfg.h").read_bytes())
 
 
@@ -100,7 +109,7 @@ class SchedulerBehavior(unittest.TestCase):
         root = Path(cls.temp.name)
         upstream = Path(os.environ['ZG204ZL_SOURCE']).resolve()
         original = (upstream / 'src/zb_appCb.c').read_text()
-        changed = fw.modified_sources(upstream)['src/zb_appCb.c'].decode()
+        changed = fw.modified_sources(upstream, 'v0146')['src/zb_appCb.c'].decode()
         end = '#if !USE_BLE\nstatic ev_timer_event_t *timerDevAnnceEvt;'
         sections = {
             'baseline': original[original.index('/* Rejoin period, ms.'):original.index(end)],

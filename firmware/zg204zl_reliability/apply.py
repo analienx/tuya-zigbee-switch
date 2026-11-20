@@ -1,14 +1,27 @@
 #!/usr/bin/env python3
-"""Fail-closed ZG-204ZL v0.1.4.5 overlay for one immutable upstream commit."""
+"""Fail-closed ZG-204ZL overlay for one immutable upstream commit."""
 from __future__ import annotations
 import argparse
 import hashlib
 import json
 from pathlib import Path
 import subprocess
+from typing import NamedTuple
 
 UPSTREAM_COMMIT = 'c249d8a7caddb5012d06aba580d4a53d1957f9c1'
-NEXT_FILE_VERSION = 0x01453001
+
+
+class Variant(NamedTuple):
+    file_version: int
+    tx_index: str
+    tx_dbm: float
+
+
+VARIANTS = {
+    'v0146': Variant(0x01463001, 'RF_POWER_INDEX_P2p61dBm', 2.61),
+    'v0147': Variant(0x01473001, 'RF_POWER_INDEX_P3p01dBm', 3.01),
+}
+
 BASE_BLOBS = {
     'src/zb_appCb.c': '4d7db2b8563b91d6b3d56907c3277965f98ecf8a',
     'src/sensor_pir.c': 'f92b4b71ee95d690775b433800ce6dbd123c2e17',
@@ -31,7 +44,8 @@ def replace_once(text: str, old: str, new: str, where: str) -> str:
     return text.replace(old, new, 1)
 
 
-def modified_sources(source: Path) -> dict[str, bytes]:
+def modified_sources(source: Path, variant: str) -> dict[str, bytes]:
+    spec = VARIANTS[variant]
     edits = {}
     for name, expected in BASE_BLOBS.items():
         raw = (source / name).read_bytes()
@@ -39,12 +53,13 @@ def modified_sources(source: Path) -> dict[str, bytes]:
             raise ValueError(f'{name}: upstream blob mismatch; expected {expected}')
         edits[name] = raw.decode('utf-8')
     name = 'src/version_cfg.h'
+    build = (spec.file_version >> 16) & 0xff
     edits[name] = replace_once(edits[name], '#define APP_BUILD\t\t\t\t0x40',
-                               '#define APP_BUILD\t\t\t\t0x45', name)
+                               f'#define APP_BUILD\t\t\t\t0x{build:02x}', name)
     name = 'src/app_cfg.h'
     edits[name] = replace_once(edits[name],
         '#define ZB_TX_POWER_IDX_DEF\t\t\t\tRF_POWER_INDEX_P2p61dBm',
-        '#define ZB_TX_POWER_IDX_DEF\t\t\t\tRF_POWER_INDEX_P6p14dBm', name)
+        f'#define ZB_TX_POWER_IDX_DEF\t\t\t\t{spec.tx_index}', name)
     name = 'src/includes/zb_config.h'
     edits[name] = replace_once(edits[name],
         '#define\tZDO_NWK_SCAN_ATTEMPTS\t\t\t\t\t\t1',
@@ -110,20 +125,22 @@ def modified_sources(source: Path) -> dict[str, bytes]:
     return {name: text.encode('utf-8') for name, text in edits.items()}
 
 
-def apply(source: Path, *, dry_run: bool = False, check_commit: bool = True) -> dict:
+def apply(source: Path, variant: str, *, dry_run: bool = False, check_commit: bool = True) -> dict:
+    spec = VARIANTS[variant]
     if check_commit:
         head = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
         if head != UPSTREAM_COMMIT:
             raise ValueError(f'wrong ZigbeeTLc source commit {head}; expected {UPSTREAM_COMMIT}')
-    changed = modified_sources(source)
+    changed = modified_sources(source, variant)
     if not dry_run:
         for name, contents in changed.items():
             (source / name).write_bytes(contents)
     return {
         'status': 'SOURCE_OVERLAY_VALIDATED', 'base': UPSTREAM_COMMIT,
-        'target_board': 'BOARD_ZG204ZL', 'file_version': f'0x{NEXT_FILE_VERSION:08x}',
-        'tx_power_old_dbm': 2.61, 'tx_power_new_dbm_nominal': 6.14,
-        'tx_power_caveat': 'SDK VBAT setting characterized at 3.3 V. Output and current on this 2.1 V board require measurement.',
+        'target_board': 'BOARD_ZG204ZL', 'variant': variant,
+        'file_version': f'0x{spec.file_version:08x}',
+        'tx_power_old_dbm': 2.61, 'tx_power_new_dbm_nominal': spec.tx_dbm,
+        'tx_supply_mode': 'VANT', 'tx_power_index': spec.tx_index,
         'receive_gain': 'unchanged (maximum normal RX gain)',
         'scan_attempts': 3, 'rejoin_delays_s': [2, 3, 5, 10, 20, 40, 80, 300, 900, 1800],
         'sdk_deferral_delays_s': [1, 1, 1, 5, 15, 60, 300],
@@ -140,9 +157,10 @@ def apply(source: Path, *, dry_run: bool = False, check_commit: bool = True) -> 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--source', type=Path, required=True)
+    parser.add_argument('--variant', choices=VARIANTS, required=True)
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
-    print(json.dumps(apply(args.source.resolve(), dry_run=args.dry_run), indent=2))
+    print(json.dumps(apply(args.source.resolve(), args.variant, dry_run=args.dry_run), indent=2))
 
 
 if __name__ == '__main__':

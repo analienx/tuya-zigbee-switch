@@ -1,4 +1,4 @@
-name: ZG-204ZL v0.1.4.5 reliability canary (hosted build)
+name: ZG-204ZL VANT comparison (hosted build)
 
 on:
   pull_request:
@@ -20,8 +20,13 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [v0146, v0147]
     env:
       EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      VARIANT: ${{ matrix.variant }}
     steps:
       - name: Checkout this overlay and hosted tests
         uses: actions/checkout@v4
@@ -51,37 +56,39 @@ jobs:
       - name: Apply board-specific, fail-closed source changes
         shell: bash
         run: |
-          python control/firmware/zg204zl_reliability/apply.py --source upstream |
+          python control/firmware/zg204zl_reliability/apply.py --source upstream --variant "$VARIANT" |
             tee "${RUNNER_TEMP}/zg204zl-overlay.json"
       - name: Install Telink TC32 SDK/toolchain prerequisites
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends make unzip bzip2 libc6-i386 lib32z1
           make -C upstream install
-      - name: Build only ZG-204ZL v0.1.4.5 (never flash)
+      - name: Compile the ZG-204ZL sensor firmware
         run: |
           make -C upstream clean
           make -C upstream -j2 PROJECT_NAME=ZG204ZL \
             POJECT_DEF="-DBOARD=BOARD_ZG204ZL" \
-            VERSION_BIN=_v0145 \
+            VERSION_BIN="_$VARIANT" \
             ZNAME="Sonoff:ZG-204ZL-z"
       - name: Verify OTA and native firmware with strict image bounds and CRC
         run: |
-          mkdir -p "${RUNNER_TEMP}/zg204zl-v0145"
-          cp upstream/bin/ZG204ZL_v0145.bin "${RUNNER_TEMP}/zg204zl-v0145/"
-          cp upstream/bin/1141-0232-01453001-ZG204ZL.zigbee "${RUNNER_TEMP}/zg204zl-v0145/"
-          cp "${RUNNER_TEMP}/zg204zl-overlay.json" "${RUNNER_TEMP}/zg204zl-v0145/source-overlay.json"
-          cp "${RUNNER_TEMP}/zg204zl-battery-model.json" "${RUNNER_TEMP}/zg204zl-v0145/"
+          stage="${RUNNER_TEMP}/zg204zl-${VARIANT}"
+          version=$(jq -er '.file_version | ltrimstr("0x")' "${RUNNER_TEMP}/zg204zl-overlay.json")
+          native="ZG204ZL_${VARIANT}.bin"
+          ota="1141-0232-${version}-ZG204ZL.zigbee"
+          mkdir -p "$stage"
+          cp "upstream/bin/$native" "upstream/bin/$ota" "$stage/"
+          cp "${RUNNER_TEMP}/zg204zl-overlay.json" "$stage/source-overlay.json"
+          cp "${RUNNER_TEMP}/zg204zl-battery-model.json" "$stage/"
           python control/firmware/zg204zl_reliability/verify_image.py \
             --source-commit "$EXPECTED_HEAD" \
-            --bin "${RUNNER_TEMP}/zg204zl-v0145/ZG204ZL_v0145.bin" \
-            --ota "${RUNNER_TEMP}/zg204zl-v0145/1141-0232-01453001-ZG204ZL.zigbee" \
-            --manifest "${RUNNER_TEMP}/zg204zl-v0145/manifest.json"
-          git -C upstream ls-tree HEAD tools/SDK_z.zip tools/linux/tc32_gcc_v2.0.tar.bz2 > "${RUNNER_TEMP}/zg204zl-v0145/sdk-toolchain-blobs.txt"
+            --variant "$VARIANT" --bin "$stage/$native" --ota "$stage/$ota" \
+            --manifest "$stage/manifest.json"
+          git -C upstream ls-tree HEAD tools/SDK_z.zip tools/linux/tc32_gcc_v2.0.tar.bz2 > "$stage/sdk-toolchain-blobs.txt"
       - name: Upload canary candidate (hosted-built; NOT hardware approved)
         uses: actions/upload-artifact@v4
         with:
-          name: zg204zl-v0145-reliability-candidate-${{ github.event.pull_request.head.sha || github.sha }}
-          path: ${{ runner.temp }}/zg204zl-v0145/
+          name: zg204zl-${{ matrix.variant }}-reliability-candidate-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/zg204zl-${{ matrix.variant }}/
           retention-days: 30
           if-no-files-found: error

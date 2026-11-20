@@ -1,18 +1,18 @@
-# ZG-204ZL-3.0 / TLSR8258 v0.1.4.5 with +6.14 dBm TX
+# ZG-204ZL-3.0 / TLSR8258 VANT transmit power comparison
 
-Development candidate for one hardware canary. Builds and tests run only on GitHub-hosted Actions. This branch has not flashed a sensor, changed Home Assistant or published an OTA index. A successful build establishes image integrity, not boot, pairing, battery life or RF acceptance.
+Development images for a one-sensor comparison. GitHub-hosted Actions verify the builds and image integrity. Battery-only boot, pairing and RF performance require hardware testing.
 
 ## Firmware policy
 
-This candidate uses nominal **+6.14 dBm** with battery-first recovery that backs off during quiet outages and advances the next retry on eligible motion. It retains pvvx PIR, illuminance, battery reporting, configurable `pir_timeout`, local lux gating, direct Zigbee On/Off binding and standard ZigbeeTLc OTA.
+Both images use the radio's internal VANT supply. Flash **v0146 (+2.61 dBm)** first to isolate the radio change from v0145. If battery-only operation is confirmed, test **v0147 (+3.01 dBm)** on the same sensor and CR2450. Except for version identity, only the TX index differs between the images at source level. Both use the v0145 recovery schedule and retain pvvx PIR, illuminance, battery reporting, configurable `pir_timeout`, local lux gating, direct Zigbee On/Off binding and standard ZigbeeTLc OTA.
 
 The only upstream is [pvvx/ZigbeeTLc at c249d8a7](https://github.com/pvvx/ZigbeeTLc/tree/c249d8a7caddb5012d06aba580d4a53d1957f9c1). Board 50 is ZG-204ZL-3.0 with TLSR8258F512ET32 and a CR2450. The overlay verifies all seven original source blob IDs before writing anything and refuses other boards at compile time.
 
-| Setting | Upstream v0.1.4.0 | Candidate v0.1.4.5 |
+| Setting | Upstream v0.1.4.0 | v0146 / v0147 |
 |---|---|---|
 | Manufacturer / image type | `0x1141 / 0x0232` | Preserved |
-| File version | `0x01403001` | `0x01453001` |
-| TX setting | Nominal +2.61 dBm, VANT | Nominal **+6.14 dBm**, VBAT |
+| File version | `0x01403001` | `0x01463001` / `0x01473001` |
+| TX setting | Nominal +2.61 dBm, VANT | Nominal +2.61 / +3.01 dBm, VANT |
 | Normal RX gain | Maximum | Preserved |
 | Delays after accepted attempts | 30, 60, 120, 300, 600, 1200, 1800 s | **2, 3, 5, 10, 20, 40, 80, 300, 900, 1800 s**, then 1800 s |
 | Channel masks | Known except every fourth request | **Known, known, full, full**, repeated |
@@ -34,9 +34,9 @@ Without motion, recovery after a long outage can wait up to the 30-minute timer;
 
 ## TX and battery limits
 
-The pinned SDK's `platform/chip_8258/rf_drv.h` labels `RF_POWER_INDEX_P6p14dBm` as VBAT and the upstream +2.61 dBm setting as VANT. The nominal difference is **3.53 dB**, or **2.25 times RF power** by `10^(3.53/10)`. Telink characterized the VBAT table at 3.3 V. The sensor's regulated 2.1 V rail therefore needs its own output and pulse current measurements. [TLSR8258 datasheet, section 2.6.4](https://www.mouser.com/datasheet/2/1039/DS_TLSR8258_E_Datasheet_for_Telink_BLE_2bIEEE802_1-2301271.pdf)
+The pinned SDK uses VANT for the upstream +2.61 dBm setting and the highest VANT index, +3.01 dBm. The nominal 0.40 dB gain is about 10% more radiated power if the board and antenna reproduce the SDK values. Actual current and link margin require measurement. The previous v0145 +6.14 dBm index uses VBAT, whose nominal table Telink characterized at 3.3 V. [TLSR8258 datasheet, section 2.6.4](https://www.mouser.com/datasheet/2/1039/DS_TLSR8258_E_Datasheet_for_Telink_BLE_2bIEEE802_1-2301271.pdf)
 
-Use +2.61 dBm as the reference. Aim for a repeatable improvement of at least 2 dB in received signal strength at the same Zigbee receiver, channel, position and orientation. Capture the regulated rail and current during a burst of rejoin attempts with fresh and partly discharged cells. For example, a cell at 2.7 V with an effective resistance of 40 Ω would drop 0.6 V under a 15 mA pulse, leaving 2.1 V at the regulator input. This is an illustrative load calculation. Confirm rail stability and absence of resets during the test. [Energizer CR2450 pulse curves](https://energizer.com/wp-content/uploads/2023/11/cr2450.pdf)
+Use +2.61 dBm as the reference. Keep the receiver, channel, position and orientation fixed. Compare cold starts, motion and direct binding, then measure rejoin after a parent outage. Repeat with a partly discharged CR2450. For power characterization, capture the supply at the chip and current during startup, first transmission and rejoin. [Coin-cell Zigbee measurements](https://www.nxp.com/docs/en/application-note/AN4573.pdf)
 
 Characterize the actual CR2450 and board together. Continuous-drain ratings and pulse-test conditions describe different loads. [Panasonic CR2450 datasheet](https://energy.panasonic.com/dam/master/pdf/en/datasheet/lithium/CR2450_Datasheet_EN.pdf)
 
@@ -54,14 +54,14 @@ Removing the unjoined blink saves about **0.048 mAh of LED charge over eight hou
 
 ## Hosted build and review
 
-The workflow [zg204zl-reliability-build.yml](../../.github/workflows/zg204zl-reliability-build.yml) independently pins the overlay to the exact PR head and the external source to `c249d8a7caddb5012d06aba580d4a53d1957f9c1`. Artifact filenames and the embedded version identify this v0145 candidate.
+The workflow [zg204zl-reliability-build.yml](../../.github/workflows/zg204zl-reliability-build.yml) pins the overlay to the exact PR head and the external source to `c249d8a7caddb5012d06aba580d4a53d1957f9c1`. It builds each variant in an independent job and verifies its embedded version.
 
 The compiled harness covers delays and masks, both full-channel security modes, persistent SDK refusal, resuming after first timer allocation failure, success/factory-new cleanup, cooldown allocation failure, shared automatic/motion budget, unknown channel, button recovery, long sleep beyond the raw-clock wrap and the long-running attempt-counter wrap. It runs the section extracted from the patched source. CI stops if the overlay script returns an error. Image tests reject independent CRC, identity, payload, size and truncation corruption.
 
 The target build runs the pinned TC32 toolchain and SDK. Native CRC, startup marker, length, version and OTA payload equality must pass, and native size must remain within the existing **0x20000** application erase footprint. Artifacts include:
 
-- `ZG204ZL_v0145.bin`: native SWire image.
-- `1141-0232-01453001-ZG204ZL.zigbee`: standard Zigbee OTA after conversion.
+- `ZG204ZL_v0146.bin` and `ZG204ZL_v0147.bin` for SWire.
+- `1141-0232-01463001-ZG204ZL.zigbee` and `1141-0232-01473001-ZG204ZL.zigbee` for Zigbee OTA on already converted sensors.
 - `manifest.json`: candidate source SHA, upstream pin, sizes and SHA-256 hashes.
 - `source-overlay.json`, `sdk-toolchain-blobs.txt`, `zg204zl-battery-model.json`: source configuration, pinned dependencies and model evidence.
 
