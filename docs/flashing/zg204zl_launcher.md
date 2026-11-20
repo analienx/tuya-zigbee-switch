@@ -6,6 +6,31 @@ Use only the same physically qualified ZG-204ZL board/interface as the first
 sensor. It cannot identify the connected PCB electrically. The regulated 2.1 V
 rail is not a 3.3 V input. Follow the device-specific voltage/pad record.
 
+## Flash the v0.1.4.5 test candidate
+
+On the bench machine with the candidate already staged, run from Command Prompt
+or PowerShell:
+
+```bat
+C:\Workspace\tools\telink-swire\flash-zg204zl.cmd COM3 --version v0145
+```
+
+From a checkout of the launcher branch, download and extract the
+[GitHub Actions artifact](https://github.com/analienx/tuya-zigbee-switch/actions/runs/44706913369/artifacts/14615831032)
+for firmware source `2dab36974f11bb4120f076a094fcee37727fa14f`. Pass its native
+image path explicitly:
+
+```bat
+helper_scripts\flash-zg204zl.cmd COM3 --version v0145 --image "C:\path\to\ZG204ZL_v0145.bin"
+```
+
+Replace `COM3` with the adapter's actual port. v0.1.4.5 is a hardware test
+candidate with firmware version `0x01453001`. The launcher checks the native
+image size and exact SHA-256 from the reviewed build before serial access.
+If there is no `--image` argument, v0145 uses the staged file at
+`~/.telink-swire/tools/zg204zl/ZG204ZL_v0145.bin`. The default without a
+version option remains the original v0.1.4.0 conversion image.
+
 ## ZG-204ZL-3.0 programming pins
 
 Owner-confirmed orientation, recorded 2026-11-19: look at the **component side**,
@@ -39,11 +64,13 @@ BSEED verified-session double-read policy. A single backup does not prove read
 repeatability. No original sensor dump, IEEE or network configuration is copied
 to a different sensor.
 
-The launcher downloads and checks the immutable ZigbeeTLc v0.1.4.0 native image
-and the pinned pvvx tool, waits up to five minutes for USB/target entry, then:
+The launcher checks the selected native image and the pinned pvvx tool, waits
+up to five minutes for USB/target entry, then:
 
 1. Halts the CPU and reads the entire 512 KiB once into a new private run folder.
-2. Calls only pvvx `wf 0x0` with the pinned 129,140-byte native image. It writes
+2. Checks the v0145 backup for a supported ZG-204ZL image at zero and no active
+   alternate boot image at 0x20000 or 0x40000. It then calls only pvvx `wf 0x0`
+   with the selected native image. It writes
    firmware sectors 0x00000..0x1FFFF, with no reset/run flag or erase-all.
 3. Reads the entire flash once, without resetting or restarting.
 4. Compares the exact image, erased tail, and all bytes at 0x20000..0x7FFFF
@@ -64,8 +91,9 @@ be automatically retried by changing output folders. Inspect actual flash and
 assess recovery before retiring that stop. Do not delete state to bypass it.
 
 If a write finishes but the verification read fails, keep the same sensor powered
-and connected, then run `flash_zg204zl.py COM3 --verify-only`. This reads once and
-compares against the saved original backup and pinned image. It never programs,
+and connected, then rerun the launcher with `COM3 --verify-only`. It selects the
+image pin from the saved operation, then reads once and compares against the
+saved backup and image. It never programs,
 erases, resets or re-halts the CPU. It checks that the CPU remains stopped and
 reuses the backup's verified SWire divider instead of accepting a new marginal
 auto-speed result. Each attempt has its own file; failed evidence is retained.

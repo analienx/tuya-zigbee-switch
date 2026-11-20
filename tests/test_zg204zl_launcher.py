@@ -12,18 +12,26 @@ import flash_zg204zl as launcher
 
 
 @pytest.fixture
-def bench(tmp_path, monkeypatch):
+def bench(tmp_path, monkeypatch, request):
     tool = launcher.swire
     monkeypatch.setattr(tool, 'STATE_ROOT', tmp_path / 'state')
     monkeypatch.setattr(launcher, 'RUNS', tmp_path / 'runs')
     monkeypatch.setattr(launcher, 'IMAGE', tmp_path / 'firmware.bin')
-    image = bytes(i % 251 for i in range(launcher.IMAGE_BYTES))
+    version = getattr(request, 'param', 'v0140')
+    firmware = launcher.firmware_profiles()[version]
+    image = bytes(i % 251 for i in range(firmware.size))
     launcher.IMAGE.write_bytes(image)
-    monkeypatch.setattr(launcher, 'IMAGE_SHA', hashlib.sha256(image).hexdigest())
+    monkeypatch.setattr(launcher, 'V0145_SHA' if version == 'v0145' else 'IMAGE_SHA',
+                        hashlib.sha256(image).hexdigest())
     monkeypatch.setattr(list_ports, 'comports', lambda: [SimpleNamespace(device='COM3')])
     monkeypatch.setattr(tool, 'ensure_reader', lambda **_: {'reader': str(tmp_path / 'reader.py')})
     monkeypatch.setattr(launcher, 'confirm_stopped', lambda *_: None)
-    before = bytes((i * 17) % 255 for i in range(launcher.FLASH_BYTES))
+    before = bytearray((i * 17) % 255 for i in range(launcher.FLASH_BYTES))
+    if version == 'v0145':
+        before[6:12] = b'\x5d\x02KNLT'
+        before[18:22] = b'\x86\x12\x03\x02'
+        before[24:28] = (121860).to_bytes(4, 'little')
+    before = bytes(before)
     expected = image + b'\xff' * (launcher.ERASE_END - len(image)) + before[launcher.ERASE_END:]
     events = []
     def read(port, output, **kwargs):
@@ -52,6 +60,48 @@ def test_one_backup_and_one_readback_with_full_preservation(bench):
     state = launcher.swire.read_json(next(launcher.RUNS.glob('*/summary.json')))
     assert state['phase'] == 'VERIFIED' and state['preservationVerified']
     assert state['bootVerified'] is False
+
+
+@pytest.mark.parametrize('bench', ['v0145'], indirect=True)
+@pytest.mark.parametrize('use_cache', [False, True])
+def test_v0145_image_selection_and_verify_only_use_the_recorded_pin(bench, monkeypatch, use_cache):
+    events, *_ = bench
+    original = launcher.swire._read_flash
+    def fail_after_write(port, output, **kwargs):
+        if not kwargs['halt']:
+            raise RuntimeError('first readback failed')
+        return original(port, output, **kwargs)
+    monkeypatch.setattr(launcher.swire, '_read_flash', fail_after_write)
+    if use_cache:
+        launcher.IMAGE.replace(launcher.IMAGE.with_name(launcher.V0145_FILENAME))
+    with pytest.raises(RuntimeError, match='verification read failed'):
+        launcher.run('COM3', 300, 'v0145', None if use_cache else launcher.IMAGE)
+    summary = next(launcher.RUNS.glob('*/summary.json'))
+    state = launcher.swire.read_json(summary)
+    assert state['imageVersion'] == 'v0145' and state['imageSha256'] == launcher.V0145_SHA
+    assert (summary.parent / launcher.V0145_FILENAME).is_file()
+    monkeypatch.setattr(launcher.swire, '_read_flash', original)
+    monkeypatch.setattr(launcher, 'writer', lambda *_: pytest.fail('verification must never write'))
+    launcher.verify_only('COM3')
+    assert events == ['backup', 'write', 'readback']
+    assert launcher.swire.read_json(summary)['phase'] == 'VERIFIED'
+
+
+@pytest.mark.parametrize('bench', ['v0145'], indirect=True)
+@pytest.mark.parametrize('offset', [0, 0x20000, 0x40000])
+def test_v0145_refuses_unsupported_or_alternate_boot_layout(bench, monkeypatch, offset):
+    events, *_ = bench
+    original = launcher.swire._read_flash
+    def read(port, output, **kwargs):
+        original(port, output, **kwargs)
+        data = bytearray(output.read_bytes())
+        data[offset + 8:offset + 12] = b'KNLT' if offset else b'\x00' * 4
+        output.write_bytes(data)
+    monkeypatch.setattr(launcher.swire, '_read_flash', read)
+    with pytest.raises(RuntimeError, match='Inspect before writing'):
+        launcher.run('COM3', 300, 'v0145', launcher.IMAGE)
+    assert events == ['backup']
+    assert not launcher.swire.read_json(next(launcher.RUNS.glob('*/summary.json')))['writeAttempted']
 
 
 @pytest.mark.parametrize('offset', [8, launcher.IMAGE_BYTES, launcher.ERASE_END, 0x7FFFF])

@@ -13,6 +13,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from typing import NamedTuple, Optional
 
 import telink_swire_recovery as swire
 
@@ -24,10 +25,65 @@ IMAGE_BYTES = 129140
 FLASH_BYTES = 0x80000
 ERASE_END = 0x20000
 RUNS = swire.STATE_ROOT / 'zg204zl-runs'
+V0145_FILENAME = 'ZG204ZL_v0145.bin'
+V0145_SHA = 'd31624949aeec6f95fd983899e1b679dbd7a44db209a690d6a2ded57e3cc1031'
+V0145_BYTES = 130628
+V0145_ARTIFACT = 'https://github.com/analienx/tuya-zigbee-switch/actions/runs/44706913369/artifacts/14615831032'
+
+
+class Firmware(NamedTuple):
+    filename: str
+    sha256: str
+    size: int
+    cache: Path
+    source: Optional[str] = None
+
+
+def firmware_profiles():
+    return {
+        'v0140': Firmware('ZG204ZL_v0140.bin', IMAGE_SHA, IMAGE_BYTES, IMAGE, IMAGE_URL),
+        'v0145': Firmware(V0145_FILENAME, V0145_SHA, V0145_BYTES,
+                          IMAGE.with_name(V0145_FILENAME)),
+    }
 
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def load_firmware(firmware, image_path):
+    if image_path is not None:
+        data = image_path.read_bytes()
+    elif firmware.cache.exists():
+        data = firmware.cache.read_bytes()
+    elif firmware.source:
+        print('Downloading the pinned ZG-204ZL firmware...', flush=True)
+        data = swire.download(firmware.source, firmware.size)
+    else:
+        raise RuntimeError(f'Download {firmware.filename} from {V0145_ARTIFACT} '
+                           'and pass its path with --image.')
+    if len(data) != firmware.size or len(data) > ERASE_END or digest(data) != firmware.sha256:
+        raise RuntimeError('ZG-204ZL firmware size/hash mismatch. Nothing written.')
+    if image_path is None and not firmware.cache.exists():
+        firmware.cache.parent.mkdir(parents=True, exist_ok=True)
+        temporary = firmware.cache.with_name(firmware.filename + '.' + uuid.uuid4().hex + '.tmp')
+        temporary.write_bytes(data)
+        temporary.replace(firmware.cache)
+    return data
+
+
+def require_v0145_layout(before):
+    # The documented stock and ZigbeeTLc images both begin at zero on this board.
+    identity = (int.from_bytes(before[18:20], 'little'), int.from_bytes(before[20:22], 'little'))
+    size = int.from_bytes(before[24:28], 'little')
+    if (before[6:12] != b'\x5d\x02KNLT' or identity not in {(0x1286, 0x0203), (0x1141, 0x0232)}
+            or not 4096 <= size <= ERASE_END):
+        raise RuntimeError('Backup does not show a supported ZG-204ZL application at zero. Inspect before writing.')
+    # The ZigbeeTLc boot path can copy an active OTA image from 0x20000.
+    # Refuse either alternate boot area rather than trying to disable it.
+    for offset in (0x20000, 0x40000):
+        if before[offset + 8:offset + 12] == b'KNLT':
+            raise RuntimeError(f'Backup has an active alternate image at 0x{offset:05X}. Inspect before writing.')
 
 
 def verify(before, after, image):
@@ -124,9 +180,12 @@ def verify_only(port):
         authority = swire.authority_path(port)
         if authority.exists() and swire.read_json(authority)['phase'] not in swire.HALT_READ_PHASES:
             raise RuntimeError('An existing recovery owns this port.')
-        image = (folder / 'ZG204ZL_v0140.bin').read_bytes()
+        firmware = next((f for f in firmware_profiles().values() if f.sha256 == state.get('imageSha256')), None)
+        if firmware is None:
+            raise RuntimeError('Recorded image is not a supported firmware pin. Verification stopped.')
+        image = (folder / firmware.filename).read_bytes()
         before = (folder / 'before.bin').read_bytes()
-        if (len(image) != IMAGE_BYTES or digest(image) != IMAGE_SHA or state.get('imageSha256') != IMAGE_SHA
+        if (len(image) != firmware.size or digest(image) != firmware.sha256
                 or len(before) != FLASH_BYTES or digest(before) != state.get('backupSha256')):
             raise RuntimeError('Original image/backup evidence changed; verification stopped.')
         receipt = swire.read_json(folder / 'before.bin.json')
@@ -166,28 +225,18 @@ def verify_only(port):
             report('Evidence: ' + str(folder))
 
 
-def run(port, seconds):
+def run(port, seconds, version='v0140', image_path=None):
     from serial.tools import list_ports
+    firmware = firmware_profiles()[version]
+    print(f'ZG-204ZL | {firmware.filename} | {port}', flush=True)
+    image = load_firmware(firmware, image_path)
     deadline = time.monotonic() + seconds
-    print(f'ZG-204ZL | ZigbeeTLc v0.1.4.0 | {port}', flush=True)
     print('Use the same qualified sensor wiring and supply as before. Keep contacts fixed throughout.', flush=True)
     print(f'Waiting up to {seconds} seconds for the USB adapter...', flush=True)
     while port.upper() not in {p.device.upper() for p in list_ports.comports()}:
         if time.monotonic() >= deadline:
             raise RuntimeError(f'{port} did not appear. Check USB/port, then run again.')
         time.sleep(1)
-    if IMAGE.exists():
-        image = IMAGE.read_bytes()
-    else:
-        print('Downloading the pinned ZG-204ZL firmware...', flush=True)
-        image = swire.download(IMAGE_URL, IMAGE_BYTES)
-    if len(image) != IMAGE_BYTES or digest(image) != IMAGE_SHA:
-        raise RuntimeError('ZG-204ZL firmware size/hash mismatch. Nothing written.')
-    if not IMAGE.exists():
-        IMAGE.parent.mkdir(parents=True, exist_ok=True)
-        temporary = IMAGE.with_name(IMAGE.name + '.' + uuid.uuid4().hex + '.tmp')
-        temporary.write_bytes(image)
-        temporary.replace(IMAGE)
     folder = swire.private_output(RUNS / (datetime.datetime.now().strftime('%Y%m%d-%H%M%S-') + uuid.uuid4().hex[:6]))
     folder.mkdir(parents=True)
     def report(message):
@@ -195,7 +244,8 @@ def run(port, seconds):
         with (folder / 'progress.log').open('a', encoding='utf-8') as stream:
             stream.write(datetime.datetime.now().isoformat(timespec='seconds') + ' ' + message + '\n')
     state_path = swire.STATE_ROOT / 'zg204zl' / (swire.port_key(port) + '.json')
-    state = {'device': 'ZG-204ZL', 'port': port, 'folder': str(folder), 'imageSha256': IMAGE_SHA,
+    state = {'device': 'ZG-204ZL', 'port': port, 'folder': str(folder), 'imageSha256': firmware.sha256,
+             'imageVersion': version,
              'phase': 'PREPARING', 'writeAttempted': False, 'bootVerified': False,
              'backupReadCount': 1, 'verificationReadCount': 1}
     def save(phase):
@@ -213,7 +263,7 @@ def run(port, seconds):
         save('PREPARING')
         try:
             reader = Path(swire.ensure_reader(out=report)['reader'])
-            snapshot = folder / 'ZG204ZL_v0140.bin'
+            snapshot = folder / firmware.filename
             snapshot.write_bytes(image)
             report('[1/4] Reading your sensor backup ONCE (512 KiB).')
             save('BACKUP')
@@ -225,7 +275,9 @@ def run(port, seconds):
             state['backupSha256'] = digest(before)
             if before == b'\xff' * FLASH_BYTES or before == b'\x00' * FLASH_BYTES:
                 raise RuntimeError('Blank-looking backup; inspect wiring before any write.')
-            if digest(snapshot.read_bytes()) != IMAGE_SHA:
+            if version == 'v0145':
+                require_v0145_layout(before)
+            if digest(snapshot.read_bytes()) != firmware.sha256:
                 raise RuntimeError('Prepared image changed; write cancelled.')
             report('[2/4] Writing firmware at 0x00000; erases only 0x00000..0x1FFFF.')
             state['writeAttempted'] = True
@@ -262,15 +314,19 @@ def main():
     parser = argparse.ArgumentParser(description='ZG-204ZL only: one backup, flash, one verifying read. No automatic restart.')
     parser.add_argument('port', nargs='?', default='COM3', help='adapter COM port (default COM3)')
     parser.add_argument('--seconds', type=int, default=300, help='USB/target connection window, 1..900 seconds')
+    parser.add_argument('--version', choices=firmware_profiles(), help='choose a pinned image (default v0140)')
+    parser.add_argument('--image', type=Path, help='use a local native file matching the selected firmware pin')
     parser.add_argument('--verify-only', action='store_true', help='read and verify the last write on this port, WITHOUT rewriting/resetting')
     args = parser.parse_args()
     if not 1 <= args.seconds <= 900 or not re.fullmatch(r'COM\d+', args.port, re.I):
         parser.error('use a COM port and --seconds 1..900')
+    if args.verify_only and (args.version is not None or args.image is not None):
+        parser.error('--verify-only uses the saved image. Omit --version and --image.')
     try:
         if args.verify_only:
             verify_only(args.port.upper())
         else:
-            run(args.port.upper(), args.seconds)
+            run(args.port.upper(), args.seconds, args.version or 'v0140', args.image)
         return 0
     except KeyboardInterrupt:
         print('\nCancelled. Read the saved summary before another write.', file=sys.stderr)
