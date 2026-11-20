@@ -19,10 +19,13 @@ static bool motionRetryReady;
 static bool rj_secMode = REJOIN_SECURITY;
 #endif
 
-static void app_saveNwkChannel(void) {
-    u8 ch = g_zbMacPib.phyChannelCur;
+static void app_rememberChannel(u8 ch) {
     if (ch >= 11 && ch <= 26)
         rj_chan = ch;
+}
+
+static void app_saveNwkChannel(void) {
+    app_rememberChannel(g_zbMacPib.phyChannelCur);
 }
 
 static u32 app_rejoinChannelMask(void) {

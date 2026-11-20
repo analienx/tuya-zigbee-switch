@@ -13,8 +13,8 @@ spec.loader.exec_module(image_gate)
 
 class ImageGate(unittest.TestCase):
     def test_valid_payload_and_independent_corruptions(self):
-        variant = 'v0146'
-        version = 0x01463001
+        variant = 'v0148'
+        version = 0x01483001
         body = bytearray(4092)
         body[6:8] = b'\x5d\x02'
         body[8:12] = b'KNLT'
@@ -31,8 +31,11 @@ class ImageGate(unittest.TestCase):
             native_path.write_bytes(firmware)
             ota_path.write_bytes(ota)
             self.assertEqual(image_gate.verify(native_path, ota_path, variant)['native']['bytes'], 4096)
+            stale = bytearray(firmware)
+            struct.pack_into('<I', stale, 2, 0x01473001)
+            native_path.write_bytes(bytes(stale))
             with self.assertRaisesRegex(ValueError, 'wrong native fileVersion'):
-                image_gate.verify(native_path, ota_path, 'v0147')
+                image_gate.verify(native_path, ota_path, variant)
             for name, native, package in (
                 ('crc', firmware[:-1] + bytes([firmware[-1] ^ 1]), ota),
                 ('identity', firmware, ota[:14] + b'\xff\xff\xff\xff' + ota[18:]),

@@ -17,10 +17,12 @@ class Variant(NamedTuple):
     tx_dbm: float
 
 
+# v0148 keeps the upstream TX index and the upstream single discovery scan.
+# v0146/v0147 (e0d558b0) used three scan attempts; both failed on a CR2450.
 VARIANTS = {
-    'v0146': Variant(0x01463001, 'RF_POWER_INDEX_P2p61dBm', 2.61),
-    'v0147': Variant(0x01473001, 'RF_POWER_INDEX_P3p01dBm', 3.01),
+    'v0148': Variant(0x01483001, 'RF_POWER_INDEX_P2p61dBm', 2.61),
 }
+SCAN_ATTEMPTS = 1
 
 BASE_BLOBS = {
     'src/zb_appCb.c': '4d7db2b8563b91d6b3d56907c3277965f98ecf8a',
@@ -60,10 +62,11 @@ def modified_sources(source: Path, variant: str) -> dict[str, bytes]:
     edits[name] = replace_once(edits[name],
         '#define ZB_TX_POWER_IDX_DEF\t\t\t\tRF_POWER_INDEX_P2p61dBm',
         f'#define ZB_TX_POWER_IDX_DEF\t\t\t\t{spec.tx_index}', name)
+    # ZDO_NWK_SCAN_ATTEMPTS stays at upstream 1. Three attempts tripled every
+    # discovery's receive time (~6.8 s per full-mask request) on a coin cell.
     name = 'src/includes/zb_config.h'
-    edits[name] = replace_once(edits[name],
-        '#define\tZDO_NWK_SCAN_ATTEMPTS\t\t\t\t\t\t1',
-        '#define\tZDO_NWK_SCAN_ATTEMPTS\t\t\t\t\t\t3', name)
+    if edits[name].count('#define\tZDO_NWK_SCAN_ATTEMPTS\t\t\t\t\t\t1') != 1:
+        raise ValueError(f'{name}: expected upstream single scan attempt')
     name = 'src/zb_appCb.c'
     start = '/* Rejoin period, ms. The full channel mask is scanned on every 4th attempt. */'
     end = '#if !USE_BLE\nstatic ev_timer_event_t *timerDevAnnceEvt;'
@@ -85,6 +88,13 @@ def modified_sources(source: Path, variant: str) -> dict[str, bytes]:
     edits[name] = replace_once(edits[name],
         '\t\t\t\tzb_rejoinSecModeSet(REJOIN_SECURITY);\n#endif\n\t\t\t\tzb_rejoinReq(app_rejoinChannelMask(), g_bdbAttrs.scanDuration);\n\t\t\t\tapp_rejoinSchedule(rejoinBackoffTbl[0]);',
         '\t\t\t\trj_secMode = REJOIN_SECURITY;\n#endif\n\t\t\t\tapp_rejoinSchedule(100);', name)
+    # A cold boot whose startup rejoin fails never reaches app_saveNwkChannel(),
+    # which made every request a full-channel scan. BDB captured the restored
+    # NV operating channel in g_bdbCtx.channel before this callback.
+    edits[name] = replace_once(edits[name],
+        '\t\t\tg_sensorAppCtx.linkDown = 1;\n\t\t\tapp_rejoinSchedule(rejoinBackoffTbl[0]);',
+        '\t\t\tg_sensorAppCtx.linkDown = 1;\n\t\t\tapp_rememberChannel(g_bdbCtx.channel);\n'
+        '\t\t\tapp_rejoinSchedule(rejoinBackoffTbl[0]);', name)
     # This upstream entry point requests recovery before BDB has necessarily
     # delivered PARENT_LOST. Keep it eligible for the linkDown-guarded callback.
     edits[name] = replace_once(edits[name],
@@ -142,12 +152,13 @@ def apply(source: Path, variant: str, *, dry_run: bool = False, check_commit: bo
         'tx_power_old_dbm': 2.61, 'tx_power_new_dbm_nominal': spec.tx_dbm,
         'tx_supply_mode': 'VANT', 'tx_power_index': spec.tx_index,
         'receive_gain': 'unchanged (maximum normal RX gain)',
-        'scan_attempts': 3, 'rejoin_delays_s': [2, 3, 5, 10, 20, 40, 80, 300, 900, 1800],
+        'scan_attempts': SCAN_ATTEMPTS, 'rejoin_delays_s': [2, 3, 5, 10, 20, 40, 80, 300, 900, 1800],
         'sdk_deferral_delays_s': [1, 1, 1, 5, 15, 60, 300],
         'retry_timer_allocation': 'retry on normal app passes after an allocation failure',
         'motion_rejoin_min_interval_s': 300,
         'motion_policy': 'accelerate one retry after 300 s since any accepted request; preserve progression; coalesce while busy',
-        'channel_policy': 'known, known, full, full; both alternating security modes cover both masks',
+        'channel_policy': 'known, known, full, full; both alternating security modes cover both masks; '
+                          'restored NV channel is remembered when the startup rejoin fails',
         'led_policy': 'periodic unjoined blink removed; retain motion and commissioning feedback',
         'diagnostics': 'printf disabled in the production candidate; no runtime counters claimed',
         'output_blobs': {name: git_blob_sha(data) for name, data in changed.items()},
