@@ -34,7 +34,7 @@ def test_pm_does_not_run_nonpm_gate():
 
 def test_flash_flow_inserts_gate_between_last_check_and_snapshot():
     source = inspect.getsource(bseed_ota_campaign.main)
-    block = source[source.index("    if args.mode == 'flash':"):]
+    block = source[source.rindex("    if args.mode == 'flash':"):]
     check = block.index('checked = auto_relay_off_then_check(profile)')
     link = block.index('link_status = verify_nonpm_link_after_final_check(profile)')
     proof = block.index('confirmed, relay_record = load_confirmation(profile')
