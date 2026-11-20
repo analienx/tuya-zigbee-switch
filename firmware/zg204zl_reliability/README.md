@@ -1,23 +1,31 @@
-# ZG-204ZL-3.0 / TLSR8258 VANT transmit power comparison
+# ZG-204ZL-3.0 / TLSR8258 v0148 coin-cell candidate
 
-Development images for a one-sensor comparison. GitHub-hosted Actions verify the builds and image integrity. Battery-only boot, pairing and RF performance require hardware testing.
+Development image for one sensor. GitHub-hosted Actions verify the build and image integrity. Battery-only boot, pairing and RF performance require hardware testing.
 
 ## Firmware policy
 
-Both images use the radio's internal VANT supply. Flash **v0146 (+2.61 dBm)** first to isolate the radio change from v0145. If battery-only operation is confirmed, test **v0147 (+3.01 dBm)** on the same sensor and CR2450. Except for version identity, only the TX index differs between the images at source level. Both use the v0145 recovery schedule and retain pvvx PIR, illuminance, battery reporting, configurable `pir_timeout`, local lux gating, direct Zigbee On/Off binding and standard ZigbeeTLc OTA.
+**v0148** follows v0146 and v0147 (`e0d558b0`). Both of those builds stopped working on a CR2450. Neither differed from upstream in transmit power, so v0148 targets the shared receive load instead:
+
+- `ZDO_NWK_SCAN_ATTEMPTS` returns to the upstream value of **1**. With 3 attempts every discovery repeated three times. A full-channel request then kept the receiver on for about 6.8 s at roughly 8 mA, above the CR2450's rated continuous drain.
+- A cold boot whose startup rejoin fails now remembers the channel restored from NVM (`g_bdbCtx.channel`). Before this, `rj_chan` stayed unknown after a reboot, so every request scanned all 16 channels.
+
+The suspected failure loop is: the loaded cell voltage sags, `battery_detect()` reads below 2000 mV and enters a 180-second deep sleep, the sensor reboots without a known channel, and the full-channel burst starts again. This is inferred from source, not measured. Confirm it by scoping +VBAT during a v0148 cold boot.
+
+Transmit power is the upstream nominal +2.61 dBm with the internal VANT supply. The v0145 recovery schedule, motion budget, button recovery and LED policy are unchanged. pvvx PIR, illuminance, battery reporting, configurable `pir_timeout`, local lux gating, direct Zigbee On/Off binding and standard ZigbeeTLc OTA are retained.
 
 The only upstream is [pvvx/ZigbeeTLc at c249d8a7](https://github.com/pvvx/ZigbeeTLc/tree/c249d8a7caddb5012d06aba580d4a53d1957f9c1). Board 50 is ZG-204ZL-3.0 with TLSR8258F512ET32 and a CR2450. The overlay verifies all seven original source blob IDs before writing anything and refuses other boards at compile time.
 
-| Setting | Upstream v0.1.4.0 | v0146 / v0147 |
+| Setting | Upstream v0.1.4.0 | v0148 |
 |---|---|---|
 | Manufacturer / image type | `0x1141 / 0x0232` | Preserved |
-| File version | `0x01403001` | `0x01463001` / `0x01473001` |
-| TX setting | Nominal +2.61 dBm, VANT | Nominal +2.61 / +3.01 dBm, VANT |
+| File version | `0x01403001` | `0x01483001` |
+| TX setting | Nominal +2.61 dBm, VANT | Preserved |
 | Normal RX gain | Maximum | Preserved |
 | Delays after accepted attempts | 30, 60, 120, 300, 600, 1200, 1800 s | **2, 3, 5, 10, 20, 40, 80, 300, 900, 1800 s**, then 1800 s |
 | Channel masks | Known except every fourth request | **Known, known, full, full**, repeated |
 | Security | Alternates | Alternates; both modes now cover both masks |
-| SDK discovery scan attempts | 1 | 3 (not a claim that every secure rejoin scans three times) |
+| SDK discovery scan attempts | 1 | Preserved (v0142–v0147 used 3) |
+| Channel after failed startup rejoin | Unknown, so every request is full-channel | Restored NV channel |
 | Motion recovery | None | Bring the next retry forward to 100 ms once eligible |
 | Motion budget | N/A | **Five minutes since any accepted automatic or motion request** |
 | LED while unjoined | 50 ms flash about every 10 seconds while the stack is idle | Periodic flash removed |
@@ -42,7 +50,7 @@ Characterize the actual CR2450 and board together. Continuous-drain ratings and 
 
 ### Outage model and charge sensitivity
 
-Hosted CI compiles the actual injected scheduler, plus the unchanged upstream scheduler. Its eight-hour model assumes a known channel, a full mask of channels 11..26, two seconds of SDK busy time per accepted request, no successful recovery and either no motion or one rising edge per minute. It records accepted requests and secure/insecure full-channel scans in `zg204zl-battery-model.json`. This is not an RF, association or measured-current model.
+Hosted CI compiles the actual injected scheduler, plus the unchanged upstream scheduler. Its eight-hour model assumes a known channel, a full mask of channels 11..26, two seconds of SDK busy time per accepted request, no successful recovery and either no motion or one rising edge per minute. It records accepted requests and secure/insecure full-channel scans in `zg204zl-battery-model.json`. It counts requests, not how long each scan keeps the receiver on, so it did not show the 3× scan-attempt cost in v0142–v0147. This is not an RF, association or measured-current model.
 
 The quiet candidate is expected to issue **25 requests** versus upstream's **21**. The previous reviewed v0.1.4.1 model issued **54 quiet / 483 with minute-by-minute motion**, documented in [that hosted run](https://github.com/analienx/tuya-zigbee-switch/actions/runs/44632296442). The new five-minute shared floor bounds the moving scenario to at most 110 requests in the tested eight-hour case. The artifact contains its exact counts and charge calculations.
 
@@ -56,16 +64,16 @@ Removing the unjoined blink saves about **0.048 mAh of LED charge over eight hou
 
 The workflow [zg204zl-reliability-build.yml](../../.github/workflows/zg204zl-reliability-build.yml) pins the overlay to the exact PR head and the external source to `c249d8a7caddb5012d06aba580d4a53d1957f9c1`. It builds each variant in an independent job and verifies its embedded version.
 
-The compiled harness covers delays and masks, both full-channel security modes, persistent SDK refusal, resuming after first timer allocation failure, success/factory-new cleanup, cooldown allocation failure, shared automatic/motion budget, unknown channel, button recovery, long sleep beyond the raw-clock wrap and the long-running attempt-counter wrap. It runs the section extracted from the patched source. CI stops if the overlay script returns an error. Image tests reject independent CRC, identity, payload, size and truncation corruption.
+The compiled harness covers delays and masks, both full-channel security modes, persistent SDK refusal, resuming after first timer allocation failure, success/factory-new cleanup, cooldown allocation failure, shared automatic/motion budget, unknown channel, the restored channel after a failed cold-boot rejoin, button recovery, long sleep beyond the raw-clock wrap and the long-running attempt-counter wrap. It runs the section extracted from the patched source. CI stops if the overlay script returns an error. Image tests reject independent CRC, identity, payload, size and truncation corruption.
 
 The target build runs the pinned TC32 toolchain and SDK. Native CRC, startup marker, length, version and OTA payload equality must pass, and native size must remain within the existing **0x20000** application erase footprint. Artifacts include:
 
-- `ZG204ZL_v0146.bin` and `ZG204ZL_v0147.bin` for SWire.
-- `1141-0232-01463001-ZG204ZL.zigbee` and `1141-0232-01473001-ZG204ZL.zigbee` for Zigbee OTA on already converted sensors.
+- `ZG204ZL_v0148.bin` for SWire.
+- `1141-0232-01483001-ZG204ZL.zigbee` for Zigbee OTA on already converted sensors.
 - `manifest.json`: candidate source SHA, upstream pin, sizes and SHA-256 hashes.
 - `source-overlay.json`, `sdk-toolchain-blobs.txt`, `zg204zl-battery-model.json`: source configuration, pinned dependencies and model evidence.
 
-v0.1.4.5 supersedes v0.1.4.4 (`bf09bbc9`) with the retry fixes above. Keep the older artifacts for evidence.
+v0148 supersedes v0146/v0147 (`e0d558b0`), which superseded v0.1.4.5 (`2dab3697`). Keep the older artifacts for evidence. The bench launcher's pinned hashes still name v0146/v0147, so add the v0148 hashes there after this hosted build succeeds.
 
 ## Physical canary
 

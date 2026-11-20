@@ -1,4 +1,4 @@
-name: ZG-204ZL VANT comparison (hosted build)
+name: ZG-204ZL v0148 coin-cell build (hosted)
 
 on:
   pull_request:
@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [v0146, v0147]
+        variant: [v0148]
     env:
       EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
       VARIANT: ${{ matrix.variant }}

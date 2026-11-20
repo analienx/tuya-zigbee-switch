@@ -284,6 +284,26 @@ int main(int argc, char **argv) {
         advance(2100);
         assert(requests == 2 && full_scans == 2);
         assert(secure_full_scans == 1 && insecure_full_scans == 1);
+    } else if (!strcmp(scenario, "cold_boot_restored_channel")) {
+        /* bdbInitCb(FAILURE, joined) after a cold boot: the MAC channel has
+         * not been saved, but BDB restored the NV operating channel. */
+        g_zbMacPib.phyChannelCur = 0;
+        app_rememberChannel(0);
+        app_rememberChannel(27);
+        assert(!rj_chan);
+        app_rememberChannel(15);
+        g_sensorAppCtx.linkDown = true;
+        app_rejoinSchedule(rejoinBackoffTbl[0]);
+        advance(2000);
+        assert(requests == 1 && last_mask == 1UL << 15 && !full_scans);
+        advance(2000);
+        assert(requests == 2 && last_mask == 1UL << 15 && !full_scans);
+        advance(3000);
+        assert(requests == 3 && full_scans == 1);
+        advance(5000);
+        assert(requests == 4 && full_scans == 2);
+        advance(10000);
+        assert(requests == 5 && last_mask == 1UL << 15 && full_scans == 2);
     } else if (!strcmp(scenario, "counter_wrap")) {
         g_sensorAppCtx.linkDown = true;
         rj_chan = 11;
