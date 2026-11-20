@@ -368,6 +368,23 @@ def auto_relay_off_then_check(profile):
     return status
 
 
+def verify_nonpm_link_after_final_check(profile, run=subprocess.call):
+    """A fresh OTA check invalidates the earlier pre-check link gate.
+
+    Re-run the full spaced, target-correlated link gate *after* the last check
+    and before OTA admission. Failure is terminal and sends no OTA bytes.
+    """
+    if profile.get('non_pm') is not True:
+        return 0
+    command = [sys.executable, '-u',
+               str(ROOT / 'helper_scripts/bseed_nonpm_link_gate.py'),
+               '--profile', profile['_profile_path']]
+    status = run(command)
+    if status:
+        print('POST_CHECK_LINK_GATE_FAILED_NO_FLASH', status, flush=True)
+    return status
+
+
 def load_confirmation(profile, human):
     """(confirmed, relay_off_record): the human attestation, or this flash's fresh verified-OFF record."""
     if human:
@@ -835,6 +852,8 @@ def main():
             provision_cmd(profile, args.confirm_ieee, work / 'pm_prevalidated.json')
         checked = auto_relay_off_then_check(profile)
         if checked: raise SystemExit(checked)
+        link_status = verify_nonpm_link_after_final_check(profile)
+        if link_status: raise SystemExit(link_status)
         confirmed, relay_record = load_confirmation(profile, args.confirm_load_unplugged)
         if profile.get('non_pm') is True:
             verify_recovery(profile, confirm_unloaded=confirmed)
