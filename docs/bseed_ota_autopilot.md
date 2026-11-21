@@ -53,6 +53,13 @@ PM load proof and the automatic relay-OFF step stand on their own (owner rule,
 2026-11-21). A relay that answers in the **wrong** state still refuses the
 update.
 
+Pass `--site <private site.json>` (also to `run-many`) so the autopilot can
+re-publish an image that is no longer served. It does that before any attempt
+whose image URL returns an error or a different hash, uploading the profile's
+own hash-checked image and index. Without `--site` it stops with
+`image_not_served`. Progress is read from `device_state` and also from
+Zigbee2MQTT's own `OTA update of '0x…' at N%` log lines.
+
 ## What it does
 
 The autopilot repeats until the socket is installed or a stop rule applies:

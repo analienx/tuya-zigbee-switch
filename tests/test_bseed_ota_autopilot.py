@@ -84,6 +84,8 @@ class Fake:
         monkeypatch.setattr(sup, 'run_logged', self.run_logged)
         monkeypatch.setattr(sup, 'reconcile_until_ready', self.reconcile)
         monkeypatch.setattr(ap.time, 'sleep', lambda _s: None)
+        self.served = True
+        monkeypatch.setattr(ap, 'served_image_ok', lambda _p: self.served)
 
     def set_phase(self, phase):
         (self.work / 'ACTIVE_LOCK.json').write_text(json.dumps({'phase': phase}))
@@ -150,6 +152,51 @@ def test_a_dropped_preflight_is_retried_before_flashing(tmp_path, monkeypatch):
     fake.preflight_failures = 1
     assert ap.Autopilot(Path(cfg['workdir']) / 'p.json', IEEE).run()['state'] == 'installed'
     assert fake.calls[:3] == ['preflight', 'preflight', 'check']
+
+
+def test_progress_logged_only_by_zigbee2mqtt_counts(tmp_path):
+    log = tmp_path / 'ota_bseed-ota-1.jsonl'
+    log.write_text('\n'.join(json.dumps(r) for r in [
+        {'event': 'z2m_log', 'value': {'message': "zh:controller:ota: OTA update of '%s' at 39.21%%, 52 seconds" % IEEE}},
+        {'event': 'z2m_log', 'value': {'message': "zh:controller:ota: OTA update of '%s' at 39.53%%, 9 seconds" % IEEE}},
+        {'event': 'z2m_log', 'value': {'message': "zh:controller:ota: OTA update of '0xa4c138da1333dc70' at 46.2%, x"}}]))
+    assert ap.log_progress(log, IEEE.upper().replace('0X', '0x')) == 39.53
+    assert ap.log_progress(tmp_path / 'missing.jsonl', IEEE) == 0.0
+
+
+def test_a_missing_served_image_is_republished_or_reported(tmp_path, monkeypatch):
+    cfg = profile(tmp_path)
+    fake = Fake(tmp_path, monkeypatch, cfg, [('postflash_candidate', 100.0)])
+    fake.served = False
+    result = ap.Autopilot(Path(cfg['workdir']) / 'p.json', IEEE).run()
+    assert result['state'] == 'image_not_served' and 'flash' not in fake.calls
+    published = []
+
+    def republish(_profile, site):
+        published.append(site)
+        fake.served = True
+    monkeypatch.setattr(ap, 'republish', republish)
+    site = {'publish': {'remote_dir': '/config/www/x', 'ssh_alias': 'ha'}}
+    assert ap.Autopilot(Path(cfg['workdir']) / 'p.json', IEEE, site=site).run()['state'] == 'installed'
+    assert published == [site]
+
+
+def test_republish_refuses_a_local_image_that_differs_and_uploads_the_right_folder(tmp_path):
+    image = tmp_path / 'SocketX-a-to-b.ota'
+    image.write_bytes(b'image')
+    index = tmp_path / 'index.json'
+    index.write_text('[]')
+    import hashlib
+    p = {'image': str(image), 'index_output': str(index), 'sha256': hashlib.sha256(b'image').hexdigest(),
+         'url': 'http://ha.invalid/local/bseed-canary/SocketX-a-to-b/firmware.ota?v=1'}
+    site = {'publish': {'remote_dir': '/config/www/bseed-canary', 'ssh_alias': 'ha'}}
+    calls = []
+    ap.republish(p, site, call=lambda cmd, stdin=None: calls.append(cmd) or 0)
+    assert calls[0][-1] == 'mkdir -p /config/www/bseed-canary/SocketX-a-to-b'
+    assert calls[1][-1] == 'ha:/config/www/bseed-canary/SocketX-a-to-b/firmware.ota'
+    assert calls[2][-1] == 'ha:/config/www/bseed-canary/SocketX-a-to-b/index.json'
+    with pytest.raises(RuntimeError, match='differs'):
+        ap.republish(dict(p, sha256='0' * 64), site, call=lambda *a, **k: 0)
 
 
 def group(tmp_path, n, slots=5, drop=None):

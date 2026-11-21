@@ -39,11 +39,15 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 from pathlib import Path
+import re
+import subprocess
 import sys
 import time
 from typing import Any, Callable
+import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPERS = ROOT / "helper_scripts"
@@ -104,6 +108,60 @@ def progress_gate(history: list[dict[str, Any]], max_stagnant: int) -> dict[str,
             "allow_retry": stagnant <= max_stagnant}
 
 
+Z2M_PROGRESS = re.compile(r"OTA update of '(0x[0-9a-f]{16})' at ([0-9.]+)%")
+
+
+def log_progress(path: Path, ieee: str) -> float:
+    """Highest percent Zigbee2MQTT logged for this socket (also covers attempts
+    whose device_state never carried an update block)."""
+    best = 0.0
+    try:
+        text = path.read_text(encoding="utf8", errors="replace")
+    except OSError:
+        return best
+    for match in Z2M_PROGRESS.finditer(text):
+        if match.group(1) == ieee.lower():
+            best = max(best, float(match.group(2)))
+    return best
+
+
+def progress_history(work: Path, profile: dict[str, Any]) -> list[dict[str, Any]]:
+    """Per real attempt (OTA request sent): max of device_state and log progress."""
+    history = sup.ota_progress_history(work, profile)
+    for attempt in history:
+        if attempt.get("log"):
+            attempt["max_progress"] = max(float(attempt["max_progress"] or 0.0),
+                                          log_progress(Path(attempt["log"]), profile["ieee"]))
+    return history
+
+
+def served_image_ok(profile: dict[str, Any], opener=urllib.request.urlopen) -> bool:
+    try:
+        with opener(profile["url"], timeout=30) as reply:
+            return hashlib.sha256(reply.read()).hexdigest() == profile["sha256"]
+    except OSError:
+        return False
+
+
+def republish(profile: dict[str, Any], site: dict[str, Any],
+              call: Callable[..., int] = subprocess.call) -> None:
+    """Re-upload the profile's own image and index (hash-checked) when the served copy is gone."""
+    image = Path(profile["image"])
+    if hashlib.sha256(image.read_bytes()).hexdigest() != profile["sha256"]:
+        raise RuntimeError("local image differs from the profile sha256; not republishing")
+    index = Path(profile["index_output"])
+    if not index.is_file():
+        raise RuntimeError("private index missing: " + str(index))
+    folder = profile["url"].split("?")[0].rstrip("/").split("/")[-2]
+    remote = site["publish"]["remote_dir"].rstrip("/") + "/" + folder
+    alias = site["publish"]["ssh_alias"]
+    for cmd in (["ssh", "-o", "BatchMode=yes", alias, "mkdir -p " + remote],
+                ["scp", "-q", "-o", "BatchMode=yes", str(image), alias + ":" + remote + "/firmware.ota"],
+                ["scp", "-q", "-o", "BatchMode=yes", str(index), alias + ":" + remote + "/index.json"]):
+        if call(cmd, stdin=subprocess.DEVNULL):
+            raise RuntimeError("republish step failed: " + " ".join(cmd[:2]))
+
+
 def attempt_summary(path: Path | None) -> dict[str, Any]:
     """First/last progress, duration and the Zigbee2MQTT error of one attempt log."""
     out: dict[str, Any] = {"log": str(path) if path else None}
@@ -150,8 +208,10 @@ class Autopilot:
     def __init__(self, profile_path: Path, confirm_ieee: str, *, confirm_unloaded: bool = False,
                  max_attempts: int = 12, max_stagnant: int = 2, step_retries: int = 2,
                  step_retry_seconds: float = 30, postflash_retries: int = 2,
-                 reconcile_wait_seconds: int = 900, reconcile_retry_seconds: int = 20):
+                 reconcile_wait_seconds: int = 900, reconcile_retry_seconds: int = 20,
+                 site: dict[str, Any] | None = None):
         self.profile_path = profile_path
+        self.site = site
         self.confirm_ieee = confirm_ieee
         self.confirm_unloaded = confirm_unloaded
         self.max_attempts, self.max_stagnant = max_attempts, max_stagnant
@@ -175,7 +235,7 @@ class Autopilot:
         return (sup.read_json(self.work / "ACTIVE_LOCK.json") or {}).get("phase")
 
     def persist(self, state: str, **extra: Any) -> dict[str, Any]:
-        history = sup.ota_progress_history(self.work, self.profile)
+        history = progress_history(self.work, self.profile)
         record = {"schema": 1, "state": state, "updated_at": sup.now(),
                   "device": self.profile["device"], "ieee": self.profile["ieee"],
                   "profile": str(self.profile_path), "image_sha256": self.profile["sha256"],
@@ -212,7 +272,7 @@ class Autopilot:
                 return self.persist("blocked_active_transport",
                                     reason="another process owns a running transfer; prove it stopped first")
             if phase in sup.RECONCILABLE_PHASES:
-                gate = progress_gate(sup.ota_progress_history(self.work, self.profile), self.max_stagnant)
+                gate = progress_gate(progress_history(self.work, self.profile), self.max_stagnant)
                 if not gate["allow_retry"]:
                     return self.persist("progress_stalled", reason="no new best progress in %d attempts"
                                         % gate["stagnant_attempts"])
@@ -231,6 +291,18 @@ class Autopilot:
             if len(self.attempts) >= self.max_attempts:
                 return self.persist("attempt_budget_exhausted")
 
+            if not served_image_ok(self.profile):
+                # Every preflight would refuse a 404 or a changed image.
+                if not self.site:
+                    return self.persist("image_not_served", url=self.profile["url"],
+                                        reason="re-publish it, or pass --site to let the autopilot do it")
+                try:
+                    republish(self.profile, self.site)
+                except (RuntimeError, OSError) as error:
+                    return self.persist("republish_failed", reason=str(error))
+                if not served_image_ok(self.profile):
+                    return self.persist("image_not_served", url=self.profile["url"])
+                self.persist("republished", url=self.profile["url"])
             try:
                 sup.restore_pm_source_telemetry(self.profile, self.work)
             except (RuntimeError, ValueError, OSError) as error:
@@ -321,12 +393,14 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--step-retries", type=int, default=2)
     run.add_argument("--step-retry-seconds", type=float, default=30)
     run.add_argument("--postflash-retries", type=int, default=2)
+    run.add_argument("--site", help="private site.json: lets the autopilot re-publish a missing image")
     many = sub.add_parser("run-many", help="up to %d sockets in parallel, one autopilot each" % MAX_PARALLEL)
     many.add_argument("--profile", action="append", required=True)
     many.add_argument("--confirm-ieee", action="append", required=True)
     many.add_argument("--stagger-seconds", type=float, default=20)
     many.add_argument("--max-attempts", type=int, default=12)
     many.add_argument("--max-stagnant", type=int, default=2)
+    many.add_argument("--site", help="private site.json, passed to every autopilot")
     show = sub.add_parser("status")
     show.add_argument("--profile", required=True)
     args = parser.parse_args(argv)
@@ -334,7 +408,8 @@ def main(argv: list[str] | None = None) -> int:
         paths = [Path(p).expanduser().resolve() for p in args.profile]
         results = run_many(paths, args.confirm_ieee, stagger_seconds=args.stagger_seconds,
                            extra=["--max-attempts", str(args.max_attempts),
-                                  "--max-stagnant", str(args.max_stagnant)])
+                                  "--max-stagnant", str(args.max_stagnant)] +
+                                 (["--site", args.site] if args.site else []))
         print(json.dumps(results, indent=2))
         return 0 if all(r["state"] == "installed" for r in results) else 2
     profile_path = Path(args.profile).expanduser().resolve()
@@ -347,7 +422,8 @@ def main(argv: list[str] | None = None) -> int:
     pilot = Autopilot(profile_path, args.confirm_ieee, confirm_unloaded=args.confirm_load_unplugged,
                       max_attempts=args.max_attempts, max_stagnant=args.max_stagnant,
                       step_retries=args.step_retries, step_retry_seconds=args.step_retry_seconds,
-                      postflash_retries=args.postflash_retries)
+                      postflash_retries=args.postflash_retries,
+                      site=json.loads(Path(args.site).read_text(encoding="utf8")) if args.site else None)
     # Same per-workdir ownership as the resume supervisor: one owner at a time.
     result = sup.exclusive_supervisor(lambda _path: pilot.run())(profile_path)
     print(json.dumps(result, indent=2, default=str))
