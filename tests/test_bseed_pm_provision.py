@@ -1,4 +1,5 @@
 """Offline PM provisioning unit tests."""
+import json
 import sys
 from pathlib import Path
 import pytest
@@ -72,3 +73,36 @@ def test_idle_observation_covers_full_current_reporting_window():
     assert observation_policy(420, True) == (420, 310)
     with pytest.raises(ValueError, match='bounded'):
         observation_policy(500, True)
+
+
+def test_idle_check_reads_the_meter_and_ignores_older_messages(monkeypatch):
+    import bseed_pm_provision as prov
+
+    class Published:
+        def wait_for_publish(self, _timeout):
+            pass
+
+        def is_published(self):
+            return True
+
+    bridge = prov.Bridge({'base_topic': 'z2m'}, 'broker.invalid', 'SocketX')
+    sent = []
+    fresh = {'voltage': 236.0, 'current': 0, 'power': 0, 'energy': 1.2}
+
+    def publish(topic, payload, qos):
+        sent.append((topic, json.loads(payload)))
+        bridge.states.append((prov.time.monotonic() + 0.001, dict(fresh)))  # the device's reply
+        return Published()
+
+    monkeypatch.setattr(bridge.client, 'publish', publish)
+    monkeypatch.setattr(prov.time, 'sleep', lambda _s: None)
+    prov.active_idle_reads(bridge, gap=0)
+    assert sent == [('z2m/SocketX/get', {'voltage': '', 'current': '', 'power': '', 'energy': ''})] * 2
+    assert len(bridge.states) == 2
+
+    # A message from before the read (e.g. cached state) never satisfies it.
+    stale = prov.Bridge({'base_topic': 'z2m'}, 'broker.invalid', 'SocketX')
+    stale.states.append((prov.time.monotonic(), dict(fresh)))
+    monkeypatch.setattr(stale.client, 'publish', lambda *a, **k: Published())
+    with pytest.raises(TimeoutError, match='No fresh PM read reply'):
+        stale.read_now(timeout=0.2)
