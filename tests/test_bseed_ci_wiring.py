@@ -24,6 +24,7 @@ NATIVE_BUILD_WORKFLOWS = [
     "bseed-mains-client-experimental.yml",
     "bseed-nonpm-client-canary.yml",
     "bseed-ts0726-currentlevel-canary.yml",
+    "analienx-release.yml",
 ]
 
 
