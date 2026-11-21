@@ -134,7 +134,7 @@ def test_runner_cannot_bypass_wrapper_flash_gate(tmp_path):
         image=str(image), workdir=cfg['workdir'], device=cfg['device'],
         expect_relay='OFF', manufacturer_code=4417, image_type=65026,
         file_version=0x11023013, campaign_profile=str(src),
-        preflash_build='1.1.2-bseedcli4', hardware_evidence='',
+        preflash_build='1.1.2-bseedcli4', hardware_evidence='', waive_preflash_pm=False,
         confirm_load_unplugged=True,
         relay_get_key='state', preflash_relay_physical_mode='follow_state')
     with patch.object(runner, 'arguments', return_value=args), \

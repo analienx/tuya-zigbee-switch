@@ -126,6 +126,10 @@ def load_profile(path):
     stock_client_conversion(data)
     import bseed_relay_auto_off
     bseed_relay_auto_off.validate(data)
+    import bseed_relay_state_policy
+    bseed_relay_state_policy.validate(data)
+    from bseed_pm_meter_waiver import validate as validate_meter_waiver
+    validate_meter_waiver(data)
     from bseed_ota_block_policy import check_block_bytes, default_block_bytes
     if data.get('block_bytes') is None:
         data['block_bytes'] = default_block_bytes(data)
@@ -350,6 +354,8 @@ def network_lock_path(profile, *, required=False):
 
 def accept_candidate(profile):
     """postflash_candidate, then return an auto-OFF relay to its pre-flash state."""
+    import bseed_relay_state_policy
+    bseed_relay_state_policy.verify_after_flash(profile)
     record_postflash_candidate(profile)
     import bseed_relay_auto_off
     if bseed_relay_auto_off.enabled(profile):
@@ -365,6 +371,23 @@ def auto_relay_off_then_check(profile):
     status = subprocess.call(runner_args(profile, 'check'))
     if status:
         print('AUTO_RELAY_OFF_CHECK_FAILED_NO_FLASH', status, flush=True)
+    return status
+
+
+def verify_nonpm_link_after_final_check(profile, run=subprocess.call):
+    """A fresh OTA check invalidates the earlier pre-check link gate.
+
+    Re-run the full spaced, target-correlated link gate *after* the last check
+    and before OTA admission. Failure is terminal and sends no OTA bytes.
+    """
+    if profile.get('non_pm') is not True:
+        return 0
+    command = [sys.executable, '-u',
+               str(ROOT / 'helper_scripts/bseed_nonpm_link_gate.py'),
+               '--profile', profile['_profile_path']]
+    status = run(command)
+    if status:
+        print('POST_CHECK_LINK_GATE_FAILED_NO_FLASH', status, flush=True)
     return status
 
 
@@ -426,6 +449,10 @@ def runner_args(profile, mode, *, confirm_unloaded=False, relay_off_record=None)
         cmd.extend(['--native-image', str(profile['native_image'])])
     if profile.get('relay_get_key'):
         cmd.extend(['--relay-get-key', profile['relay_get_key']])
+    if profile.get('max_reported_watts') is not None:
+        cmd.extend(['--max-reported-watts', str(profile['max_reported_watts'])])
+    if profile.get('operator_waive_preflash_pm') is True:
+        cmd.append('--waive-preflash-pm')
     if profile.get('pm_preflash_load_proof') == 'physically_unloaded':
         cmd.append('--pm-preflash-physical-unloaded')
         if mode == 'flash' and confirm_unloaded:
@@ -598,6 +625,8 @@ def main():
         raise SystemExit('--confirm-load-unplugged is only valid for non-PM or pinned PM physical-proof flash')
     import bseed_relay_auto_off
     auto_off = bseed_relay_auto_off.enabled(profile)
+    if args.mode in ('flash', 'transition') and auto_off:
+        raise SystemExit('Current operator policy forbids turning a relay OFF for OTA; migrate to a verified preserve-state profile')
     if (args.mode in ('flash', 'transition') and physical_pm and not args.confirm_load_unplugged
             and not auto_off):
         raise SystemExit('PM physical-proof flash requires fresh --confirm-load-unplugged attestation or auto_relay_off')
@@ -835,6 +864,8 @@ def main():
             provision_cmd(profile, args.confirm_ieee, work / 'pm_prevalidated.json')
         checked = auto_relay_off_then_check(profile)
         if checked: raise SystemExit(checked)
+        link_status = verify_nonpm_link_after_final_check(profile)
+        if link_status: raise SystemExit(link_status)
         confirmed, relay_record = load_confirmation(profile, args.confirm_load_unplugged)
         if profile.get('non_pm') is True:
             verify_recovery(profile, confirm_unloaded=confirmed)

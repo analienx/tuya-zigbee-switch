@@ -149,7 +149,7 @@ def test_live_legacy_single_owner_blocks_dual_and_dual_blocks_single(tmp_path):
 
 @pytest.mark.parametrize("profile_changes", [
     {"parallel_ota_max": True},
-    {"parallel_ota_max": 3},
+    {"parallel_ota_max": 4},
     {"parallel_ota_max": "2"},
     {"concurrent_ota_ieees": []},
     {"concurrent_ota_ieees": [B, C]},
