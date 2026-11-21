@@ -14,7 +14,8 @@ IEEE = '0xa4c1380011223344'
 
 def profile(tmp_path, **extra):
     p = {'device': 'SocketX', 'ieee': IEEE, 'sha256': 'a' * 64, 'workdir': str(tmp_path / 'work'),
-         'preflash_role': 'EndDevice', 'postflash_role': 'EndDevice', 'request_timeout_ms': 300000}
+         'preflash_role': 'EndDevice', 'postflash_role': 'EndDevice', 'request_timeout_ms': 300000,
+         'url': 'http://ha.invalid/local/bseed-canary/SocketX/firmware.ota?v=1'}
     p.update(extra)
     return p
 
