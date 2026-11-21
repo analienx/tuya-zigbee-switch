@@ -1,0 +1,94 @@
+name: ZG-204ZL VANT comparison (hosted build)
+
+on:
+  pull_request:
+    paths:
+      - "firmware/zg204zl_reliability/**"
+      - ".github/workflows/zg204zl-reliability-build.yml"
+  push:
+    branches:
+      - codex/zg204zl-rejoin-rf-v0141-20261119
+    paths:
+      - "firmware/zg204zl_reliability/**"
+      - ".github/workflows/zg204zl-reliability-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [v0146, v0147]
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      VARIANT: ${{ matrix.variant }}
+    steps:
+      - name: Checkout this overlay and hosted tests
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: control
+      - name: Checkout immutable upstream firmware
+        uses: actions/checkout@v4
+        with:
+          repository: pvvx/ZigbeeTLc
+          ref: c249d8a7caddb5012d06aba580d4a53d1957f9c1
+          persist-credentials: false
+          path: upstream
+      - name: Python interpreter
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify exact candidate source
+        run: test "$(git -C control rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Verify exact upstream provenance and source-level regression tests
+        env:
+          ZG204ZL_SOURCE: ${{ github.workspace }}/upstream
+          ZG204ZL_BATTERY_MODEL: ${{ runner.temp }}/zg204zl-battery-model.json
+        run: |
+          test "$(git -C upstream rev-parse HEAD)" = "c249d8a7caddb5012d06aba580d4a53d1957f9c1"
+          python -m unittest discover -s control/firmware/zg204zl_reliability -p 'test_*.py' -v
+      - name: Apply board-specific, fail-closed source changes
+        shell: bash
+        run: |
+          python control/firmware/zg204zl_reliability/apply.py --source upstream --variant "$VARIANT" |
+            tee "${RUNNER_TEMP}/zg204zl-overlay.json"
+      - name: Install Telink TC32 SDK/toolchain prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends make unzip bzip2 libc6-i386 lib32z1
+          make -C upstream install
+      - name: Compile the ZG-204ZL sensor firmware
+        run: |
+          make -C upstream clean
+          make -C upstream -j2 PROJECT_NAME=ZG204ZL \
+            POJECT_DEF="-DBOARD=BOARD_ZG204ZL" \
+            VERSION_BIN="_$VARIANT" \
+            ZNAME="Sonoff:ZG-204ZL-z"
+      - name: Verify OTA and native firmware with strict image bounds and CRC
+        run: |
+          stage="${RUNNER_TEMP}/zg204zl-${VARIANT}"
+          version=$(jq -er '.file_version | ltrimstr("0x")' "${RUNNER_TEMP}/zg204zl-overlay.json")
+          native="ZG204ZL_${VARIANT}.bin"
+          ota="1141-0232-${version}-ZG204ZL.zigbee"
+          mkdir -p "$stage"
+          cp "upstream/bin/$native" "upstream/bin/$ota" "$stage/"
+          cp "${RUNNER_TEMP}/zg204zl-overlay.json" "$stage/source-overlay.json"
+          cp "${RUNNER_TEMP}/zg204zl-battery-model.json" "$stage/"
+          python control/firmware/zg204zl_reliability/verify_image.py \
+            --source-commit "$EXPECTED_HEAD" \
+            --variant "$VARIANT" --bin "$stage/$native" --ota "$stage/$ota" \
+            --manifest "$stage/manifest.json"
+          git -C upstream ls-tree HEAD tools/SDK_z.zip tools/linux/tc32_gcc_v2.0.tar.bz2 > "$stage/sdk-toolchain-blobs.txt"
+      - name: Upload canary candidate (hosted-built; NOT hardware approved)
+        uses: actions/upload-artifact@v4
+        with:
+          name: zg204zl-${{ matrix.variant }}-reliability-candidate-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/zg204zl-${{ matrix.variant }}/
+          retention-days: 30
+          if-no-files-found: error
