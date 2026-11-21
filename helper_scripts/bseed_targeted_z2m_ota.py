@@ -190,6 +190,10 @@ def verify_image(args):
     return image, header
 
 
+RELAY_GET_ATTEMPTS = 3
+RELAY_GET_WAIT_SECONDS = 7
+
+
 def update_payload(ieee, url, token, max_block_bytes, response_delay_ms=None, request_timeout_ms=600000):
     if not (10 <= max_block_bytes <= 100):
         raise AssertionError('OTA maximum data size must be 10..100 bytes')
@@ -539,11 +543,20 @@ def main():
         if not (state['info'].get('permit_join') is False):
             raise AssertionError('Permit join unexpectedly open')
         log('inventory_ok', {k: d.get(k) for k in ('friendly_name', 'ieee_address', 'manufacturer', 'model_id', 'type', 'software_build_id')})
+        # Read-only relay GET. Clear the freshness flag first: an earlier
+        # non-retained message must not end the wait with no relay value. A
+        # weak route can drop one GET, so re-send it (at most 3, within 20 s).
         state['relay'] = None
-        client.publish(base + '/' + args.device + '/get', json.dumps({args.relay_get_key: ''}), qos=1).wait_for_publish(5)
-        until = time.monotonic() + 14
-        while time.monotonic() < until and not fresh_relay.is_set():
-            changed.wait(0.5); changed.clear()
+        fresh_relay.clear()
+        for _ in range(RELAY_GET_ATTEMPTS):
+            client.publish(base + '/' + args.device + '/get', json.dumps({args.relay_get_key: ''}), qos=1).wait_for_publish(5)
+            until = time.monotonic() + RELAY_GET_WAIT_SECONDS
+            while time.monotonic() < until and not (fresh_relay.is_set() and
+                                                    args.relay_get_key in (state['relay'] or {})):
+                changed.wait(0.5); changed.clear()
+            if args.relay_get_key in (state['relay'] or {}):
+                break
+            log('relay_get_retry', {'key': args.relay_get_key})
         relay = state['relay'] or {}
         if not (relay.get(args.relay_get_key) == args.expect_relay):
             raise AssertionError('Relay state not verified by read-only GET')
