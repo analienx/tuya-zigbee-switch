@@ -100,7 +100,7 @@ def _active_slots(base):
     result = []
     for slot in sorted(base.parent.glob(base.stem + '.slot-*.json')):
         owner = read_lock(slot)  # Invalid/truncated JSON must block admission.
-        if owner is None or owner.get('parallel_ota_max') not in (2, 3):
+        if owner is None or owner.get('parallel_ota_max') not in (2, *MULTI_SLOTS):
             raise RuntimeError('Invalid two-slot lease record')
         if slot != dual_slot_path(base, owner.get('ieee')):
             raise RuntimeError('Two-slot lease filename/IEEE mismatch')
@@ -118,10 +118,17 @@ def _validate_dual_peers(target_ieee, peers):
 
 
 
+MULTI_SLOTS = (3, 4, 5)
+MAX_SLOTS = max(MULTI_SLOTS)
+# Four or five transfers share one coordinator: pace each one more slowly so
+# the total response rate stays at or below three 1800 ms transfers.
+MULTI_SLOT_MIN_DELAY_MS = {3: 1800, 4: 2400, 5: 2400}
+
+
 def _validate_three_peers(target_ieee, peers):
-    """Future 3-slot policy: all currently active peer IEEEs, max two."""
-    if not isinstance(peers, list) or len(peers) > 2:
-        raise ValueError('Three-slot OTA requires a 0..2 IEEE peer allowlist')
+    """3..5-slot policy: an allowlist of peers that may run beside this OTA."""
+    if not isinstance(peers, list) or len(peers) > MAX_SLOTS - 1:
+        raise ValueError('Multi-slot OTA requires a 0..%d IEEE peer allowlist' % (MAX_SLOTS - 1))
     normalized = [str(value).lower() for value in peers]
     if (len(normalized) != len(set(normalized)) or
             any(not _IEEE_RE.fullmatch(i) or i == target_ieee for i in normalized)):
@@ -133,19 +140,27 @@ def _validate_three_slot_admission(base, slots, record, *, peers,
                                    legacy_peer_work_lock=None,
                                    active_peer_work_lock=None,
                                    peer_work_locks=None):
-    """Under coordinator mutex. Verify immutable existing campaigns before 3rd admission.
+    """Under coordinator mutex. Verify every existing campaign before admission.
 
-    Does not modify or release either running campaign; their lock files and
-    transport parameters remain identical to what their runner started with.
+    Capacity is the smallest slot count any participant accepts. Every current
+    owner must be on this campaign's allowlist (a fixed profile may list more
+    peers than are running now). A running owner must be freshly updating; an
+    owner between attempts (it still holds its slot) must have its own
+    authoritative work lock. Never modifies or releases another campaign.
     """
     legacy = read_lock(base)
     owners = ([(legacy, base)] if legacy is not None else []) + [
         (slot, dual_slot_path(base, slot['ieee'])) for slot in slots
     ]
-    if len(owners) >= 3:
-        raise RuntimeError('Three OTA coordinator slots are occupied')
-    if set(peers) != {owner['ieee'] for owner, _ in owners}:
-        raise RuntimeError('Exact active three-slot peer allowlist required')
+    # A legacy (single-slot) or two-slot owner keeps the original rule: at
+    # most three transfers in total beside it.
+    limits = [owner.get('parallel_ota_max') or 1 for owner, _ in owners]
+    capacity = min([record['parallel_ota_max']] +
+                   [limit if limit in MULTI_SLOTS else 3 for limit in limits])
+    if len(owners) >= capacity:
+        raise RuntimeError('%d OTA coordinator slots are occupied' % len(owners))
+    if not {owner['ieee'] for owner, _ in owners} <= set(peers):
+        raise RuntimeError('Every active OTA must be on this campaign\'s peer allowlist')
     mappings = dict(peer_work_locks or {})
     if legacy_peer_work_lock and legacy:
         mappings[legacy['ieee']] = legacy_peer_work_lock
@@ -153,9 +168,8 @@ def _validate_three_slot_admission(base, slots, record, *, peers,
         mappings[slots[0]['ieee']] = active_peer_work_lock
     for owner, lease_path in owners:
         ieee = owner['ieee']
-        if (owner.get('network_id') != record['network_id']
-            or owner.get('phase') != 'ota_running'
-            or ieee == record['ieee']):
+        running = owner.get('phase') == 'ota_running'
+        if owner.get('network_id') != record['network_id'] or ieee == record['ieee']:
             raise RuntimeError('Three-slot peer is not an independent active OTA')
         path_text = mappings.get(ieee) or owner.get('work_lock_path')
         if not path_text:
@@ -165,9 +179,12 @@ def _validate_three_slot_admission(base, slots, record, *, peers,
             raise RuntimeError('Three-slot peer has no authoritative work lock: ' + ieee)
         work = json.loads(path.read_text(encoding='utf8'))
         if (work.get('ieee'), work.get('token'), work.get('sha256'),
-            work.get('phase'), Path(work.get('network_lock') or '').resolve()) != (
-            ieee, owner['token'], owner['image_sha256'], 'ota_running',
-            lease_path.resolve()):
+            Path(work.get('network_lock') or '').resolve()) != (
+            ieee, owner['token'], owner['image_sha256'], lease_path.resolve()):
+            raise RuntimeError('Three-slot peer work/lease identity mismatch: ' + ieee)
+        if not running:
+            continue  # between attempts: holds its slot, verified by its work lock
+        if work.get('phase') != 'ota_running':
             raise RuntimeError('Three-slot peer work/lease identity mismatch: ' + ieee)
         status_path = path.parent / 'LIVE_STATUS.json'
         live = json.loads(status_path.read_text(encoding='utf8'))
@@ -184,7 +201,6 @@ def _validate_three_slot_admission(base, slots, record, *, peers,
                 and type(progress) in (int, float) and 0 <= progress < 100):
             raise RuntimeError('Three-slot peer is not freshly updating: ' + ieee)
     record.update(
-        parallel_ota_max=3,
         allowed_peer_ieees=peers,
         admission_peer_tokens={owner['ieee']:owner['token'] for owner,_ in owners},
         active_slots_at_admission=len(owners)+1,
@@ -207,15 +223,15 @@ def require_profile_authority(profile):
         raise ValueError('Network lock authority must be independent of workdir')
     base = authority_path(root, network_id)
     slots = profile.get('parallel_ota_max', 1)
-    if type(slots) is not int or slots not in (1, 2, 3):
-        raise ValueError('parallel_ota_max must be the integer 1, 2, or 3')
+    if type(slots) is not int or slots not in (1, 2, *MULTI_SLOTS):
+        raise ValueError('parallel_ota_max must be an integer from 1 to %d' % MAX_SLOTS)
     if slots == 1:
         return base
     ieee = str(profile.get('ieee') or '').lower()
     if not _IEEE_RE.fullmatch(ieee):
         raise ValueError('Two-slot campaign must pin the device IEEE')
     (_validate_three_peers(ieee, profile.get('concurrent_ota_ieees') or [])
-     if slots == 3 else _validate_dual_peers(ieee, profile.get('concurrent_ota_ieees')))
+     if slots in MULTI_SLOTS else _validate_dual_peers(ieee, profile.get('concurrent_ota_ieees')))
     if profile.get('preflash_role') != profile.get('postflash_role'):
         raise ValueError('Two-slot pilot permits only same-role updates')
     if profile.get('force_test_transition') is True:
@@ -229,8 +245,9 @@ def require_profile_authority(profile):
     from bseed_ota_block_policy import check_block_bytes
     check_block_bytes(profile, allowed=(32, 48))
     delay = profile.get('response_delay_ms')
-    if type(delay) is not int or delay < 1800:
-        raise ValueError('Two-slot initial pilot requires >=1800ms per-device response pacing')
+    minimum = MULTI_SLOT_MIN_DELAY_MS.get(slots, 1800)
+    if type(delay) is not int or delay < minimum:
+        raise ValueError('%d-slot OTA requires >=%dms per-device response pacing' % (slots, minimum))
     return dual_slot_path(base, ieee)
 
 
@@ -332,10 +349,10 @@ def acquire(path, *, network_id, token, device, ieee, image_sha256,
     path.parent.mkdir(parents=True, exist_ok=True)
     base, slot_ieee = _lease_group(path)
     dual = slot_ieee is not None
-    triple = dual and parallel_ota_max == 3
-    if parallel_ota_max not in (None, 1, 2, 3):
+    triple = dual and parallel_ota_max in MULTI_SLOTS
+    if parallel_ota_max not in (None, 1, 2, *MULTI_SLOTS):
         raise ValueError('Invalid parallel_ota_max at lease acquisition')
-    if not dual and parallel_ota_max == 3:
+    if not dual and parallel_ota_max in MULTI_SLOTS:
         raise ValueError('Three-slot admission must use a per-IEEE slot')
     target = str(ieee).lower()
     if not _IEEE_RE.fullmatch(target):
@@ -359,7 +376,7 @@ def acquire(path, *, network_id, token, device, ieee, image_sha256,
         'updated_at': now_iso(),
     }
     if dual:
-        record.update(parallel_ota_max=3 if triple else 2, allowed_peer_ieees=peers)
+        record.update(parallel_ota_max=parallel_ota_max if triple else 2, allowed_peer_ieees=peers)
         if triple:
             if not work_lock_path or Path(work_lock_path).name != 'ACTIVE_LOCK.json':
                 raise ValueError('Three-slot owner must pin its work lock')

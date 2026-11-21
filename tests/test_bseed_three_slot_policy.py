@@ -46,8 +46,8 @@ def test_three_slots_can_run_without_legacy(tmp_path):
  pb,wb=start(tmp_path,B,[A])
  pc,wc=start(tmp_path,C,[A,B])
  assert all(read_lock(p)['phase']=='ota_running' for p in (pa,pb,pc))
- with pytest.raises(RuntimeError,match='three|Three|occupied'):
-  start(tmp_path,D,[A,B])
+ with pytest.raises(RuntimeError,match='occupied'):
+  start(tmp_path,D,[A,B,C])
 
 def test_running_legacy_and_two_slot_can_accept_third(tmp_path):
  legacy,wlegacy=start(tmp_path,A,[],maxslots=1)
@@ -69,8 +69,66 @@ def test_three_slot_refuses_unlisted_and_stale_peers(tmp_path):
  with pytest.raises(RuntimeError,match='freshly updating'):
   start(tmp_path,B,[A])
 
-def test_boolean_and_four_not_valid(tmp_path):
- bad=campaign(tmp_path,A,[],maxslots=4)
+def test_boolean_and_six_not_valid(tmp_path):
+ bad=campaign(tmp_path,A,[],maxslots=6)
  with pytest.raises(ValueError):require_profile_authority(bad)
  bad['parallel_ota_max']=True
  with pytest.raises(ValueError):require_profile_authority(bad)
+
+
+E='0xa4c1380000000005'
+F='0xa4c1380000000006'
+
+
+def start5(root,ieee,peers):
+ p=campaign(root,ieee,peers,maxslots=5)
+ p['response_delay_ms']=2400
+ path=require_profile_authority(p)
+ wk=Path(p['workdir'])/'ACTIVE_LOCK.json'
+ record=acquire(path,network_id=N,token='token-'+ieee,device=p['device'],ieee=ieee,
+                image_sha256=SHA,parallel_allowed_ieees=peers,parallel_ota_max=5,
+                work_lock_path=str(wk))
+ update(path,record['token'],'ota_running')
+ wk.parent.mkdir(parents=True,exist_ok=True)
+ wk.write_text(json.dumps(dict(ieee=ieee,token=record['token'],sha256=SHA,
+                            phase='ota_running',network_lock=str(path))))
+ (wk.parent/'LIVE_STATUS.json').write_text(json.dumps({
+   'observed_at':dt.datetime.now(dt.timezone.utc).isoformat(),
+   'ieee':ieee,'token':record['token'],'phase':'ota_running',
+   'update':{'state':'updating','progress':1.0}}))
+ return path,wk
+
+
+def test_five_slots_with_one_fixed_allowlist_per_campaign(tmp_path):
+ group=[A,B,C,D,E]
+ peers=lambda me:[x for x in group if x!=me]
+ # A fixed profile may list peers that are not running yet.
+ for ieee in group:start5(tmp_path,ieee,peers(ieee))
+ with pytest.raises(RuntimeError,match='occupied'):
+  start5(tmp_path,F,group[:4])
+ assert read_lock(dual_slot_path(authority_path(tmp_path/'authority',N),E))['parallel_ota_max']==5
+
+
+def test_a_peer_between_attempts_keeps_its_slot_and_must_be_allowed(tmp_path):
+ pa,wa=start5(tmp_path,A,[B,C])
+ update(pa,'token-'+A,'update_error')  # A failed and will resume; it still holds a slot
+ lock=json.loads(wa.read_text());lock['phase']='update_error';wa.write_text(json.dumps(lock))
+ start5(tmp_path,B,[A,C])
+ with pytest.raises(RuntimeError,match='allowlist'):
+  start5(tmp_path,C,[B])
+
+
+def test_capacity_is_the_smallest_slot_count_of_any_participant(tmp_path):
+ start(tmp_path,A,[B,C,D],maxslots=3)
+ start5(tmp_path,B,[A,C,D])
+ start5(tmp_path,C,[A,B,D])
+ with pytest.raises(RuntimeError,match='occupied'):
+  start5(tmp_path,D,[A,B,C])
+
+
+def test_four_and_five_slots_need_slower_pacing(tmp_path):
+ p=campaign(tmp_path,A,[B],maxslots=5)
+ with pytest.raises(ValueError,match='2400'):
+  require_profile_authority(p)
+ p['response_delay_ms']=2400
+ require_profile_authority(p)
