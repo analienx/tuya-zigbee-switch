@@ -74,6 +74,7 @@ stderr. Argument failures also return JSON. Human `--help` is ordinary text.
 | `bseed-ts0726` | This fork's released TS0726 3-gang (`iedhxgyi`) Router image from `index_bseed.json`, checked against its SHA-512 |
 | `bseed-ts011f-pm-r19-recovery` | Exact pinned historical PM Router r19 incident fallback only |
 | `generic-tlsr8258` | Other explicitly qualified TLSR8258 512 KiB layouts with an input SHA pin; cannot bypass the profiles above |
+| `zg-204zl` | HOBEIAN ZG-204ZL **TLSR8258** PIR/lux: wiring and read-only discovery ONLY; `prepare` and flash refuse until a separate flash-layout qualification |
 
 `boards --search TEXT` finds a board name from part of its Zigbee manufacturer
 name, as Zigbee2MQTT shows it (for example `4rbqgcuv`). Indexed profiles download
