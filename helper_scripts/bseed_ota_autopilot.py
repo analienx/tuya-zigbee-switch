@@ -254,6 +254,61 @@ class Autopilot:
             self.persist("attempt_finished", attempt=attempt["number"])
 
 
+MAX_PARALLEL = 5
+
+
+def validate_group(profiles: list[dict[str, Any]]) -> None:
+    """Every member of a parallel group must allow every other member."""
+    if not 1 <= len(profiles) <= MAX_PARALLEL:
+        raise ValueError("run-many takes 1..%d profiles" % MAX_PARALLEL)
+    ieees = [p["ieee"].lower() for p in profiles]
+    if len(set(ieees)) != len(ieees):
+        raise ValueError("run-many needs distinct sockets")
+    if len(profiles) == 1:
+        return
+    for p in profiles:
+        slots = int(p.get("parallel_ota_max", 1) or 1)
+        if slots < len(profiles):
+            raise ValueError("%s: parallel_ota_max=%d is below the group size %d"
+                             % (p["device"], slots, len(profiles)))
+        allowed = {str(i).lower() for i in p.get("concurrent_ota_ieees") or []}
+        missing = set(ieees) - {p["ieee"].lower()} - allowed
+        if missing:
+            raise ValueError("%s: concurrent_ota_ieees lacks %s" % (p["device"], ", ".join(sorted(missing))))
+
+
+def run_many(profile_paths: list[Path], confirm_ieees: list[str], *, extra: list[str],
+             stagger_seconds: float = 20, poll_seconds: float = 30,
+             launch: Callable[[list[str], Path], int] = sup.launch_logged,
+             alive: Callable[[int], bool] = sup.process_alive,
+             sleep: Callable[[float], None] = time.sleep) -> list[dict[str, Any]]:
+    """One autopilot process per socket (each takes its own slot), then wait for all."""
+    profiles = [sup.campaign.load_profile(p) for p in profile_paths]
+    if [p["ieee"] for p in profiles] != list(confirm_ieees):
+        raise ValueError("--confirm-ieee must list each profile's exact IEEE, in the same order")
+    validate_group(profiles)
+    pids = []
+    stamp = dt.datetime.now().strftime("%Y%m%dT%H%M%S")
+    for index, (path, profile) in enumerate(zip(profile_paths, profiles)):
+        if index:
+            sleep(stagger_seconds)  # one admission at a time on the coordinator
+        cmd = [sys.executable, "-u", str(Path(__file__).resolve()), "run", "--profile", str(path),
+               "--confirm-ieee", profile["ieee"], *extra]
+        log = Path(profile["workdir"]) / f"autopilot_run_many_{stamp}.log"
+        pids.append(launch(cmd, log))
+        print("LAUNCHED", profile["device"], "pid", pids[-1], "log", log, flush=True)
+    while any(alive(pid) for pid in pids):
+        sleep(poll_seconds)
+    results = []
+    for profile in profiles:
+        record = sup.read_json(Path(profile["workdir"]) / STATE_FILE) or {}
+        results.append({"device": profile["device"], "state": record.get("state"),
+                        "phase": record.get("phase"),
+                        "attempts": len(record.get("attempts") or []),
+                        "best_progress": (record.get("progress_gate") or {}).get("best_progress")})
+    return results
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -266,9 +321,22 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--step-retries", type=int, default=2)
     run.add_argument("--step-retry-seconds", type=float, default=30)
     run.add_argument("--postflash-retries", type=int, default=2)
+    many = sub.add_parser("run-many", help="up to %d sockets in parallel, one autopilot each" % MAX_PARALLEL)
+    many.add_argument("--profile", action="append", required=True)
+    many.add_argument("--confirm-ieee", action="append", required=True)
+    many.add_argument("--stagger-seconds", type=float, default=20)
+    many.add_argument("--max-attempts", type=int, default=12)
+    many.add_argument("--max-stagnant", type=int, default=2)
     show = sub.add_parser("status")
     show.add_argument("--profile", required=True)
     args = parser.parse_args(argv)
+    if args.command == "run-many":
+        paths = [Path(p).expanduser().resolve() for p in args.profile]
+        results = run_many(paths, args.confirm_ieee, stagger_seconds=args.stagger_seconds,
+                           extra=["--max-attempts", str(args.max_attempts),
+                                  "--max-stagnant", str(args.max_stagnant)])
+        print(json.dumps(results, indent=2))
+        return 0 if all(r["state"] == "installed" for r in results) else 2
     profile_path = Path(args.profile).expanduser().resolve()
     if args.command == "status":
         work = Path(sup.campaign.load_profile(profile_path)["workdir"])

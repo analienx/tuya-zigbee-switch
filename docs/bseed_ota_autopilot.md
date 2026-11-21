@@ -9,8 +9,49 @@ python helper_scripts/bseed_ota_autopilot.py run --profile <workdir>/profile.jso
 python helper_scripts/bseed_ota_autopilot.py status --profile <workdir>/profile.json
 ```
 
-Run one autopilot per socket. In two- or three-slot mode, start one per paired
-profile; each takes its own coordinator slot through the campaign's lock.
+## Up to five sockets at once
+
+```bash
+python helper_scripts/bseed_ota_autopilot.py run-many \
+  --profile A/profile.json --confirm-ieee 0xA... \
+  --profile B/profile.json --confirm-ieee 0xB... \
+  --profile C/profile.json --confirm-ieee 0xC...
+```
+
+`run-many` starts one autopilot per socket, 20 s apart (`--stagger-seconds`).
+Each takes its own coordinator slot. It then waits for all of them and prints
+each socket's final state, attempt count and best progress. It refuses the
+group unless every profile:
+
+- has `parallel_ota_max` of at least the group size (2–5);
+- lists every other member in `concurrent_ota_ieees`;
+- uses `source_rejoin_strategy: none`.
+
+Slot rules (`bseed_network_campaign_lock.py`):
+
+- **Allowlist, not exact set.** A campaign may start while every running or
+  slot-holding OTA is on its `concurrent_ota_ieees` allowlist. The profile's
+  peer list may name peers that are not running yet, so one fixed profile
+  serves every resume. (Until now the list had to equal the running set, so
+  each retry needed a new hand-made profile.)
+- **Between attempts.** A peer that is between attempts still holds its slot
+  and must have its own work lock. A running peer must be freshly updating.
+- **Capacity** is the smallest `parallel_ota_max` of any participant. A legacy
+  or two-slot owner allows three in total, as before.
+- **Pacing.** 3 slots need at least 1800 ms response pacing per socket; 4–5
+  slots need at least 2400 ms. That keeps the coordinator's total load no
+  higher than three transfers at 1800 ms.
+
+Pick group members with strong routes (see below), and never put a Router in
+the same group as one of its own children.
+
+## Relay read-back
+
+The preflight's read-only relay GET is re-sent up to 3 times. If the socket
+never answers it, the update continues and logs `relay_get_unverified`. The
+PM load proof and the automatic relay-OFF step stand on their own (owner rule,
+2026-11-21). A relay that answers in the **wrong** state still refuses the
+update.
 
 ## What it does
 

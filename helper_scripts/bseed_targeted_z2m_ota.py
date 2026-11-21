@@ -558,7 +558,12 @@ def main():
                 break
             log('relay_get_retry', {'key': args.relay_get_key})
         relay = state['relay'] or {}
-        if not (relay.get(args.relay_get_key) == args.expect_relay):
+        # Owner rule (2026-11-21): an unanswered relay GET does not block the
+        # update; the PM load proof and the automatic relay-OFF step stand on
+        # their own. A relay that answers in the wrong state still refuses.
+        if args.relay_get_key not in relay:
+            log('relay_get_unverified', {'key': args.relay_get_key, 'expected': args.expect_relay})
+        elif relay.get(args.relay_get_key) != args.expect_relay:
             raise AssertionError('Relay state not verified by read-only GET')
         if args.non_pm:
             from bseed_nonpm_relay_policy import BALCONY_LEGACY_POLICY, relay_policy_matches
@@ -703,7 +708,7 @@ def main():
             image_sha256=args.sha256,
             parallel_allowed_ieees=(
                 source_profile.get('concurrent_ota_ieees') or []
-                if source_profile.get('parallel_ota_max', 1) in (2, 3) else None),
+                if source_profile.get('parallel_ota_max', 1) in (2, 3, 4, 5) else None),
             parallel_ota_max=source_profile.get('parallel_ota_max', 1),
             peer_work_locks=source_profile.get('peer_work_locks'),
             work_lock_path=str(lock),

@@ -152,6 +152,55 @@ def test_a_dropped_preflight_is_retried_before_flashing(tmp_path, monkeypatch):
     assert fake.calls[:3] == ['preflight', 'preflight', 'check']
 
 
+def group(tmp_path, n, slots=5, drop=None):
+    ieees = ['0xa4c13800000000%02d' % i for i in range(n)]
+    out = []
+    for i, ieee in enumerate(ieees):
+        peers = [x for x in ieees if x != ieee and x != drop]
+        out.append(profile(tmp_path, device='S%d' % i, ieee=ieee, workdir=str(tmp_path / ('w%d' % i)),
+                           parallel_ota_max=slots, concurrent_ota_ieees=peers, source_rejoin_strategy='none'))
+    return out
+
+
+def test_parallel_group_must_allow_every_member(tmp_path):
+    ap.validate_group(group(tmp_path, 5))
+    ap.validate_group(group(tmp_path, 1, slots=1))
+    with pytest.raises(ValueError, match='1..5'):
+        ap.validate_group(group(tmp_path, 6))
+    with pytest.raises(ValueError, match='below the group size'):
+        ap.validate_group(group(tmp_path, 4, slots=3))
+    members = group(tmp_path, 3, drop='0xa4c1380000000002')
+    with pytest.raises(ValueError, match='lacks 0xa4c1380000000002'):
+        ap.validate_group(members)
+    twins = group(tmp_path, 2)
+    twins[1]['ieee'] = twins[0]['ieee']
+    with pytest.raises(ValueError, match='distinct'):
+        ap.validate_group(twins)
+
+
+def test_run_many_launches_one_autopilot_per_socket_and_reports_each(tmp_path, monkeypatch):
+    members = group(tmp_path, 3)
+    by_path = {Path(m['workdir']) / 'profile.json': m for m in members}
+    monkeypatch.setattr(ap.sup.campaign, 'load_profile', lambda p: dict(by_path[Path(p)]))
+    launched, sleeps = [], []
+    for i, m in enumerate(members):
+        Path(m['workdir']).mkdir()
+        (Path(m['workdir']) / ap.STATE_FILE).write_text(json.dumps(
+            {'state': 'installed' if i else 'progress_stalled', 'phase': 'x',
+             'attempts': [{}] * (i + 1), 'progress_gate': {'best_progress': 40.0 + i}}))
+    alive = iter([True, False, False, False])
+    results = ap.run_many(list(by_path), [m['ieee'] for m in members], extra=['--max-attempts', '9'],
+                          launch=lambda cmd, log: launched.append(cmd) or len(launched),
+                          alive=lambda pid: next(alive, False), sleep=sleeps.append)
+    assert [c[c.index('--confirm-ieee') + 1] for c in launched] == [m['ieee'] for m in members]
+    assert all(c[3] == 'run' and c[-2:] == ['--max-attempts', '9'] for c in launched)
+    assert sleeps[:2] == [20, 20]  # staggered admissions
+    assert [r['state'] for r in results] == ['progress_stalled', 'installed', 'installed']
+    assert results[2]['attempts'] == 3 and results[0]['best_progress'] == 40.0
+    with pytest.raises(ValueError, match='same order'):
+        ap.run_many(list(by_path), [m['ieee'] for m in reversed(members)], extra=[])
+
+
 def test_exact_ieee_and_unloaded_confirmation_are_required(tmp_path, monkeypatch):
     cfg = profile(tmp_path, non_pm=True)
     Fake(tmp_path, monkeypatch, cfg, [])
