@@ -2131,22 +2131,52 @@ def load_pinned_reader(reader):
 
 
 class _Lines:
-    """File-like sink that forwards complete lines to a progress callback."""
-    def __init__(self, report):
-        self.report, self.pending = report, ''
+    """Buffer-only stdout sink for the pinned reader's prints during activation.
+
+    It never calls a progress callback while stdout is redirected to it: the
+    human CLI reporter prints to sys.stdout, so forwarding from inside the
+    redirect re-entered write() until RecursionError. Lines are replayed with
+    drain() only after the redirect has ended. The buffer is bounded.
+    """
+    MAX_LINES = 200
+    MAX_PENDING = 4096
+
+    def __init__(self):
+        self.lines, self.pending, self.dropped = [], '', 0
+
+    def _keep(self, line):
+        line = line.rstrip('\r')
+        if not line.strip():
+            return
+        if len(self.lines) < self.MAX_LINES:
+            self.lines.append(line)
+        else:
+            self.dropped += 1
 
     def write(self, value):
+        value = str(value)
         self.pending += value
         while '\n' in self.pending:
             line, self.pending = self.pending.split('\n', 1)
-            if line.strip():
-                self.report('  pvvx: ' + line.rstrip('\r'))
+            self._keep(line)
+        if len(self.pending) > self.MAX_PENDING:
+            self._keep(self.pending[:self.MAX_PENDING])
+            self.pending = ''
         return len(value)
 
     def flush(self):
-        if self.pending.strip():
-            self.report('  pvvx: ' + self.pending.rstrip())
+        """print(..., flush=True) calls this inside the redirect; it must not report."""
+
+    def drain(self, report):
+        """Replay buffered lines; call only after the stdout redirect has ended."""
+        self._keep(self.pending)
         self.pending = ''
+        lines, dropped = self.lines, self.dropped
+        self.lines, self.dropped = [], 0
+        for line in lines:
+            report('  pvvx: ' + line)
+        if dropped:
+            report(f'  pvvx: ({dropped} further line(s) not shown)')
 
 
 def verify_cpu_halted(port, reader, out=None):
@@ -2154,27 +2184,40 @@ def verify_cpu_halted(port, reader, out=None):
 
     Uses the pinned reader's own activation (it sends SWire stop commands; RTS
     and DTR stay unwired), then the bounded diagnostic for divider discovery and
-    two register reads. No flash access happens here. Faults of the serial link
-    or of the upstream activation are returned as a retryable RecoveryError.
+    two register reads. No flash access happens here.
+
+    Serial-link faults (OSError, which includes pyserial's SerialException and
+    SerialTimeoutException) and an upstream SystemExit are hardware/link
+    conditions a power-cycle may cure: retryable HALT_ATTEMPT_FAILED. Any other
+    exception is a software defect: HALT_INTERNAL_ERROR, retry_safe=False, never
+    retried. KeyboardInterrupt is not caught.
     """
     report = out or (lambda _message: None)
     pinned = load_pinned_reader(reader)
+    sink = _Lines()
     try:
         with open_port(port, timeout=0.02, baud=921600) as control:
             control.write_timeout = 2
-            sink = _Lines(report)
-            with contextlib.redirect_stdout(sink):
-                pinned.activate(control, 3000)
-            sink.flush()
+            try:
+                with contextlib.redirect_stdout(sink):
+                    pinned.activate(control, 3000)
+            finally:
+                sink.drain(report)  # outside the redirect; kept even if activation raised
             report('  CPU stop requested; scanning for the target reply.')
             check = SwireDiagnostic(control, 921600)
             divider = check.find_divider()
             controls = [check.read_register(0x602)[0] for _ in range(2)]
     except RecoveryError:
         raise
-    except (OSError, SystemExit, Exception) as error:  # upstream activation may sys.exit or raise serial errors
+    except (OSError, SystemExit) as error:  # serial link fault or upstream sys.exit for a silent chip
         raise RecoveryError('CPU pause attempt failed: %s: %s' % (type(error).__name__, error),
                             code='HALT_ATTEMPT_FAILED', retry_safe=True) from error
+    except Exception as error:
+        raise RecoveryError('internal software error during the CPU pause (%s: %s); this is a tool defect, '
+                            'not a wiring or power fault, so it is not retried. No flash access happened'
+                            % (type(error).__name__, error),
+                            code='HALT_INTERNAL_ERROR', retry_safe=False,
+                            details={'exception': type(error).__name__, 'flashAccessed': False}) from error
     record = {'divider': divider, 'cpuControls': controls, 'haltVerified': controls == [CPU_STOPPED] * 2,
               'statistics': dict(check.stats)}
     if not record['haltVerified']:
@@ -2731,8 +2774,12 @@ def main(argv=None):
     as_json = '--json' in argv
     action = None
 
+    # Bind the real stream now: a later contextlib.redirect_stdout must never
+    # route progress back into the redirect target.
+    progress_stream = sys.stderr if as_json else sys.stdout
+
     def out(line):
-        print(line, file=sys.stderr if as_json else sys.stdout, flush=True)
+        print(line, file=progress_stream, flush=True)
 
     def emit(result):
         if as_json:

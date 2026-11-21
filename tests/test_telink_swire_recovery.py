@@ -2110,23 +2110,199 @@ def test_pause_retries_every_real_no_reply_code_and_a_failed_activation():
     assert record['attempts'] == len(codes) + 1 and len(sleeps) == len(codes)
 
 
-def test_upstream_activation_faults_become_a_retryable_structured_error(tmp_path, monkeypatch):
+def pause_stubs(monkeypatch, activate, *, controls=(5, 5)):
+    """Stub serial port, pinned reader and SWire diagnostic; no hardware is touched."""
     import contextlib
+    calls = []
+
     class Port:
         write_timeout = None
+
     @contextlib.contextmanager
     def fake_port(*_args, **_kwargs):
         yield Port()
-    for fault in (SystemExit('Chip sleep? -> Use reset chip'), OSError('port vanished'), ValueError('upstream bug')):
-        class Pinned:
-            @staticmethod
-            def activate(*_args):
-                raise fault
-        monkeypatch.setattr(tool, 'load_pinned_reader', lambda _reader, pinned=Pinned: pinned)
-        monkeypatch.setattr(tool, 'open_port', fake_port)
+
+    class Pinned:
+        pass
+    Pinned.activate = staticmethod(activate)
+
+    class Diagnostic:
+        def __init__(self, *_args):
+            self.stats, self.values = {}, list(controls)
+
+        def find_divider(self):
+            calls.append('divider')
+            return 52
+
+        def read_register(self, address):
+            calls.append(hex(address))
+            return [self.values.pop(0)]
+
+    monkeypatch.setattr(tool, 'load_pinned_reader', lambda _reader: Pinned)
+    monkeypatch.setattr(tool, 'open_port', fake_port)
+    monkeypatch.setattr(tool, 'SwireDiagnostic', Diagnostic)
+    return calls
+
+
+def test_serial_and_upstream_exit_faults_are_retryable_hardware_failures(tmp_path, monkeypatch):
+    import serial
+    faults = (SystemExit('Chip sleep? -> Use reset chip'), OSError('port vanished'),
+              serial.SerialException('device disconnected'), serial.SerialTimeoutException('write timeout'))
+    for fault in faults:
+        def activate(*_args, fault=fault):
+            raise fault
+        pause_stubs(monkeypatch, activate)
         with pytest.raises(RecoveryError) as error:
             tool.verify_cpu_halted('COM5', tmp_path / 'reader.py')
         assert error.value.code == 'HALT_ATTEMPT_FAILED' and error.value.retry_safe is True
+        assert error.value.code in tool.HALT_RETRY_CODES
+
+
+@pytest.mark.parametrize('fault', [RecursionError('maximum recursion depth exceeded'), ValueError('upstream bug'),
+                                   TypeError('bad call'), AttributeError('no attribute')])
+def test_programming_errors_are_internal_and_never_retried(tmp_path, monkeypatch, fault):
+    def activate(*_args):
+        raise fault
+    pause_stubs(monkeypatch, activate)
+    with pytest.raises(RecoveryError) as error:
+        tool.verify_cpu_halted('COM5', tmp_path / 'reader.py')
+    assert error.value.code == 'HALT_INTERNAL_ERROR' and error.value.retry_safe is False
+    assert 'HALT_INTERNAL_ERROR' not in tool.HALT_RETRY_CODES
+    # Through the retry loop: one attempt, no sleep, no power-cycle advice, even with 900 s.
+    sleeps, messages = [], []
+    with pytest.raises(RecoveryError) as error:
+        tool.await_cpu_halted('COM5', tmp_path / 'reader.py', retry_seconds=900, out=messages.append,
+                              clock=lambda: 0.0, sleep=sleeps.append)
+    assert error.value.code == 'HALT_INTERNAL_ERROR' and sleeps == []
+    assert not any('off and on' in message for message in messages)
+
+
+def test_keyboard_interrupt_during_activation_is_not_swallowed(tmp_path, monkeypatch):
+    def activate(*_args):
+        raise KeyboardInterrupt
+    pause_stubs(monkeypatch, activate)
+    with pytest.raises(KeyboardInterrupt):
+        tool.verify_cpu_halted('COM5', tmp_path / 'reader.py')
+
+
+def test_upstream_prints_reach_a_stdout_reporter_without_recursion(tmp_path, monkeypatch, capsys):
+    # The 2026-11-15 RecursionError: the human reporter prints to sys.stdout,
+    # which was still redirected into the sink that called the reporter.
+    def activate(*_args):
+        print('Reset module (RTS low)...')
+        print('Activate (%d ms)...' % 3000, flush=True)
+        print('partial line without newline', end='')
+    calls = pause_stubs(monkeypatch, activate)
+
+    def report(line):
+        print(line, file=sys.stdout, flush=True)
+    record = tool.verify_cpu_halted('COM5', tmp_path / 'reader.py', out=report)
+    assert record['haltVerified'] is True and record['cpuControls'] == [5, 5]
+    assert calls == ['divider', '0x602', '0x602']
+    lines = capsys.readouterr().out.splitlines()
+    assert lines.count('  pvvx: Reset module (RTS low)...') == 1
+    assert lines.count('  pvvx: Activate (3000 ms)...') == 1
+    assert lines.count('  pvvx: partial line without newline') == 1
+
+
+def test_upstream_output_is_kept_when_activation_fails_and_is_bounded(tmp_path, monkeypatch):
+    def activate(*_args):
+        for index in range(tool._Lines.MAX_LINES + 5):
+            print('line %d' % index)
+        raise OSError('port vanished')
+    pause_stubs(monkeypatch, activate)
+    messages = []
+    with pytest.raises(RecoveryError) as error:
+        tool.verify_cpu_halted('COM5', tmp_path / 'reader.py', out=messages.append)
+    assert error.value.code == 'HALT_ATTEMPT_FAILED'
+    assert messages[0] == '  pvvx: line 0' and len(messages) == tool._Lines.MAX_LINES + 1
+    assert messages[-1] == '  pvvx: (5 further line(s) not shown)'
+
+
+def test_genuine_no_reply_is_retried_every_10_seconds_then_pauses(tmp_path, monkeypatch):
+    attempts = []
+
+    def activate(*_args):
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise OSError('no reply')
+    pause_stubs(monkeypatch, activate)
+    clock, sleeps = [0.0], []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock[0] += seconds
+    record = tool.await_cpu_halted('COM5', tmp_path / 'reader.py', retry_seconds=900,
+                                   clock=lambda: clock[0], sleep=sleep)
+    assert record['cpuControls'] == [5, 5] and record['attempts'] == 3 and sleeps == [10, 10]
+
+
+def cli_read_stubs(tmp_path, monkeypatch, activate):
+    """CLI read with the real verify_cpu_halted and stubbed hardware/reader subprocess."""
+    import subprocess
+    reader = tmp_path / 'reader.py'
+    reader.write_bytes(b'pinned source fixture')
+    monkeypatch.setattr(tool, 'READER_SHA256', tool.sha256(reader.read_bytes()))
+    calls = pause_stubs(monkeypatch, activate)
+    commands = []
+
+    def run(command, *, size, **_kwargs):
+        commands.append(command)
+        assert not {'-t', 'ea', 'es', 'wf', 'we', '-r'} & set(command)
+        assert 'rf' in command
+        Path(command[-1]).write_bytes(b'\xff' * size)
+        return subprocess.CompletedProcess(command, 0, '', '')
+    monkeypatch.setattr(tool, 'run_reader_with_progress', run)
+    out_dir = tmp_path / 'private'
+    out_dir.mkdir()
+    return reader, out_dir, calls, commands
+
+
+def test_cli_human_halt_read_with_printing_reader_completes(tmp_path, monkeypatch, capsys):
+    def activate(*_args):
+        print('Activate (%d ms)...' % 3000)
+    reader, out_dir, _calls, commands = cli_read_stubs(tmp_path, monkeypatch, activate)
+    target = out_dir / 'probe.bin'
+    code = tool.main(['read', '--port', 'COM5', '--halt', '--retry-seconds', '900', '--size', '0x1000',
+                      '--single', '--reader', str(reader), '--out', str(target)])
+    captured = capsys.readouterr()
+    assert code == 0, captured
+    assert captured.out.splitlines().count('  pvvx: Activate (3000 ms)...') == 1
+    assert 'RecursionError' not in captured.out + captured.err and 'off and on' not in captured.out
+    assert len(commands) == 1 and target.stat().st_size == 0x1000
+    receipt = json.loads(target.with_name('probe.bin.json').read_text())
+    assert receipt['status'] == 'READ_SINGLE' and receipt['haltChecks'][0]['cpuControls'] == [5, 5]
+
+
+def test_cli_json_halt_read_keeps_stdout_a_single_json_object(tmp_path, monkeypatch, capsys):
+    def activate(*_args):
+        print('Activate (%d ms)...' % 3000)
+    reader, out_dir, _calls, commands = cli_read_stubs(tmp_path, monkeypatch, activate)
+    target = out_dir / 'full.bin'
+    code = tool.main(['read', '--json', '--port', 'COM5', '--halt', '--size', '0x1000',
+                      '--reader', str(reader), '--out', str(target)])
+    captured = capsys.readouterr()
+    assert code == 0, captured
+    assert json.loads(captured.out)['status'] == 'READ_MATCHED'
+    assert '  pvvx: Activate (3000 ms)...' in captured.err and 'pvvx:' not in captured.out
+    assert len(commands) == 2
+
+
+def test_cli_internal_halt_error_fails_once_without_power_cycle_advice(tmp_path, monkeypatch, capsys):
+    attempts = []
+
+    def activate(*_args):
+        attempts.append(1)
+        raise RecursionError('maximum recursion depth exceeded')
+    reader, out_dir, calls, commands = cli_read_stubs(tmp_path, monkeypatch, activate)
+    monkeypatch.setattr(tool.time, 'sleep', lambda _s: pytest.fail('internal error must not wait to retry'))
+    code = tool.main(['read', '--port', 'COM5', '--halt', '--retry-seconds', '900', '--size', '0x1000',
+                      '--single', '--reader', str(reader), '--out', str(out_dir / 'bad.bin')])
+    captured = capsys.readouterr()
+    assert code != 0 and attempts == [1] and commands == [] and calls == []
+    assert 'off and on' not in captured.out + captured.err
+    receipt = json.loads((out_dir / 'bad.bin.json').read_text())
+    assert receipt['errorCode'] == 'HALT_INTERNAL_ERROR' and receipt['reads'] == []
 
 
 def test_pinned_reader_is_hash_checked_again_right_before_it_runs(tmp_path, monkeypatch):
