@@ -125,6 +125,33 @@ def require_increasing(profile, registry=None):
     if 'preflash_file_version' in profile:
         source = [e for e in source if e['file_version'] == number(profile['preflash_file_version'])]
     if len(source) != 1:
+        # Very early WifiLeft Router predates the current sealed version
+        # registry. Do NOT invent its image version. Identity is rechecked
+        # live, and a successful exact-device Z2M OTA availability check is
+        # mandatory before flash (LAST_CHECK.json, 30 minute expiry).
+        legacy = (
+            len(source) == 0
+            and profile.get('device') == 'LivingRoomSocketWifiLeft'
+            and profile.get('ieee') == '0xa4c138ba60b92c5f'
+            and profile.get('preflash_build') == '1.2.5-8b8cc492'
+            and profile.get('postflash_build') == '1.2.5-bseedr24'
+            and profile.get('preflash_role') == profile.get('postflash_role') == 'Router'
+            and profile.get('operator_waive_preflash_pm') is True
+            and profile.get('relay_state_policy') == 'preserve'
+            and profile.get('auto_relay_off') is False
+            and profile.get('manufacturer') == 'b28wrpvx'
+            and profile.get('model') == 'TS011F-BS-PM'
+            and profile.get('sha256') == 'a8807d52c2a900525b93c67e22a5a89208616923e85eb445572d90d78638c541'
+            and not force_test
+            and outer['image_type'] == source_type == target_type
+            and outer['file_version'] == native['file_version']
+        )
+        if legacy:
+            return {'board': board, 'legacy_source_build': profile['preflash_build'],
+                    'legacy_source_version': 'unknown_not_in_registry',
+                    'requires_live_ota_check': True,
+                    'target_version': native['file_version'],
+                    'source_role': source_role, 'target_role': target_role}
         raise IdentityError('pin an unambiguous preflash build/role/version from live evidence')
     if source[0].get('payload_role', source_role) != source_role:
         raise IdentityError('source role contradicts the registered payload role')
