@@ -534,7 +534,7 @@ class HaPublisher:
         self.profile, self.run, self.created = profile, run, False
 
     def ssh(self, command):
-        result = self.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8',
+        result = self.run(['ssh', '-n', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8',
                            self.alias, command], capture_output=True, text=True, timeout=120)
         if result.returncode != 0:
             raise CanaryError('HA publish command failed: %s' % command)
