@@ -126,6 +126,10 @@ def load_profile(path):
     stock_client_conversion(data)
     import bseed_relay_auto_off
     bseed_relay_auto_off.validate(data)
+    import bseed_relay_state_policy
+    bseed_relay_state_policy.validate(data)
+    from bseed_pm_meter_waiver import validate as validate_meter_waiver
+    validate_meter_waiver(data)
     from bseed_ota_block_policy import check_block_bytes, default_block_bytes
     if data.get('block_bytes') is None:
         data['block_bytes'] = default_block_bytes(data)
@@ -350,6 +354,8 @@ def network_lock_path(profile, *, required=False):
 
 def accept_candidate(profile):
     """postflash_candidate, then return an auto-OFF relay to its pre-flash state."""
+    import bseed_relay_state_policy
+    bseed_relay_state_policy.verify_after_flash(profile)
     record_postflash_candidate(profile)
     import bseed_relay_auto_off
     if bseed_relay_auto_off.enabled(profile):
@@ -443,6 +449,10 @@ def runner_args(profile, mode, *, confirm_unloaded=False, relay_off_record=None)
         cmd.extend(['--native-image', str(profile['native_image'])])
     if profile.get('relay_get_key'):
         cmd.extend(['--relay-get-key', profile['relay_get_key']])
+    if profile.get('max_reported_watts') is not None:
+        cmd.extend(['--max-reported-watts', str(profile['max_reported_watts'])])
+    if profile.get('operator_waive_preflash_pm') is True:
+        cmd.append('--waive-preflash-pm')
     if profile.get('pm_preflash_load_proof') == 'physically_unloaded':
         cmd.append('--pm-preflash-physical-unloaded')
         if mode == 'flash' and confirm_unloaded:
@@ -615,6 +625,8 @@ def main():
         raise SystemExit('--confirm-load-unplugged is only valid for non-PM or pinned PM physical-proof flash')
     import bseed_relay_auto_off
     auto_off = bseed_relay_auto_off.enabled(profile)
+    if args.mode in ('flash', 'transition') and auto_off:
+        raise SystemExit('Current operator policy forbids turning a relay OFF for OTA; migrate to a verified preserve-state profile')
     if (args.mode in ('flash', 'transition') and physical_pm and not args.confirm_load_unplugged
             and not auto_off):
         raise SystemExit('PM physical-proof flash requires fresh --confirm-load-unplugged attestation or auto_relay_off')

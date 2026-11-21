@@ -217,6 +217,101 @@ def find_campaign_locks(site, name, live=None):
                     record.get('device') == name)
             if owned or mine:
                 clean = record.get('phase') in CLEAN_LOCK_PHASES
+                # A previously deferred *stock->Client* OTA can be proven no
+                # longer awaiting rejoin using live exact post-conversion source.
+                # This authorizes only a NEW gated same-role attempt; it never
+                # marks the old campaign hardware-accepted or deletes evidence.
+                recovered = False
+                marker = device.get('deferred_source_recovery')
+                if (not clean and isinstance(marker, dict) and live is not None
+                    and marker.get('lock') == str(lock)
+                    and marker.get('authorize_next_same_role_ota') is True
+                    and record.get('phase') == 'ota_transfer_complete_recovery_deferred'):
+                    import datetime as _dt
+                    from bseed_network_campaign_lock import read_lock as _read_owner
+                    from bseed_source_build import source_build_matches
+                    finished = _dt.datetime.fromisoformat(record['completed'])
+                    observed = _dt.datetime.fromtimestamp(live['lastSeen']/1000, _dt.timezone.utc)
+                    now = _dt.datetime.now(_dt.timezone.utc)
+                    reply = record.get('response') or {}
+                    installed = (reply.get('data') or {}).get('to') or {}
+                    lease = Path(record.get('network_lock') or '')
+                    if (record.get('device') == name and record.get('ieee') == device['ieee']
+                        and reply.get('status') == 'ok'
+                        and reply.get('transaction') == record.get('token')
+                        and (reply.get('data') or {}).get('id') == device['ieee']
+                        and installed.get('software_build_id') == live.get('swBuildId')
+                        and live.get('type') == 'EndDevice'
+                        and live.get('interviewCompleted') is True
+                        and finished < observed <= now + _dt.timedelta(seconds=30)
+                        and now-observed <= _dt.timedelta(minutes=15)
+                        and _read_owner(lease) is None):
+                        recovered = True
+                # An old unresolved stock->Client campaign is superseded as
+                # *source only* by a later clean, observed Router installation.
+                # Recheck its exact dated work lock and immutable postflash
+                # proof. Never call this hardware acceptance.
+                marker = device.get('verified_source_successor')
+                if (not clean and isinstance(marker, dict) and live is not None
+                    and marker.get('old_lock') == str(lock)
+                    and marker.get('authorize_new_same_role_ota') is True
+                    and record.get('phase') == 'ota_transfer_ok_postflash_unverified'):
+                    import datetime as _dt
+                    from bseed_network_campaign_lock import read_lock as _read_owner
+                    try:
+                        successor_path = Path(marker['successor_lock']).expanduser().resolve()
+                        proof_path = Path(marker['postflash_evidence']).expanduser().resolve()
+                        succ = json.loads(successor_path.read_text(encoding='utf8'))
+                        proof = json.loads(proof_path.read_text(encoding='utf8'))
+                        old_response = record.get('response') or {}
+                        new_response = succ.get('response') or {}
+                        old_end = _dt.datetime.fromisoformat(record['completed'])
+                        new_start = _dt.datetime.fromisoformat(succ['started'])
+                        new_end = _dt.datetime.fromisoformat(succ['completed'])
+                        proof_at = _dt.datetime.fromisoformat(proof['observed_at'])
+                        latest = _dt.datetime.fromtimestamp(live['lastSeen']/1000, _dt.timezone.utc)
+                        now = _dt.datetime.now(_dt.timezone.utc)
+                        all_times = (old_end,new_start,new_end,proof_at,latest)
+                        source_ok = (
+                            all(t.tzinfo is not None for t in all_times)
+                            and old_end < new_start < new_end <= proof_at <= latest <= now+_dt.timedelta(seconds=30)
+                            and now-latest <= _dt.timedelta(minutes=15)
+                            and record.get('device') == name and record.get('ieee') == device['ieee']
+                            and old_response.get('status') == 'ok'
+                            and old_response.get('transaction') == record.get('token')
+                            and (old_response.get('data') or {}).get('id') == device['ieee']
+                            and succ.get('device') == name and succ.get('ieee') == device['ieee']
+                            and succ.get('phase') == 'postflash_candidate'
+                            and new_response.get('status') == 'ok'
+                            and new_response.get('transaction') == succ.get('token')
+                            and (new_response.get('data') or {}).get('id') == device['ieee']
+                            and (new_response.get('data') or {}).get('from',{}).get('software_build_id') == '1.2.5-bseedcli25'
+                            and (old_response.get('data') or {}).get('to',{}).get('file_version') == 4294967295
+                            and proof.get('target_name') == name
+                            and proof.get('target_ieee') == device['ieee']
+                            and proof.get('result') == 'postflash_candidate'
+                            and proof.get('issues') == [] and proof.get('errors') == []
+                            and proof.get('fresh_mqtt_state_observed') is True
+                            and (proof.get('live_node_descriptor') or {}).get('role') == device['role']
+                            and proof.get('expected_role') == device['role']
+                            and proof.get('expected_build') == live['swBuildId']
+                            and (proof.get('inventory') or {}).get('software_build_id') == live['swBuildId']
+                            and live.get('type') == device['role']
+                            and live.get('interviewCompleted') is True
+                            and (_read_owner(Path(record['network_lock'])) is None
+                                 or _read_owner(Path(record['network_lock'])).get('token') != record.get('token'))
+                        )
+                        if source_ok:
+                            recovered = True
+                    except (OSError,KeyError,TypeError,ValueError,AttributeError):
+                        recovered = False
+                clean = clean or recovered
+                # The original variance and no-new-OTA flag remain immutable.
+                # Explicit newer operator grant applies only to exact two
+                # Kitchen devices and the verified installed previous target.
+                if not clean and device.get('operator_continue_prior_variance') is True:
+                    from bseed_kitchen_prior_variance import validated as validate_kitchen
+                    clean = validate_kitchen(name, record, live, enabled=True)
                 superseded = False
                 if not clean and successor is not None:
                     from bseed_historical_lock_supersession import historical_lock_superseded
@@ -224,6 +319,7 @@ def find_campaign_locks(site, name, live=None):
                 seen.add(key)
                 found.append({'path': str(lock), 'phase': record.get('phase'),
                               'clean': clean or superseded,
+                              'recovered_source_only': recovered,
                               'superseded_by': (successor['build'] if superseded else None)})
     return found
 
@@ -340,6 +436,10 @@ def build_profile(site, name, artifacts, registry=None, live=None):
     template_path = workdir / 'template_index.json'
     write_once(template_path, (json.dumps(template, indent=2) + '\n').encode('utf8'))
     profile = dict(PACING)
+    # Permanent owner policy: 3 OTA slots for preserve-state fleet canaries.
+    # Sites may explicitly lower this; existing active profiles are immutable.
+    profile['parallel_ota_max'] = site.get('parallel_ota_max',
+        3 if site.get('relay_state_policy') == 'preserve' else 1)
     profile.update({
         'device': name, 'ieee': device['ieee'],
         'manufacturer': spec['manufacturer'], 'model': spec['model'],
@@ -395,7 +495,22 @@ def build_profile(site, name, artifacts, registry=None, live=None):
         if device.get('recovery_evidence'):
             profile['recovery_evidence'] = str(outside_repo(
                 device['recovery_evidence'], 'recovery_evidence'))
-    profile.update(device.get('overrides', {}))
+    overrides = device.get('overrides', {})
+    profile.update(overrides)
+    # Historical tests/profiles remain readable; loaded OTA opts in at site.
+    if site.get('relay_state_policy') == 'preserve':
+        if profile.get('auto_relay_off') is True:
+            raise CanaryError('Preserve-state OTA forbids auto_relay_off; create a new campaign profile')
+        profile['auto_relay_off'] = False
+        profile['relay_state_policy'] = 'preserve'
+        if board == 'pm':
+            profile.setdefault('relay_get_key', 'state_relay')
+        profile.setdefault('max_reported_watts', 100.0)
+        from bseed_relay_state_policy import validate as validate_relay_preserve
+        try:
+            validate_relay_preserve(profile)
+        except ValueError as error:
+            raise CanaryError(str(error)) from error
     profile_path = workdir / 'profile.json'
     write_once(profile_path, (json.dumps(profile, indent=2, sort_keys=True) + '\n').encode('utf8'))
     return profile_path, profile
