@@ -1,4 +1,4 @@
-"""Exact prior-OTA continuation approved 2026-11-21; old negative findings remain."""
+"""Exact prior-OTA continuation approved by operator; old negative findings remain."""
 import datetime as dt
 import json
 from pathlib import Path
@@ -9,6 +9,12 @@ PREVIOUS = {
   "0xa4c138241e3de538","EndDevice","1.2.5-bseedcli25",
   "postflash_operator_confirmed_variance_network_released",
   "bseed-ota-1123b86ee4e8491ab948efe99bb3af63",
+  "4246f097a8927fcfa9a02d16d7ee966cc96ea14487681b2cd9f34b50b41dc914",
+ ),
+ "LivingRoomSocketHifiLeft": (
+  "0xa4c138da1333dc70","EndDevice","1.2.5-bseedcli25",
+  "postflash_operator_confirmed_variance_network_released",
+  "bseed-ota-b19ecf204ee648f6b165e947a877ca5b",
   "4246f097a8927fcfa9a02d16d7ee966cc96ea14487681b2cd9f34b50b41dc914",
  ),
  "KitchenSocketRight": (
@@ -45,8 +51,15 @@ def validated(device, record, live, *, enabled):
     if (close.get("result"),close.get("network_lease_released"),
         close.get("new_ota_same_ieee_authorized")) != (phase,True,False):
         return False
+    if device=="LivingRoomSocketHifiLeft" and (
+        close.get("operator_operational_confirmation") is not True
+        or close.get("fleet_release_approved") is not False
+        or close.get("preserved_postflash_issues") != [
+            "Relay state changed across same-role OTA"
+        ]):
+        return False
     # Evidence has two historical formats; both must pin the old image/token.
-    if device=="KitchenSocketLeft":
+    if device in ("KitchenSocketLeft","LivingRoomSocketHifiLeft"):
         if (close.get("device"),close.get("ieee"),close.get("transaction"),
             close.get("image_sha256"),close.get("installed_build"),
             close.get("full_physical_acceptance")) != (

@@ -307,8 +307,8 @@ def find_campaign_locks(site, name, live=None):
                         recovered = False
                 clean = clean or recovered
                 # The original variance and no-new-OTA flag remain immutable.
-                # Explicit newer operator grant applies only to exact two
-                # Kitchen devices and the verified installed previous target.
+                # Explicit newer operator grant applies only to individually pinned
+                # prior transactions and the verified installed previous target.
                 if not clean and device.get('operator_continue_prior_variance') is True:
                     from bseed_kitchen_prior_variance import validated as validate_kitchen
                     clean = validate_kitchen(name, record, live, enabled=True)
