@@ -163,7 +163,7 @@ def main():
     if args.preflash_lock:
         try:
             lock=json.loads(Path(args.preflash_lock).read_text(encoding='utf8'))
-            validate_campaign(lock,args.ieee,args.device,args.expected_image_sha256)
+            validate_campaign(lock,args.ieee,args.device,args.expected_image_sha256,allow_postflash_candidate=True)
             if lock.get('relay_get_key')!=args.relay_get_key:
                 raise ValueError('Preflash relay endpoint differs from verification endpoint')
             retention_issues=assess_retained_state(
