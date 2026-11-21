@@ -50,6 +50,55 @@ def is_exact_entrance_r20_operator_risk(profile, roles, transition):
             not profile.get('parallel_ota_max') and not profile.get('concurrent_ota_ieees'))
 
 
+# 20 November 2026: the owner reconfirmed the two-device parallel OTA
+# experiment. Earlier fleet-wide irreversible-loss risk acknowledgement is
+# narrowed here to these TWO exact non-PM firmware artifacts and target IEEEs.
+# This is not a recovery mechanism or approval for another board or release.
+# The campaign must obtain a NEW verified relay-OFF record before OTA.
+PARALLEL_20261120_CANDIDATES = (
+    {
+        'device': 'WRSocketEntrance', 'ieee': '0xa4c1387b13e9436d',
+        'preflash_role': 'Router', 'postflash_role': 'Router',
+        'preflash_build': '1.1.3-bseedr19',
+        'postflash_build': '1.1.3-bseedr21',
+        'sha256': 'b9745a9282e8063005e75b00df8c76053bf04aaf033619f7ef06841255abfdcd',
+        'concurrent_ota_ieees': ['0xa4c13824a7005afb'],
+    },
+    {
+        'device': 'BedroomSocketCabinetRight',
+        'ieee': '0xa4c13824a7005afb',
+        'preflash_role': 'EndDevice', 'postflash_role': 'EndDevice',
+        'preflash_build': '1.1.3-bseedc17',
+        'postflash_build': '1.1.3-bseedc19',
+        'sha256': 'a551668210ef91d9b43788e1a2dc281f691a6ca47b016b9b7f4a68cc1449ad63',
+        'concurrent_ota_ieees': ['0xa4c1387b13e9436d'],
+    },
+)
+PARALLEL_20261120_COMMON = {
+    'manufacturer': 'o1jzcxou', 'model': 'TS011F-BS',
+    'preflash_relay_physical_mode': 'follow_state',
+    'relay_get_key': 'state_relay', 'expect_relay': 'OFF',
+    'require_pm': False, 'non_pm': True,
+    'force_test_transition': False,
+    'parallel_ota_max': 2, 'network_lock_shared': True,
+    'block_bytes': 32, 'response_delay_ms': 1800,
+    'source_rejoin_strategy': 'none', 'allow_join_all_fallback': False,
+    'auto_relay_off': True, 'owner_irreversible_risk_accepted': True,
+}
+
+
+def is_exact_parallel_owner_risk_20261120(profile, roles, transition):
+    """ONLY reciprocal sealed no-readback canaries, never generic permission."""
+    if transition or not all(profile.get(k) == v
+                             for k, v in PARALLEL_20261120_COMMON.items()):
+        return False
+    return any(
+        roles == (candidate['preflash_role'], candidate['postflash_role'])
+        and all(profile.get(key) == value for key, value in candidate.items())
+        for candidate in PARALLEL_20261120_CANDIDATES
+    )
+
+
 def _private_file(value, label):
     if not isinstance(value, str) or not value or not Path(value).is_absolute():
         raise ValueError(label + ': absolute private file path required')
@@ -95,6 +144,14 @@ def _verify_recovery(profile, *, confirm_unloaded=False,
     check_block_bytes(profile, allowed=(32, 48))
     if confirm_unloaded is not True:
         raise ValueError('Physical load not explicitly confirmed disconnected for THIS flash')
+    if (not profile.get('recovery_evidence') and
+            is_exact_parallel_owner_risk_20261120(profile, roles, transition)):
+        # The canonical runner must independently verify fresh relay OFF before
+        # treating auto_relay_off as load proof. This shape check alone does not.
+        return {'ieee': profile['ieee'],
+                'method': 'exact two-slot owner-risk canary (relay-OFF proof required)',
+                'recovery_available': False, 'readback_verified': False,
+                'operator_risk_accepted': True, 'hardware_acceptance': False}
     if (profile.get('device'), profile.get('ieee')) == (BEDROOM_DEVICE, BEDROOM_IEEE):
         # The exact Bedroom authorizations were approved at 32-byte blocks.
         if profile.get('block_bytes') != 32:

@@ -82,6 +82,12 @@ def _coordinator_mutex(base):
             break
         except FileExistsError:
             time.sleep(0.05)
+        except PermissionError:
+            # Windows can transiently deny mkdir while another owner removes
+            # the same admission directory. Retry only that exact race.
+            if os.name != 'nt' or not folder.is_dir():
+                raise
+            time.sleep(0.05)
     else:
         raise RuntimeError('Coordinator lease admission is busy or orphaned; fail closed')
     try:
@@ -94,7 +100,7 @@ def _active_slots(base):
     result = []
     for slot in sorted(base.parent.glob(base.stem + '.slot-*.json')):
         owner = read_lock(slot)  # Invalid/truncated JSON must block admission.
-        if owner is None or owner.get('parallel_ota_max') != 2:
+        if owner is None or owner.get('parallel_ota_max') not in (2, *MULTI_SLOTS):
             raise RuntimeError('Invalid two-slot lease record')
         if slot != dual_slot_path(base, owner.get('ieee')):
             raise RuntimeError('Two-slot lease filename/IEEE mismatch')
@@ -109,6 +115,97 @@ def _validate_dual_peers(target_ieee, peers):
     if not _IEEE_RE.fullmatch(normalized) or normalized == str(target_ieee).lower():
         raise ValueError('Parallel OTA peer must be a distinct complete IEEE')
     return [normalized]
+
+
+
+MULTI_SLOTS = (3, 4, 5)
+MAX_SLOTS = max(MULTI_SLOTS)
+# Four or five transfers share one coordinator: pace each one more slowly so
+# the total response rate stays at or below three 1800 ms transfers.
+MULTI_SLOT_MIN_DELAY_MS = {3: 1800, 4: 2400, 5: 2400}
+
+
+def _validate_three_peers(target_ieee, peers):
+    """3..5-slot policy: an allowlist of peers that may run beside this OTA."""
+    if not isinstance(peers, list) or len(peers) > MAX_SLOTS - 1:
+        raise ValueError('Multi-slot OTA requires a 0..%d IEEE peer allowlist' % (MAX_SLOTS - 1))
+    normalized = [str(value).lower() for value in peers]
+    if (len(normalized) != len(set(normalized)) or
+            any(not _IEEE_RE.fullmatch(i) or i == target_ieee for i in normalized)):
+        raise ValueError('Three-slot OTA needs distinct valid non-target peer IEEEs')
+    return normalized
+
+
+def _validate_three_slot_admission(base, slots, record, *, peers,
+                                   legacy_peer_work_lock=None,
+                                   active_peer_work_lock=None,
+                                   peer_work_locks=None):
+    """Under coordinator mutex. Verify every existing campaign before admission.
+
+    Capacity is the smallest slot count any participant accepts. Every current
+    owner must be on this campaign's allowlist (a fixed profile may list more
+    peers than are running now). A running owner must be freshly updating; an
+    owner between attempts (it still holds its slot) must have its own
+    authoritative work lock. Never modifies or releases another campaign.
+    """
+    legacy = read_lock(base)
+    owners = ([(legacy, base)] if legacy is not None else []) + [
+        (slot, dual_slot_path(base, slot['ieee'])) for slot in slots
+    ]
+    # A legacy (single-slot) or two-slot owner keeps the original rule: at
+    # most three transfers in total beside it.
+    limits = [owner.get('parallel_ota_max') or 1 for owner, _ in owners]
+    capacity = min([record['parallel_ota_max']] +
+                   [limit if limit in MULTI_SLOTS else 3 for limit in limits])
+    if len(owners) >= capacity:
+        raise RuntimeError('%d OTA coordinator slots are occupied' % len(owners))
+    if not {owner['ieee'] for owner, _ in owners} <= set(peers):
+        raise RuntimeError('Every active OTA must be on this campaign\'s peer allowlist')
+    mappings = dict(peer_work_locks or {})
+    if legacy_peer_work_lock and legacy:
+        mappings[legacy['ieee']] = legacy_peer_work_lock
+    if active_peer_work_lock and len(slots) == 1:
+        mappings[slots[0]['ieee']] = active_peer_work_lock
+    for owner, lease_path in owners:
+        ieee = owner['ieee']
+        running = owner.get('phase') == 'ota_running'
+        if owner.get('network_id') != record['network_id'] or ieee == record['ieee']:
+            raise RuntimeError('Three-slot peer is not an independent active OTA')
+        path_text = mappings.get(ieee) or owner.get('work_lock_path')
+        if not path_text:
+            raise RuntimeError('Three-slot peer exact work-lock path required: ' + ieee)
+        path = Path(path_text).expanduser().resolve()
+        if path.name != 'ACTIVE_LOCK.json' or not path.is_file():
+            raise RuntimeError('Three-slot peer has no authoritative work lock: ' + ieee)
+        work = json.loads(path.read_text(encoding='utf8'))
+        if (work.get('ieee'), work.get('token'), work.get('sha256'),
+            Path(work.get('network_lock') or '').resolve()) != (
+            ieee, owner['token'], owner['image_sha256'], lease_path.resolve()):
+            raise RuntimeError('Three-slot peer work/lease identity mismatch: ' + ieee)
+        if not running:
+            continue  # between attempts: holds its slot, verified by its work lock
+        if work.get('phase') != 'ota_running':
+            raise RuntimeError('Three-slot peer work/lease identity mismatch: ' + ieee)
+        status_path = path.parent / 'LIVE_STATUS.json'
+        live = json.loads(status_path.read_text(encoding='utf8'))
+        at = dt.datetime.fromisoformat(live['observed_at'])
+        if at.tzinfo is None:
+            raise RuntimeError('Three-slot peer status timestamp has no timezone')
+        age = (dt.datetime.now(dt.timezone.utc)
+               - at.astimezone(dt.timezone.utc)).total_seconds()
+        progress = (live.get('update') or {}).get('progress')
+        if not (0 <= age <= 120
+                and live.get('ieee') == ieee and live.get('token') == owner['token']
+                and live.get('phase') == 'ota_running'
+                and (live.get('update') or {}).get('state') == 'updating'
+                and type(progress) in (int, float) and 0 <= progress < 100):
+            raise RuntimeError('Three-slot peer is not freshly updating: ' + ieee)
+    record.update(
+        allowed_peer_ieees=peers,
+        admission_peer_tokens={owner['ieee']:owner['token'] for owner,_ in owners},
+        active_slots_at_admission=len(owners)+1,
+    )
+    return True
 
 
 def require_profile_authority(profile):
@@ -126,14 +223,15 @@ def require_profile_authority(profile):
         raise ValueError('Network lock authority must be independent of workdir')
     base = authority_path(root, network_id)
     slots = profile.get('parallel_ota_max', 1)
-    if type(slots) is not int or slots not in (1, 2):
-        raise ValueError('parallel_ota_max must be the integer 1 or 2')
+    if type(slots) is not int or slots not in (1, 2, *MULTI_SLOTS):
+        raise ValueError('parallel_ota_max must be an integer from 1 to %d' % MAX_SLOTS)
     if slots == 1:
         return base
     ieee = str(profile.get('ieee') or '').lower()
     if not _IEEE_RE.fullmatch(ieee):
         raise ValueError('Two-slot campaign must pin the device IEEE')
-    _validate_dual_peers(ieee, profile.get('concurrent_ota_ieees'))
+    (_validate_three_peers(ieee, profile.get('concurrent_ota_ieees') or [])
+     if slots in MULTI_SLOTS else _validate_dual_peers(ieee, profile.get('concurrent_ota_ieees')))
     if profile.get('preflash_role') != profile.get('postflash_role'):
         raise ValueError('Two-slot pilot permits only same-role updates')
     if profile.get('force_test_transition') is True:
@@ -147,8 +245,9 @@ def require_profile_authority(profile):
     from bseed_ota_block_policy import check_block_bytes
     check_block_bytes(profile, allowed=(32, 48))
     delay = profile.get('response_delay_ms')
-    if type(delay) is not int or delay < 1800:
-        raise ValueError('Two-slot initial pilot requires >=1800ms per-device response pacing')
+    minimum = MULTI_SLOT_MIN_DELAY_MS.get(slots, 1800)
+    if type(delay) is not int or delay < minimum:
+        raise ValueError('%d-slot OTA requires >=%dms per-device response pacing' % (slots, minimum))
     return dual_slot_path(base, ieee)
 
 
@@ -237,7 +336,9 @@ def ownership_diagnosis(record):
 
 
 def acquire(path, *, network_id, token, device, ieee, image_sha256,
-            parallel_allowed_ieees=None):
+            parallel_allowed_ieees=None, legacy_peer_work_lock=None,
+            active_peer_work_lock=None, completed_peer_work_lock=None,
+            parallel_ota_max=None, peer_work_locks=None, work_lock_path=None):
     """Acquire a single or opt-in two-slot lease atomically per coordinator.
 
     In two-slot mode both participants must explicitly allowlist each other.
@@ -248,6 +349,11 @@ def acquire(path, *, network_id, token, device, ieee, image_sha256,
     path.parent.mkdir(parents=True, exist_ok=True)
     base, slot_ieee = _lease_group(path)
     dual = slot_ieee is not None
+    triple = dual and parallel_ota_max in MULTI_SLOTS
+    if parallel_ota_max not in (None, 1, 2, *MULTI_SLOTS):
+        raise ValueError('Invalid parallel_ota_max at lease acquisition')
+    if not dual and parallel_ota_max in MULTI_SLOTS:
+        raise ValueError('Three-slot admission must use a per-IEEE slot')
     target = str(ieee).lower()
     if not _IEEE_RE.fullmatch(target):
         raise ValueError('Network lease requires a full target IEEE')
@@ -255,7 +361,8 @@ def acquire(path, *, network_id, token, device, ieee, image_sha256,
         raise ValueError('Two-slot lease does not belong to requested IEEE')
     if not dual and parallel_allowed_ieees:
         raise ValueError('Legacy single-slot lease cannot allow concurrent peers')
-    peers = _validate_dual_peers(target, parallel_allowed_ieees) if dual else []
+    peers = (_validate_three_peers(target, parallel_allowed_ieees or []) if triple
+             else _validate_dual_peers(target, parallel_allowed_ieees) if dual else [])
     record = {
         'schema': SCHEMA,
         'network_id': network_id,
@@ -269,24 +376,200 @@ def acquire(path, *, network_id, token, device, ieee, image_sha256,
         'updated_at': now_iso(),
     }
     if dual:
-        record.update(parallel_ota_max=2, allowed_peer_ieees=peers)
+        record.update(parallel_ota_max=parallel_ota_max if triple else 2, allowed_peer_ieees=peers)
+        if triple:
+            if not work_lock_path or Path(work_lock_path).name != 'ACTIVE_LOCK.json':
+                raise ValueError('Three-slot owner must pin its work lock')
+            record['work_lock_path'] = str(Path(work_lock_path).resolve())
     with _coordinator_mutex(base):
         slots = _active_slots(base)
-        if dual:
-            if base.exists():
-                raise RuntimeError('Legacy network OTA ownership exists; two-slot admission refused')
-            if len(slots) >= 2:
-                raise RuntimeError('Both parallel OTA coordinator slots are occupied')
-            if any(x['ieee'] == target for x in slots):
+        if triple:
+            _validate_three_slot_admission(
+                base, slots, record, peers=peers,
+                legacy_peer_work_lock=legacy_peer_work_lock,
+                active_peer_work_lock=active_peer_work_lock,
+                peer_work_locks=peer_work_locks)
+        elif dual:
+            chained = False
+            if completed_peer_work_lock:
+                # The operator permits the NEXT active OTA while keeping both
+                # successful but hardware-unaccepted transactions immutable.
+                # There may be three slot records, but only TWO are active.
+                # It requires the exact historical chain:
+                #   legacy finished -> first peer finished -> second peer active
+                #   -> this one starts. Every token/IEEE/OTA hash is pinned.
+                if not base.exists() or len(slots) != 2 or not legacy_peer_work_lock or not active_peer_work_lock:
+                    raise RuntimeError('Verified completed+active succession chain not present')
+                legacy = read_lock(base)
+                done = [r for r in slots if r.get('phase') == 'ota_transfer_ok_postflash_unverified']
+                running = [r for r in slots if r.get('phase') == 'ota_running']
+                if len(done)!=1 or len(running)!=1:
+                    raise RuntimeError('Requires exactly one completed and one actively updating peer')
+                done,running=done[0],running[0]
+                if not (legacy.get('network_id')==network_id and
+                        legacy.get('phase')=='ota_transfer_ok_postflash_unverified' and
+                        done.get('network_id')==network_id and
+                        running.get('network_id')==network_id and
+                        running.get('ieee')==peers[0] and
+                        done.get('mixed_legacy_peer_ieee')==legacy.get('ieee') and
+                        done.get('mixed_legacy_peer_token')==legacy.get('token') and
+                        running.get('mixed_completed_legacy_ieee')==legacy.get('ieee') and
+                        running.get('mixed_completed_legacy_token')==legacy.get('token') and
+                        running.get('mixed_active_peer_ieee')==done.get('ieee') and
+                        running.get('mixed_active_peer_token')==done.get('token') and
+                        done.get('allowed_peer_ieees')==[legacy['ieee']] and
+                        running.get('allowed_peer_ieees')==[done['ieee']]):
+                    raise RuntimeError('Exact earlier-transaction chain does not match')
+                checks = [
+                    (legacy, Path(legacy_peer_work_lock), base),
+                    (done, Path(completed_peer_work_lock), dual_slot_path(base, done['ieee'])),
+                    (running, Path(active_peer_work_lock), dual_slot_path(base, running['ieee']))]
+                for owner, work_path, expected_lease in checks:
+                    work_path=work_path.expanduser().resolve()
+                    if work_path.name != 'ACTIVE_LOCK.json' or not work_path.is_file():
+                        raise RuntimeError('One historical campaign lock missing')
+                    work=json.loads(work_path.read_text(encoding='utf8'))
+                    expected_phase=owner['phase']
+                    if (work.get('ieee'),work.get('token'),work.get('sha256'),
+                        work.get('phase'),Path(work.get('network_lock') or '').resolve()) != (
+                            owner['ieee'],owner['token'],owner['image_sha256'],
+                            expected_phase,expected_lease.resolve()):
+                        raise RuntimeError('Local and shared campaign ownership differ')
+                    if expected_phase=='ota_transfer_ok_postflash_unverified':
+                        reply=work.get('response') or {}
+                        last=json.loads((work_path.parent/'LIVE_STATUS.json').read_text(encoding='utf8'))
+                        if (reply.get('status')!='ok' or
+                            reply.get('transaction')!=owner['token'] or
+                            (reply.get('data') or {}).get('id')!=owner['ieee'] or
+                            last.get('token')!=owner['token'] or
+                            last.get('phase')!=expected_phase or
+                            (last.get('update') or {}).get('state')!='idle'):
+                            raise RuntimeError('Historical transport not provably complete/idle')
+                    else:
+                        last=json.loads((work_path.parent/'LIVE_STATUS.json').read_text(encoding='utf8'))
+                        at=dt.datetime.fromisoformat(last['observed_at'])
+                        if at.tzinfo is None:
+                            raise RuntimeError('Active peer status timestamp lacks timezone')
+                        age=(dt.datetime.now(dt.timezone.utc)-at.astimezone(dt.timezone.utc)).total_seconds()
+                        progress=(last.get('update') or {}).get('progress')
+                        if not (0<=age<=120 and last.get('ieee')==owner['ieee'] and
+                                last.get('token')==owner['token'] and
+                                last.get('phase')=='ota_running' and
+                                (last.get('update') or {}).get('state')=='updating' and
+                                type(progress) in (int,float) and 0<=progress<100):
+                            raise RuntimeError('Live OTA peer is not freshly progressing')
+                record.update(chain_legacy_ieee=legacy['ieee'],
+                              chain_legacy_token=legacy['token'],
+                              chain_completed_ieee=done['ieee'],
+                              chain_completed_token=done['token'],
+                              chain_active_ieee=running['ieee'],
+                              chain_active_token=running['token'])
+                chained=True
+            elif base.exists():
+                # Keep the original singleton immutable. One previously
+                # completed singleton plus TWO verified live dual-slot peers
+                # still means at most two simultaneous OTA transfers.
+                if not legacy_peer_work_lock:
+                    raise RuntimeError('Legacy network OTA ownership exists; two-slot admission refused')
+                if len(slots) > 1:
+                    raise RuntimeError('Legacy mixed mode has no free additional slot')
+                owner = read_lock(base)
+                peer_path = Path(legacy_peer_work_lock).expanduser().resolve()
+                if peer_path.name != 'ACTIVE_LOCK.json' or not peer_path.is_file():
+                    raise RuntimeError('Exact legacy peer work lock missing')
+                peer_lock = json.loads(peer_path.read_text(encoding='utf8'))
+                expected_legacy_phase = ('ota_transfer_ok_postflash_unverified'
+                                         if slots else 'ota_running')
+                if (owner.get('network_id'), owner.get('ieee'), owner.get('phase'),
+                    owner.get('image_sha256')) != (
+                        network_id, peer_lock.get('ieee'), expected_legacy_phase, image_sha256):
+                    raise RuntimeError('Legacy owner network/image/phase mismatch')
+                if (peer_lock.get('ieee'), peer_lock.get('token'), peer_lock.get('sha256'),
+                    peer_lock.get('phase'), Path(peer_lock.get('network_lock') or '').resolve()) != (
+                        owner['ieee'], owner['token'], image_sha256, expected_legacy_phase, base.resolve()):
+                    raise RuntimeError('Legacy work lock does not match intact network lease')
+                progress_file = peer_path.parent / 'LIVE_STATUS.json'
+                live = json.loads(progress_file.read_text(encoding='utf8'))
+                if live.get('ieee') != owner['ieee'] or live.get('token') != owner['token']:
+                    raise RuntimeError('Legacy status identity mismatch')
+                if slots:
+                    if not active_peer_work_lock:
+                        raise RuntimeError('Active peer work lock required for mixed completed+active mode')
+                    first = slots[0]
+                    if (first.get('network_id'), first.get('ieee'), first.get('phase'),
+                        first.get('image_sha256'), first.get('mixed_legacy_peer_ieee'),
+                        first.get('mixed_legacy_peer_token'),
+                        first.get('allowed_peer_ieees')) != (
+                            network_id, peers[0], 'ota_running', image_sha256,
+                            owner['ieee'], owner['token'], [owner['ieee']]):
+                        raise RuntimeError('Mixed active peer not traceable to completed legacy owner')
+                    reply = peer_lock.get('response') or {}
+                    if (reply.get('status') != 'ok'
+                        or reply.get('transaction') != owner['token']
+                        or (reply.get('data') or {}).get('id') != owner['ieee']
+                        or live.get('phase') != 'ota_transfer_ok_postflash_unverified'
+                        or (live.get('update') or {}).get('state') != 'idle'
+                        or (live.get('update') or {}).get('installed_version') !=
+                           (live.get('update') or {}).get('latest_version')):
+                        raise RuntimeError('Completed legacy transport and idle status are not proven')
+                    active_path=Path(active_peer_work_lock).expanduser().resolve()
+                    if active_path.name != 'ACTIVE_LOCK.json' or not active_path.is_file():
+                        raise RuntimeError('Active peer campaign lock missing')
+                    active=json.loads(active_path.read_text(encoding='utf8'))
+                    if (active.get('ieee'),active.get('token'),active.get('sha256'),
+                        active.get('phase'),Path(active.get('network_lock') or '').resolve()) != (
+                            first['ieee'],first['token'],image_sha256,
+                            'ota_running',dual_slot_path(base,first['ieee']).resolve()):
+                        raise RuntimeError('Active peer local ownership mismatch')
+                    active_live=json.loads((active_path.parent / 'LIVE_STATUS.json').read_text(encoding='utf8'))
+                    observed_at=dt.datetime.fromisoformat(active_live['observed_at'])
+                    if observed_at.tzinfo is None:
+                        raise RuntimeError('Active peer status must have timezone')
+                    age=(dt.datetime.now(dt.timezone.utc)-observed_at.astimezone(dt.timezone.utc)).total_seconds()
+                    progress=(active_live.get('update') or {}).get('progress')
+                    if not (0<=age<=120 and active_live.get('ieee')==first['ieee']
+                            and active_live.get('token')==first['token']
+                            and active_live.get('phase')=='ota_running'
+                            and (active_live.get('update') or {}).get('state')=='updating'
+                            and type(progress) in (int,float) and 0<=progress<100):
+                        raise RuntimeError('Active peer not freshly updating')
+                    chained=True
+                    record.update(mixed_completed_legacy_ieee=owner['ieee'],
+                                  mixed_completed_legacy_token=owner['token'],
+                                  mixed_active_peer_ieee=first['ieee'],
+                                  mixed_active_peer_token=first['token'])
+                else:
+                    observed_at=dt.datetime.fromisoformat(live['observed_at'])
+                    if observed_at.tzinfo is None:
+                        raise RuntimeError('Legacy peer status timestamp not timezone-aware')
+                    age=(dt.datetime.now(dt.timezone.utc)-
+                         observed_at.astimezone(dt.timezone.utc)).total_seconds()
+                    progress=(live.get('update') or {}).get('progress')
+                    if not (owner['ieee']==peers[0] and 0<=age<=120
+                            and live.get('phase')=='ota_running'
+                            and (live.get('update') or {}).get('state')=='updating'
+                            and type(progress) in (int,float) and 0<=progress<100):
+                        raise RuntimeError('Legacy peer not freshly updating')
+                    record.update(mixed_legacy_peer_ieee=owner['ieee'],
+                                  mixed_legacy_peer_token=owner['token'],
+                                  mixed_legacy_peer_lock=str(peer_path))
+            elif legacy_peer_work_lock or active_peer_work_lock:
+                raise RuntimeError('Explicit mixed mode requires existing legacy singleton')
+            if len(slots)>=2 and not completed_peer_work_lock:
+                raise RuntimeError('Both parallel coordinator slots occupied')
+            if any(x['ieee']==target for x in slots):
                 raise RuntimeError('Target IEEE already owns a parallel OTA slot')
-            if slots:
-                peer = slots[0]
-                if (peer.get('network_id') != network_id or
-                    peer['ieee'] != peers[0] or
-                    peer.get('allowed_peer_ieees') != [target]):
-                    raise RuntimeError('Two-slot campaigns require reciprocal exact-IEEE peer allowlists')
+            if slots and not chained:
+                peer=slots[0]
+                if (peer.get('ieee') != peers[0] or
+                        peer.get('allowed_peer_ieees') != [target]):
+                    raise RuntimeError('Two-slot requires reciprocal exact active peer')
                 if peer.get('phase') != 'ota_running':
-                    raise RuntimeError('Second OTA slot requires its reciprocal peer to be actively updating')
+                    raise RuntimeError('Second slot requires peer actively updating')
+                if (peer.get('network_id')!=network_id or peer['ieee']!=peers[0]
+                    or peer.get('allowed_peer_ieees')!=[target]
+                    or peer.get('phase')!='ota_running'):
+                    raise RuntimeError('Two-slot requires reciprocal exact active peer')
         else:
             if slots:
                 raise RuntimeError('Two-slot OTA ownership exists; legacy single-slot admission refused')

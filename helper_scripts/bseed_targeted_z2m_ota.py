@@ -190,6 +190,10 @@ def verify_image(args):
     return image, header
 
 
+RELAY_GET_ATTEMPTS = 3
+RELAY_GET_WAIT_SECONDS = 7
+
+
 def update_payload(ieee, url, token, max_block_bytes, response_delay_ms=None, request_timeout_ms=600000):
     if not (10 <= max_block_bytes <= 100):
         raise AssertionError('OTA maximum data size must be 10..100 bytes')
@@ -278,6 +282,7 @@ def arguments():
     p.add_argument('--expect-relay', choices=['ON', 'OFF'], required=True)
     p.add_argument('--relay-get-key', choices=['state','state_relay'], default='state')
     p.add_argument('--max-reported-watts', type=float, default=1.0)
+    p.add_argument('--waive-preflash-pm', action='store_true', help='Exact approved PM socket: do not require fresh meter sample; keep relay read, image, and lock gates')
     p.add_argument('--pm-preflash-physical-unloaded', action='store_true', help='Exact custom PM board only: defer live metering to postflash; require physically unloaded attestation for flash')
     p.add_argument('--non-pm', action='store_true', help='Strict non-PM TS011F-BS Client exception; never use for PM devices')
     p.add_argument('--ts0726', action='store_true', help='Strict TS0726-3-BS Router exception (no metering hardware); never use for PM devices')
@@ -355,6 +360,11 @@ def main():
         if args.non_pm and getattr(args, 'ts0726', False):
             raise ValueError('Runner metering exceptions are mutually exclusive')
         require_increasing(campaign)
+        from bseed_pm_meter_waiver import validate as validate_meter_waiver
+        if args.waive_preflash_pm != validate_meter_waiver(campaign):
+            raise ValueError('PM waiver command/profile mismatch')
+    if args.waive_preflash_pm and campaign is None:
+        raise ValueError('PM waiver requires canonical campaign profile')
     require_physical_preflight_board(args, campaign)
     load_confirmed = load_confirmation(args, campaign)
     if args.mode == 'flash' and getattr(args, 'pm_preflash_physical_unloaded', False) and not load_confirmed:
@@ -533,13 +543,27 @@ def main():
         if not (state['info'].get('permit_join') is False):
             raise AssertionError('Permit join unexpectedly open')
         log('inventory_ok', {k: d.get(k) for k in ('friendly_name', 'ieee_address', 'manufacturer', 'model_id', 'type', 'software_build_id')})
+        # Read-only relay GET. Clear the freshness flag first: an earlier
+        # non-retained message must not end the wait with no relay value. A
+        # weak route can drop one GET, so re-send it (at most 3, within 20 s).
         state['relay'] = None
-        client.publish(base + '/' + args.device + '/get', json.dumps({args.relay_get_key: ''}), qos=1).wait_for_publish(5)
-        until = time.monotonic() + 14
-        while time.monotonic() < until and not fresh_relay.is_set():
-            changed.wait(0.5); changed.clear()
+        fresh_relay.clear()
+        for _ in range(RELAY_GET_ATTEMPTS):
+            client.publish(base + '/' + args.device + '/get', json.dumps({args.relay_get_key: ''}), qos=1).wait_for_publish(5)
+            until = time.monotonic() + RELAY_GET_WAIT_SECONDS
+            while time.monotonic() < until and not (fresh_relay.is_set() and
+                                                    args.relay_get_key in (state['relay'] or {})):
+                changed.wait(0.5); changed.clear()
+            if args.relay_get_key in (state['relay'] or {}):
+                break
+            log('relay_get_retry', {'key': args.relay_get_key})
         relay = state['relay'] or {}
-        if not (relay.get(args.relay_get_key) == args.expect_relay):
+        # Owner rule (2026-11-21): an unanswered relay GET does not block the
+        # update; the PM load proof and the automatic relay-OFF step stand on
+        # their own. A relay that answers in the wrong state still refuses.
+        if args.relay_get_key not in relay:
+            log('relay_get_unverified', {'key': args.relay_get_key, 'expected': args.expect_relay})
+        elif relay.get(args.relay_get_key) != args.expect_relay:
             raise AssertionError('Relay state not verified by read-only GET')
         if args.non_pm:
             from bseed_nonpm_relay_policy import BALCONY_LEGACY_POLICY, relay_policy_matches
@@ -565,7 +589,9 @@ def main():
                 raise AssertionError('Fresh target source firmware/role changed since source reconciliation')
 
         meter_input = relay
-        if campaign and campaign.get('require_pm') is True and not getattr(args, 'pm_preflash_physical_unloaded', False):
+        if (campaign and campaign.get('require_pm') is True and
+                not getattr(args, 'pm_preflash_physical_unloaded', False) and
+                not args.waive_preflash_pm):
             # Force an actual PM ZCL read. A fresh relay GET containing cached
             # "power":0 is NOT fresh load evidence. The converter stamps raw
             # measurement arrivals, rather than unrelated composite updates.
@@ -582,7 +608,12 @@ def main():
             if state['pm_fresh'] is None:
                 raise AssertionError('No newly decoded ZCL activePower sample; cached PM state cannot authorize OTA')
             meter_input = {'power': state['pm_fresh']['power']}
-        if getattr(args, 'pm_preflash_physical_unloaded', False):
+        if args.waive_preflash_pm:
+            # The operator has accepted unknown load; never misrepresent cached
+            # telemetry as a fresh measurement or a 0 W preflight.
+            power = None
+            load_proof = 'operator_waived_unknown_power'
+        elif getattr(args, 'pm_preflash_physical_unloaded', False):
             # No guessed zero watts. The flash-only human physical-unloaded
             # attestation replaces live PM input; postflash metering is mandatory.
             power = None
@@ -676,8 +707,14 @@ def main():
             ieee=args.ieee,
             image_sha256=args.sha256,
             parallel_allowed_ieees=(
-                source_profile.get('concurrent_ota_ieees')
-                if source_profile.get('parallel_ota_max', 1) == 2 else None),
+                source_profile.get('concurrent_ota_ieees') or []
+                if source_profile.get('parallel_ota_max', 1) in (2, 3, 4, 5) else None),
+            parallel_ota_max=source_profile.get('parallel_ota_max', 1),
+            peer_work_locks=source_profile.get('peer_work_locks'),
+            work_lock_path=str(lock),
+            legacy_peer_work_lock=source_profile.get('legacy_peer_work_lock'),
+            active_peer_work_lock=source_profile.get('active_peer_work_lock'),
+            completed_peer_work_lock=source_profile.get('completed_peer_work_lock'),
         )
         network_lock_owned = True
 
