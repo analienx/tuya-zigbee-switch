@@ -100,8 +100,18 @@ class Fake:
         if mode == 'flash':
             phase, progress = self.flash_results.pop(0)
             self.set_phase(phase)
-            if progress is not None:
+            self.flashes = getattr(self, 'flashes', 0) + 1
+            log = self.work / ('ota_bseed-ota-%d.jsonl' % self.flashes)
+            if progress is not None:  # an update was really sent
                 self.history.append({'max_progress': progress})
+                rows = [{'event': 'ota_request_sent', 'value': {'ieee': IEEE, 'image_sha256': 'a' * 64,
+                                                               'transaction': 't%d' % self.flashes}},
+                        {'event': 'device_state', 'value': {'update': {'progress': progress}}}]
+            else:  # refused before sending, as the campaign logs it
+                rows = [{'event': 'campaign_error', 'value': {
+                    'error': "RuntimeError('Three-slot peer is not freshly updating: 0xa4c13800000000ff')",
+                    'ota_was_sent': False}}]
+            log.write_text('\n'.join(json.dumps(r) for r in rows) + '\n')
             return 0 if phase in ('postflash_candidate', ap.POSTFLASH_PENDING) else 2
         if mode == 'postflash':
             self.set_phase(self.postflash.pop(0))
@@ -124,10 +134,13 @@ def test_resumes_until_installed_without_live_rejoin_beside_a_peer(tmp_path, mon
     assert result['state'] == 'installed'
     assert fake.calls.count('flash') == 4 and fake.calls.count('postflash') == 2
     assert fake.joins == ['none', 'none']
+    # The flash that sent nothing is a refusal, not an attempt.
     assert [a['ended_phase'] for a in result['attempts']] == [
-        'update_error', 'update_error', 'preflight_abort', ap.POSTFLASH_PENDING]
+        'update_error', 'update_error', ap.POSTFLASH_PENDING]
+    assert [r['phase'] for r in result['refusals']] == ['preflight_abort']
+    assert 'not freshly updating' in result['refusals'][0]['reason']
     saved = json.loads((fake.work / ap.STATE_FILE).read_text())
-    assert saved['state'] == 'installed' and len(saved['attempts']) == 4
+    assert saved['state'] == 'installed' and len(saved['attempts']) == 3
 
 
 def test_stops_when_progress_no_longer_improves(tmp_path, monkeypatch):
@@ -256,3 +269,49 @@ def test_exact_ieee_and_unloaded_confirmation_are_required(tmp_path, monkeypatch
         ap.Autopilot(Path('p.json'), '0x0000000000000000')
     with pytest.raises(ValueError, match='load-unplugged'):
         ap.Autopilot(Path('p.json'), IEEE)
+
+
+def test_refused_admissions_wait_for_the_peer_and_do_not_use_attempts(tmp_path, monkeypatch):
+    cfg = profile(tmp_path, parallel_ota_max=3, source_rejoin_strategy='none')
+    refused = (ap.sup.READY_PHASE, None)
+    fake = Fake(tmp_path, monkeypatch, cfg, [refused] * 5 + [('postflash_candidate', 100.0)])
+    sleeps = []
+    monkeypatch.setattr(ap.time, 'sleep', sleeps.append)
+    pilot = ap.Autopilot(Path(cfg['workdir']) / 'p.json', IEEE, max_attempts=2, peer_wait_seconds=60)
+    result = pilot.run()
+    assert result['state'] == 'installed'
+    assert len(result['attempts']) == 1 and len(result['refusals']) == 5
+    assert sleeps.count(60) == 5 and result['peer_wait_seconds_used'] == 300
+
+
+def test_peer_wait_has_a_budget(tmp_path, monkeypatch):
+    cfg = profile(tmp_path, parallel_ota_max=3, source_rejoin_strategy='none')
+    fake = Fake(tmp_path, monkeypatch, cfg, [(ap.sup.READY_PHASE, None)] * 10)
+    result = ap.Autopilot(Path(cfg['workdir']) / 'p.json', IEEE, peer_wait_seconds=60,
+                          peer_wait_budget_seconds=120).run()
+    assert result['state'] == 'peer_wait_timeout'
+    assert fake.calls.count('flash') == 3 and result['attempts'] == []
+
+
+def test_stop_file_ends_the_run_between_attempts(tmp_path, monkeypatch):
+    cfg = profile(tmp_path)
+    fake = Fake(tmp_path, monkeypatch, cfg, [('update_error', 20.0), ('update_error', 30.0)])
+    pilot = ap.Autopilot(Path(cfg['workdir']) / 'p.json', IEEE)
+    original = fake.run_logged
+
+    def flash_then_stop(cmd, log):
+        rc = original(cmd, log)
+        if cmd[cmd.index('--mode') + 1] == 'flash':
+            (fake.work / ap.STOP_FILE).write_text('stop')
+        return rc
+    monkeypatch.setattr(ap.sup, 'run_logged', flash_then_stop)
+    result = pilot.run()
+    assert result['state'] == 'stopped_by_operator'
+    assert fake.calls.count('flash') == 1  # the running attempt finished; no new one started
+
+
+def test_tiny_gains_count_as_stagnant_with_a_minimum_gain():
+    history = [{'max_progress': 53.98}, {'max_progress': 54.2}, {'max_progress': 54.3}, {'max_progress': 54.4}]
+    assert not ap.progress_gate(history, 2, min_gain=0.5)['allow_retry']
+    assert ap.progress_gate(history, 2)['allow_retry']
+    assert ap.progress_gate([{'max_progress': 0.3}], 2, min_gain=0.5)['best_progress'] == 0.3

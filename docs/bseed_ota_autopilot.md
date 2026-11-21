@@ -81,12 +81,26 @@ The autopilot repeats until the socket is installed or a stop rule applies:
    unconfirmed (`ota_transfer_ok_postflash_unverified`) gets up to
    `--postflash-retries` re-runs of `postflash`.
 
+A flash that sends nothing is **not an attempt**. That covers being refused
+at slot admission (for example while a peer is between attempts) and being
+stopped by its own pre-checks. The autopilot records it under `refusals`,
+waits `--peer-wait-seconds` (60), and tries again. After
+`--peer-wait-budget-seconds` (1800) of such waiting it stops with
+`peer_wait_timeout`. (The first live pair on 2026-11-21 burned all 12
+attempts on KitchenSocketLeft in two minutes this way.)
+
+To stop a run cleanly, use `bseed_ota_autopilot.py stop --profile P`. It
+writes `AUTOPILOT_STOP` in the workdir. The attempt in progress finishes, and
+the autopilot then exits with `stopped_by_operator`; a new run refuses to
+start until the file is removed.
+
 Stop rules:
 
 - `postflash_candidate` → `installed`. Releasing the lease still needs the
   owner's words (`migrate release`).
 - More than `--max-stagnant` (default 2) consecutive attempts that do not beat
-  the best progress so far → `progress_stalled`. One cheap dud, for example a
+  the best progress so far by more than `--min-gain` (0.5 percentage points)
+  → `progress_stalled`. One cheap dud, for example a
   lost GET, does not end the run.
 - `--max-attempts` (default 12) → `attempt_budget_exhausted`.
 - `ota_running` owned by another process, a non-recoverable phase, or a failed

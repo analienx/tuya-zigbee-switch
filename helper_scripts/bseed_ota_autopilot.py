@@ -57,6 +57,7 @@ if str(HELPERS) not in sys.path:
 import bseed_ota_resume_supervisor as sup  # noqa: E402
 
 STATE_FILE = "OTA_AUTOPILOT.json"
+STOP_FILE = "AUTOPILOT_STOP"
 INSTALLED = ("postflash_candidate", "postflash_accepted")
 POSTFLASH_PENDING = "ota_transfer_ok_postflash_unverified"
 OWNER_STALL_TIMEOUT_MS = 300000
@@ -90,17 +91,20 @@ def join_strategy(profile: dict[str, Any]) -> str:
     return "none" if multi_slot(profile) else profile.get("source_rejoin_strategy", "auto")
 
 
-def progress_gate(history: list[dict[str, Any]], max_stagnant: int) -> dict[str, Any]:
+def progress_gate(history: list[dict[str, Any]], max_stagnant: int,
+                  min_gain: float = 0.0) -> dict[str, Any]:
     """Allow a retry while the best progress keeps rising, tolerating a few duds.
 
     An attempt that sends nothing (relay GET lost, peer check) or stalls before
     its previous offset is cheap with fast stall detection, so up to
-    `max_stagnant` consecutive non-improving attempts are allowed.
+    `max_stagnant` consecutive non-improving attempts are allowed. An attempt
+    improves only when it beats the best by more than `min_gain` points, so a
+    crawl of a fraction of a percent per attempt cannot keep it going forever.
     """
     best, stagnant = 0.0, 0
     for attempt in history:
         progress = float(attempt.get("max_progress") or 0.0)
-        if progress > best:
+        if progress > best + min_gain or (progress > best and best == 0.0):
             best, stagnant = progress, 0
         else:
             stagnant += 1
@@ -162,6 +166,23 @@ def republish(profile: dict[str, Any], site: dict[str, Any],
             raise RuntimeError("republish step failed: " + " ".join(cmd[:2]))
 
 
+def ota_logs(work: Path) -> set[Path]:
+    return set(work.glob("ota_bseed-ota-*.jsonl"))
+
+
+def refusal_reason(paths: set[Path]) -> str | None:
+    """The campaign_error of a flash that sent nothing, if it logged one."""
+    for path in sorted(paths):
+        for line in path.read_text(encoding="utf8", errors="replace").splitlines():
+            try:
+                item = json.loads(line)
+            except ValueError:
+                continue
+            if item.get("event") == "campaign_error":
+                return str((item.get("value") or {}).get("error"))[:300]
+    return None
+
+
 def attempt_summary(path: Path | None) -> dict[str, Any]:
     """First/last progress, duration and the Zigbee2MQTT error of one attempt log."""
     out: dict[str, Any] = {"log": str(path) if path else None}
@@ -209,9 +230,14 @@ class Autopilot:
                  max_attempts: int = 12, max_stagnant: int = 2, step_retries: int = 2,
                  step_retry_seconds: float = 30, postflash_retries: int = 2,
                  reconcile_wait_seconds: int = 900, reconcile_retry_seconds: int = 20,
-                 site: dict[str, Any] | None = None):
+                 site: dict[str, Any] | None = None, min_gain: float = 0.5,
+                 peer_wait_seconds: float = 60, peer_wait_budget_seconds: float = 1800):
         self.profile_path = profile_path
         self.site = site
+        self.min_gain = min_gain
+        self.peer_wait_seconds, self.peer_wait_budget = peer_wait_seconds, peer_wait_budget_seconds
+        self.waited = 0.0
+        self.refusals: list[dict[str, Any]] = []
         self.confirm_ieee = confirm_ieee
         self.confirm_unloaded = confirm_unloaded
         self.max_attempts, self.max_stagnant = max_attempts, max_stagnant
@@ -241,8 +267,9 @@ class Autopilot:
                   "profile": str(self.profile_path), "image_sha256": self.profile["sha256"],
                   "phase": self.phase(), "advisories": self.advisories,
                   "join_strategy": join_strategy(self.profile),
-                  "progress_gate": progress_gate(history, self.max_stagnant),
-                  "attempts": self.attempts, "log": str(self.log), **extra}
+                  "progress_gate": progress_gate(history, self.max_stagnant, self.min_gain),
+                  "attempts": self.attempts, "refusals": self.refusals,
+                  "peer_wait_seconds_used": self.waited, "log": str(self.log), **extra}
         sup.write_json_atomic(self.work / STATE_FILE, record)
         print("AUTOPILOT", state, json.dumps({k: record[k] for k in ("phase", "progress_gate")}), flush=True)
         return record
@@ -263,6 +290,8 @@ class Autopilot:
     def run(self) -> dict[str, Any]:
         self.persist("starting")
         while True:
+            if (self.work / STOP_FILE).exists():
+                return self.persist("stopped_by_operator", reason="stop file found; no attempt running")
             phase = self.phase()
             if phase in INSTALLED:
                 return self.persist("installed")
@@ -272,7 +301,8 @@ class Autopilot:
                 return self.persist("blocked_active_transport",
                                     reason="another process owns a running transfer; prove it stopped first")
             if phase in sup.RECONCILABLE_PHASES:
-                gate = progress_gate(progress_history(self.work, self.profile), self.max_stagnant)
+                gate = progress_gate(progress_history(self.work, self.profile), self.max_stagnant,
+                                     self.min_gain)
                 if not gate["allow_retry"]:
                     return self.persist("progress_stalled", reason="no new best progress in %d attempts"
                                         % gate["stagnant_attempts"])
@@ -317,11 +347,29 @@ class Autopilot:
             except (RuntimeError, ValueError) as error:
                 return self.persist("deferred_release_failed", reason=str(error))
 
+            if (self.work / STOP_FILE).exists():
+                return self.persist("stopped_by_operator", reason="stop file found before flashing")
             attempt = {"number": len(self.attempts) + 1, "launched_at": sup.now()}
             self.attempts.append(attempt)
             self.persist("flashing", attempt=attempt["number"])
+            before = ota_logs(self.work)
             attempt["flash_exit"] = self.run_campaign("flash", confirm=True)
-            attempt.update(attempt_summary(sup.latest_ota_jsonl(self.work)))
+            new_logs = ota_logs(self.work) - before
+            if not any(sup.ota_attempt_progress(path, self.profile) is not None for path in new_logs):
+                # Nothing was sent (refused at admission, e.g. a peer between
+                # attempts, or stopped by the flash's own checks): not an
+                # attempt. Wait for the peer instead of spinning.
+                self.attempts.pop()
+                self.refusals.append({"at": sup.now(), "phase": self.phase(),
+                                      "reason": refusal_reason(new_logs)})
+                if self.waited >= self.peer_wait_budget:
+                    return self.persist("peer_wait_timeout",
+                                        reason="refused for %d s without sending an update" % self.waited)
+                self.persist("waiting_for_peer", reason=self.refusals[-1]["reason"])
+                time.sleep(self.peer_wait_seconds)
+                self.waited += self.peer_wait_seconds
+                continue
+            attempt.update(attempt_summary(max(new_logs, key=lambda path: path.stat().st_mtime)))
             attempt["ended_phase"] = self.phase()
             self.persist("attempt_finished", attempt=attempt["number"])
 
@@ -394,6 +442,9 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--step-retry-seconds", type=float, default=30)
     run.add_argument("--postflash-retries", type=int, default=2)
     run.add_argument("--site", help="private site.json: lets the autopilot re-publish a missing image")
+    run.add_argument("--min-gain", type=float, default=0.5)
+    run.add_argument("--peer-wait-seconds", type=float, default=60)
+    run.add_argument("--peer-wait-budget-seconds", type=float, default=1800)
     many = sub.add_parser("run-many", help="up to %d sockets in parallel, one autopilot each" % MAX_PARALLEL)
     many.add_argument("--profile", action="append", required=True)
     many.add_argument("--confirm-ieee", action="append", required=True)
@@ -403,7 +454,14 @@ def main(argv: list[str] | None = None) -> int:
     many.add_argument("--site", help="private site.json, passed to every autopilot")
     show = sub.add_parser("status")
     show.add_argument("--profile", required=True)
+    stop = sub.add_parser("stop", help="stop at the next safe point (never mid-transfer)")
+    stop.add_argument("--profile", required=True)
     args = parser.parse_args(argv)
+    if args.command == "stop":
+        work = Path(sup.campaign.load_profile(Path(args.profile).expanduser().resolve())["workdir"])
+        (work / STOP_FILE).write_text(sup.now() + "\n", encoding="utf8")
+        print("STOP_REQUESTED", work / STOP_FILE)
+        return 0
     if args.command == "run-many":
         paths = [Path(p).expanduser().resolve() for p in args.profile]
         results = run_many(paths, args.confirm_ieee, stagger_seconds=args.stagger_seconds,
@@ -422,9 +480,13 @@ def main(argv: list[str] | None = None) -> int:
     pilot = Autopilot(profile_path, args.confirm_ieee, confirm_unloaded=args.confirm_load_unplugged,
                       max_attempts=args.max_attempts, max_stagnant=args.max_stagnant,
                       step_retries=args.step_retries, step_retry_seconds=args.step_retry_seconds,
-                      postflash_retries=args.postflash_retries,
+                      postflash_retries=args.postflash_retries, min_gain=args.min_gain,
+                      peer_wait_seconds=args.peer_wait_seconds,
+                      peer_wait_budget_seconds=args.peer_wait_budget_seconds,
                       site=json.loads(Path(args.site).read_text(encoding="utf8")) if args.site else None)
     # Same per-workdir ownership as the resume supervisor: one owner at a time.
+    if (pilot.work / STOP_FILE).exists():
+        raise SystemExit("A stop file is present (%s); remove it to start again" % (pilot.work / STOP_FILE))
     result = sup.exclusive_supervisor(lambda _path: pilot.run())(profile_path)
     print(json.dumps(result, indent=2, default=str))
     return 0 if result["state"] == "installed" else 2
