@@ -98,6 +98,9 @@ def test_software_successor_recognized_without_changing_old_failure(tmp_path):
     path,old,config,live,now=evidence(tmp_path)
     assert proven(config,old=old,old_path=path,live=live,now=now)
     assert json.loads(path.read_text(encoding="utf8"))["phase"] == old["phase"]
+    # find_campaign_locks checks genuine current wall time, unlike the fixed
+    # historical fixture used to exercise the pure successor validator above.
+    live["lastSeen"] = dt.datetime.now(dt.timezone.utc).timestamp()*1000
     site={"campaign_root":str(tmp_path),"lock_search_roots":[],
         "devices":{"BedroomSocketBalcony":dict(
             ieee=IEEE,board="nonpm",role="EndDevice",expect_relay="OFF",
