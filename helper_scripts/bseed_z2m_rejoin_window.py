@@ -109,8 +109,46 @@ def permit_payload(seconds, router_name, transaction):
     return payload
 
 
+
+def validated_stock_router_rejoin(profile, lock, target, ieee, from_role, expect_role):
+    """Exact completed stock->custom Router canary: same Zigbee role, new NVM association.
+
+    This is a rejoin exception ONLY. It authorizes no firmware retry, reset,
+    device deletion, relay change or hardware acceptance.
+    """
+    if not isinstance(profile, dict) or not isinstance(lock, dict):
+        return False
+    response = lock.get('response') or {}
+    data = response.get('data') or {}
+    return (
+        from_role == expect_role == 'Router' and
+        profile.get('stock_router_conversion') is True and
+        profile.get('preflash_role') == profile.get('postflash_role') == 'Router' and
+        profile.get('ieee') == lock.get('ieee') == target.get('ieee_address') == ieee and
+        profile.get('device') == target.get('friendly_name') == lock.get('device') and
+        target.get('type') == 'Router' and
+        target.get('manufacturer') == profile.get('manufacturer') == '_TZ3000_b28wrpvx' and
+        target.get('model_id') == profile.get('model') == 'TS011F' and
+        profile.get('postflash_manufacturer') == 'b28wrpvx' and
+        profile.get('postflash_model') == 'TS011F-BS-PM' and
+        str(profile.get('postflash_build') or '').startswith('1.2.5-bseedr') and
+        profile.get('image_type') == 54179 and
+        str(profile.get('file_version', '')).lower() == '0xffffffff' and
+        profile.get('sha256') == lock.get('sha256') and
+        profile.get('relay_state_policy') == 'preserve' and
+        profile.get('auto_relay_off') is False and
+        profile.get('expect_relay') == (lock.get('preflash_state') or {}).get('state') == 'OFF' and
+        lock.get('phase') == 'ota_transfer_ok_postflash_unverified' and
+        response.get('status') == 'ok' and
+        response.get('transaction') == lock.get('token') and
+        data.get('id') == ieee and
+        (data.get('from') or {}).get('file_version') == 77 and
+        (data.get('to') or {}).get('file_version') == 0xffffffff
+    )
+
+
 def validate_recovery(target_ieee, confirm_ieee, router_name, inventory, permit_join, lock,
-                      network_wide=False, from_role=None, expect_role=None):
+                      network_wide=False, from_role=None, expect_role=None, stock_router_profile=None):
     if confirm_ieee != target_ieee: raise ValueError('Explicit target IEEE confirmation required')
     if permit_join is not False: raise ValueError('Joining already open; do not override another campaign')
     if lock.get('ieee') != target_ieee or lock.get('phase') not in ('ota_transfer_ok_postflash_unverified','update_ok'):
@@ -121,8 +159,11 @@ def validate_recovery(target_ieee, confirm_ieee, router_name, inventory, permit_
         if len(target) != 1: raise ValueError('Exact target not found')
         # Only a role migration needs a fresh association; same-role updates
         # rejoin with their retained network key and never open the network.
-        if from_role not in ('Router', 'EndDevice') or from_role == expect_role:
-            raise ValueError('Network-wide join is only for a role migration (--from-role != --expect-role)')
+        role_change = from_role in ('Router', 'EndDevice') and from_role != expect_role
+        stock_router = validated_stock_router_rejoin(
+            stock_router_profile, lock, target[0], target_ieee, from_role, expect_role)
+        if not role_change and not stock_router:
+            raise ValueError('Network-wide join needs a role migration or exact completed stock Router canary')
         if target[0].get('type') not in (from_role, expect_role):
             raise ValueError('Cached inventory type is neither --from-role nor --expect-role')
         return target[0], None
@@ -150,7 +191,9 @@ def arguments():
     p.add_argument('--expect-build',required=True)
     p.add_argument('--expect-role',required=True,choices=['Router','EndDevice'])
     p.add_argument('--from-role',choices=['Router','EndDevice'],
-                   help='Pre-OTA role; required with --network-wide (must differ from --expect-role)')
+                   help='Pre-OTA role; for stock Router rejoin use Router with --stock-router-profile')
+    p.add_argument('--stock-router-profile',
+                   help='Exact workdir/profile.json for a transport-complete stock Router->custom Router canary')
     return p.parse_args()
 
 
@@ -161,7 +204,14 @@ def main():
     window_seconds,total_seconds=window_budget(a.seconds,getattr(a,'total_seconds',None),network_wide)
     output=Path(a.output).expanduser().resolve()
     if output.is_relative_to(ROOT) or output.exists(): raise ValueError('Evidence must be new and outside git')
-    lock=json.loads(Path(a.campaign_lock).read_text(encoding='utf8'))
+    lock_path=Path(a.campaign_lock).resolve()
+    lock=json.loads(lock_path.read_text(encoding='utf8'))
+    stock_profile=None
+    if getattr(a, 'stock_router_profile', None):
+        profile_path=Path(a.stock_router_profile).resolve()
+        if not network_wide or profile_path != lock_path.with_name('profile.json'):
+            raise ValueError('Stock Router rejoin requires exact profile beside campaign lock and --network-wide')
+        stock_profile=json.loads(profile_path.read_text(encoding='utf8'))
     config=yaml.safe_load(Path(a.mqtt_config).read_text(encoding='utf8'))['mqtt']
     base=config.get('base_topic','zigbee2mqtt');token='bseed-rejoin-'+uuid.uuid4().hex
     state={'info':None,'inventory':None,'response':{},'events':[],'target_state':None,'candidate':None,
@@ -256,7 +306,7 @@ def main():
             raise RuntimeError('Missing bridge info or inventory')
         target,router=validate_recovery(a.ieee,a.confirm_ieee,permit_via,state['inventory'],
                                          state['info'].get('permit_join'),lock,network_wide,
-                                         getattr(a,'from_role',None),a.expect_role)
+                                         getattr(a,'from_role',None),a.expect_role,stock_profile)
         if target.get('friendly_name')!=a.target:raise RuntimeError('Target name/IEEE mismatch')
         print('RECOVERY_GATE',a.target,a.ieee,'network-wide' if network_wide else
               'via router '+router['friendly_name'],flush=True)

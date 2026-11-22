@@ -196,3 +196,20 @@ What to do:
   parent's own uplink (`zigbee_uplink_lqi` on the parent), not only the
   socket's. Run weak-route sockets alone, which also allows 1200 ms pacing.
 - Avoid simultaneously flashing a Router and its **currently confirmed** child. Check live parent/neighbor evidence; an old relationship is not proof of the current route.
+
+
+### Recovery: stock Router to custom Router after 100 percent transfer
+
+The stock Router to custom Router canary retains the Router Zigbee role but
+may need a fresh network association due to the firmware change. A narrowly
+pinned, no-reflash network-wide rejoin now requires --stock-router-profile
+pointing to the profile.json in the same directory as the completed campaign
+ACTIVE_LOCK.json. Supply --network-wide --from-role Router --expect-role Router,
+target exact name/IEEE twice, expected BSEED r24 build, and a bounded
+--seconds 120 --total-seconds 300. The tool checks the successful stock OTA
+transaction (version 77 -> 0xffffffff), hash, model, role and preserved
+OFF relay, and refuses ordinary same-role updates, rejected OTAs and
+missing identities. Foreign joiners close the network immediately.
+Rejoining is only a candidate; a fresh target interview, identity, radio,
+relay and PM validation are required separately. Never automatically reflash
+a postflash-unverified target.
