@@ -15,7 +15,9 @@ Each loop:
 - the campaign's own `flash` runs, and the attempt's progress, duration and
   Zigbee2MQTT error are recorded in OTA_AUTOPILOT.json;
 - a finished transfer whose post-flash check was unconfirmed (e.g. an idle
-  meter) gets a bounded number of `postflash` re-runs.
+  meter) gets a bounded number of `postflash` re-runs;
+- a socket in use (relay in another state, load over the limit) is waited for,
+  never switched, and the host is kept out of idle sleep (Windows).
 
 The autopilot stops at the first of:
 - `postflash_candidate`;
@@ -38,6 +40,7 @@ abort is detected in 5 min (docs/bseed_ota_timeout_evidence_policy_20261010.md).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as dt
 import hashlib
 import json
@@ -213,8 +216,44 @@ def attempt_summary(path: Path | None) -> dict[str, Any]:
     return out
 
 
+# Preflight refusals that mean "the household is using this socket right now",
+# not "this campaign is broken": the relay answered in another state than the
+# profile expects, or the meter reads more than the profile allows. The
+# autopilot waits for them instead of stopping; it never toggles the relay.
+SOCKET_BUSY_ERRORS = ("Relay state not verified", "Power missing or above limit")
+
+
+def socket_busy(reason: str | None) -> bool:
+    return bool(reason) and any(marker in reason for marker in SOCKET_BUSY_ERRORS)
+
+
+@contextlib.contextmanager
+def keep_awake(platform: str = sys.platform, kernel=None):
+    """Keep the host from going to sleep while the autopilot runs.
+
+    2026-11-21: the laptop went to sleep 4 min into an attempt
+    (23:58:43-06:34:15). The flash's monitor froze, its deadline passed on
+    wake, and the attempt was recorded as unconfirmed after 6.5 h while
+    Zigbee2MQTT had long since given up. ES_SYSTEM_REQUIRED stops idle
+    sleep only; closing the lid or choosing Sleep still sleeps.
+    """
+    if platform != "win32":
+        yield False
+        return
+    if kernel is None:
+        import ctypes
+        kernel = ctypes.windll.kernel32
+    es_continuous, es_system_required = 0x80000000, 0x00000001
+    held = bool(kernel.SetThreadExecutionState(es_continuous | es_system_required))
+    try:
+        yield held
+    finally:
+        if held:
+            kernel.SetThreadExecutionState(es_continuous)
+
+
 def retry_step(step: Callable[[], int], retries: int, delay: float,
-               sleep: Callable[[float], None] = time.sleep) -> tuple[int, int]:
+               sleep: Callable[[float], None] | None = None) -> tuple[int, int]:
     """Run a read-only step up to `retries` extra times; return (exit, tries)."""
     tries = 0
     while True:
@@ -222,7 +261,7 @@ def retry_step(step: Callable[[], int], retries: int, delay: float,
         rc = step()
         if rc == 0 or tries > retries:
             return rc, tries
-        sleep(delay)
+        (sleep or time.sleep)(delay)
 
 
 class Autopilot:
@@ -231,8 +270,12 @@ class Autopilot:
                  step_retry_seconds: float = 30, postflash_retries: int = 2,
                  reconcile_wait_seconds: int = 900, reconcile_retry_seconds: int = 20,
                  site: dict[str, Any] | None = None, min_gain: float = 0.5,
-                 peer_wait_seconds: float = 60, peer_wait_budget_seconds: float = 1800):
+                 peer_wait_seconds: float = 60, peer_wait_budget_seconds: float = 1800,
+                 busy_wait_seconds: float = 300, busy_wait_budget_seconds: float = 4 * 3600):
         self.profile_path = profile_path
+        self.busy_wait_seconds, self.busy_wait_budget = busy_wait_seconds, busy_wait_budget_seconds
+        self.busy_waited = 0.0
+        self.busy_waits: list[dict[str, Any]] = []
         self.site = site
         self.min_gain = min_gain
         self.peer_wait_seconds, self.peer_wait_budget = peer_wait_seconds, peer_wait_budget_seconds
@@ -269,7 +312,8 @@ class Autopilot:
                   "join_strategy": join_strategy(self.profile),
                   "progress_gate": progress_gate(history, self.max_stagnant, self.min_gain),
                   "attempts": self.attempts, "refusals": self.refusals,
-                  "peer_wait_seconds_used": self.waited, "log": str(self.log), **extra}
+                  "peer_wait_seconds_used": self.waited, "socket_busy_waits": self.busy_waits[-20:],
+                  "log": str(self.log), **extra}
         sup.write_json_atomic(self.work / STATE_FILE, record)
         print("AUTOPILOT", state, json.dumps({k: record[k] for k in ("phase", "progress_gate")}), flush=True)
         return record
@@ -337,11 +381,26 @@ class Autopilot:
                 sup.restore_pm_source_telemetry(self.profile, self.work)
             except (RuntimeError, ValueError, OSError) as error:
                 return self.persist("pm_source_restore_failed", reason=str(error))
+            busy = None
             for mode in ("preflight", "check"):
+                before = ota_logs(self.work)
                 rc, tries = retry_step(lambda m=mode: self.run_campaign(m), self.step_retries,
                                        self.step_retry_seconds)
                 if rc:
-                    return self.persist(mode + "_failed", tries=tries)
+                    reason = refusal_reason(ota_logs(self.work) - before)
+                    if not socket_busy(reason):
+                        return self.persist(mode + "_failed", tries=tries, reason=reason)
+                    busy = reason
+                    break
+            if busy:
+                self.busy_waits.append({"at": sup.now(), "reason": busy})
+                if self.busy_waited >= self.busy_wait_budget:
+                    return self.persist("socket_busy_timeout", reason=busy,
+                                        busy_wait_seconds_used=self.busy_waited)
+                self.persist("waiting_for_socket", reason=busy)
+                time.sleep(self.busy_wait_seconds)
+                self.busy_waited += self.busy_wait_seconds
+                continue
             try:
                 sup.release_pm_after_deferred_reconcile(self.profile, self.work)
             except (RuntimeError, ValueError) as error:
@@ -445,6 +504,9 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--min-gain", type=float, default=0.5)
     run.add_argument("--peer-wait-seconds", type=float, default=60)
     run.add_argument("--peer-wait-budget-seconds", type=float, default=1800)
+    run.add_argument("--busy-wait-seconds", type=float, default=300,
+                     help="pause while the socket is in use (relay in another state, load over the limit)")
+    run.add_argument("--busy-wait-budget-seconds", type=float, default=4 * 3600)
     many = sub.add_parser("run-many", help="up to %d sockets in parallel, one autopilot each" % MAX_PARALLEL)
     many.add_argument("--profile", action="append", required=True)
     many.add_argument("--confirm-ieee", action="append", required=True)
@@ -464,10 +526,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "run-many":
         paths = [Path(p).expanduser().resolve() for p in args.profile]
-        results = run_many(paths, args.confirm_ieee, stagger_seconds=args.stagger_seconds,
-                           extra=["--max-attempts", str(args.max_attempts),
-                                  "--max-stagnant", str(args.max_stagnant)] +
-                                 (["--site", args.site] if args.site else []))
+        with keep_awake():
+            results = run_many(paths, args.confirm_ieee, stagger_seconds=args.stagger_seconds,
+                               extra=["--max-attempts", str(args.max_attempts),
+                                      "--max-stagnant", str(args.max_stagnant)] +
+                                     (["--site", args.site] if args.site else []))
         print(json.dumps(results, indent=2))
         return 0 if all(r["state"] == "installed" for r in results) else 2
     profile_path = Path(args.profile).expanduser().resolve()
@@ -483,11 +546,15 @@ def main(argv: list[str] | None = None) -> int:
                       postflash_retries=args.postflash_retries, min_gain=args.min_gain,
                       peer_wait_seconds=args.peer_wait_seconds,
                       peer_wait_budget_seconds=args.peer_wait_budget_seconds,
+                      busy_wait_seconds=args.busy_wait_seconds,
+                      busy_wait_budget_seconds=args.busy_wait_budget_seconds,
                       site=json.loads(Path(args.site).read_text(encoding="utf8")) if args.site else None)
     # Same per-workdir ownership as the resume supervisor: one owner at a time.
     if (pilot.work / STOP_FILE).exists():
         raise SystemExit("A stop file is present (%s); remove it to start again" % (pilot.work / STOP_FILE))
-    result = sup.exclusive_supervisor(lambda _path: pilot.run())(profile_path)
+    with keep_awake() as awake:
+        print("KEEP_AWAKE", "held" if awake else "unavailable on this host", flush=True)
+        result = sup.exclusive_supervisor(lambda _path: pilot.run())(profile_path)
     print(json.dumps(result, indent=2, default=str))
     return 0 if result["state"] == "installed" else 2
 

@@ -76,6 +76,7 @@ class Fake:
         self.flash_results, self.postflash = list(flash_results), list(postflash)
         self.history, self.calls, self.joins = [], [], []
         self.preflight_failures = 0
+        self.preflight_errors = []
         sup = ap.sup
         monkeypatch.setattr(sup.campaign, 'load_profile', lambda _p: dict(cfg))
         monkeypatch.setattr(sup, 'ota_progress_history', lambda _w, _p=None: list(self.history))
@@ -96,6 +97,12 @@ class Fake:
         self.calls.append(mode)
         if mode == 'preflight' and self.preflight_failures:
             self.preflight_failures -= 1
+            return 1
+        if mode == 'preflight' and self.preflight_errors:
+            self.refused = getattr(self, 'refused', 0) + 1
+            log = self.work / ('ota_bseed-ota-pre%d.jsonl' % self.refused)
+            log.write_text(json.dumps({'event': 'campaign_error', 'value': {
+                'error': self.preflight_errors.pop(0), 'ota_was_sent': False}}) + '\n')
             return 1
         if mode == 'flash':
             phase, progress = self.flash_results.pop(0)
@@ -308,6 +315,56 @@ def test_stop_file_ends_the_run_between_attempts(tmp_path, monkeypatch):
     result = pilot.run()
     assert result['state'] == 'stopped_by_operator'
     assert fake.calls.count('flash') == 1  # the running attempt finished; no new one started
+
+
+RELAY_OFF = "AssertionError('Relay state not verified by read-only GET')"
+
+
+def test_a_socket_in_use_is_waited_for_not_failed(tmp_path, monkeypatch):
+    cfg = profile(tmp_path)
+    fake = Fake(tmp_path, monkeypatch, cfg, [('postflash_candidate', 100.0)])
+    # Three tries each (1 + step_retries) for two busy rounds, then it is free.
+    fake.preflight_errors = [RELAY_OFF] * 3 + ["AssertionError('Power missing or above limit')"] * 3
+    sleeps = []
+    monkeypatch.setattr(ap.time, 'sleep', sleeps.append)
+    result = ap.Autopilot(Path(cfg['workdir']) / 'p.json', IEEE, busy_wait_seconds=300).run()
+    assert result['state'] == 'installed' and len(result['attempts']) == 1
+    assert sleeps.count(300) == 2
+    reasons = [w['reason'] for w in result['socket_busy_waits']]
+    assert 'Relay state' in reasons[0] and 'Power missing' in reasons[1]
+    assert fake.calls.count('flash') == 1
+
+
+def test_socket_busy_wait_has_a_budget_and_other_refusals_still_stop(tmp_path, monkeypatch):
+    cfg = profile(tmp_path)
+    fake = Fake(tmp_path, monkeypatch, cfg, [])
+    fake.preflight_errors = [RELAY_OFF] * 30
+    result = ap.Autopilot(Path(cfg['workdir']) / 'p.json', IEEE, busy_wait_seconds=300,
+                          busy_wait_budget_seconds=600).run()
+    assert result['state'] == 'socket_busy_timeout' and 'flash' not in fake.calls
+    assert len(result['socket_busy_waits']) == 3
+    cfg = profile(tmp_path / 'b')
+    fake = Fake(tmp_path, monkeypatch, cfg, [])
+    fake.preflight_errors = ["AssertionError('Identity/role mismatch')"] * 3
+    result = ap.Autopilot(Path(cfg['workdir']) / 'p.json', IEEE).run()
+    assert result['state'] == 'preflight_failed' and 'Identity' in result['reason']
+
+
+def test_keep_awake_holds_idle_sleep_off_on_windows_only():
+    class Kernel:
+        def __init__(self):
+            self.calls = []
+
+        def SetThreadExecutionState(self, flags):
+            self.calls.append(flags)
+            return 1
+    kernel = Kernel()
+    with ap.keep_awake('win32', kernel) as held:
+        assert held and kernel.calls == [0x80000001]
+    assert kernel.calls == [0x80000001, 0x80000000]
+    with ap.keep_awake('linux', kernel) as held:
+        assert held is False
+    assert len(kernel.calls) == 2
 
 
 def test_tiny_gains_count_as_stagnant_with_a_minimum_gain():

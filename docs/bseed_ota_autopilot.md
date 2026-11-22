@@ -89,6 +89,21 @@ waits `--peer-wait-seconds` (60), and tries again. After
 `peer_wait_timeout`. (The first live pair on 2026-11-21 burned all 12
 attempts on KitchenSocketLeft in two minutes this way.)
 
+**A socket in use is waited for, not failed.** If preflight refuses because the
+relay answers in another state than the profile expects, or because the meter
+reads more than `max_reported_watts`, someone is using the socket. The autopilot
+never toggles the relay. It records the refusal under `socket_busy_waits`,
+waits `--busy-wait-seconds` (300) and checks again. After
+`--busy-wait-budget-seconds` (4 h) it stops with `socket_busy_timeout`. Every
+other preflight refusal still stops the run, with its reason recorded.
+
+**The host is kept awake.** On Windows, `run` and `run-many` hold
+`ES_SYSTEM_REQUIRED` for as long as they run, so idle sleep cannot freeze an
+attempt. On 2026-11-21 the laptop slept for 6.5 h, four minutes into an
+attempt. The flash's monitor froze, and on wake the attempt was recorded as
+unconfirmed. Closing the lid or choosing Sleep still sleeps the host, so on a
+laptop keep it plugged in and open, or set the lid action to "Do nothing".
+
 To stop a run cleanly, use `bseed_ota_autopilot.py stop --profile P`. It
 writes `AUTOPILOT_STOP` in the workdir. The attempt in progress finishes, and
 the autopilot then exits with `stopped_by_operator`; a new run refuses to
