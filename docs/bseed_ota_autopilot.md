@@ -9,6 +9,65 @@ python helper_scripts/bseed_ota_autopilot.py run --profile <workdir>/profile.jso
 python helper_scripts/bseed_ota_autopilot.py status --profile <workdir>/profile.json
 ```
 
+## Parallel OTA: canonical scheduling and independent failure recovery
+
+`helper_scripts/bseed_ota_autopilot.py` is the supported **same-role**
+concurrent orchestrator, rather than a serial `bseed_socket_migrate.py run`
+queue. The current limit is **five per-IEEE coordinator slots**. Each device
+runs its own supervised campaign with an independent OTA token, sealed image,
+work lock, progress history, retry budget and source reconciliation.
+**A failure on one target does not cancel healthy peers.**
+
+- **Fresh group:** `run-many` launches distinct profiles 20 seconds apart;
+  every profile must pin the exact target IEEE, set `parallel_ota_max` at
+  least to group size and include all other group members in
+  `concurrent_ota_ieees`. It waits for all children and reports each result.
+- **Admit a peer while another runs:** start only the **new** profile with
+  `run --profile ... --confirm-ieee ... --site ...`. Its allowlist must cover
+  *all* existing slot owners, including completed but unreleased candidates.
+  Existing owners' exact work locks are verified via the lease's
+  `work_lock_path`, or supplied in `peer_work_locks` for older lease records.
+  A freshly updating peer must have recent, transaction-matched progress.
+  Do not re-launch `run-many` against a campaign already flashing, nor
+  mutate someone else's active lease to simulate a free slot.
+- **Failure recovery:** an ABORT/timeout is reconciled for that IEEE alone.
+  If the original build/role remains installed and the OTA is inactive, the
+  autopilot rechecks the image and preflight and retries only while the
+  progress gate advances. A refusal before bytes are sent does **not**
+  consume a flash attempt; the autopilot waits for admission with a bounded
+  peer budget. Persistent failures stop only that worker, not the group.
+- **Completed is not released:** `postflash_candidate` is software install
+  evidence, not automatic hardware acceptance or a free slot. Preserve
+  evidence; release or quarantine a lease only via the canonical evidence-
+  backed owner/broker flow. Do not delete JSON leases or fabricate acceptance.
+- **Rates and recovery:** minimum response pacing 1800 ms for three slots,
+  2400 ms for four/five, 32/48-byte blocks, exact sealed image SHA and
+  per-device load/relay verification. Same-role only, no FORCE, no Join All,
+  `source_rejoin_strategy: none`, and independent source recovery.
+- **Dynamic topology:** a Router-to-child dependency must be checked using
+  a *fresh* exact-IEEE neighbor/route snapshot, not carried forward from
+  an earlier run. Avoid concurrent updating of a Router and its **currently
+  confirmed** child. A missing entry alone is not definitive proof of an
+  alternative uplink: treat uncertain routes conservatively. There is no
+  unconditional scheduler ban on two unrelated, healthy Router/Client OTAs.
+- **Relay policy:** maintain the actual ON/OFF state of each appliance,
+  `auto_relay_off: false`, `relay_state_policy: preserve`. PM preflight
+  generally requires a fresh device-originated power sample; any prior
+  explicitly approved exception must remain device-specific and auditable.
+
+### Adding one peer to a live multi-slot group
+
+Prepare/publish the exact new profile first. Ensure all existing owners
+are allowlisted and each has a valid active or pending lease.
+
+```bash
+python helper_scripts/bseed_ota_autopilot.py run   --profile /private/new-target/profile.json --confirm-ieee 0xEXACTIEEE   --site /private/site.json --max-attempts 12
+```
+
+Use `run-many` when starting a group from scratch. Use single `run` to join
+an existing group; it still obtains its own coordinator slot and supervises
+all retries. Do not start a second worker on the same IEEE.
+
 ## Up to five sockets at once
 
 ```bash
@@ -42,8 +101,7 @@ Slot rules (`bseed_network_campaign_lock.py`):
   slots need at least 2400 ms. That keeps the coordinator's total load no
   higher than three transfers at 1800 ms.
 
-Pick group members with strong routes (see below), and never put a Router in
-the same group as one of its own children.
+Pick group members with strong routes (see below). Avoid pairing a Router with a **currently confirmed** child; check live topology, not a historical neighbor snapshot.
 
 ## Relay read-back
 
@@ -137,4 +195,4 @@ What to do:
 - Pair sockets in multi-slot mode only when both routes are strong. Check the
   parent's own uplink (`zigbee_uplink_lqi` on the parent), not only the
   socket's. Run weak-route sockets alone, which also allows 1200 ms pacing.
-- Never flash a Router while one of its own children is flashing.
+- Avoid simultaneously flashing a Router and its **currently confirmed** child. Check live parent/neighbor evidence; an old relationship is not proof of the current route.

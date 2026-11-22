@@ -1,6 +1,6 @@
 # Repository agent instructions
 
-For Zigbee firmware flashing, OTA, device role changes, stock-to-custom conversions and recovery, **read `skills/bseed-zigbee-ota/SKILL.md` first** and follow its safety and evidence gates. Consult `docs/bseed_targeted_ota_runner.md` and the latest device-specific incident record before using live credentials or modifying hardware. Use local, profile-driven tooling rather than inventing ad hoc one-off scripts.
+For Zigbee firmware flashing, OTA, device role changes, stock-to-custom conversions and recovery, **read `skills/bseed-zigbee-ota/SKILL.md` first** and follow its safety and evidence gates. Parallel same-role OTAs use the coordinator-gated `run-many` / `run` autopilot workflow in `docs/bseed_ota_autopilot.md`, not a serial global lock. Consult `docs/bseed_targeted_ota_runner.md` and the latest device-specific incident record before using live credentials or modifying hardware. Use local, profile-driven tooling rather than inventing ad hoc one-off scripts.
 
 For wired Telink recovery or optional SWire readback, also load the dedicated
 [agent runbook](docs/flashing/swire/AGENTS.md). It defines tool discovery, firmware
