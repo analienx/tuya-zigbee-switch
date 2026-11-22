@@ -11,6 +11,11 @@ def validate(profile):
         return False
     if selected is not True:
         raise ValueError("operator_waive_preflash_pm must be Boolean")
+    from bseed_stock_client_loaded_canary import authorized as loaded_authorized
+    if loaded_authorized(profile):
+        # The stock converter has NO independent fresh-PM timestamp. Admit
+        # only two SHA/IEEE-locked operator-authorized ON-relay conversions.
+        return True
     expected=APPROVED.get(profile.get("device"))
     if expected != (profile.get("ieee"),profile.get("preflash_role")):
         raise ValueError("PM waiver is not approved for this device/role")

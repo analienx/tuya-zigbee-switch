@@ -16,8 +16,10 @@ campaign runs, so every refusal surfaces before anything is published.
 
 ``run`` waits for the shared network lease, then runs the canonical campaign
 (``transition`` for a role change, ``flash`` otherwise) with a durable log.
-Automatic relay OFF is always on: the relay is switched OFF and verified
-before the flash and switched back ON only after ``postflash_candidate``.
+The historical stock conversion uses verified auto-OFF. Two explicitly pinned
+2026-11-22 stock Client canaries instead preserve the live ON relay without
+a relay SET; they accept unknown stock PM freshness and never guarantee
+mains continuity through reboot. Other devices remain unchanged.
 A transfer that stops (``update_error`` / timeout) is reconciled with the
 canonical ``reconcile-source`` and retried only while its OTA progress
 strictly increases (the resume supervisor's gate), at most ``--max-resumes``.
@@ -178,6 +180,17 @@ def build_profile(site, live, route, candidate, *, image, sha256, native_image=N
         p.update(stock_client_conversion=True, pm_preflash_load_proof='physically_unloaded',
                  relay_get_key='state', postflash_manufacturer=CUSTOM_PM[0],
                  postflash_model=CUSTOM_PM[1], pm_allow_configure=True)
+        if live['friendly_name'] in site.get('stock_loaded_preserve_devices', []):
+            # Two exact-IEEE operator-authorized loaded canaries only.
+            # No relay command, no assertion that stock PM is independently fresh.
+            p.update(stock_client_preserve_loaded=True, auto_relay_off=False,
+                     expect_relay='ON', relay_state_policy='preserve',
+                     pm_preflash_load_proof='meter', operator_waive_preflash_pm=True,
+                     operator_connected_load_risk_accepted=True,
+                     max_reported_watts=100.0, pm_expected_idle=False,
+                     response_delay_ms=1800)
+            from bseed_stock_client_loaded_canary import authorized as loaded_authorized
+            loaded_authorized(p)
     else:
         p.update(preflash_build=live['software_build_id'], relay_get_key='state_relay')
         if pm:

@@ -1,8 +1,8 @@
-"""No-disconnect OTA policy for same-role BSEED PM socket campaigns.
+"""No-SET OTA relay policy for PM sockets and two exact stock-to-Client canaries.
 
-The operator must pin the relay's CURRENT state in expect_relay. This
-module never sends any relay state-changing command. Power continuity
-through a firmware reboot is NOT guaranteed by a state snapshot.
+The operator pins the relay's CURRENT state in expect_relay. This module
+never sends a relay command. Power continuity through firmware reboot is
+NOT guaranteed. A stock loaded canary does not have fresh-ZCL meter proof.
 """
 import math
 
@@ -22,7 +22,9 @@ def validate(profile):
     if profile.get('relay_get_key') not in ('state', 'state_relay'):
         raise ValueError('Preserve policy requires an explicit relay read key')
     if profile.get('preflash_role') != profile.get('postflash_role'):
-        raise ValueError('Loaded relay preservation is not verified for cross-role OTA')
+        from bseed_stock_client_loaded_canary import authorized as loaded_authorized
+        if not loaded_authorized(profile):
+            raise ValueError('Loaded relay preservation is not verified for cross-role OTA')
     if profile.get('require_pm') is not True or profile.get('non_pm') is True:
         raise ValueError('Preserve-with-load OTA requires fresh power monitoring')
     if profile.get('pm_preflash_load_proof', 'meter') != 'meter':
@@ -47,7 +49,11 @@ def verify_after_flash(profile, reader=None):
         from bseed_relay_auto_off import RelayClient
         reader = RelayClient(profile)
     try:
-        actual = reader.read(profile['relay_get_key'])
+        # A stock-to-custom Client role conversion changes the Z2M relay
+        # property from stock "state" to custom "state_relay".
+        from bseed_stock_client_loaded_canary import authorized as loaded_authorized
+        post_key = 'state_relay' if loaded_authorized(profile) else profile['relay_get_key']
+        actual = reader.read(post_key)
         wanted = profile['expect_relay']
         if actual != wanted:
             raise ValueError('Postflash relay changed: expected %s, observed %s (NO relay command sent)' % (wanted, actual))

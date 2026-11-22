@@ -69,19 +69,22 @@ STOCK_PM_MODEL = 'TS011F'
 def stock_client_conversion(data):
     """Validated stock PM socket -> custom PM mains Client in one OTA.
 
-    The stock converter has no fresh-sample PM stamp, so the live meter proof
-    cannot pass; a fresh physical unplugged attestation replaces it, as for
-    the custom PM physical route. The native image and the header-only stock
-    wrapper are proven by bseed_socket_version_policy.require_increasing.
+    Stock PM lacks a fresh-sample converter stamp. The default path uses
+    verified relay OFF or physical unplugged proof. Two explicit 2026-11-22
+    pinned ON-relay canaries instead accept operator-authorized unknown load,
+    without a relay SET or fabricated meter data. Their exact native/wrapper
+    hashes are checked in the loaded-canary authority and version policy.
     """
     value = data.get('stock_client_conversion')
     if value is None or value is False:
         return False
     if value is not True:
         raise ValueError('stock_client_conversion must be an explicit Boolean')
+    from bseed_stock_client_loaded_canary import authorized as loaded_authorized
+    loaded = loaded_authorized(data)
     expected = {'manufacturer': STOCK_PM_MANUFACTURER, 'model': STOCK_PM_MODEL,
                 'preflash_role': 'Router', 'postflash_role': 'EndDevice', 'require_pm': True,
-                'pm_preflash_load_proof': 'physically_unloaded'}
+                'pm_preflash_load_proof': 'meter' if loaded else 'physically_unloaded'}
     for key, want in expected.items():
         if data.get(key) != want:
             raise ValueError('stock_client_conversion requires %s=%r' % (key, want))
@@ -363,10 +366,13 @@ def accept_candidate(profile):
 
 
 def auto_relay_off_then_check(profile):
-    """Switch the relay OFF (verified), then a fresh OTA check under the meter proof."""
+    """Fresh OTA check for auto-OFF and exact preserve-ON stock canaries."""
     import bseed_relay_auto_off
     if not bseed_relay_auto_off.enabled(profile):
-        return 0
+        from bseed_stock_client_loaded_canary import authorized as loaded_authorized
+        # An ON-relay stock canary MUST perform the same fresh targeted OTA check
+        # as the historical auto-OFF route, without any relay SET.
+        return subprocess.call(runner_args(profile, 'check')) if loaded_authorized(profile) else 0
     bseed_relay_auto_off.switch_off_before_flash(profile)
     status = subprocess.call(runner_args(profile, 'check'))
     if status:
