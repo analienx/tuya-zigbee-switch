@@ -163,7 +163,7 @@ def validate_recovery(target_ieee, confirm_ieee, router_name, inventory, permit_
         stock_router = validated_stock_router_rejoin(
             stock_router_profile, lock, target[0], target_ieee, from_role, expect_role)
         if not role_change and not stock_router:
-            raise ValueError('Network-wide join needs a role migration or exact completed stock Router canary')
+            raise ValueError('Network-wide join is only for a role migration or exact completed stock Router canary')
         if target[0].get('type') not in (from_role, expect_role):
             raise ValueError('Cached inventory type is neither --from-role nor --expect-role')
         return target[0], None
