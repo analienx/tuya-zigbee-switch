@@ -306,6 +306,19 @@ def find_campaign_locks(site, name, live=None):
                     except (OSError,KeyError,TypeError,ValueError,AttributeError):
                         recovered = False
                 clean = clean or recovered
+                # An exact later, software-verified Balcony Client c17 installation
+                # can supersede ONLY the old 2026-11-15 isolated network owner.
+                # No hardware acceptance is implied, and the old lock is immutable.
+                balcony = device.get('balcony_software_successor')
+                if (not clean and name == 'BedroomSocketBalcony'
+                    and record.get('phase') ==
+                        'interrupted_source_identity_mismatch_operator_isolated_network_released'
+                    and balcony is not None):
+                    from bseed_balcony_software_successor import proven
+                    try:
+                        clean = proven(balcony, old=record, old_path=lock, live=live)
+                    except (ValueError, KeyError, OSError, TypeError) as exc:
+                        raise CanaryError('Balcony exact successor proof failed: %s' % exc) from exc
                 # The original variance and no-new-OTA flag remain immutable.
                 # Explicit newer operator grant applies only to individually pinned
                 # prior transactions and the verified installed previous target.
