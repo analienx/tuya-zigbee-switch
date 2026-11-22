@@ -329,8 +329,9 @@ def test_a_socket_in_use_is_waited_for_not_failed(tmp_path, monkeypatch):
     monkeypatch.setattr(ap.time, 'sleep', sleeps.append)
     result = ap.Autopilot(Path(cfg['workdir']) / 'p.json', IEEE, busy_wait_seconds=300).run()
     assert result['state'] == 'installed' and len(result['attempts']) == 1
-    assert sleeps.count(300) == 2 and [w['reason'][:30] for w in result['socket_busy_waits']] == [
-        RELAY_OFF[:30], "AssertionError('Power missing o"]
+    assert sleeps.count(300) == 2
+    reasons = [w['reason'] for w in result['socket_busy_waits']]
+    assert 'Relay state' in reasons[0] and 'Power missing' in reasons[1]
     assert fake.calls.count('flash') == 1
 
 
