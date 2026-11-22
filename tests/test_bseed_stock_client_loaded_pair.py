@@ -137,3 +137,85 @@ def test_postflash_uses_custom_key_and_never_sets_relay(tmp_path):
     assert reader.calls == ["state_relay"]
     with pytest.raises(ValueError, match="Postflash relay changed"):
         relay.verify_after_flash(p, reader=Reader("OFF"))
+
+def test_completed_loaded_rejoin_recovers_target_on_without_off(tmp_path):
+    from bseed_stock_client_loaded_canary import restore_pinned_on_after_rejoin
+    p = profile(tmp_path)
+    work = Path(p["workdir"])
+    work.mkdir()
+    (work / "ACTIVE_LOCK.json").write_text(json.dumps(dict(
+        device=p["device"], ieee=p["ieee"], sha256=p["sha256"],
+        phase="ota_transfer_ok_postflash_unverified",
+    )))
+    class Reader:
+        def __init__(self, initial):
+            self.value = initial
+            self.calls = []
+        def read(self, key):
+            self.calls.append(("read", key))
+            assert key == "state_relay"
+            return self.value
+        def set(self, key, value):
+            self.calls.append(("set", key, value))
+            assert (key, value) == ("state_relay", "ON")
+            self.value = value
+
+    reader = Reader("OFF")
+    record = restore_pinned_on_after_rejoin(p, "after_rejoin", client=reader)
+    assert record["fresh_after_rejoin_before"] == "OFF"
+    assert record["fresh_after_rejoin_after"] == "ON"
+    assert record["recovery_on_command_sent"] is True
+    assert record["hardware_acceptance"] is False
+    assert record["mains_continuity_proven"] is False
+    assert [x for x in reader.calls if x[0] == "set"] == [("set", "state_relay", "ON")]
+    with pytest.raises(ValueError, match="already exists"):
+        restore_pinned_on_after_rejoin(p, "after_rejoin", client=reader)
+
+
+def test_completed_loaded_rejoin_already_on_never_commands_relay(tmp_path):
+    from bseed_stock_client_loaded_canary import restore_pinned_on_after_rejoin
+    p = profile(tmp_path, "LivingRoomSocketWifiRight")
+    work = Path(p["workdir"])
+    work.mkdir()
+    (work / "ACTIVE_LOCK.json").write_text(json.dumps(dict(
+        device=p["device"], ieee=p["ieee"], sha256=p["sha256"],
+        phase="postflash_candidate",
+    )))
+    class Reader:
+        def read(self, key):
+            assert key == "state_relay"
+            return "ON"
+        def set(self, *_):
+            raise AssertionError("Existing ON relay must not be commanded")
+    record = restore_pinned_on_after_rejoin(p, "before_acceptance", client=Reader())
+    assert record["recovery_on_command_sent"] is False
+    assert record["fresh_after_rejoin_before"] == "ON"
+
+
+@pytest.mark.parametrize("wrong", [
+    {"phase": "ota_running"},
+    {"device": "LivingRoomSocketHA"},
+    {"ieee": "0xa4c13812088a54ac"},
+    {"sha256": "0" * 64},
+])
+def test_loaded_recovery_rejects_unverified_campaign(tmp_path, wrong):
+    from bseed_stock_client_loaded_canary import restore_pinned_on_after_rejoin
+    p = profile(tmp_path)
+    work = Path(p["workdir"])
+    work.mkdir()
+    lock = dict(device=p["device"], ieee=p["ieee"], sha256=p["sha256"],
+                phase="ota_transfer_ok_postflash_unverified")
+    lock.update(wrong)
+    (work / "ACTIVE_LOCK.json").write_text(json.dumps(lock))
+    class Reader:
+        def read(self, *_): raise AssertionError("Must reject before accessing relay")
+        def set(self, *_): raise AssertionError("Must reject before any SET")
+    with pytest.raises(ValueError):
+        restore_pinned_on_after_rejoin(p, "after_rejoin", client=Reader())
+
+
+def test_loaded_recovery_is_not_fleet_waiver(tmp_path):
+    from bseed_stock_client_loaded_canary import restore_pinned_on_after_rejoin
+    p = profile(tmp_path)
+    p["stock_client_preserve_loaded"] = False
+    assert restore_pinned_on_after_rejoin(p, "after_rejoin") is None

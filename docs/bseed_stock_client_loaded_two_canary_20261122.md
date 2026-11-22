@@ -37,8 +37,12 @@ If uninterrupted supply is mandatory, do not run the conversion.
 
 - Check fresh source manufacturer, model, hardware, IEEE, role, interview,
   relay ON and correct served SHA. Do not flash a different stock variant.
-- Disable automatic relay switching completely. Pin `expect_relay=ON` on
+- Disable automatic relay-OFF completely. Pin `expect_relay=ON` on
   the **stock** `state` key; never send `state=OFF` for this procedure.
+  The stock boot may nevertheless reset the output OFF. After confirmed
+  custom firmware rejoin, the runner must read `state_relay`, restore
+  **ON only** if necessary, and record the interruption as negative
+  physical-continuity evidence. No relay command is sent before reboot.
 - A direct, current OTA availability check **must** pass before flash.
   Reject mismatched image URL, version, role, shared-network lease or current
   firmware. Preserve bounded retries and immutable failure evidence.

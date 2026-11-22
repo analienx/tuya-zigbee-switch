@@ -356,7 +356,9 @@ def network_lock_path(profile, *, required=False):
 
 
 def accept_candidate(profile):
-    """postflash_candidate, then return an auto-OFF relay to its pre-flash state."""
+    """postflash_candidate after post-reboot relay verification/recovery."""
+    from bseed_stock_client_loaded_canary import restore_pinned_on_after_rejoin
+    restore_pinned_on_after_rejoin(profile, "before_acceptance")
     import bseed_relay_state_policy
     bseed_relay_state_policy.verify_after_flash(profile)
     record_postflash_candidate(profile)
@@ -827,6 +829,10 @@ def main():
         join_evidence = work / ('rejoin_' + uuid.uuid4().hex + '.json')
         joined = subprocess.call(rejoin_cmd(profile, args.confirm_ieee, join_evidence))
         if joined: raise SystemExit(joined)
+        from bseed_stock_client_loaded_canary import restore_pinned_on_after_rejoin
+        # A reboot may clear an ON relay even without any command from us.
+        # Exact source/target role and firmware have been verified by rejoin.
+        restore_pinned_on_after_rejoin(profile, "after_rejoin")
         metadata_evidence = work / ('metadata_' + uuid.uuid4().hex + '.json')
         refreshed = subprocess.call(metadata_cmd(profile, args.confirm_ieee, metadata_evidence))
         if refreshed: raise SystemExit(refreshed)
@@ -838,6 +844,7 @@ def main():
             release(profile, metadata_evidence)
         restored = restore_device_state(profile, args.confirm_ieee)
         if restored: raise SystemExit(restored)
+        restore_pinned_on_after_rejoin(profile, "after_state_restore")
         if profile.get('require_pm'):
             if profile['postflash_role'] == 'EndDevice':
                 pm_evidence = work / ('pm_provision_' + uuid.uuid4().hex + '.json')
