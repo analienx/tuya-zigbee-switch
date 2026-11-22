@@ -99,6 +99,34 @@ def is_exact_parallel_owner_risk_20261120(profile, roles, transition):
     )
 
 
+def is_exact_balcony_c19_operator_risk(profile, roles, transition):
+    """One named same-role canary without SWire backups; load still needs fresh proof.
+
+    Operator's existing 2026-11-03 fleet risk acknowledgment is not a
+    recovery method. This exception cannot affect any other socket/image.
+    """
+    expected = {
+        'device': 'BedroomSocketBalcony',
+        'ieee': '0xa4c138ac993cc245',
+        'manufacturer': 'o1jzcxou', 'model': 'TS011F-BS',
+        'preflash_role': 'EndDevice', 'postflash_role': 'EndDevice',
+        'preflash_build': '1.1.3-bseedc17', 'postflash_build': '1.1.3-bseedc19',
+        'sha256': 'a551668210ef91d9b43788e1a2dc281f691a6ca47b016b9b7f4a68cc1449ad63',
+        'preflash_relay_physical_mode': 'follow_state',
+        'expect_relay': 'OFF', 'relay_get_key': 'state_relay',
+        'require_pm': False, 'non_pm': True, 'force_test_transition': False,
+        'auto_relay_off': False, 'network_lock_shared': True,
+        'parallel_ota_max': 3, 'block_bytes': 48,
+        'source_rejoin_strategy': 'none', 'allow_join_all_fallback': False,
+        'owner_irreversible_risk_accepted': True,
+    }
+    return (not transition and roles == ('EndDevice', 'EndDevice')
+            and not profile.get('recovery_evidence')
+            and profile.get('relay_state_policy') is None
+            and profile.get('response_delay_ms', 0) >= 1800
+            and all(profile.get(k) == v for k, v in expected.items()))
+
+
 def _private_file(value, label):
     if not isinstance(value, str) or not value or not Path(value).is_absolute():
         raise ValueError(label + ': absolute private file path required')
@@ -152,6 +180,14 @@ def _verify_recovery(profile, *, confirm_unloaded=False,
                 'method': 'exact two-slot owner-risk canary (relay-OFF proof required)',
                 'recovery_available': False, 'readback_verified': False,
                 'operator_risk_accepted': True, 'hardware_acceptance': False}
+    if is_exact_balcony_c19_operator_risk(profile, roles, transition):
+        # The mandatory confirm_unloaded above is a separate physical gate.
+        # There is no verified readback, and this is not hardware acceptance.
+        return {'ieee': profile['ieee'],
+                'method': 'exact operator-risk Balcony c17-to-c19 canary',
+                'recovery_available': False, 'readback_verified': False,
+                'operator_risk_accepted': True, 'hardware_acceptance': False,
+                'warning': 'No full chip readback; a failed OTA may require SWire repair.'}
     if (profile.get('device'), profile.get('ieee')) == (BEDROOM_DEVICE, BEDROOM_IEEE):
         # The exact Bedroom authorizations were approved at 32-byte blocks.
         if profile.get('block_bytes') != 32:
