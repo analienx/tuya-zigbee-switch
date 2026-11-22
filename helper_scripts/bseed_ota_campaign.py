@@ -94,6 +94,39 @@ def stock_client_conversion(data):
     return True
 
 
+def stock_router_conversion(data):
+    """Exact stock PM Router to sealed custom Router canary, no relay writes."""
+    selected = data.get('stock_router_conversion', False)
+    if selected is False:
+        return False
+    if selected is not True:
+        raise ValueError('stock_router_conversion requires Boolean true')
+    expected = {
+        'device': 'WRSocketWindowRightL',
+        'ieee': '0xa4c138793505c5cc',
+        'manufacturer': '_TZ3000_b28wrpvx', 'model': 'TS011F',
+        'preflash_role': 'Router', 'postflash_role': 'Router',
+        'postflash_build': '1.2.5-bseedr24',
+        'image_type': 54179, 'file_version': '0xffffffff',
+        'require_pm': True, 'non_pm': False,
+        'stock_client_conversion': False,
+        'relay_state_policy': 'preserve', 'auto_relay_off': False,
+        'relay_get_key': 'state', 'postflash_relay_get_key': 'state_relay', 'expect_relay': 'OFF',
+        'pm_preflash_load_proof': 'meter',
+        'postflash_manufacturer': 'b28wrpvx', 'postflash_model': 'TS011F-BS-PM',
+    }
+    for key, value in expected.items():
+        if data.get(key, False if key == 'stock_client_conversion' else None) != value:
+            raise ValueError('Stock Router canary requires %s=%r' % (key, value))
+    if data.get('preflash_build') is not None or data.get('force_test_transition') is True:
+        raise ValueError('Stock Router canary must not invent stock build or use FORCE')
+    if not data.get('native_image') or not data.get('native_sha256'):
+        raise ValueError('Stock Router canary requires sealed native image and wrapper')
+    if type(data.get('max_reported_watts')) not in (int, float) or data['max_reported_watts'] > 0.5:
+        raise ValueError('Stock Router canary requires <=0.5 W load threshold')
+    return True
+
+
 def load_profile(path):
     source = Path(path).expanduser().resolve()
     if source.is_relative_to(ROOT):
@@ -124,6 +157,7 @@ def load_profile(path):
         raise ValueError('Network lock authority must not be inside repository')
     validate_pm_mode(data)
     stock_client_conversion(data)
+    stock_router_conversion(data)
     import bseed_relay_auto_off
     bseed_relay_auto_off.validate(data)
     import bseed_relay_state_policy
@@ -520,7 +554,7 @@ def postflash_cmd(profile, evidence):
     if profile['preflash_role']==profile['postflash_role']:
         cmd.extend(['--preflash-lock',str(Path(profile['workdir'])/'ACTIVE_LOCK.json'),
                     '--expected-image-sha256',str(profile['sha256']),
-                    '--relay-get-key',str(profile.get('relay_get_key','state'))])
+                    '--relay-get-key',str(profile.get('postflash_relay_get_key', profile.get('relay_get_key','state')))])
     return cmd
 
 
@@ -587,6 +621,14 @@ def verified_router_pm_candidate(profile):
     """Allow only one same-role PM Router candidate proven by the cross-role binary matrix."""
     if profile.get('preflash_role') != 'Router' or profile.get('postflash_role') != 'Router':
         raise ValueError('Router PM candidate may not change Zigbee role')
+    if stock_router_conversion(profile):
+        # Stock-facing header and sealed native Router image are proved
+        # together by the official registry. Never accept the Client payload.
+        from bseed_socket_version_policy import require_increasing
+        result = require_increasing(profile)
+        if result.get('source') != 'stock' or result.get('board') != 'b28wrpvx':
+            raise ValueError('Stock Router candidate registry identity mismatch')
+        return True
     path = profile.get('pm_router_matrix_evidence')
     if not path or not Path(path).is_file():
         raise ValueError('Router PM flash requires private cross-role build-matrix evidence')

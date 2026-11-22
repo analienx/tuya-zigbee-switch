@@ -56,8 +56,38 @@ because the next OTA cannot start while that lease is held.
 | custom PM Client ↔ Router | `router` / `client` | FORCE wrapper on the source query type, network-wide rejoin |
 | custom `o1jzcxou` / `TS011F-BS` | `same` | native image; runs only where the non-PM recovery gate admits it |
 
-Refused: stock → Router (no reviewed route yet), non-PM role changes, other
+Refused: stock PM to Router except the exact WindowRightL authorized canary, non-PM role changes, other
 boards. All transfers use 48-byte blocks with 1200 ms response pacing.
+
+## Exact stock PM Router canary (2026-11-22)
+
+The Router-to-Router stock path is narrowly authorized for WRSocketWindowRightL
+(IEEE 0xa4c138793505c5cc), not a general fleet converter. Its required
+stock-facing OTA header is image type 54179, version 0xffffffff; only six
+header bytes differ from the sha-verified, sealed native BSEED r24 Router
+image. The production version policy checks the native board/role/version.
+
+The device must freshly answer a read-only relay GET with exact stock
+manufacturer, IEEE and Router role, relay OFF, and reported power/current both
+exactly zero. Stock composite power values may be cached: this is an
+explicit relay-OFF plus stock-reported-zero proof, NOT a fresh ZCL meter
+sample. No relay SET commands or auto-OFF controls are allowed. A profile
+for any other IEEE, build, role, relay mode or missing native image is refused.
+
+After installation the relay property changes from stock state to custom
+state_relay. The post-flash verifier uses the latter, requires the correct
+r24 Router Basic build/interview and fresh PM evidence, and retains the
+coordinator lease until postflash_candidate is achieved. OTA transport
+success alone is never physical acceptance. The first canary intentionally
+does not auto-restore source groups/reporting, to avoid unverified relay
+writes; separately audit children, routing, metering and group parity.
+
+The private site must contain devices.WRSocketWindowRightL with the exact
+IEEE, expect_relay OFF and stock_router_canary_authority equal to
+WRSocketWindowRightL:0xa4c138793505c5cc:Router:relay-OFF.
+The process is plan, publish, run, then release only after owner's
+post-flash acceptance. Do not bypass active network leases or run this
+canary in parallel with a Router's children.
 
 ## When the socket does not rejoin
 

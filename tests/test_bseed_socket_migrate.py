@@ -92,7 +92,7 @@ def test_route_specifics(tmp_path):
 
 
 @pytest.mark.parametrize('row, to, match', [
-    (STOCK, 'router', 'stock-to-Router'),
+    (STOCK, 'same', 'explicit'),
     (live('o1jzcxou', 'TS011F-BS', 'Router', 'x'), 'client', 'Non-PM role changes'),
     (live('_TZ3000_o1jzcxou', 'TS011F', 'Router', None), 'client', 'Unsupported board'),
     (live('b28wrpvx', 'TS011F-BS-PM', 'Coordinator', 'x'), 'same', 'not a socket role'),
