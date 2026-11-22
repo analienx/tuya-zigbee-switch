@@ -249,6 +249,25 @@ def independently_fresh_pm_sample(data, *, baseline_ms, request_ms, received_ms)
     return {'power': watts, 'sample_time_ms': stamp}
 
 
+def validate_stock_router_no_load(relay, campaign):
+    """Exact canary: target relay OFF is fresh, but stock PM readings may be cached."""
+    from bseed_ota_campaign import stock_router_conversion
+    if not stock_router_conversion(campaign):
+        raise AssertionError('Not a verified stock Router canary')
+    identity = relay.get('device') or {}
+    expected = (campaign['device'], campaign['ieee'], '_TZ3000_b28wrpvx', 'Router')
+    actual = (identity.get('friendlyName'), identity.get('ieeeAddr'),
+              identity.get('manufacturerName'), identity.get('type'))
+    if actual != expected or relay.get('state') != 'OFF':
+        raise AssertionError('Stock Router requires exact fresh stock source identity and relay OFF')
+    for key in ('power', 'current'):
+        value = relay.get(key)
+        if type(value) not in (float, int) or not math.isfinite(value) or value != 0:
+            raise AssertionError('Stock Router requires reported zero '+key)
+    return {'relay_state': 'OFF', 'reported_power_w': 0,
+            'reported_current_a': 0, 'metering_stamp_verified': False}
+
+
 def load_confirmation(args, campaign):
     """Human attestation, or the canonical campaign's fresh verified-OFF record (flash only)."""
     if args.confirm_load_unplugged:
@@ -589,7 +608,13 @@ def main():
                 raise AssertionError('Fresh target source firmware/role changed since source reconciliation')
 
         meter_input = relay
-        if (campaign and campaign.get('require_pm') is True and
+        stock_router = campaign is not None and campaign.get('stock_router_conversion') is True
+        if stock_router:
+            # Strict exact-stock relay-OFF proof. Stock converters do not
+            # expose BSEED ZCL PM arrival timestamps; reported power/current
+            # may be cached and are NOT represented as fresh PM measurements.
+            validate_stock_router_no_load(relay, campaign)
+        if (campaign and campaign.get('require_pm') is True and not stock_router and
                 not getattr(args, 'pm_preflash_physical_unloaded', False) and
                 not args.waive_preflash_pm):
             # Force an actual PM ZCL read. A fresh relay GET containing cached
@@ -629,7 +654,10 @@ def main():
                      campaign.get('manufacturer') == 'o1jzcxou' and
                      campaign.get('model') == 'TS011F-BS'))),
                 ts0726=getattr(args, 'ts0726', False))
-            load_proof = 'fresh_pm' if campaign and campaign.get('require_pm') is True else 'board_specific_nonpm'
+            load_proof = ('stock_router_fresh_relay_OFF_with_cached_zero_meter'
+                          if stock_router else
+                          'fresh_pm' if campaign and campaign.get('require_pm') is True
+                          else 'board_specific_nonpm')
         if not (not (relay.get('update') or {}).get('state') == 'updating'):
             raise AssertionError('Device OTA already running')
         log('preflight_ok', {'relay': relay.get(args.relay_get_key), 'relay_get_key': args.relay_get_key,

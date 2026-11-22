@@ -8,7 +8,8 @@ def source_build_matches(profile, build):
     b28wrpvx / TS011F-BS-PM / EndDevice, so an install cannot pass."""
     if 'preflash_build' in profile:
         return build == profile['preflash_build']
-    if profile.get('stock_client_conversion') is not True:
+    if not (profile.get('stock_client_conversion') is True or
+            profile.get('stock_router_conversion') is True):
         raise ValueError('Profile pins no preflash_build and is not a stock conversion')
     if not str(profile.get('manufacturer', '')).startswith('_TZ3000_'):
         raise ValueError('Stock conversion profile without a stock manufacturer')

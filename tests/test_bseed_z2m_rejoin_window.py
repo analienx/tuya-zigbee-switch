@@ -411,3 +411,63 @@ def test_joining_is_not_reported_closed_while_the_bridge_says_open(tmp_path, mon
                                           network_wide=True, bridge_stays_open=True)
     assert code == 2 and evidence['result'] == 'unconfirmed'
     assert evidence['closed_verified'] is False and times.count(0) == 2   # one resend
+
+
+def test_stock_router_same_role_network_wide_rejoin_requires_exact_completed_canary():
+    from copy import deepcopy
+    from bseed_z2m_rejoin_window import validate_recovery
+
+    ieee = '0x1122334455667788'
+    target = {'friendly_name': 'TestStockRouter', 'ieee_address': ieee,
+              'type': 'Router', 'manufacturer': '_TZ3000_b28wrpvx',
+              'model_id': 'TS011F'}
+    lock = {'ieee': ieee, 'device': 'TestStockRouter',
+            'sha256': 'a' * 64, 'phase': 'ota_transfer_ok_postflash_unverified',
+            'preflash_state': {'state': 'OFF'}, 'token': 'test-ota-123',
+            'response': {'status': 'ok', 'transaction': 'test-ota-123',
+                         'data': {'id': ieee, 'from': {'file_version': 77},
+                                  'to': {'file_version': 0xffffffff}}}}
+    profile = {'ieee': ieee, 'device': 'TestStockRouter',
+               'sha256': 'a' * 64, 'stock_router_conversion': True,
+               'preflash_role': 'Router', 'postflash_role': 'Router',
+               'manufacturer': '_TZ3000_b28wrpvx', 'model': 'TS011F',
+               'postflash_manufacturer': 'b28wrpvx',
+               'postflash_model': 'TS011F-BS-PM',
+               'postflash_build': '1.2.5-bseedr24', 'image_type': 54179,
+               'file_version': '0xffffffff',
+               'relay_state_policy': 'preserve', 'auto_relay_off': False,
+               'expect_relay': 'OFF'}
+    args = (ieee, ieee, None, [target], False, lock)
+    selected, router = validate_recovery(*args, network_wide=True,
+                                       from_role='Router', expect_role='Router',
+                                       stock_router_profile=profile)
+    assert selected == target and router is None
+    with pytest.raises(ValueError):
+        validate_recovery(*args, network_wide=True,
+                          from_role='Router', expect_role='Router')
+    for field,bad in [('sha256','b'*64),('stock_router_conversion',False),
+                      ('image_type',43556),('expect_relay','ON'),
+                      ('preflash_role','EndDevice'),('postflash_build','other')]:
+        altered = deepcopy(profile)
+        altered[field] = bad
+        with pytest.raises(ValueError):
+            validate_recovery(*args, network_wide=True,
+                              from_role='Router', expect_role='Router',
+                              stock_router_profile=altered)
+    for change in ({'phase':'update_error'}, {'token':'different'},
+                   {'preflash_state':{'state':'ON'}}):
+        bad_lock=deepcopy(lock)
+        bad_lock.update(change)
+        with pytest.raises(ValueError):
+            validate_recovery(ieee,ieee,None,[target],False,bad_lock,
+                              network_wide=True,from_role='Router',expect_role='Router',
+                              stock_router_profile=profile)
+    for bad in (True, None):
+        with pytest.raises(ValueError):
+            validate_recovery(ieee,ieee,None,[target],bad,lock,
+                              network_wide=True,from_role='Router',expect_role='Router',
+                              stock_router_profile=profile)
+    with pytest.raises(ValueError):
+        validate_recovery('0x0000000000000001',ieee,None,[target],False,lock,
+                          network_wide=True,from_role='Router',expect_role='Router',
+                          stock_router_profile=profile)

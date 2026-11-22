@@ -76,8 +76,15 @@ def choose_route(live, to):
     if target is None:
         raise Refused('--to must be client, router or same')
     if board == STOCK_PM:
-        if source != 'Router' or target != 'EndDevice':
-            raise Refused('Stock PM sockets convert only to a Client here; no reviewed stock-to-Router route yet')
+        if source != 'Router':
+            raise Refused('Stock PM source must be a Router')
+        if target == 'Router' and to == 'router':
+            # Explicit Router selection only. Exact device approval is checked
+            # in cmd_plan; never silently convert every stock socket.
+            return dict(kind='stock_pm_to_router', board=CUSTOM_PM, source=source, target=target,
+                        variant='pm-router', wrapper_type=STOCK_IMAGE_TYPE)
+        if target != 'EndDevice':
+            raise Refused('Stock PM needs explicit --to router or --to client')
         return dict(kind='stock_pm_to_client', board=CUSTOM_PM, source=source, target=target,
                     variant='pm-client', wrapper_type=STOCK_IMAGE_TYPE)
     if board == CUSTOM_PM:
@@ -178,6 +185,15 @@ def build_profile(site, live, route, candidate, *, image, sha256, native_image=N
         p.update(stock_client_conversion=True, pm_preflash_load_proof='physically_unloaded',
                  relay_get_key='state', postflash_manufacturer=CUSTOM_PM[0],
                  postflash_model=CUSTOM_PM[1], pm_allow_configure=True)
+    elif route['kind'] == 'stock_pm_to_router':
+        # This canary is already OFF and must stay OFF. Stock has no BSEED
+        # meter-stamp; the targeted runner requires a fresh relay read plus
+        # stock-reported zero power and current before *every* OTA stage.
+        p.update(stock_router_conversion=True, relay_get_key='state', postflash_relay_get_key='state_relay',
+                 pm_preflash_load_proof='meter', postflash_manufacturer=CUSTOM_PM[0],
+                 postflash_model=CUSTOM_PM[1], auto_relay_off=False,
+                 relay_state_policy='preserve', max_reported_watts=0.5,
+                 preserve_device_state=False)
     else:
         p.update(preflash_build=live['software_build_id'], relay_get_key='state_relay')
         if pm:
@@ -186,8 +202,8 @@ def build_profile(site, live, route, candidate, *, image, sha256, native_image=N
         p.update(force_test_transition=True, preflash_query_image_type=route['wrapper_type'])
         if preflash_file_version is not None:
             p['preflash_file_version'] = '0x%08X' % preflash_file_version
-    if route['target'] == 'Router' and pm and not role_change:
-        # Same-role PM Router flashes need private build-matrix evidence and
+    if route['target'] == 'Router' and pm and not role_change and route['kind'] != 'stock_pm_to_router':
+        # Already-custom same-role PM Router flashes need build-matrix evidence and
         # this device's settings baseline (site.json devices.<name>).
         device = (site.get('devices') or {}).get(live['friendly_name']) or {}
         for key in ('pm_router_matrix_evidence', 'pm_settings_baseline'):
@@ -336,6 +352,15 @@ def cmd_plan(site, args):
     if live.get('interview_state') != 'SUCCESSFUL':
         raise Refused('Source interview incomplete')
     route = choose_route(live, args.to)
+    if route['kind'] == 'stock_pm_to_router':
+        device_settings = (site.get('devices') or {}).get(args.device) or {}
+        expected_authority = 'WRSocketWindowRightL:0xa4c138793505c5cc:Router:relay-OFF'
+        if not (device_settings.get('ieee') == live['ieee_address'] and
+                device_settings.get('stock_router_canary_authority') == expected_authority and
+                args.device == 'WRSocketWindowRightL' and
+                live['ieee_address'] == '0xa4c138793505c5cc' and
+                device_settings.get('expect_relay') == 'OFF'):
+            raise Refused('Stock Router canary requires exact target, current relay OFF and operator authority')
     package_dir = Path(site['candidate_package'])
     package = json.loads((package_dir / 'CANDIDATE_PACKAGE.json').read_text(encoding='utf8'))
     candidate = candidate_for(package, route)
@@ -345,7 +370,7 @@ def cmd_plan(site, args):
     if hashlib.sha256(native).hexdigest() != candidate['otaSha256']:
         raise Refused('Sealed candidate file hash differs from its package entry')
     source = live.get('software_build_id') or 'stock'
-    label = '%s-to-%s' % ('stock' if route['kind'] == 'stock_pm_to_client' else source, candidate['build'])
+    label = '%s-to-%s' % ('stock' if route['kind'] in ('stock_pm_to_client', 'stock_pm_to_router') else source, candidate['build'])
     work = Path(site['campaign_root']) / args.device / label
     if (work / 'profile.json').exists() and not args.replan:
         raise Refused('Plan already exists: %s (use --replan only before any flash)' % work)

@@ -47,7 +47,7 @@ def verify_after_flash(profile, reader=None):
         from bseed_relay_auto_off import RelayClient
         reader = RelayClient(profile)
     try:
-        actual = reader.read(profile['relay_get_key'])
+        actual = reader.read(profile.get('postflash_relay_get_key', profile['relay_get_key']))
         wanted = profile['expect_relay']
         if actual != wanted:
             raise ValueError('Postflash relay changed: expected %s, observed %s (NO relay command sent)' % (wanted, actual))

@@ -60,8 +60,8 @@ def begin(profile, campaign_token):
     path = guard_path(profile)
     if path.exists():
         raise ValueError('existing telemetry guard requires identity recovery before another OTA')
-    if profile.get('stock_client_conversion') is True:
-        # The stock converter has no BSEED quarantine option. Record that;
+    if profile.get('stock_client_conversion') is True or profile.get('stock_router_conversion') is True:
+        # Stock firmware has no BSEED quarantine option. Record that;
         # never claim quarantine was enabled or send an unsupported option.
         # The custom Client still needs PM provisioning after the update.
         record = dict(ieee=profile['ieee'], device=profile['device'], sha256=profile['sha256'],
@@ -69,7 +69,7 @@ def begin(profile, campaign_token):
                       expected_role=profile['postflash_role'],
                       started=dt.datetime.now(dt.timezone.utc).isoformat(),
                       phase=STOCK_NO_QUARANTINE_PHASE, quarantine_enabled=False,
-                      requires_pm_provision=True)
+                      requires_pm_provision=profile.get('postflash_role') == 'EndDevice')
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open('x', encoding='utf8') as handle:
             json.dump(record, handle, indent=2)
@@ -183,7 +183,8 @@ def validate_source_unchanged_release(profile, record, evidence, lock):
 
 def is_stock_guard(profile, record):
     """A stock-to-Client guard only records that no quarantine option exists."""
-    return (profile.get('stock_client_conversion') is True and 'preflash_build' not in profile
+    return ((profile.get('stock_client_conversion') is True or
+             profile.get('stock_router_conversion') is True) and 'preflash_build' not in profile
             and record.get('phase') == STOCK_NO_QUARANTINE_PHASE
             and record.get('quarantine_enabled') is False)
 
@@ -321,7 +322,7 @@ def release(profile, evidence_path):
     record = json.loads(path.read_text(encoding='utf8'))
     evidence = json.loads(Path(evidence_path).read_text(encoding='utf8'))
     lock = json.loads((path.parent / 'ACTIVE_LOCK.json').read_text(encoding='utf8'))
-    if profile.get('stock_client_conversion') is True:
+    if profile.get('stock_client_conversion') is True or profile.get('stock_router_conversion') is True:
         if record.get('phase') != STOCK_NO_QUARANTINE_PHASE or record.get('quarantine_enabled') is not False:
             raise ValueError('stock conversion record does not match this campaign')
         # Same identity, lock and fresh-evidence checks; there is no option to release.
