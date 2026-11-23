@@ -77,7 +77,8 @@ def parse_neighbor_page(result):
     return total, entries
 
 
-def read_neighbor_table(mqtt_config, broker, ieee, network_address, timeout=25, max_pages=12):
+def read_neighbor_table(mqtt_config, broker, ieee, network_address, timeout=25, max_pages=12,
+                        *, require_complete=False):
     """Exact IEEE/NWK, transaction-matched, paginated Mgmt_Lqi read. Never writes."""
     if not ieee.startswith('0x') or len(ieee) != 18:
         raise ValueError('Invalid target IEEE')
@@ -127,6 +128,8 @@ def read_neighbor_table(mqtt_config, broker, ieee, network_address, timeout=25, 
             total, page = parse_neighbor_page(responses.pop(token))
             entries += page
             index += max(1, len(page))
+        if require_complete and (total is None or len(entries) != total):
+            raise ValueError('Incomplete ZDO neighbour table')
         return entries
     finally:
         client.loop_stop()

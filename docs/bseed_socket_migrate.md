@@ -16,6 +16,7 @@ tooling already uses. The migration flow additionally reads:
 | `publish` | `ssh_alias`, `remote_dir`, `url_base` of the HA `www` folder |
 | `mutation_broker` | `script` and `policy` used by `release` |
 | `devices.<name>.pm_settings_baseline`, `pm_router_matrix_evidence` | only for same-role PM Router flashes |
+| `devices.<name>.parallel_ota_max`, `concurrent_ota_ieees`, `response_delay_ms` | opt-in coordinator slots, exact peers and pacing for a same-role plan |
 
 ## Commands
 
@@ -46,6 +47,31 @@ tooling already uses. The migration flow additionally reads:
 `queue --device A --device B --to client` chains plan, publish and run per
 device. Without `--release-authority` it stops after the first candidate,
 because the next OTA cannot start while that lease is held.
+
+## Mixed Router and Client queue
+
+```bash
+python helper_scripts/bseed_socket_migrate.py --site PRIVATE.json queue \
+  --target SOCKET_A=router --target SOCKET_B=client --target SOCKET_C=same
+```
+
+The mixed queue validates every target plan before publishing any image.
+Planning and publication use up to three workers. A saved `CURRENT` plan must
+match its requested device and destination role. Use `--replan` to replace
+unflashed plans or select the correct private site before running.
+
+Transfer order follows the target list. Adjacent same-role campaigns use the
+[parallel autopilot](bseed_ota_autopilot.md) when their private profiles opt in
+to reciprocal peers, slots and pacing. Router and Client firmware can share
+one such group. The live check places members listed as each other's children
+in separate groups. A role change takes one exclusive group and runs through
+its existing rejoin and verification steps before the next group starts.
+
+After a successful group, use `--release-authority` for the existing broker
+workflow, or release its verified candidates separately and run the same
+queue again. The queue keeps unfinished campaigns and their leases for
+reconciliation. Stock conversion, exact image and device qualification still
+come from the individual campaign routes.
 
 ## Routes
 

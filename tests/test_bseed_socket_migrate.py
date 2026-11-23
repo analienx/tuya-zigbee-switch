@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import struct
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -115,6 +116,96 @@ def test_route_specifics(tmp_path):
 def test_unsupported_routes_are_refused_with_a_reason(row, to, match):
     with pytest.raises(mig.Refused, match=match):
         mig.choose_route(row, to)
+
+
+def test_mixed_targets_have_explicit_roles_and_reject_duplicates():
+    assert mig.parse_targets(['A=router', 'B=client', 'C=same']) == [
+        ('A', 'router'), ('B', 'client'), ('C', 'same'),
+    ]
+    with pytest.raises(mig.Refused, match='Duplicate target'):
+        mig.parse_targets(['A=client', 'a=router'])
+    with pytest.raises(mig.Refused, match='DEVICE='):
+        mig.parse_targets(['../A=client'])
+
+
+def test_mixed_queue_prepares_all_then_runs_parallel_same_role_and_exclusive_transition(tmp_path, monkeypatch):
+    args = SimpleNamespace(target=['A=router', 'B=client', 'C=client'], device=None, to=None,
+                           max_resumes=3, lease_wait_seconds=0, release_authority=None)
+    roles = [('Router', 'Router'), ('EndDevice', 'EndDevice'), ('Router', 'EndDevice')]
+    profiles = {}
+    for index, (target, roles_for_target) in enumerate(zip('ABC', roles), start=1):
+        work = tmp_path / target
+        work.mkdir()
+        profiles[target] = (work, {'device': target, 'ieee': f'0x{index:016x}',
+                                  'preflash_role': roles_for_target[0], 'postflash_role': roles_for_target[1],
+                                  'image': f'{target}.ota', 'sha256': target * 64,
+                                  'parallel_ota_max': 2, 'source_rejoin_strategy': 'none'})
+    profiles['A'][1]['concurrent_ota_ieees'] = [profiles['B'][1]['ieee']]
+    profiles['B'][1]['concurrent_ota_ieees'] = [profiles['A'][1]['ieee']]
+    prepared = []
+    order = []
+
+    def prepare(_site, target):
+        prepared.append(target.device)
+        return (target, *profiles[target.device], False)
+
+    def publish(_site, target, *, work):
+        assert set(prepared) == set('ABC')
+        order.append(('publish', target.device))
+
+    def mark_candidate(device):
+        work, profile = profiles[device]
+        lock = {key: profile[key] for key in ('device', 'ieee', 'sha256')}
+        (work / 'ACTIVE_LOCK.json').write_text(json.dumps(dict(lock, phase='postflash_candidate')))
+
+    def parallel(paths, confirmations, *, extra):
+        assert [p.parent.name for p in paths] == ['A', 'B']
+        assert list(confirmations) == [profiles[device][1]['ieee'] for device in 'AB']
+        order.append(('parallel', 'AB'))
+        for device in 'AB':
+            mark_candidate(device)
+        return [{'device': device, 'state': 'installed'} for device in 'AB']
+
+    def transition(_site, target, *, work):
+        order.append(('exclusive', target.device))
+        mark_candidate(target.device)
+        return 0
+
+    monkeypatch.setattr(mig, 'planned_target', prepare)
+    monkeypatch.setattr(mig, 'cmd_publish', publish)
+    monkeypatch.setattr(mig, 'active_leases', lambda _site: [])
+    monkeypatch.setattr(mig, 'check_parallel_topology', lambda _site, _wave: None)
+    monkeypatch.setattr(mig, 'cmd_run', transition)
+    monkeypatch.setattr('bseed_ota_autopilot.run_many', parallel)
+    assert mig.cmd_queue({}, args) == 0
+    assert set(order[:3]) == {('publish', target) for target in 'ABC'}
+    assert order[3:] == [('parallel', 'AB'), ('exclusive', 'C')]
+
+
+def test_mixed_queue_does_not_publish_if_one_role_plan_is_refused(monkeypatch):
+    args = SimpleNamespace(target=['A=router', 'B=client'], device=None, to=None, max_resumes=3)
+    def prepare(_site, target):
+        if target.device == 'B':
+            raise mig.Refused('The saved plan has the wrong role')
+        return target
+    monkeypatch.setattr(mig, 'planned_target', prepare)
+    monkeypatch.setattr(mig, 'cmd_publish', lambda *args, **kwargs: pytest.fail('Published a partial batch'))
+    with pytest.raises(mig.Refused, match='wrong role'):
+        mig.cmd_queue({}, args)
+
+
+def test_parallel_wave_detects_router_child_conflict(monkeypatch):
+    router = dict(PM_ROUTER, friendly_name='RouterA')
+    child = dict(PM_CLIENT, friendly_name='ClientB', ieee_address='0x0000000000000002')
+    profiles = [(None, None, {'device': row['friendly_name'], 'ieee': row['ieee_address'],
+                              'preflash_role': row['type']}, False) for row in (router, child)]
+    monkeypatch.setattr(mig, 'inventory', lambda _site: [router, child])
+    monkeypatch.setattr('bseed_zdo_live.read_neighbor_table', lambda *args, **kwargs: [
+        {'eui64': child['ieee_address'], 'relationship': 1},
+    ])
+    assert mig.check_parallel_topology({'mqtt_config': 'config', 'broker': 'broker'}, profiles) == (
+        'RouterA lists another member as its child'
+    )
 
 
 def test_wrapper_changes_only_the_header_type_and_version():

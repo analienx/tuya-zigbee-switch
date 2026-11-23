@@ -6,6 +6,7 @@
     python helper_scripts/bseed_socket_migrate.py run     --device NAME
     python helper_scripts/bseed_socket_migrate.py release --device NAME --authority "<owner's words>"
     python helper_scripts/bseed_socket_migrate.py queue   --device A --device B --to client [--release-authority "..."]
+    python helper_scripts/bseed_socket_migrate.py queue   --target A=client --target B=router [--release-authority "..."]
     python helper_scripts/bseed_socket_migrate.py status  --device NAME
 
 ``plan`` is read-only on the network: it reads the live inventory and the
@@ -38,6 +39,7 @@ Routes (anything else is refused with the reason):
 Private paths, images and profiles never enter the repository.
 """
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import datetime as dt
 import hashlib
 import json
@@ -47,6 +49,7 @@ import struct
 import subprocess
 import sys
 import time
+import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 CAMPAIGN = ROOT / 'helper_scripts' / 'bseed_ota_campaign.py'
@@ -214,13 +217,20 @@ def build_profile(site, live, route, candidate, *, image, sha256, native_image=N
         p.update(force_test_transition=True, preflash_query_image_type=route['wrapper_type'])
         if preflash_file_version is not None:
             p['preflash_file_version'] = '0x%08X' % preflash_file_version
+    device = (site.get('devices') or {}).get(live['friendly_name']) or {}
     if route['target'] == 'Router' and pm and not role_change:
         # Same-role PM Router flashes need private build-matrix evidence and
         # this device's settings baseline (site.json devices.<name>).
-        device = (site.get('devices') or {}).get(live['friendly_name']) or {}
         for key in ('pm_router_matrix_evidence', 'pm_settings_baseline'):
             if device.get(key) or site.get(key):
                 p[key] = device.get(key) or site.get(key)
+    if not role_change and device.get('parallel_ota_max', 1) != 1:
+        p.update(parallel_ota_max=device['parallel_ota_max'],
+                 concurrent_ota_ieees=device.get('concurrent_ota_ieees', []),
+                 response_delay_ms=device.get('response_delay_ms', p['response_delay_ms']),
+                 source_rejoin_strategy='none', allow_join_all_fallback=False)
+        from bseed_network_campaign_lock import require_profile_authority
+        require_profile_authority(p)
     require_preserve_state_for_flash(p)
     return p
 
@@ -281,7 +291,7 @@ def inventory(site):
         got[m.topic.rsplit('/', 1)[-1]] = json.loads(m.payload)
         if {'devices', 'info'} <= set(got):
             done.set()
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id='bseed-migrate-inv')
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id='bseed-migrate-inv-' + uuid.uuid4().hex[:8])
     client.username_pw_set(config.get('user', ''), config.get('password', ''))
     client.on_message = on_message
     client.connect(site['broker'], 1883, 10)
@@ -310,7 +320,7 @@ def installed_file_version(site, device, key):
     def on_message(_c, _u, m):
         box.update(json.loads(m.payload))
         seen.set()
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id='bseed-migrate-ver')
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id='bseed-migrate-ver-' + uuid.uuid4().hex[:8])
     client.username_pw_set(config.get('user', ''), config.get('password', ''))
     client.on_message = on_message
     client.connect(site['broker'], 1883, 10)
@@ -471,7 +481,6 @@ def cmd_plan(site, args):
         json.dumps(template_index(profile, transport, manufacturer_name), indent=2) + '\n', encoding='utf8')
     profile_path = work / 'profile.json'
     profile_path.write_text(json.dumps(profile, indent=2, sort_keys=True) + '\n', encoding='utf8')
-    (Path(site['campaign_root']) / args.device / 'CURRENT').write_text(str(work), encoding='utf8')
     # The same gates the campaign runs: refuse now, not halfway through a run.
     import bseed_ota_campaign
     from bseed_socket_version_policy import require_increasing
@@ -486,12 +495,13 @@ def cmd_plan(site, args):
              'candidate': candidate['build'], 'image_sha256': sha, 'join_via': join_via,
              'children_reparent': children, 'policy': policy, 'resumes': 0}
     (work / STATE_FILE).write_text(json.dumps(state, indent=2, default=str) + '\n', encoding='utf8')
+    (Path(site['campaign_root']) / args.device / 'CURRENT').write_text(str(work), encoding='utf8')
     print('PLANNED', json.dumps(state, default=str))
     return 0
 
 
-def cmd_publish(site, args):
-    work = workdir_for(site, args.device)
+def cmd_publish(site, args, *, work=None):
+    work = work if work is not None else workdir_for(site, args.device)
     profile = json.loads((work / 'profile.json').read_text(encoding='utf8'))
     folder = Path(profile['image']).stem
     remote = site['publish']['remote_dir'].rstrip('/') + '/' + folder
@@ -528,9 +538,9 @@ def wait_for_lease(site, timeout):
         time.sleep(30)
 
 
-def cmd_run(site, args):
+def cmd_run(site, args, *, work=None):
     from bseed_ota_resume_supervisor import ota_progress_history
-    work = workdir_for(site, args.device)
+    work = work if work is not None else workdir_for(site, args.device)
     profile_path = work / 'profile.json'
     profile = json.loads(profile_path.read_text(encoding='utf8'))
     state = read_json(work / STATE_FILE) or {}
@@ -572,8 +582,8 @@ def reconcile(work, profile, state):
     print('RECONCILED_RESUMING', state['resumes'], flush=True)
 
 
-def cmd_release(site, args):
-    work = workdir_for(site, args.device)
+def cmd_release(site, args, *, work=None):
+    work = work if work is not None else workdir_for(site, args.device)
     profile = json.loads((work / 'profile.json').read_text(encoding='utf8'))
     lock = read_json(work / 'ACTIVE_LOCK.json') or {}
     leases = [p for p in active_leases(site) if (read_json(p) or {}).get('ieee') == profile['ieee']]
@@ -608,6 +618,8 @@ def cmd_status(site, args):
 
 
 def cmd_queue(site, args):
+    if getattr(args, 'target', None):
+        return cmd_mixed_queue(site, args)
     for device in args.device:
         one = argparse.Namespace(**dict(vars(args), device=device))
         root = Path(site['campaign_root']) / device / 'CURRENT'
@@ -623,6 +635,157 @@ def cmd_queue(site, args):
     return 0
 
 
+def parse_targets(values):
+    targets = []
+    seen = set()
+    for value in values:
+        device, _, role = value.rpartition('=')
+        if (not device or device != device.strip() or device in ('.', '..') or
+                any(char in device for char in '/\\:') or role not in {*ROLE, 'same'}):
+            raise Refused('--target needs DEVICE=client, DEVICE=router or DEVICE=same')
+        if device.casefold() in seen:
+            raise Refused('Duplicate target: ' + device)
+        seen.add(device.casefold())
+        targets.append((device, role))
+    return targets
+
+
+def planned_target(site, args):
+    from bseed_ota_campaign import load_profile, network_lock_path
+    from bseed_operator_load_policy import require_preserve_state_for_flash
+
+    current = Path(site['campaign_root']) / args.device / 'CURRENT'
+    if not current.is_file() or args.replan:
+        cmd_plan(site, args)
+    work = workdir_for(site, args.device).resolve()
+    path = work / 'profile.json'
+    profile = load_profile(path)
+    target_role = profile['preflash_role'] if args.to == 'same' else ROLE[args.to]
+    if (profile['device'], profile['postflash_role']) != (args.device, target_role):
+        raise Refused(f'{args.device}: current plan does not target {target_role}; replan before running')
+    if (Path(profile['workdir']).resolve(), profile['network_id'], Path(profile['network_lock_dir']).resolve()) != (
+            work, site['network_id'], Path(site['network_lock_dir']).resolve()):
+        raise Refused(f'{args.device}: current plan has a different workdir or coordinator authority')
+    require_preserve_state_for_flash(profile)
+    network_lock_path(profile, required=True)
+    lock_path = work / 'ACTIVE_LOCK.json'
+    lock = json.loads(lock_path.read_text(encoding='utf8')) if lock_path.exists() else {}
+    phase = lock.get('phase')
+    finished = phase == 'postflash_candidate'
+    if finished and (lock.get('device'), lock.get('ieee'), lock.get('sha256')) != (
+            args.device, profile['ieee'], profile['sha256']):
+        raise Refused(f'{args.device}: completed campaign does not match this plan')
+    if not finished and phase not in (None, 'source_unchanged_reconciled', *FAILED_PHASES):
+        raise Refused(f'{args.device}: campaign phase {phase!r} needs reconciliation')
+    return args, work, profile, finished
+
+
+def parallel_waves(targets):
+    """Group adjacent opted-in, same-role campaigns while keeping the requested order."""
+    from bseed_ota_autopilot import validate_group, validate_policy
+
+    wave = []
+    for target in targets:
+        profiles = [item[2] for item in (*wave, target)]
+        if wave:
+            try:
+                for profile in profiles:
+                    validate_policy(profile)
+                validate_group(profiles)
+            except ValueError:
+                yield wave
+                wave = []
+        wave.append(target)
+    if wave:
+        yield wave
+
+
+def check_parallel_topology(site, wave):
+    from bseed_zdo_live import read_neighbor_table
+
+    devices = {device['ieee_address'].lower(): device for device in inventory(site)}
+    peers = {item[2]['ieee'].lower() for item in wave}
+    for _, _, profile, _ in wave:
+        ieee = profile['ieee'].lower()
+        live = devices.get(ieee, {})
+        if (live.get('friendly_name'), live.get('type')) != (profile['device'], profile['preflash_role']):
+            raise Refused(f'{profile["device"]}: live identity or role changed before parallel OTA')
+        if live['type'] == 'Router':
+            neighbors = read_neighbor_table(site['mqtt_config'], site['broker'], profile['ieee'],
+                                            live['network_address'], require_complete=True)
+            if not neighbors:
+                raise Refused(f'{profile["device"]}: live neighbor table unavailable')
+            for neighbor in neighbors:
+                child = (neighbor.get('eui64') or '').lower()
+                if neighbor.get('relationship') == 1 and child in peers - {ieee}:
+                    return f'{profile["device"]} lists another member as its child'
+    return None
+
+
+def cmd_mixed_queue(site, args):
+    from bseed_ota_autopilot import run_many
+
+    if args.device or args.to:
+        raise Refused('Use --target for each socket or --device with one --to')
+    if not 0 <= args.max_resumes <= 29:
+        raise Refused('Mixed queue max-resumes must be 0..29')
+    targets = [argparse.Namespace(**dict(vars(args), device=device, to=role))
+               for device, role in parse_targets(args.target)]
+    # Obtain a complete plan before publishing any member or starting an OTA.
+    with ThreadPoolExecutor(max_workers=min(3, len(targets))) as pool:
+        plans = list(pool.map(lambda one: planned_target(site, one), targets))
+        ieees = {item[2]['ieee'].lower() for item in plans}
+        pending = [item for item in plans if not item[3]]
+        remote_folders = {Path(item[2]['image']).stem for item in pending}
+        if len(ieees) != len(plans) or len(remote_folders) != len(pending):
+            raise Refused('Mixed queue needs distinct IEEE addresses and publication folders')
+        list(pool.map(lambda item: cmd_publish(site, item[0], work=item[1]), pending))
+
+    # Only retire exact postflash candidates, with the same authority as the single-device flow.
+    def release_wave(wave):
+        held = {lease.get('ieee') for path in active_leases(site) if (lease := read_json(path))}
+        for one, work, profile, _ in wave:
+            if profile['ieee'] not in held:
+                continue
+            if not args.release_authority:
+                print('QUEUE_PAUSED: %s is a candidate; release its lease to continue' % one.device)
+                return True
+            cmd_release(site, argparse.Namespace(**dict(vars(one), authority=args.release_authority)), work=work)
+        return False
+
+    if release_wave([item for item in plans if item[3]]):
+        return 0
+    for group in parallel_waves(pending):
+        waves = [group]
+        if len(group) > 1:
+            wait_for_lease(site, args.lease_wait_seconds)
+            if reason := check_parallel_topology(site, group):
+                print('QUEUE_SERIAL', reason, flush=True)
+                waves = [[item] for item in group]
+        for wave in waves:
+            if len(wave) == 1:
+                one, work, _, _ = wave[0]
+                result = cmd_run(site, one, work=work)
+                if result:
+                    return result
+            else:
+                results = run_many([item[1] / 'profile.json' for item in wave],
+                                   [item[2]['ieee'] for item in wave],
+                                   extra=['--max-attempts', str(args.max_resumes + 1), '--max-stagnant', '0'])
+                print('QUEUE_WAVE', json.dumps(results), flush=True)
+                if [(result['device'], result['state']) for result in results] != [
+                        (item[0].device, 'installed') for item in wave]:
+                    return 2
+            for one, work, profile, _ in wave:
+                lock = read_json(work / 'ACTIVE_LOCK.json') or {}
+                if (lock.get('device'), lock.get('ieee'), lock.get('sha256'), lock.get('phase')) != (
+                        one.device, profile['ieee'], profile['sha256'], 'postflash_candidate'):
+                    raise Refused(f'{one.device}: no exact postflash candidate for this wave')
+            if release_wave(wave):
+                return 0
+    return 0
+
+
 def now():
     return dt.datetime.now(dt.timezone.utc).isoformat()
 
@@ -634,9 +797,9 @@ def main(argv=None):
     sub = parser.add_subparsers(dest='command', required=True)
     for name in ('plan', 'publish', 'run', 'release', 'status', 'queue'):
         p = sub.add_parser(name)
-        p.add_argument('--device', required=True, action='append' if name == 'queue' else 'store')
+        p.add_argument('--device', required=name != 'queue', action='append' if name == 'queue' else 'store')
         if name in ('plan', 'queue'):
-            p.add_argument('--to', choices=('client', 'router', 'same'), required=True)
+            p.add_argument('--to', choices=('client', 'router', 'same'), required=name == 'plan')
             p.add_argument('--replan', action='store_true', help='rewrite an unflashed plan')
         if name in ('run', 'queue'):
             p.add_argument('--max-resumes', type=int, default=3)
@@ -644,8 +807,12 @@ def main(argv=None):
         if name == 'release':
             p.add_argument('--authority', required=True, help="owner's acceptance words")
         if name == 'queue':
+            p.add_argument('--target', action='append', metavar='DEVICE=ROLE',
+                           help='mixed queue with an explicit client, router or same role per socket')
             p.add_argument('--release-authority', help='standing acceptance: release each candidate lease')
     args = parser.parse_args(argv)
+    if args.command == 'queue' and not args.target and not (args.device and args.to):
+        parser.error('queue requires --target DEVICE=ROLE or --device DEVICE with --to ROLE')
     site = load_site(args.site)
     handler = {'plan': cmd_plan, 'publish': cmd_publish, 'run': cmd_run, 'release': cmd_release,
                'status': cmd_status, 'queue': cmd_queue}[args.command]
