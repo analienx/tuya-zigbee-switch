@@ -1,4 +1,4 @@
-"""Non-PM OTA preflight never bypasses the PM wattage or identity guard."""
+"""Non-PM OTA preflight retains strict identity; wattage is always advisory."""
 import sys
 from pathlib import Path
 import pytest
@@ -20,15 +20,16 @@ def test_nonpm_opt_in_only_for_exact_client_identity():
     for variant in ({'model':'TS011F-BS-PM'}, {'role':'Router'}, {'manufacturer':'b28wrpvx'}):
         with pytest.raises(AssertionError,match='exception only'):
             check({'state_relay':'OFF'}, non_pm=True, **variant)
-    with pytest.raises(AssertionError,match='unexpectedly exposes PM'):
-        check({'state_relay':'OFF','power':0},non_pm=True)
+    assert check({'state_relay':'OFF','power':0},non_pm=True) == 0
 
 
-def test_pm_power_gate_still_requires_plausible_numeric_value():
+def test_pm_power_is_informational_even_above_historical_limit():
     assert check({'power':0.5}) == 0.5
-    for power in (None, True, -1, 2, float('nan'),float('inf')):
-        with pytest.raises(AssertionError,match='Power missing'):
-            check({'power':power})
+    assert check({'power':2}) == 2
+    assert check({'power':2500}) == 2500
+    assert check({'power':-1}) == -1
+    for power in (None, True, float('nan'),float('inf')):
+        assert check({'power':power}) is None
 
 TS0726 = dict(model='TS0726-3-BS', manufacturer='iedhxgyi', role='Router', max_reported_watts=1.0)
 
@@ -42,8 +43,7 @@ def test_ts0726_opt_in_only_for_exact_router_identity():
     for variant in ({'model': 'TS0726'}, {'role': 'EndDevice'}, {'manufacturer': 'b28wrpvx'}):
         with pytest.raises(AssertionError, match='exception only'):
             ts_check({'state': 'ON'}, **variant)
-    with pytest.raises(AssertionError, match='unexpectedly exposes PM'):
-        ts_check({'state': 'ON', 'power': 0})
+    assert ts_check({'state': 'ON', 'power': 0}) == 0
     with pytest.raises(AssertionError, match='Conflicting'):
         validate_metering_preflight({'state': 'ON'}, non_pm=True, ts0726=True, **TS0726)
 

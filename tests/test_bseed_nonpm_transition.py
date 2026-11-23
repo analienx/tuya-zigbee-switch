@@ -19,7 +19,7 @@ def test_cross_role_contract_keeps_same_role_gate_strict(tmp_path):
     with pytest.raises(ValueError, match='role mismatch'):
         verify_recovery(p, confirm_unloaded=True)
     assert verify_transition_recovery(p, confirm_unloaded=True)
-    with pytest.raises(ValueError, match='not explicitly confirmed'):
+    with pytest.raises(ValueError, match='preserve-state owner risk|not explicitly confirmed'):
         verify_transition_recovery(p)
 
 
@@ -33,14 +33,23 @@ def test_canonical_transition_reaches_submission_only_with_exact_recovery(tmp_pa
     p, _, _, _ = fixture(tmp_path, preflash_build='1.1.3-bseedv8')
     cfg = base_profile(tmp_path)
     cfg.update(p, preflash_role='Router', postflash_role='EndDevice', require_pm=False,
-               preflash_relay_physical_mode='follow_state', join_via='VerifiedParent', join_mode='scoped')
+               preflash_relay_physical_mode='follow_state', join_via='VerifiedParent', join_mode='scoped',
+               auto_relay_off=False, relay_state_policy='preserve', relay_get_key='state_relay',
+               operator_connected_load_risk_accepted=True)
     path = tmp_path / 'transition.json'; path.write_text(json.dumps(cfg))
     argv = ['campaign', '--profile', str(path), '--mode', 'transition', '--confirm-ieee', cfg['ieee']]
     monkeypatch.setattr(sys, 'argv', argv)
+    # Owner consent rather than unloading controls OTA admission.
+    cfg['operator_connected_load_risk_accepted'] = False
+    path.write_text(json.dumps(cfg))
     with patch('bseed_ota_campaign.subprocess.call') as call:
-        with pytest.raises(ValueError, match='not explicitly confirmed'): campaign.main()
+        with pytest.raises(ValueError, match='connected-load'): campaign.main()
         call.assert_not_called()
-    monkeypatch.setattr(sys, 'argv', argv + ['--confirm-load-unplugged'])
+    cfg['operator_connected_load_risk_accepted'] = True
+    path.write_text(json.dumps(cfg))
+    monkeypatch.setattr(sys, 'argv', argv)
+    monkeypatch.setattr('bseed_relay_postflash_restore.restore_preserved_on',lambda *args,**kwargs: None)
+    monkeypatch.setattr('bseed_relay_state_policy.verify_after_flash',lambda *args,**kwargs: None)
     # Model the runner's persistent ownership, not just its exit status.
     from bseed_network_campaign_lock import acquire
     cfg.update(network_lock_dir=str(tmp_path / 'authority'),
@@ -59,11 +68,11 @@ def test_canonical_transition_reaches_submission_only_with_exact_recovery(tmp_pa
     assert network.exists()
     assert json.loads((work / 'ACTIVE_LOCK.json').read_text())['phase'] == 'postflash_candidate'
     first = call.call_args_list[0].args[0]
-    assert '--confirm-load-unplugged' in first and '--campaign-profile' in first
+    assert '--confirm-load-unplugged' not in first and '--campaign-profile' in first
     assert first[first.index('--role') + 1] == 'Router'
     assert first[first.index('--hardware-evidence') + 1] == cfg['recovery_evidence']
     cfg['ieee'] = '0x0000000000000000'; path.write_text(json.dumps(cfg))
-    monkeypatch.setattr(sys, 'argv', argv[:-1] + [cfg['ieee'], '--confirm-load-unplugged'])
+    monkeypatch.setattr(sys, 'argv', argv[:-1] + [cfg['ieee']])
     with patch('bseed_ota_campaign.subprocess.call') as call:
         with pytest.raises(ValueError, match='schema/IEEE'): campaign.main()
         call.assert_not_called()

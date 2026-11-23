@@ -15,6 +15,9 @@ IEEE = '0xa4c1380011223344'
 def profile(tmp_path, **extra):
     p = {'device': 'SocketX', 'ieee': IEEE, 'sha256': 'a' * 64, 'workdir': str(tmp_path / 'work'),
          'preflash_role': 'EndDevice', 'postflash_role': 'EndDevice', 'request_timeout_ms': 300000,
+         'expect_relay':'ON','relay_get_key':'state_relay',
+         'auto_relay_off':False,'relay_state_policy':'preserve',
+         'operator_connected_load_risk_accepted':True,
          'url': 'http://ha.invalid/local/bseed-canary/SocketX/firmware.ota?v=1'}
     p.update(extra)
     return p
@@ -267,8 +270,9 @@ def test_exact_ieee_and_unloaded_confirmation_are_required(tmp_path, monkeypatch
     Fake(tmp_path, monkeypatch, cfg, [])
     with pytest.raises(ValueError, match='IEEE'):
         ap.Autopilot(Path('p.json'), '0x0000000000000000')
-    with pytest.raises(ValueError, match='load-unplugged'):
-        ap.Autopilot(Path('p.json'), IEEE)
+    # Exact role/IEEE are checked; a connected load does NOT block a
+    # preserve-state, owner-approved attempt.
+    ap.Autopilot(Path('p.json'), IEEE)
 
 
 def test_refused_admissions_wait_for_the_peer_and_do_not_use_attempts(tmp_path, monkeypatch):

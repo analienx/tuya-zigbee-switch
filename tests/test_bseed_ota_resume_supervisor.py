@@ -30,6 +30,9 @@ def _profile(tmp_path):
         "workdir": str(work),
         "non_pm": True,
         "force_test_transition": True,
+        "auto_relay_off":False,"relay_state_policy":"preserve",
+        "operator_connected_load_risk_accepted":True,
+        "expect_relay":"ON","relay_get_key":"state_relay",
     }
 
 
@@ -146,13 +149,14 @@ def test_reconcile_wait_is_bounded_and_never_launches_without_proof(tmp_path, mo
         )
 
 
-def test_resume_requires_nonpm_unloaded_confirmation(tmp_path, monkeypatch):
+def test_resume_never_requires_unplugging_but_requires_preserve_policy(tmp_path, monkeypatch):
     cfg = _profile(tmp_path)
     profile_path = tmp_path / "profile.json"
     profile_path.write_text(json.dumps(cfg))
     monkeypatch.setattr(sup.campaign, "load_profile", lambda _p: dict(cfg))
-
-    with pytest.raises(ValueError, match="load-unplugged"):
+    # Invalid legacy OFF-mode profile is rejected even with a load attestation.
+    cfg["auto_relay_off"] = True
+    with pytest.raises(ValueError, match="automatic relay-OFF"):
         sup.resume_transition(profile_path, cfg["ieee"],
                               confirm_unloaded=False)
 
@@ -510,6 +514,11 @@ def _same_role_profile(tmp_path):
         "workdir": str(work),
         "require_pm": True,
         "non_pm": False,
+        "relay_state_policy":"preserve",
+        "auto_relay_off":False,
+        "expect_relay":"ON",
+        "relay_get_key":"state_relay",
+        "operator_connected_load_risk_accepted":True,
     }
 
 

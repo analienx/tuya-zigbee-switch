@@ -36,7 +36,7 @@ def fixture(tmp_path, preflash_build='1.1.2-bseedcli4'):
 
 def test_full_readback_gate_and_unloaded_confirmation(tmp_path):
     profile,record,file,backups = fixture(tmp_path)
-    with pytest.raises(ValueError,match='Physical load'):
+    with pytest.raises(ValueError,match='preserve-state owner risk|Physical load'):
         verify_recovery(profile)
     assert verify_recovery(profile,confirm_unloaded=True)['readback_sha256'] == record['backup_sha256']
     profile['block_bytes']=50
@@ -98,7 +98,9 @@ def test_wrapper_flash_blocks_before_subprocess_without_hardware_evidence(tmp_pa
     from unittest.mock import patch
     cfg,record,file,_=fixture(tmp_path)
     cfg.update(device='BedroomSocketCabinetRight',expect_relay='OFF',require_pm=False,
-               workdir=str(tmp_path / 'campaign'))
+               workdir=str(tmp_path / 'campaign'),auto_relay_off=False,
+               relay_state_policy='preserve',relay_get_key='state_relay',
+               operator_connected_load_risk_accepted=True)
     cfg.pop('recovery_evidence')
     src=tmp_path/'private_profile.json';src.write_text(json.dumps(cfg))
     monkeypatch.setattr(sys,'argv',['campaign','--profile',str(src),'--mode','flash',
@@ -124,7 +126,9 @@ def test_runner_cannot_bypass_wrapper_flash_gate(tmp_path):
         index_url='http://example.invalid/index.json', index_output=str(tmp_path / 'index.json'),
         template_index=str(tmp_path / 'template.json'), postflash_build='1.1.3-bseedc6',
         require_pm=False, non_pm=True, preflash_build='1.1.2-bseedcli4',
-        preflash_relay_physical_mode='follow_state', block_bytes=32)
+        preflash_relay_physical_mode='follow_state', block_bytes=32,
+        auto_relay_off=False,relay_state_policy='preserve',
+        relay_get_key='state_relay',operator_connected_load_risk_accepted=True)
     src = tmp_path / 'profile.json'
     src.write_text(json.dumps(cfg))
     assert campaign.load_profile(src)['require_pm'] is False
@@ -185,7 +189,7 @@ def test_same_role_router_requires_full_recovery_attestation(tmp_path):
                    device='BedroomSocketBalcony',ieee='0xa4c138ac993cc245')
     record['target_ieee'] = profile['ieee']
     file.write_text(json.dumps(record))
-    with pytest.raises(ValueError, match='Physical load'):
+    with pytest.raises(ValueError, match='preserve-state owner risk|Physical load'):
         verify_recovery(profile)
     assert verify_recovery(profile, confirm_unloaded=True)['readback_sha256'] == record['backup_sha256']
     profile.pop('recovery_evidence')
@@ -225,5 +229,5 @@ def test_user_authorized_cabinetright_c9_to_c16_exact_image_no_repeat_prompt():
     ):
         with pytest.raises(ValueError):
             verify_recovery(dict(profile, **changed), confirm_unloaded=True)
-    with pytest.raises(ValueError, match='Physical load'):
+    with pytest.raises(ValueError, match='preserve-state owner risk|Physical load'):
         verify_recovery(profile, confirm_unloaded=False)

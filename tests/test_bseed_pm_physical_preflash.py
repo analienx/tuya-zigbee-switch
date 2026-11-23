@@ -58,14 +58,12 @@ def test_physical_pm_flag_only_appended_to_flash_if_confirmed():
     without = campaign.runner_args(profile, "flash", confirm_unloaded=False)
     assert "--confirm-load-unplugged" not in without
 
-def test_meter_validation_still_requires_actual_power():
-    with pytest.raises(AssertionError, match="Power missing"):
-        targeted.validate_metering_preflight({}, non_pm=False,
-            model="TS011F-BS-PM", manufacturer="b28wrpvx",
-            role="EndDevice", max_reported_watts=1.0)
-    assert targeted.validate_metering_preflight({"power": 0}, non_pm=False,
-        model="TS011F-BS-PM", manufacturer="b28wrpvx",
-        role="EndDevice", max_reported_watts=1.0) == 0
+def test_pm_meter_is_diagnostic_and_cannot_block_load():
+    opts=dict(non_pm=False,model="TS011F-BS-PM",manufacturer="b28wrpvx",
+              role="EndDevice",max_reported_watts=1.0)
+    assert targeted.validate_metering_preflight({},**opts) is None
+    assert targeted.validate_metering_preflight({"power":0},**opts)==0
+    assert targeted.validate_metering_preflight({"power":1200},**opts)==1200
 
 def test_supervisor_passes_load_attestation_to_flash_command():
     cmd = supervisor.campaign_cmd(Path("private.json"), "flash",

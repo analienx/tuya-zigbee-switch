@@ -26,7 +26,7 @@ def test_exact_grant_passes_only_with_load_proven_off():
     assert result['recovery_available'] is False and result['readback_verified'] is False
     assert result['hardware_acceptance'] is False
     assert verify_recovery(dict(BASE, block_bytes=32), confirm_unloaded=True)['operator_risk_accepted']
-    with pytest.raises(ValueError, match='Physical load'):
+    with pytest.raises(ValueError, match='preserve-state owner risk|Physical load'):
         verify_recovery(BASE, confirm_unloaded=False)
 
 

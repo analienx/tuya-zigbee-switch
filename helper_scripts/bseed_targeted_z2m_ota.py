@@ -209,27 +209,27 @@ def update_payload(ieee, url, token, max_block_bytes, response_delay_ms=None, re
 
 def validate_metering_preflight(relay, *, non_pm, model, manufacturer, role, max_reported_watts,
                                nonpm_router_transition=False, ts0726=False):
-    """Explicit non-PM/TS0726 exceptions; PM devices must supply a bounded fresh power reading."""
+    """Preserve strict model/board identity; return wattage for telemetry ONLY.
+
+    No positive load, missing meter, stale value or high wattage prevents OTA.
+    Historical max_reported_watts is never an admission threshold.
+    """
     if non_pm and ts0726:
         raise AssertionError('Conflicting metering exceptions')
     if ts0726:
         if not ((model, manufacturer, role) in (('TS0726-3-BS', 'iedhxgyi', 'Router'),
                                                 ('TS0726', '_TZ3002_iedhxgyi', 'Router'))):
             raise AssertionError('TS0726 exception only for BSEED TS0726-3-BS Router')
-        if not ('power' not in relay):
-            raise AssertionError('TS0726 preflight unexpectedly exposes PM data; inspect identity')
-        return None
+        return relay.get('power') if type(relay.get('power')) in (int, float) and math.isfinite(relay['power']) else None
     if non_pm:
         if not (model == 'TS011F-BS' and manufacturer == 'o1jzcxou' and
                 (role == 'EndDevice' or (role == 'Router' and nonpm_router_transition))):
             raise AssertionError('Non-PM exception only for BSEED TS011F-BS Client')
-        if not ('power' not in relay):
-            raise AssertionError('Non-PM preflight unexpectedly exposes PM data; inspect identity')
-        return None
+        return relay.get('power') if type(relay.get('power')) in (int, float) and math.isfinite(relay['power']) else None
     power = relay.get('power')
-    if not (type(power) in (int, float) and math.isfinite(power) and (0 <= power <= max_reported_watts)):
-        raise AssertionError('Power missing or above limit')
-    return power
+    if type(power) not in (int, float) or not math.isfinite(power):
+        return None
+    return power  # advisory only: may be >100 W or a negative meter glitch
 
 
 def independently_fresh_pm_sample(data, *, baseline_ms, request_ms, received_ms):
@@ -367,8 +367,12 @@ def main():
         raise ValueError('PM waiver requires canonical campaign profile')
     require_physical_preflight_board(args, campaign)
     load_confirmed = load_confirmation(args, campaign)
-    if args.mode == 'flash' and getattr(args, 'pm_preflash_physical_unloaded', False) and not load_confirmed:
-        raise ValueError('PM physical-proof OTA requires explicit load-unplugged confirmation')
+    if args.mode == 'flash':
+        from bseed_operator_load_policy import require_preserve_state_for_flash
+        require_preserve_state_for_flash(campaign)
+    if (args.mode == 'flash' and getattr(args, 'pm_preflash_physical_unloaded', False)
+            and not load_confirmed and not __import__('bseed_operator_load_policy').connected_load_authorized(campaign)):
+        raise ValueError('Legacy PM physical-proof OTA requires preserve-state replan')
     cross_role = campaign is not None and campaign['preflash_role'] != campaign['postflash_role']
     source_profile = campaign
     if not (10 <= args.max_block_bytes <= 100):
@@ -606,8 +610,12 @@ def main():
                 changed.wait(min(0.3, max(0, meter_deadline - time.monotonic())))
                 changed.clear()
             if state['pm_fresh'] is None:
-                raise AssertionError('No newly decoded ZCL activePower sample; cached PM state cannot authorize OTA')
-            meter_input = {'power': state['pm_fresh']['power']}
+                # Source identity/OTA guards remain mandatory, but watts are
+                # deliberately NOT a transfer-admission condition.
+                log('pm_telemetry_unavailable_advisory', {'device': args.device})
+                meter_input = {}
+            else:
+                meter_input = {'power': state['pm_fresh']['power']}
         if args.waive_preflash_pm:
             # The operator has accepted unknown load; never misrepresent cached
             # telemetry as a fresh measurement or a 0 W preflight.

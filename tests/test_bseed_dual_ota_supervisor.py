@@ -43,7 +43,7 @@ def test_custom_nonpm_router_meter_exception_is_board_scoped():
     assert validate_metering_preflight({"state_relay":"OFF"},**kwargs) is None
     with pytest.raises(AssertionError,match="Non-PM exception"):
         validate_metering_preflight({"state_relay":"OFF"},**{**kwargs,"manufacturer":"_TZ3000_b28wrpvx"})
-    with pytest.raises(AssertionError,match="Non-PM preflight unexpectedly"):
-        validate_metering_preflight({"power":0, "state_relay":"OFF"},**kwargs)
+    # Unexpected PM telemetry on a meterless board is diagnostic; never a veto.
+    assert validate_metering_preflight({"power":0,"state_relay":"OFF"},**kwargs) == 0
     with pytest.raises(AssertionError,match="Non-PM exception"):
         validate_metering_preflight({"state_relay":"OFF"},**{**kwargs,"nonpm_router_transition":False})

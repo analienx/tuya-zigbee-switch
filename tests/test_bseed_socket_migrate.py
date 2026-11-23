@@ -27,7 +27,7 @@ PACKAGE = {'entries': [
 def live(manufacturer, model, role, build):
     return {'friendly_name': 'SocketX', 'ieee_address': IEEE, 'manufacturer': manufacturer,
             'model_id': model, 'type': role, 'software_build_id': build, 'network_address': 1234,
-            'interview_state': 'SUCCESSFUL'}
+            'interview_state': 'SUCCESSFUL', 'relay_state':'ON'}
 
 
 STOCK = live('_TZ3000_b28wrpvx', 'TS011F', 'Router', '1.0.13')
@@ -59,7 +59,6 @@ def planned(tmp_path, row, to):
 
 
 @pytest.mark.parametrize('row, to, kind', [
-    (STOCK, 'client', 'stock_pm_to_client'),
     (PM_CLIENT, 'same', 'pm_same_role'),
     (PM_CLIENT, 'router', 'pm_role_change'),
     (PM_ROUTER, 'client', 'pm_role_change'),
@@ -68,7 +67,9 @@ def planned(tmp_path, row, to):
 def test_every_route_builds_a_profile_the_campaign_accepts(tmp_path, row, to, kind):
     route, profile, loaded = planned(tmp_path, row, to)
     assert route['kind'] == kind
-    assert relay.validate(loaded) is True and loaded['expect_relay'] == 'OFF'
+    assert relay.validate(loaded) is False and loaded['expect_relay'] == 'ON'
+    assert loaded['auto_relay_off'] is False and loaded['relay_state_policy'] == 'preserve'
+    assert loaded['operator_connected_load_risk_accepted'] is True
     assert loaded['block_bytes'] == 48 and loaded['response_delay_ms'] >= 1200
     if route['source'] != route['target']:
         assert campaign.join_mode(loaded) == 'network-wide'
@@ -76,19 +77,33 @@ def test_every_route_builds_a_profile_the_campaign_accepts(tmp_path, row, to, ki
     assert loaded['preserve_device_state'] is True
 
 
+def test_custom_socket_already_off_remains_off_with_any_load(tmp_path):
+    device=dict(PM_CLIENT,relay_state='OFF')
+    _,profile,_=planned(tmp_path,device,'same')
+    assert profile['expect_relay']=='OFF'
+    assert profile['auto_relay_off'] is False
+    assert 'max_reported_watts' not in profile
+
+
+def test_no_verified_relay_baseline_refuses_to_guess(tmp_path):
+    source=dict(PM_CLIENT)
+    source.pop('relay_state')
+    with pytest.raises(mig.Refused,match="baseline"):
+        planned(tmp_path,source,'same')
+
+
 def test_route_specifics(tmp_path):
-    _, stock, _ = planned(tmp_path, STOCK, 'client')
-    assert (stock['image_type'], stock['file_version'], stock['relay_get_key']) == (54179, '0xffffffff', 'state')
-    assert stock['stock_client_conversion'] is True and 'preflash_build' not in stock
-    assert relay.proof(stock) == 'relay_off'
+    # A non-pinned stock-to-Client route MUST refuse instead of turning OFF.
+    with pytest.raises(mig.Refused,match="pinned owner-authorized"):
+        planned(tmp_path,STOCK,'client')
     _, same, _ = planned(tmp_path, PM_CLIENT, 'same')
-    assert (same['image_type'], same['preflash_build'], relay.proof(same)) == (65024, '1.2.5-bseedcli25', 'meter')
+    assert (same['image_type'], same['preflash_build'], same['auto_relay_off']) == (65024, '1.2.5-bseedcli25', False)
     _, force, _ = planned(tmp_path, PM_CLIENT, 'router')
     assert force['force_test_transition'] is True and force['image_type'] == 65024
     assert force['preflash_query_image_type'] == 65024 and force['preflash_file_version'] == '0x12053024'
     _, nonpm, _ = planned(tmp_path, NONPM_ROUTER, 'same')
     assert nonpm['non_pm'] is True and nonpm['require_pm'] is False
-    assert nonpm['preflash_relay_physical_mode'] == 'follow_state' and relay.proof(nonpm) == 'relay_off'
+    assert nonpm['preflash_relay_physical_mode'] == 'follow_state' and nonpm['auto_relay_off'] is False
 
 
 @pytest.mark.parametrize('row, to, match', [

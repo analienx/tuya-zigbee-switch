@@ -33,7 +33,7 @@ def test_entrance_exact_route_is_meterless_and_unloaded_operator_accepted():
 
 
 def test_entrance_refuses_missing_unloaded_confirmation():
-    with pytest.raises(ValueError, match="Physical load"):
+    with pytest.raises(ValueError, match="preserve-state owner risk|Physical load"):
         verify_recovery(candidate(), confirm_unloaded=False)
 
 
@@ -65,10 +65,9 @@ def test_cannot_use_generic_router_to_disable_metering_gate():
         validate_metering_preflight({"state_relay":"OFF"},non_pm=True,
             model=p["model"],manufacturer=p["manufacturer"],role="Router",
             max_reported_watts=1,nonpm_router_transition=False)
-    with pytest.raises(AssertionError, match="unexpectedly exposes PM"):
-        validate_metering_preflight({"state_relay":"OFF","power":0},non_pm=True,
-            model=p["model"],manufacturer=p["manufacturer"],role="Router",
-            max_reported_watts=1,nonpm_router_transition=True)
+    assert validate_metering_preflight({"state_relay":"OFF","power":0},non_pm=True,
+        model=p["model"],manufacturer=p["manufacturer"],role="Router",
+        max_reported_watts=1,nonpm_router_transition=True) == 0
 
 
 def test_balcony_legacy_policy_admission_remains_exact():

@@ -195,9 +195,10 @@ def test_flash_needs_exact_confirmation_before_any_stage(tmp_path):
         canary.run(site, path, profile, confirm_ieee=IEEE, call=calls)
     assert calls.modes == []
     site, path, profile = planned(tmp_path / 'nonpm', 'nonpm')
-    with pytest.raises(canary.CanaryError, match='confirm-load-unplugged'):
-        canary.run(site, path, profile, flash=True, confirm_ieee=IEEE, call=calls)
-    assert calls.modes == []
+    # Once the exact IEEE is supplied, an attached load is not a veto.
+    assert canary.run(site, path, profile, flash=True, confirm_ieee=IEEE, call=calls)==0
+    assert calls.modes==['prepare','preflight','qualify','flash','status']
+    assert '--confirm-load-unplugged' not in calls.calls[3]
 
 
 def test_flash_runs_after_gates_and_stops_on_first_failure(tmp_path):

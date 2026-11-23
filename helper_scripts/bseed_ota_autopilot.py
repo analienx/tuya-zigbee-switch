@@ -248,9 +248,9 @@ class Autopilot:
         self.profile = sup.campaign.load_profile(profile_path)
         if confirm_ieee != self.profile["ieee"]:
             raise ValueError("Exact IEEE confirmation mismatch")
-        if ((self.profile.get("non_pm") is True or
-             self.profile.get("pm_preflash_load_proof") == "physically_unloaded") and not confirm_unloaded):
-            raise ValueError("load-unplugged confirmation required for this campaign")
+        from bseed_operator_load_policy import require_preserve_state_for_flash
+        require_preserve_state_for_flash(self.profile)
+        # No wattage/unplugged attestation is required for preserve-state OTA.
         self.advisories = validate_policy(self.profile)
         self.work = Path(self.profile["workdir"])
         stamp = dt.datetime.now().strftime("%Y%m%dT%H%M%S")

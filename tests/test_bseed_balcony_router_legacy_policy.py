@@ -69,7 +69,7 @@ def test_no_unsafe_generalization_of_legacy_router_exception(field, other):
 
 
 def test_unloaded_confirmation_remains_mandatory():
-    with pytest.raises(ValueError, match='Physical load'):
+    with pytest.raises(ValueError, match='preserve-state owner risk|Physical load'):
         verify_recovery(candidate(), confirm_unloaded=False)
 
 
