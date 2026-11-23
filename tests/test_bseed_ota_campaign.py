@@ -430,7 +430,10 @@ def test_same_role_router_interview_precedes_audit_and_postflash(tmp_path,monkey
     assert result.value.code==0
     assert [Path(c.args[0][2]).name for c in run.call_args_list]==[
         'bseed_targeted_z2m_ota.py','bseed_z2m_postota_reinterview.py',
-        'bseed_z2m_postflash_verify.py','bseed_pm_role_audit.py']
+        'bseed_z2m_postflash_verify.py']
+    cmd = run.call_args.args[0]
+    assert cmd[cmd.index('--pm-audit-seconds') + 1] == '85'
+    assert cmd[cmd.index('--baseline') + 1] == cfg['pm_settings_baseline']
 
 
 def test_same_role_interview_failure_blocks_provision_and_postflash(tmp_path,monkeypatch):
@@ -462,7 +465,8 @@ def test_postota_interview_pins_image_and_separate_postflash_identity(tmp_path):
 def test_same_role_postflash_requires_exact_private_relay_energy_baseline(tmp_path):
     cfg=profile(tmp_path)
     cfg.update(preflash_role='Router',postflash_role='Router',require_pm=True,
-               relay_get_key='state_relay')
+               relay_get_key='state_relay', pm_ssh_host='test.invalid',
+               pm_ssh_key=str(tmp_path/'private.key'))
     cmd=campaign.postflash_cmd(cfg,tmp_path/'post.json')
     assert cmd[cmd.index('--preflash-lock')+1]==str(Path(cfg['workdir'])/'ACTIVE_LOCK.json')
     assert cmd[cmd.index('--expected-image-sha256')+1]==cfg['sha256']
@@ -687,8 +691,8 @@ def test_force_pm_client_to_router_transition_uses_audit_not_client_provisioner(
     assert done.value.code == 0
     names = [Path(call.args[0][2]).name for call in run.call_args_list]
     assert names == ['bseed_targeted_z2m_ota.py', 'bseed_z2m_rejoin_window.py',
-                     'bseed_z2m_metadata_refresh.py', 'bseed_z2m_postflash_verify.py',
-                     'bseed_pm_role_audit.py']
+                     'bseed_z2m_metadata_refresh.py', 'bseed_z2m_postflash_verify.py']
+    assert '--pm-audit-seconds' in run.call_args.args[0]
     assert 'bseed_pm_provision.py' not in names
 
 

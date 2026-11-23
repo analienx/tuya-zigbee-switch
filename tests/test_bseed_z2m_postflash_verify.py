@@ -2,7 +2,8 @@
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'helper_scripts'))
-from bseed_z2m_postflash_verify import evaluate
+from bseed_z2m_postflash_verify import evaluate, observed_power, router_audit_observations
+from bseed_z2m_state_refresh import PM_STAMP, PM_STAMP_POWER
 
 IEEE='0xa4c138241e3de538'
 def record(role='EndDevice', build='1.2.5-bseedcli6', interviewed=True):
@@ -51,3 +52,27 @@ def test_pm_gate_accepts_configured_plausible_but_not_physical_acceptance():
     assert pm_readiness(pm_device(),{'voltage':240.65,'current':0.218,'power':28,'energy':0.156})==[]
     assert any('nonretained' in issue for issue in pm_readiness(pm_device(),None))
     assert any('max-60s' in issue for issue in pm_readiness(pm_device(False),{'voltage':240,'current':0,'power':0,'energy':0}))
+
+
+def test_observed_power_requires_a_new_stamp_and_accepts_zero_watts():
+    start = 100_000
+    state = {PM_STAMP: start + 1_000, PM_STAMP_POWER: 0, 'device': {'ieeeAddr': IEEE}}
+    assert observed_power(state, IEEE, 0, start, start + 2_000)['power'] == 0
+    assert observed_power(state, IEEE, state[PM_STAMP], start, start + 2_000) is None
+    assert observed_power({**state, PM_STAMP: start - 2}, IEEE, 0, start, start + 2_000) is None
+    assert observed_power(state, '0xwrong', 0, start, start + 2_000) is None
+
+
+def test_router_audit_refresh_can_supplement_one_observation_but_cannot_replace_it():
+    samples = [(10, {PM_STAMP: 100_000, 'power': 0})]
+    refresh = {
+        'issues': [], 'freshPmSample': {'sample_time_ms': 112_000, 'power': 0},
+        'fields': {key: {'fresh': value} for key, value in
+                   {'power': 0, 'energy': 1.2, 'voltage': 240, 'current': 0}.items()},
+    }
+    assert router_audit_observations([], refresh) == []
+    assert router_audit_observations(samples, refresh)[-1] == (
+        22, {'power': 0, 'energy': 1.2, 'voltage': 240, 'current': 0},
+    )
+    refresh['freshPmSample']['sample_time_ms'] = 100_000
+    assert router_audit_observations(samples, refresh) == samples

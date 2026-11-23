@@ -516,7 +516,10 @@ def postflash_cmd(profile, evidence):
             '--expect-role', profile['postflash_role'], '--expect-build', profile['postflash_build'],
             '--mqtt-config', profile['mqtt_config'], '--broker', profile['broker'],
             '--output', str(evidence), '--observe-seconds', str(profile.get('observe_seconds', 20))]
-    if profile.get('require_pm'): cmd.append('--require-pm')
+    if profile.get('require_pm'):
+        cmd.append('--require-pm')
+        if profile['postflash_role'] == 'Router':
+            cmd.extend(['--pm-audit-seconds', pm_audit_seconds(profile), *pm_audit_ssh_options(profile)])
     from bseed_converter_gate import converter_copy
     converter = converter_copy(profile)
     if converter: cmd.extend(['--converter', converter])
@@ -572,17 +575,30 @@ def provision_cmd(profile, confirmation, evidence):
     return cmd
 
 
-def role_audit_cmd(profile, evidence):
-    if not profile.get('require_pm'): raise ValueError('PM role audit requires a PM profile')
+def pm_audit_seconds(profile):
+    seconds = profile.get('pm_audit_seconds', 85)
+    if type(seconds) is not int or not 60 <= seconds <= 420:
+        raise ValueError('PM audit requires 60..420 observation seconds')
+    return str(seconds)
+
+
+def pm_audit_ssh_options(profile):
     if not profile.get('pm_ssh_host') or not profile.get('pm_ssh_key'):
         raise ValueError('Private PM SSH settings required')
+    options = ['--ssh-host', profile['pm_ssh_host'], '--ssh-key', profile['pm_ssh_key']]
+    if profile.get('pm_settings_baseline'):
+        options.extend(['--baseline', profile['pm_settings_baseline']])
+    return options
+
+
+def role_audit_cmd(profile, evidence):
+    if not profile.get('require_pm'): raise ValueError('PM role audit requires a PM profile')
     cmd=[sys.executable,'-u',str(ROOT/'helper_scripts/bseed_pm_role_audit.py'),
          '--device',profile['device'],'--ieee',profile['ieee'],
          '--expect-role',profile['postflash_role'],'--expect-build',profile['postflash_build'],
          '--mqtt-config',profile['mqtt_config'],'--broker',profile['broker'],
-         '--ssh-host',profile['pm_ssh_host'],'--ssh-key',profile['pm_ssh_key'],
-         '--observe-seconds',str(profile.get('pm_audit_seconds',85)),'--output',str(evidence)]
-    if profile.get('pm_settings_baseline'):cmd.extend(['--baseline',profile['pm_settings_baseline']])
+         '--observe-seconds',pm_audit_seconds(profile),'--output',str(evidence),
+         *pm_audit_ssh_options(profile)]
     return cmd
 
 
@@ -644,7 +660,9 @@ def main():
         else:
             if args.mode != 'flash':
                 raise SystemExit('Router PM role transition requires an explicit force-test profile')
-            verified_router_pm_candidate(profile)  # same-role Router flash, then audit separately
+            verified_router_pm_candidate(profile)
+        pm_audit_seconds(profile)
+        pm_audit_ssh_options(profile)
     import bseed_converter_gate
     if bseed_converter_gate.required(profile, args.mode):
         try:
@@ -803,8 +821,6 @@ def main():
         if profile.get('require_pm'):
             if profile['postflash_role'] == 'EndDevice':
                 provision_cmd(profile, args.confirm_ieee, work / 'pm_prevalidated.json')
-            else:
-                role_audit_cmd(profile, work / 'pm_router_audit_prevalidated.json')
         if args.mode == 'transition':
             if profile.get('non_pm') is True:
                 from bseed_nonpm_recovery_gate import verify_transition_recovery
@@ -855,12 +871,7 @@ def main():
                 if provisioned: raise SystemExit(provisioned)
         if args.mode == 'transition':
             post_evidence = work / ('postflash_' + uuid.uuid4().hex + '.json')
-            post_status = subprocess.call(postflash_cmd(profile, post_evidence))
-            audit_status = 0
-            if profile.get('require_pm') and profile['postflash_role'] == 'Router':
-                audit_evidence = work / ('pm_role_audit_' + uuid.uuid4().hex + '.json')
-                audit_status = subprocess.call(role_audit_cmd(profile, audit_evidence))
-            status = 0 if post_status == 0 and audit_status == 0 else 2
+            status = subprocess.call(postflash_cmd(profile, post_evidence))
             if status == 0:
                 accept_candidate(profile)
             raise SystemExit(status)
@@ -911,24 +922,10 @@ def main():
         restored = restore_device_state(profile, args.confirm_ieee)
         if restored: raise SystemExit(restored)
         restore_preserved_on(profile, "after_state_restore")
-        if profile.get('require_pm'):
-            if profile['postflash_role'] == 'Router':
-                post = work / ('postflash_' + uuid.uuid4().hex + '.json')
-                post_code = subprocess.call(postflash_cmd(profile, post))
-                audit = work / ('pm_role_audit_' + uuid.uuid4().hex + '.json')
-                audit_code = subprocess.call(role_audit_cmd(profile, audit))
-                status = 0 if post_code == 0 and audit_code == 0 else 2
-                if status == 0:
-                    accept_candidate(profile)
-                raise SystemExit(status)
+        if profile.get('require_pm') and profile['postflash_role'] == 'EndDevice':
             pm_evidence = work / ('pm_provision_' + uuid.uuid4().hex + '.json')
             provisioned = subprocess.call(provision_cmd(profile, args.confirm_ieee, pm_evidence))
             if provisioned: raise SystemExit(provisioned)
-            post_evidence = work / ('postflash_' + uuid.uuid4().hex + '.json')
-            post_status = subprocess.call(postflash_cmd(profile, post_evidence))
-            if post_status == 0:
-                accept_candidate(profile)
-            raise SystemExit(post_status)
         post = work / ('postflash_' + uuid.uuid4().hex + '.json')
         post_status = subprocess.call(postflash_cmd(profile, post))
         if post_status == 0:
