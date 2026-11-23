@@ -359,6 +359,8 @@ def accept_candidate(profile):
     """postflash_candidate after post-reboot relay verification/recovery."""
     from bseed_stock_client_loaded_canary import restore_pinned_on_after_rejoin
     restore_pinned_on_after_rejoin(profile, "before_acceptance")
+    from bseed_relay_postflash_restore import restore_preserved_on
+    restore_preserved_on(profile, "before_acceptance")
     import bseed_relay_state_policy
     bseed_relay_state_policy.verify_after_flash(profile)
     record_postflash_candidate(profile)
@@ -368,18 +370,12 @@ def accept_candidate(profile):
 
 
 def auto_relay_off_then_check(profile):
-    """Fresh OTA check for auto-OFF and exact preserve-ON stock canaries."""
+    """Never disable socket power. Pinned stock canaries get a read-only OTA check."""
     import bseed_relay_auto_off
-    if not bseed_relay_auto_off.enabled(profile):
-        from bseed_stock_client_loaded_canary import authorized as loaded_authorized
-        # An ON-relay stock canary MUST perform the same fresh targeted OTA check
-        # as the historical auto-OFF route, without any relay SET.
-        return subprocess.call(runner_args(profile, 'check')) if loaded_authorized(profile) else 0
-    bseed_relay_auto_off.switch_off_before_flash(profile)
-    status = subprocess.call(runner_args(profile, 'check'))
-    if status:
-        print('AUTO_RELAY_OFF_CHECK_FAILED_NO_FLASH', status, flush=True)
-    return status
+    if bseed_relay_auto_off.enabled(profile):
+        raise ValueError('Automatic relay-OFF prohibited for OTA')
+    from bseed_stock_client_loaded_canary import authorized as loaded_authorized
+    return subprocess.call(runner_args(profile, 'check')) if loaded_authorized(profile) else 0
 
 
 def verify_nonpm_link_after_final_check(profile, run=subprocess.call):
@@ -633,11 +629,14 @@ def main():
         raise SystemExit('--confirm-load-unplugged is only valid for non-PM or pinned PM physical-proof flash')
     import bseed_relay_auto_off
     auto_off = bseed_relay_auto_off.enabled(profile)
+    if args.mode in ('flash', 'transition'):
+        from bseed_operator_load_policy import require_preserve_state_for_flash
+        require_preserve_state_for_flash(profile)
     if args.mode in ('flash', 'transition') and auto_off:
         raise SystemExit('Current operator policy forbids turning a relay OFF for OTA; migrate to a verified preserve-state profile')
     if (args.mode in ('flash', 'transition') and physical_pm and not args.confirm_load_unplugged
-            and not auto_off):
-        raise SystemExit('PM physical-proof flash requires fresh --confirm-load-unplugged attestation or auto_relay_off')
+            and not __import__('bseed_operator_load_policy').connected_load_authorized(profile)):
+        raise SystemExit('Legacy PM physical-proof campaign requires replan under preserve-state policy')
     if profile.get('require_pm') and profile['postflash_role'] == 'Router' and args.mode in ('flash','transition','rejoin'):
         if profile.get('force_test_transition') is True:
             if args.mode == 'flash':
@@ -816,8 +815,9 @@ def main():
             confirmed, relay_record = load_confirmation(profile, args.confirm_load_unplugged)
             if profile.get('non_pm') is True:
                 verify_transition_recovery(profile, confirm_unloaded=confirmed)
-            if (profile.get('non_pm') is True or physical_pm) and not confirmed:
-                raise SystemExit('Load safety not proven: no attestation and no fresh verified relay OFF')
+            from bseed_operator_load_policy import connected_load_authorized
+            if (profile.get('non_pm') is True or physical_pm) and not confirmed and not connected_load_authorized(profile):
+                raise SystemExit('Legacy load-proof campaign must be replanned to preserve relays')
             snapshot_status = take_state_snapshot(profile)
             if snapshot_status:
                 print('STATE_SNAPSHOT_FAILED_NO_FLASH', flush=True)
@@ -833,6 +833,8 @@ def main():
         # A reboot may clear an ON relay even without any command from us.
         # Exact source/target role and firmware have been verified by rejoin.
         restore_pinned_on_after_rejoin(profile, "after_rejoin")
+        from bseed_relay_postflash_restore import restore_preserved_on
+        restore_preserved_on(profile, "after_rejoin")
         metadata_evidence = work / ('metadata_' + uuid.uuid4().hex + '.json')
         refreshed = subprocess.call(metadata_cmd(profile, args.confirm_ieee, metadata_evidence))
         if refreshed: raise SystemExit(refreshed)
@@ -845,6 +847,7 @@ def main():
         restored = restore_device_state(profile, args.confirm_ieee)
         if restored: raise SystemExit(restored)
         restore_pinned_on_after_rejoin(profile, "after_state_restore")
+        restore_preserved_on(profile, "after_state_restore")
         if profile.get('require_pm'):
             if profile['postflash_role'] == 'EndDevice':
                 pm_evidence = work / ('pm_provision_' + uuid.uuid4().hex + '.json')
@@ -882,8 +885,9 @@ def main():
         confirmed, relay_record = load_confirmation(profile, args.confirm_load_unplugged)
         if profile.get('non_pm') is True:
             verify_recovery(profile, confirm_unloaded=confirmed)
-        if (profile.get('non_pm') is True or physical_pm) and not confirmed:
-            raise SystemExit('Load safety not proven: no attestation and no fresh verified relay OFF')
+            from bseed_operator_load_policy import connected_load_authorized
+            if (profile.get('non_pm') is True or physical_pm) and not confirmed and not connected_load_authorized(profile):
+                raise SystemExit('Legacy load-proof campaign must be replanned to preserve relays')
         snapshot_status = take_state_snapshot(profile)
         if snapshot_status:
             print('STATE_SNAPSHOT_FAILED_NO_FLASH', flush=True)
@@ -898,12 +902,15 @@ def main():
         if interviewed:
             print('POSTOTA_INTERVIEW_UNCONFIRMED', interview, flush=True)
             raise SystemExit(interviewed)  # No provisioning or hardware acceptance on stale build.
+        from bseed_relay_postflash_restore import restore_preserved_on
+        restore_preserved_on(profile, "after_rejoin")
         if profile.get('require_pm'):
             from bseed_pm_telemetry_guard import release
             release(profile, interview)
         # A stock-to-custom image moves the relay endpoint; restore groups there.
         restored = restore_device_state(profile, args.confirm_ieee)
         if restored: raise SystemExit(restored)
+        restore_preserved_on(profile, "after_state_restore")
         if profile.get('require_pm'):
             if profile['postflash_role'] == 'Router':
                 post = work / ('postflash_' + uuid.uuid4().hex + '.json')

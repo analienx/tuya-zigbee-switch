@@ -16,8 +16,8 @@ campaign runs, so every refusal surfaces before anything is published.
 
 ``run`` waits for the shared network lease, then runs the canonical campaign
 (``transition`` for a role change, ``flash`` otherwise) with a durable log.
-The historical stock conversion uses verified auto-OFF. Two explicitly pinned
-2026-11-22 stock Client canaries instead preserve the live ON relay without
+Historical stock conversion via relay-OFF is now refused. Exactly two
+2026-11-22 stock Client canaries preserve the live ON relay without
 a relay SET; they accept unknown stock PM freshness and never guarantee
 mains continuity through reboot. Other devices remain unchanged.
 A transfer that stops (``update_error`` / timeout) is reconciled with the
@@ -133,7 +133,15 @@ def choose_join_via(neighbors, devices, target_ieee):
 
 
 def build_profile(site, live, route, candidate, *, image, sha256, native_image=None,
-                  native_sha256=None, join_via=None, workdir, folder, preflash_file_version=None):
+                  native_sha256=None, join_via=None, workdir, folder, preflash_file_version=None,
+                   relay_baseline=None):
+    from bseed_operator_load_policy import require_preserve_state_for_flash
+    if relay_baseline is None:
+        # Tests/explicit helper callers may provide a verified live relay value;
+        # the production planner always passes a freshly read value below.
+        relay_baseline = live.get('relay_state')
+    if relay_baseline not in ('ON', 'OFF'):
+        raise Refused('Cannot preserve relay: a fresh ON/OFF baseline is required')
     tag = sha256[:12]
     url_base = site['publish']['url_base'].rstrip('/') + '/' + folder
     role_change = route['source'] != route['target']
@@ -149,7 +157,10 @@ def build_profile(site, live, route, candidate, *, image, sha256, native_image=N
         'mqtt_config': site['mqtt_config'], 'broker': site['broker'], 'workdir': str(workdir),
         'network_lock_dir': site['network_lock_dir'], 'network_id': site['network_id'],
         'network_lock_shared': True, 'manufacturer_code': candidate['manufacturerCode'],
-        'auto_relay_off': True, 'expect_relay': 'OFF', 'force_test_transition': False,
+        'auto_relay_off': False, 'expect_relay': relay_baseline,
+        'relay_state_policy': 'preserve',
+        'operator_connected_load_risk_accepted': True,
+        'force_test_transition': False,
         'preserve_device_state': True, 'block_bytes': 48, 'response_delay_ms': 1200,
         'request_timeout_ms': 600000, 'monitor_seconds': 14400, 'check_timeout_seconds': 120,
         'postota_settle_seconds': 30, 'observe_seconds': 90,
@@ -173,22 +184,26 @@ def build_profile(site, live, route, candidate, *, image, sha256, native_image=N
     if pm:
         p.update(require_pm=True, non_pm=False, pm_ssh_host=site['pm_ssh_host'],
                  pm_ssh_key=site['pm_ssh_key'], pm_max_writes=4, pm_observe_seconds=420,
-                 pm_expected_idle=True)
+                 pm_expected_idle=False)
     else:
         p.update(require_pm=False, non_pm=True, preflash_relay_physical_mode='follow_state')
     if route['kind'] == 'stock_pm_to_client':
-        p.update(stock_client_conversion=True, pm_preflash_load_proof='physically_unloaded',
-                 relay_get_key='state', postflash_manufacturer=CUSTOM_PM[0],
-                 postflash_model=CUSTOM_PM[1], pm_allow_configure=True)
+        p.update(stock_client_conversion=True, pm_preflash_load_proof='meter',
+                  relay_get_key='state', postflash_manufacturer=CUSTOM_PM[0],
+                  postflash_model=CUSTOM_PM[1], pm_allow_configure=True)
+        if live['friendly_name'] not in site.get('stock_loaded_preserve_devices', []):
+            raise Refused('Stock-to-Client requires a pinned owner-authorized preserve-ON conversion; no relay-OFF fallback')
         if live['friendly_name'] in site.get('stock_loaded_preserve_devices', []):
+            if relay_baseline != 'ON':
+                raise Refused('Pinned stock conversion requires the already-ON relay baseline; never command ON during planning')
             # Two exact-IEEE operator-authorized loaded canaries only.
             # No relay command, no assertion that stock PM is independently fresh.
             p.update(stock_client_preserve_loaded=True, auto_relay_off=False,
                      expect_relay='ON', relay_state_policy='preserve',
                      pm_preflash_load_proof='meter', operator_waive_preflash_pm=True,
                      operator_connected_load_risk_accepted=True,
-                     max_reported_watts=100.0, pm_expected_idle=False,
-                     response_delay_ms=1800)
+                      pm_expected_idle=False,
+                      response_delay_ms=1800)
             from bseed_stock_client_loaded_canary import authorized as loaded_authorized
             loaded_authorized(p)
     else:
@@ -206,6 +221,7 @@ def build_profile(site, live, route, candidate, *, image, sha256, native_image=N
         for key in ('pm_router_matrix_evidence', 'pm_settings_baseline'):
             if device.get(key) or site.get(key):
                 p[key] = device.get(key) or site.get(key)
+    require_preserve_state_for_flash(p)
     return p
 
 
@@ -310,6 +326,56 @@ def installed_file_version(site, device, key):
     return (box.get('update') or {}).get('installed_version')
 
 
+def read_relay_baseline(site, live):
+    """Read a fresh exact-device ON/OFF state. Never write a relay or read watts.
+
+    Firmware source's cached inventory is not a physical relay baseline.
+    A missed response blocks planning because 'preserve current state' would
+    otherwise be impossible to verify.
+    """
+    import paho.mqtt.client as mqtt
+    import threading
+    import yaml
+    config = yaml.safe_load(Path(site['mqtt_config']).read_text(encoding='utf8'))['mqtt']
+    base = config.get('base_topic', 'zigbee2mqtt')
+    name = live['friendly_name']
+    source_stock = live.get('manufacturer', '').startswith(('_TZ3000_', '_TZ3002_'))
+    key = 'state' if source_stock else 'state_relay'
+    topic = base + '/' + name
+    seen = threading.Event()
+    results = []
+    def on_message(_client, _userdata, msg):
+        if msg.topic != topic or msg.retain:
+            return
+        try:
+            value = json.loads(msg.payload)
+        except (ValueError, UnicodeDecodeError):
+            return
+        if (value.get('device') or {}).get('ieeeAddr') != live['ieee_address']:
+            return
+        if value.get(key) in ('ON', 'OFF'):
+            results.append(value[key])
+            seen.set()
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
+                         client_id='bseed-relay-baseline-' + uuid.uuid4().hex[:7])
+    client.username_pw_set(config.get('user', ''), config.get('password', ''))
+    client.on_message = on_message
+    client.connect(site['broker'], 1883, 10)
+    client.subscribe(topic, qos=1)
+    client.loop_start()
+    try:
+        for _ in range(2):
+            seen.clear()
+            results.clear()
+            client.publish(topic + '/get', json.dumps({key: ''}), qos=1).wait_for_publish(5)
+            if seen.wait(9) and results:
+                return results[-1]
+    finally:
+        client.loop_stop()
+        client.disconnect()
+    raise Refused('Exact socket relay state unavailable; cannot guarantee a preserve-state OTA plan')
+
+
 def workdir_for(site, device):
     root = Path(site['campaign_root']) / device
     current = root / 'CURRENT'
@@ -396,9 +462,10 @@ def cmd_plan(site, args):
     if route['kind'] == 'pm_role_change':
         file_version = installed_file_version(site, args.device, 'state_relay')
     profile = build_profile(site, live, route, candidate, image=image, sha256=sha,
-                            native_image=native_path, native_sha256=candidate['otaSha256'],
-                            join_via=join_via, workdir=work, folder=folder,
-                            preflash_file_version=file_version)
+                             native_image=native_path, native_sha256=candidate['otaSha256'],
+                             join_via=join_via, workdir=work, folder=folder,
+                             preflash_file_version=file_version,
+                             relay_baseline=read_relay_baseline(site, live))
     manufacturer_name = live['manufacturer']
     (work / 'template_index.json').write_text(
         json.dumps(template_index(profile, transport, manufacturer_name), indent=2) + '\n', encoding='utf8')

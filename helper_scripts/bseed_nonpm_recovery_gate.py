@@ -142,8 +142,9 @@ def _verify_recovery(profile, *, confirm_unloaded=False,
         raise ValueError('Unproven non-PM transfer size: pin 32 bytes, or 48 bytes with paced responses')
     from bseed_ota_block_policy import check_block_bytes
     check_block_bytes(profile, allowed=(32, 48))
-    if confirm_unloaded is not True:
-        raise ValueError('Physical load not explicitly confirmed disconnected for THIS flash')
+    from bseed_operator_load_policy import connected_load_authorized
+    if confirm_unloaded is not True and not connected_load_authorized(profile):
+        raise ValueError('Non-PM OTA needs preserve-state owner risk authorization or explicit unloaded proof')
     if (not profile.get('recovery_evidence') and
             is_exact_parallel_owner_risk_20261120(profile, roles, transition)):
         # The canonical runner must independently verify fresh relay OFF before

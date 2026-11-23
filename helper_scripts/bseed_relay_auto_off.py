@@ -1,23 +1,8 @@
-"""Automatic relay OFF before a flash and restore after acceptance (replaces "nothing plugged in").
+"""Historical BSEED relay-OFF helpers — DISABLED for every OTA campaign.
 
-With ``"auto_relay_off": true`` a ``flash``/``transition`` campaign:
-
-1. reads the relay afresh and records its pre-flash state once, in the private
-   workdir (``RELAY_AUTO_OFF.json``; a resumed campaign keeps the first record);
-2. switches it OFF if it was ON and verifies OFF by a fresh read of the same IEEE;
-3. proves the outlet is unpowered without a human attestation:
-   - custom PM firmware (meter route): the runner's fresh converter-stamped
-     power must be at or below ``max_reported_watts``;
-   - stock PM and non-PM sockets, whose meter cannot prove zero watts: the
-     verified-OFF record (``verified_off_at``, at most 15 minutes old) replaces
-     ``--confirm-load-unplugged``, and the runner still reads the relay OFF
-     itself just before the flash;
-4. after a role change re-asserts OFF on the new firmware as soon as the device
-   has rejoined (a stock-to-custom first boot has no saved relay state);
-5. switches the relay back ON only after ``postflash_candidate``.
-
-A failed or unverified update leaves the relay OFF: that is the safe state.
-Only the target's own relay key is ever written; no group or broadcast command.
+This module keeps read-only relay GET, evidence and exact-target ON restoration
+for old campaign records. It refuses any OFF command, including direct calls.
+Do not treat restored ON as uninterrupted mains continuity.
 """
 import datetime as dt
 import json
@@ -43,25 +28,10 @@ def enabled(profile):
 
 
 def validate(profile):
-    """Profile shape for the automatic route; called from load_profile."""
+    """Reject all auto-OFF profile shapes before OTA planning or runtime."""
     if not enabled(profile):
         return False
-    if profile.get('expect_relay') != 'OFF':
-        raise ValueError('auto_relay_off requires expect_relay=OFF (the state the flash runs in)')
-    stock = profile.get('manufacturer', '').startswith(STOCK_PREFIXES)
-    physical = profile.get('pm_preflash_load_proof') == 'physically_unloaded'
-    if profile.get('require_pm') is True and profile.get('non_pm') is not True:
-        # Stock converters never stamp a fresh PM sample: only the verified
-        # relay OFF can stand in for the human attestation there. Custom PM
-        # firmware must keep the stronger meter proof.
-        if stock and not physical:
-            raise ValueError('auto_relay_off on stock PM uses the physically_unloaded route with a verified relay OFF')
-        if not stock and physical:
-            raise ValueError('auto_relay_off on custom PM firmware uses the meter route')
-    elif profile.get('non_pm') is not True:
-        raise ValueError('auto_relay_off needs an explicit PM or non-PM socket profile')
-    return True
-
+    raise ValueError('Automatic relay-OFF is disabled for all new BSEED OTA migrations')
 
 def proof(profile):
     """'meter' when the runner's fresh PM sample proves zero watts, else 'relay_off'."""
@@ -147,7 +117,9 @@ class RelayClient:
         raise TimeoutError('No fresh %s answer from the target' % key)
 
     def set(self, key, value, attempts=3):
-        """Switch and verify; retry the command, never accept an unverified state."""
+        """Only target-specific ON restoration is allowed; OFF is never sent."""
+        if value != 'ON' or key not in ('state', 'state_relay'):
+            raise ValueError('Relay-OFF command is forbidden during BSEED OTA')
         observed = None
         for _ in range(attempts):
             self.client.publish(self.topic + '/set', json.dumps({key: value}), qos=1).wait_for_publish(5)
@@ -168,51 +140,12 @@ def _write(profile, record):
 
 
 def switch_off_before_flash(profile, client=None):
-    """Record the pre-flash state once, then leave the relay verified OFF."""
-    path = record_path(profile)
-    own = client is None
-    client = client or RelayClient(profile)
-    try:
-        key = preflash_key(profile)
-        if path.is_file():
-            record = json.loads(path.read_text(encoding='utf8'))
-            if (record.get('ieee'), record.get('device')) != (profile['ieee'], profile['device']):
-                raise ValueError('Relay record belongs to a different target')
-        else:
-            record = {'device': profile['device'], 'ieee': profile['ieee'], 'key': key,
-                      'preflash': client.read(key), 'recorded_at': now(), 'restored': False}
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open('x', encoding='utf8') as handle:  # never overwrite the first truth
-                handle.write(json.dumps(record, indent=2, sort_keys=True) + '\n')
-        if client.read(key) != 'OFF':
-            client.set(key, 'OFF')
-            record['switched_off_at'] = now()
-        record['verified_off_at'] = now()
-        _write(profile, record)
-        print('RELAY_AUTO_OFF', json.dumps({'preflash': record['preflash'], 'now': 'OFF',
-                                            'proof': proof(profile)}), flush=True)
-        return record
-    finally:
-        if own:
-            client.close()
-
+    """No BSEED OTA path may intentionally cut relay power."""
+    raise ValueError('Automatic relay-OFF is prohibited by the BSEED migration policy')
 
 def reassert_off_after_rejoin(profile, client=None):
-    """A stock-to-custom first boot has no saved relay state: force OFF until acceptance."""
-    if not record_path(profile).is_file():
-        return None
-    own = client is None
-    client = client or RelayClient(profile)
-    try:
-        key = postflash_key(profile)
-        if client.read(key) != 'OFF':
-            client.set(key, 'OFF')
-            print('RELAY_REASSERTED_OFF_AFTER_REJOIN', flush=True)
-        return 'OFF'
-    finally:
-        if own:
-            client.close()
-
+    """Never force a post-reboot relay OFF."""
+    raise ValueError('Relay-OFF after rejoin is prohibited by the BSEED migration policy')
 
 def restore_after_acceptance(profile, client=None):
     """Return the relay to its pre-flash state; only after postflash_candidate."""

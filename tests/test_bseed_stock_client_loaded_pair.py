@@ -26,7 +26,7 @@ def profile(tmp_path, name="HALLSocketMain"):
     }
     live = dict(friendly_name=name, ieee_address=authority.TARGETS[name],
                 manufacturer="_TZ3000_b28wrpvx", model_id="TS011F",
-                type="Router", software_build_id=None)
+                type="Router", software_build_id=None, relay_state="ON")
     entry = dict(build="1.2.5-bseedcli27", imageType=65024,
                  manufacturerCode=4417, fileVersion=0x12053026)
     route = migrate.choose_route(live, "client")
@@ -84,7 +84,7 @@ def test_no_authority_for_other_stock_device(tmp_path):
         authority.authorized(p)
 
 
-def test_legacy_stock_conversion_still_has_off_proof(tmp_path):
+def test_legacy_stock_conversion_cannot_use_off_fallback(tmp_path):
     p = profile(tmp_path)
     p["stock_client_preserve_loaded"] = False
     assert authority.authorized(p) is False
@@ -99,15 +99,14 @@ def test_legacy_stock_conversion_still_has_off_proof(tmp_path):
     live = dict(friendly_name="HALLSocketMain",
                 ieee_address=authority.TARGETS["HALLSocketMain"],
                 manufacturer="_TZ3000_b28wrpvx", model_id="TS011F",
-                type="Router", software_build_id=None)
+                type="Router", software_build_id=None, relay_state="ON")
     route = migrate.choose_route(live, "client")
-    old = migrate.build_profile(site, live, route,
-        dict(build="1.2.5-bseedcli27", imageType=65024, manufacturerCode=4417),
-        image=tmp_path / "old.ota", sha256=authority.TRANSPORT_SHA,
-        native_image=tmp_path / "native.ota", native_sha256=authority.NATIVE_SHA,
-        join_via="OtherRouter", workdir=tmp_path / "old", folder="old")
-    assert old["auto_relay_off"] is True
-    assert old["pm_preflash_load_proof"] == "physically_unloaded"
+    with pytest.raises(migrate.Refused,match="pinned owner-authorized"):
+        migrate.build_profile(site, live, route,
+            dict(build="1.2.5-bseedcli27", imageType=65024, manufacturerCode=4417),
+            image=tmp_path / "old.ota", sha256=authority.TRANSPORT_SHA,
+            native_image=tmp_path / "native.ota", native_sha256=authority.NATIVE_SHA,
+            join_via="OtherRouter", workdir=tmp_path / "old", folder="old")
 
 
 def test_loaded_canary_checks_without_commanding_relay(monkeypatch, tmp_path):
