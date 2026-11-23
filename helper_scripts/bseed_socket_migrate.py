@@ -48,6 +48,7 @@ from pathlib import Path
 import struct
 import subprocess
 import sys
+import threading
 import time
 import uuid
 
@@ -64,6 +65,7 @@ VARIANT = {(CUSTOM_PM, 'EndDevice'): 'pm-client', (CUSTOM_PM, 'Router'): 'pm-rou
 SOURCE_QUERY_TYPE = {(CUSTOM_PM, 'EndDevice'): 65024, (CUSTOM_PM, 'Router'): 43556}
 STATE_FILE = 'MIGRATION.json'
 FAILED_PHASES = ('update_error', 'update_timeout_or_unconfirmed')
+PLAN_RADIO = threading.Lock()
 
 
 class Refused(ValueError):
@@ -417,7 +419,8 @@ def active_leases(site):
 
 def cmd_plan(site, args):
     sys.path.insert(0, str(ROOT / 'helper_scripts'))
-    devices = inventory(site)
+    with PLAN_RADIO:
+        devices = inventory(site)
     rows = [d for d in devices if d.get('friendly_name') == args.device]
     if len(rows) != 1:
         raise Refused('Device %r not found exactly once in Zigbee2MQTT' % args.device)
@@ -443,8 +446,9 @@ def cmd_plan(site, args):
     join_via, children = None, []
     if route['source'] != route['target']:
         from bseed_zdo_live import read_neighbor_table
-        neighbors = read_neighbor_table(site['mqtt_config'], site['broker'], live['ieee_address'],
-                                        live['network_address'])
+        with PLAN_RADIO:
+            neighbors = read_neighbor_table(site['mqtt_config'], site['broker'], live['ieee_address'],
+                                            live['network_address'], require_complete=route['source'] == 'Router')
         known = {d.get('ieee_address') for d in devices}
         if (route['target'] == 'EndDevice' and
                 not any(entry.get('eui64') in known for entry in neighbors or [])):
@@ -469,13 +473,15 @@ def cmd_plan(site, args):
         raise Refused('A different image already uses %s' % image)
     image.write_bytes(transport)
     file_version = None
-    if route['kind'] == 'pm_role_change':
-        file_version = installed_file_version(site, args.device, 'state_relay')
+    with PLAN_RADIO:
+        if route['kind'] == 'pm_role_change':
+            file_version = installed_file_version(site, args.device, 'state_relay')
+        relay_baseline = read_relay_baseline(site, live)
     profile = build_profile(site, live, route, candidate, image=image, sha256=sha,
                              native_image=native_path, native_sha256=candidate['otaSha256'],
                              join_via=join_via, workdir=work, folder=folder,
                              preflash_file_version=file_version,
-                             relay_baseline=read_relay_baseline(site, live))
+                             relay_baseline=relay_baseline)
     manufacturer_name = live['manufacturer']
     (work / 'template_index.json').write_text(
         json.dumps(template_index(profile, transport, manufacturer_name), indent=2) + '\n', encoding='utf8')

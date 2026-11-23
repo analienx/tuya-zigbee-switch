@@ -59,6 +59,10 @@ The mixed queue validates every target plan before publishing any image.
 Planning and publication use up to three workers. A saved `CURRENT` plan must
 match its requested device and destination role. Use `--replan` to replace
 unflashed plans or select the correct private site before running.
+Within a batch, Zigbee inventory, neighbor and relay requests run one at a
+time. Removing a Router role requires the full neighbor table. The reader
+checks each page's index against the requested offset and stops on an
+incomplete or changing table.
 
 Transfer order follows the target list. Adjacent same-role campaigns use the
 [parallel autopilot](bseed_ota_autopilot.md) when their private profiles opt in

@@ -208,6 +208,16 @@ def test_parallel_wave_detects_router_child_conflict(monkeypatch):
     )
 
 
+def test_complete_neighbor_scan_rejects_a_repeated_page_or_changed_table():
+    children = [{'relationship': 1}, {'relationship': 2}]
+    result = {'status': 'ok', 'data': [0, {'neighborTableEntries': 26, 'startIndex': 14, 'entryList': children}]}
+    assert parse_neighbor_page(result, expected_index=14, expected_total=26) == (26, children)
+    with pytest.raises(ValueError, match='unexpected page index'):
+        parse_neighbor_page(result, expected_index=16, expected_total=26)
+    with pytest.raises(ValueError, match='size changed'):
+        parse_neighbor_page(result, expected_index=14, expected_total=25)
+
+
 def test_wrapper_changes_only_the_header_type_and_version():
     native = bytes(range(256)) * 4
     out = mig.wrap(native, 54179)

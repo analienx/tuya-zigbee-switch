@@ -64,7 +64,7 @@ def read_node_descriptor(mqtt_config, broker, ieee, network_address, timeout=20)
 MGMT_LQI = 0x31  # ZDO Mgmt_Lqi_req: the target's neighbour table, read-only
 
 
-def parse_neighbor_page(result):
+def parse_neighbor_page(result, *, expected_index=None, expected_total=None):
     if result.get('status') != 'ok':
         raise ValueError('ZDO Mgmt_Lqi failed: ' + str(result.get('error')))
     payload = result.get('data')
@@ -74,10 +74,18 @@ def parse_neighbor_page(result):
     total, entries = page.get('neighborTableEntries'), page.get('entryList')
     if type(total) is not int or not isinstance(entries, list):
         raise ValueError('Malformed ZDO neighbour table page')
+    if expected_index is not None:
+        if page.get('startIndex') != expected_index:
+            raise ValueError('ZDO neighbour table returned an unexpected page index')
+        if expected_total is not None and total != expected_total:
+            raise ValueError('ZDO neighbour table size changed during observation')
+        remaining = total - expected_index
+        if not 0 <= total <= 255 or remaining < 0 or len(entries) > remaining or (remaining and not entries):
+            raise ValueError('Incomplete ZDO neighbour table page')
     return total, entries
 
 
-def read_neighbor_table(mqtt_config, broker, ieee, network_address, timeout=25, max_pages=12,
+def read_neighbor_table(mqtt_config, broker, ieee, network_address, timeout=25, max_pages=None,
                         *, require_complete=False):
     """Exact IEEE/NWK, transaction-matched, paginated Mgmt_Lqi read. Never writes."""
     if not ieee.startswith('0x') or len(ieee) != 18:
@@ -111,21 +119,28 @@ def read_neighbor_table(mqtt_config, broker, ieee, network_address, timeout=25, 
             raise TimeoutError('MQTT ZDO subscription not ready')
         time.sleep(0.3)
         entries, total, index = [], None, 0
+        if max_pages is None:
+            max_pages = 255 if require_complete else 12
+        full_table_deadline = time.monotonic() + 60 if require_complete else float('inf')
         for _ in range(max_pages):
             if total is not None and index >= total:
                 break
+            if time.monotonic() >= full_table_deadline:
+                raise TimeoutError('ZDO neighbour table observation timed out')
             token = 'bseed-lqi-' + uuid.uuid4().hex
             payload = {'transaction': token, 'action': 'raw', 'params': {
                 'ieee_address': ieee, 'network_address': nwk, 'profile_id': 0,
                 'cluster_key': MGMT_LQI, 'zdo_params': [index], 'disable_response': False}}
             client.publish(base + '/bridge/request/action', json.dumps(payload), qos=1).wait_for_publish(5)
-            deadline = time.monotonic() + timeout
+            deadline = min(time.monotonic() + timeout, full_table_deadline)
             while token not in responses and time.monotonic() < deadline:
                 answered.wait(0.5)
                 answered.clear()
             if token not in responses:
                 raise TimeoutError('No transaction-matched ZDO neighbour table page')
-            total, page = parse_neighbor_page(responses.pop(token))
+            total, page = parse_neighbor_page(responses.pop(token),
+                                              expected_index=index if require_complete else None,
+                                              expected_total=total)
             entries += page
             index += max(1, len(page))
         if require_complete and (total is None or len(entries) != total):
