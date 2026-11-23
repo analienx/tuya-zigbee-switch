@@ -18,6 +18,14 @@ from bseed_pm_telemetry_guard import OPTION
 from test_bseed_ota_campaign import _router_candidate_profile
 
 
+@pytest.fixture(autouse=True)
+def no_live_postflash_relay_probe(monkeypatch):
+    monkeypatch.setattr('bseed_relay_postflash_restore.restore_preserved_on',
+                        lambda *args, **kwargs: None)
+    monkeypatch.setattr('bseed_relay_state_policy.verify_after_flash',
+                        lambda *args, **kwargs: None)
+
+
 def fake_bridge_for(profile):
     class Bridge:
         state = 'online'

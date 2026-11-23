@@ -19,7 +19,7 @@ def profile_for(candidate):
 @pytest.mark.parametrize('candidate', PARALLEL_20261120_CANDIDATES)
 def test_exact_canaries_require_load_proof_but_not_unavailable_swire(candidate):
     profile = profile_for(candidate)
-    with pytest.raises(ValueError, match='Physical load'):
+    with pytest.raises(ValueError, match='preserve-state owner risk|Physical load'):
         verify_recovery(profile, confirm_unloaded=False)
     result = verify_recovery(profile, confirm_unloaded=True)
     assert result['ieee'] == candidate['ieee']
@@ -27,9 +27,10 @@ def test_exact_canaries_require_load_proof_but_not_unavailable_swire(candidate):
     assert result['readback_verified'] is False
     assert result['recovery_available'] is False
     assert result['hardware_acceptance'] is False
-    # No human unplugging claim is made. The campaign must obtain verified
-    # relay OFF through bseed_relay_auto_off BEFORE submitting any OTA request.
-    require_flash_confirmation(profile, candidate['ieee'], False)
+    # Historical exact candidates are still valid for offline recovery
+    # evidence, but auto-OFF plans cannot be submitted as new OTA campaigns.
+    with pytest.raises(ValueError, match='automatic relay-OFF'):
+        require_flash_confirmation(profile, candidate['ieee'], False)
 
 
 @pytest.mark.parametrize('candidate', PARALLEL_20261120_CANDIDATES)
@@ -85,7 +86,7 @@ def test_canary_does_not_accept_unverified_flash_confirmation():
     client = profile_for(PARALLEL_20261120_CANDIDATES[1])
     with pytest.raises(CanaryError, match='confirm-ieee'):
         require_flash_confirmation(client, PARALLEL_20261120_CANDIDATES[0]['ieee'], False)
-    with pytest.raises(CanaryError, match='verified automatic relay OFF'):
+    with pytest.raises(ValueError, match='relay_state_policy=preserve'):
         require_flash_confirmation(dict(client, auto_relay_off=False), client['ieee'], False)
-    with pytest.raises(CanaryError, match='verified automatic relay OFF'):
+    with pytest.raises(ValueError, match='automatic relay-OFF'):
         require_flash_confirmation(dict(client, auto_relay_off='true'), client['ieee'], False)

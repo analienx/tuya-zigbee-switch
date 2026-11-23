@@ -15,6 +15,12 @@ from bseed_pm_telemetry_guard import release as real_telemetry_release
 
 @pytest.fixture(autouse=True)
 def mock_telemetry_release_for_subprocess_composition(monkeypatch):
+    # Tests here simulate rejoin/metadata subprocesses and don't have a
+    # device. ON-only postflash behavior is separately identity-tested.
+    monkeypatch.setattr("bseed_relay_postflash_restore.restore_preserved_on",
+                        lambda *args, **kwargs: None)
+    monkeypatch.setattr('bseed_relay_state_policy.verify_after_flash',
+                        lambda *args, **kwargs: None)
     # These tests mock successful interview subprocesses and do not generate
     # their private evidence. Real release validation has its own negative suite.
     monkeypatch.setattr('bseed_pm_telemetry_guard.release', lambda *args: None)
@@ -31,6 +37,9 @@ def profile(tmp_path):
       'url':'http://example.invalid/image.ota', 'mqtt_config':str(tmp_path/'private-mqtt.yaml'),
       'broker':'127.0.0.1','workdir':str(tmp_path/'campaign'),'manufacturer_code':4417,
       'image_type':54179,'file_version':'0xffffffff','expect_relay':'ON',
+      'auto_relay_off':False,'relay_state_policy':'preserve',
+      'relay_get_key':'state',
+      'operator_connected_load_risk_accepted':True,
       'index_url':'http://example.invalid/private-index.json',
       'index_output':str(tmp_path/'private-index.json'),'template_index':str(template),
       'postflash_role':'EndDevice','postflash_build':'expected-client', 'block_bytes':32}
