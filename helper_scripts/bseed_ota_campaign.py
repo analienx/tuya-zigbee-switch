@@ -540,6 +540,11 @@ def reinterview_cmd(profile, confirmation, evidence):
     for key,flag in [('postflash_manufacturer','manufacturer'),('postflash_model','model')]:
         if profile.get(key):
             cmd[cmd.index('--'+flag)+1]=str(profile[key])
+    if ((profile['manufacturer'], profile['model']),
+            (profile.get('postflash_manufacturer'), profile.get('postflash_model'))) == (
+                ('_TZ3000_b28wrpvx', 'TS011F'), ('b28wrpvx', 'TS011F-BS-PM')):
+        cmd.extend(['--source-manufacturer', profile['manufacturer'],
+                    '--source-model', profile['model']])
     cmd.extend(['--image-sha256',str(profile['sha256'])])
     cmd.extend(['--confirm-ieee',confirmation,'--campaign-lock',
                 str(Path(profile['workdir'])/'ACTIVE_LOCK.json'),'--output',str(evidence),
