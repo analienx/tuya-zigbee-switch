@@ -22,6 +22,25 @@ def identity(device, ieee, name, manufacturer, model, role):
                                        'type','network_address','software_build_id','interview_state')}
 
 
+def source_identity(device, ieee, name, manufacturer, model, role, *,
+                    source_manufacturer=None, source_model=None):
+    """Allow stale stock Basic metadata ONLY before the exact target interview.
+
+    A stock-to-custom migration may already have rebooted while Z2M retains
+    its old Basic attributes. Never permit foreign devices/roles or a mixed
+    stock/custom tuple. The final identity still uses strict identity().
+    """
+    if (source_manufacturer is None) != (source_model is None):
+        raise ValueError('Both pinned source identity fields are required')
+    if source_manufacturer is not None:
+        if ((source_manufacturer, source_model), (manufacturer, model)) != (
+                ('_TZ3000_b28wrpvx', 'TS011F'), ('b28wrpvx', 'TS011F-BS-PM')):
+            raise ValueError('Unsupported stock-to-custom identity transition')
+        if (device.get('manufacturer'), device.get('model_id')) == (source_manufacturer, source_model):
+            return identity(device, ieee, name, source_manufacturer, source_model, role)
+    return identity(device, ieee, name, manufacturer, model, role)
+
+
 def evaluate(before, after, response, expected_build):
     if not response or response.get('status') != 'ok': return 'interview_failed'
     if after is None: return 'target_disappeared'
@@ -69,6 +88,8 @@ def main():
     for key in ('device','ieee','confirm-ieee','manufacturer','model','expect-role',
                 'expect-build','image-sha256','mqtt-config','broker','campaign-lock','output'):
         p.add_argument('--'+key,required=True)
+    p.add_argument('--source-manufacturer')
+    p.add_argument('--source-model')
     p.add_argument('--settle-seconds',type=int,default=10)
     p.add_argument('--timeout-seconds',type=int,default=160)
     a=p.parse_args()
@@ -121,8 +142,11 @@ def main():
         if values['bridge']!='online':raise ValueError('Bridge offline')
         selection=[x for x in values['inventory'] if x.get('ieee_address')==a.ieee]
         if len(selection)!=1:raise ValueError('Target IEEE absent or duplicate')
-        before=identity(selection[0],a.ieee,a.device,a.manufacturer,a.model,a.expect_role)
+        before=source_identity(selection[0],a.ieee,a.device,a.manufacturer,a.model,a.expect_role,
+                               source_manufacturer=a.source_manufacturer, source_model=a.source_model)
         evidence['before']=before
+        if (before['manufacturer'], before['model_id']) != (a.manufacturer, a.model):
+            print('STALE_STOCK_IDENTITY_REFRESH', a.ieee, flush=True)
         if selection[0].get('interview_state')!='SUCCESSFUL':
             raise ValueError('Target not ready for post-OTA re-interview')
         time.sleep(a.settle_seconds)
@@ -161,7 +185,9 @@ def main():
             selection=[x for x in (values['inventory'] or []) if x.get('ieee_address')==a.ieee]
             if (values['fresh_inventory'] and
                     any(e['status']=='successful' for e in values['events']) and
-                    len(selection)==1 and selection[0].get('software_build_id')==a.expect_build):break
+                    len(selection)==1 and selection[0].get('software_build_id')==a.expect_build and
+                    (selection[0].get('manufacturer'), selection[0].get('model_id')) ==
+                    (a.manufacturer, a.model)):break
             changed.wait(.3);changed.clear()
         selection=[x for x in (values['inventory'] or []) if x.get('ieee_address')==a.ieee]
         if len(selection)!=1:raise ValueError('Target disappeared after interview')

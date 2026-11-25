@@ -67,3 +67,7 @@ target still never announces (both LEDs flashing together), follow "A
 converted socket that never comes back" in the skill: owner network reset (10
 quick presses), then one more `bseed_z2m_rejoin_window.py --network-wide`
 window, then `metadata`, `restore-state`, `provision-pm` and `postflash`.
+
+### Automatic stock identity refresh after same-role OTA
+
+After a transaction-matched successful transfer, the post-OTA interview accepts the exact pinned stock PM identity as **pre-interview metadata only**. Zigbee2MQTT may still show stock Basic fields even after the custom build boots. The script automatically requests a target-only interview; final acceptance requires fresh nonretained inventory, the successful target interview event, the intended custom manufacturer/model, role and build, and the existing postflash checks. No remove, factory reset, relay command, or duplicate flash is used. A failed refresh remains unconfirmed.

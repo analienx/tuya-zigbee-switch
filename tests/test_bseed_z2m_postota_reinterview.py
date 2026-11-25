@@ -85,3 +85,27 @@ def test_only_zigbee2mqtt_in_progress_refusal_allows_one_retry():
         assert not interview_in_progress(response)
     # The refusal itself is never evidence of a successful post-OTA interview.
     assert evaluate(target(),target(software_build_id='new'),clash,'new')=='interview_failed'
+
+
+def test_stock_metadata_refresh_admits_only_exact_source_before_interview():
+    from bseed_z2m_postota_reinterview import source_identity
+    source = dict(manufacturer='_TZ3000_b28wrpvx', model_id='TS011F')
+    expected = ('0x0011223344556677', 'Canary', 'b28wrpvx', 'TS011F-BS-PM', 'Router')
+    kwargs = dict(source_manufacturer=source['manufacturer'], source_model=source['model_id'])
+    old = target(**source)
+    assert source_identity(old, *expected, **kwargs)['manufacturer'] == source['manufacturer']
+    assert source_identity(target(), *expected, **kwargs)['manufacturer'] == 'b28wrpvx'
+    for changes in ({'ieee_address':'0xBAD'}, {'friendly_name':'Other'},
+                    {'type':'EndDevice'}, {'manufacturer':'foreign'},
+                    {'model_id':'TS011F-BS-PM'}):
+        with pytest.raises(ValueError):
+            source_identity(dict(old, **changes), *expected, **kwargs)
+    with pytest.raises(ValueError):
+        source_identity(old, *expected, source_manufacturer=source['manufacturer'])
+    with pytest.raises(ValueError):
+        source_identity(old, *expected, source_manufacturer='foreign', source_model='TS011F')
+    # Fresh interview MUST change both identity fields; stale stock is never accepted.
+    with pytest.raises(ValueError):
+        identity(old, *expected)
+    refreshed = identity(target(software_build_id='new'), *expected)
+    assert evaluate(old, refreshed, {'status':'ok'}, 'new') == 'build_refreshed_postflash_unverified'

@@ -953,3 +953,17 @@ def test_acceptance_refuses_ineligible_or_foreign_campaign_state(tmp_path):
     # A foreign token leaves both ownership records unchanged.
     record = json.loads((work / 'ACTIVE_LOCK.json').read_text())
     assert record['phase'] == 'ota_transfer_ok_postflash_unverified'
+
+
+def test_stock_conversion_interview_passes_exact_source_identity_only(tmp_path):
+    cfg = profile(tmp_path)
+    cfg.update(manufacturer='_TZ3000_b28wrpvx', model='TS011F',
+               preflash_role='Router', postflash_role='Router',
+               postflash_manufacturer='b28wrpvx', postflash_model='TS011F-BS-PM')
+    cmd = campaign.reinterview_cmd(cfg, cfg['ieee'], tmp_path/'postota.json')
+    assert cmd[cmd.index('--source-manufacturer')+1] == '_TZ3000_b28wrpvx'
+    assert cmd[cmd.index('--source-model')+1] == 'TS011F'
+    assert cmd[cmd.index('--manufacturer')+1] == 'b28wrpvx'
+    assert cmd[cmd.index('--model')+1] == 'TS011F-BS-PM'
+    cfg.update(manufacturer='b28wrpvx', model='TS011F-BS-PM')
+    assert '--source-manufacturer' not in campaign.reinterview_cmd(cfg, cfg['ieee'], tmp_path/'postota.json')
