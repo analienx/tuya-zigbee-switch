@@ -17,6 +17,7 @@
 #define NC_HOP_OK 8
 #define NC_FLY_LEVEL 16
 #define NC_FLY_REPEAT 32
+#define NC_REJECTED 64
 #define NC_OK 0
 #define NC_FAILURE 1
 #define NC_NOT_AUTHORIZED 0x7e
@@ -54,7 +55,7 @@ typedef struct {
     uint16_t generation, fade_in, fade_out;
     uint8_t cfg_present, phase, reason, reoff, pending_motion;
     uint8_t level, cycle_native, on, wanted, want_level, want_native;
-    uint8_t last_aps, last_zcl, stale_on, unicast_count, group_count;
+    uint8_t last_aps, last_zcl, last_zcl_command, stale_on, unicast_count, group_count;
     uint8_t cfg_attr[13], diag_attr[13];
 } nc_state_t;
 extern nc_state_t nc;
@@ -108,4 +109,7 @@ void nc_rejection(const nc_addr_t *addr, uint8_t seq, uint16_t cluster,
 void nc_time_service(void);
 int nc_local_minute(void);
 void nc_time_response(uint8_t seq, const uint8_t *payload, unsigned length);
+int nc_receive(uint16_t source, uint8_t endpoint, uint16_t profile, int unicast,
+               int secured, const nc_addr_t *address, uint16_t cluster,
+               const uint8_t *frame, unsigned length);
 #endif

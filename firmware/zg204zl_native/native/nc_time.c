@@ -14,6 +14,7 @@ void nc_time_service(void) {
     uint8_t frame[17], aps;
     nc_addr_t coordinator;
     unsigned i;
+    if (nc.clock.valid && nc_due(nc_port_now(), nc.clock.valid_until)) nc.clock.valid = 0;
     if (!(nc.cfg.flags & NC_TIME)) { nc.clock.pending = 0; return; }
     if (nc.clock.pending) {
         if (nc_due(nc_port_now(), nc.clock.deadline)) failed();
@@ -79,7 +80,8 @@ void nc_time_response(uint8_t seq, const uint8_t *p, unsigned n) {
 int nc_local_minute(void) {
     uint32_t utc, local;
     int32_t offset;
-    if (!nc.clock.valid || nc_due(nc_port_now(), nc.clock.valid_until)) return -1;
+    if (!nc.clock.valid) return -1;
+    if (nc_due(nc_port_now(), nc.clock.valid_until)) { nc.clock.valid = 0; return -1; }
     utc = nc.clock.utc + (nc_port_now() - nc.clock.at) / 1000u;
     if (utc < nc.clock.utc) return -1;
     offset = nc.clock.tz;

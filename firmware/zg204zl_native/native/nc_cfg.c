@@ -46,18 +46,23 @@ uint8_t nc_configure(const uint8_t *p, unsigned n) {
         return NC_HARDWARE_FAILURE;
     nc.cfg = candidate; nc.cfg_present = 1;
     nc_cfg_export();
-    if (!(candidate.flags & NC_TIME)) nc.clock.pending = 0;
+    if (!(candidate.flags & NC_TIME)) nc.clock.pending = nc.clock.valid = 0;
     else nc.clock.refresh = nc_port_now();
     return NC_OK;
 }
 
 void nc_diagnostics(void) {
     uint8_t *p = nc.diag_attr;
+    unsigned i, onoff = 0, level = 0;
     uint32_t age = (nc_port_now() - nc.clock.at) / 60000u;
-    p[0] = 12; p[1] = 1; p[2] = nc.phase; p[3] = nc.reason;
-    p[4] = nc_local_minute() >= 0;
-    nc_put16(p + 5, age > 65535 ? 65535 : (uint16_t)age);
-    p[7] = nc.last_aps; p[8] = nc.last_zcl;
-    p[9] = nc.cfg_present | (nc_tx_off_unknown() ? 2 : 0) | (nc.stale_on ? 4 : 0);
-    p[10] = nc.unicast_count; p[11] = nc.group_count; p[12] = 0;
+    for (i = 0; i < NC_MAX_DST; i++) if (!nc.dst[i].addr.group) {
+        if (nc.cfg_present && (nc.dst[i].caps & NC_LEVEL)) level++;
+        else if (nc.dst[i].caps & NC_ONOFF) onoff++;
+    }
+    p[0] = 12; p[1] = 1; p[2] = nc.phase | nc.reason << 2;
+    p[3] = nc_local_minute() >= 0;
+    nc_put16(p + 4, age > 65535 ? 65535 : (uint16_t)age);
+    p[6] = nc.last_aps; p[7] = nc.last_zcl;
+    p[8] = nc.cfg_present | (nc_tx_off_unknown() ? 2 : 0) | (nc.stale_on ? 4 : 0);
+    p[9] = onoff; p[10] = level; p[11] = nc.group_count; p[12] = nc.last_zcl_command;
 }

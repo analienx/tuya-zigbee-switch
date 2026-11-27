@@ -47,7 +47,7 @@ void nc_tx_want(int on, uint8_t level, uint16_t fade, int native) {
     for (i = 0; i < NC_MAX_DST; i++) {
         nc_dst_t *r = &nc.dst[i];
         if (!(r->caps & 3)) continue;
-        r->flags = (r->flags & (NC_OFF_UNKNOWN | NC_FLY_LEVEL | NC_FLY_REPEAT)) | NC_PENDING;
+        r->flags = (r->flags & (NC_OFF_UNKNOWN | NC_FLY_LEVEL | NC_FLY_REPEAT | NC_REJECTED)) | NC_PENDING;
         if (!on && !r->addr.group) r->flags |= NC_OFF_UNKNOWN;
         if (native && r->addr.group && (r->caps & NC_LEVEL)) r->flags |= NC_REPEAT;
         if (r->state != TX_FLY) { r->state = TX_READY; r->tries = 0; r->due = nc.born; }
@@ -92,6 +92,9 @@ void nc_confirm(const nc_addr_t *addr, uint8_t aps, uint16_t cluster, uint8_t st
         if (r->fly_gen != nc.generation) {
             r->state = TX_READY; r->due = nc_port_now(); r->tries = 0; return;
         }
+        if (r->flags & NC_REJECTED) {
+            r->state = TX_FAILED; r->flags &= ~NC_PENDING; return;
+        }
         r->flags &= ~NC_OFF_UNKNOWN;
         r->flags |= NC_HOP_OK;
         if (r->addr.group && (r->flags & NC_REPEAT)) {
@@ -111,8 +114,10 @@ void nc_rejection(const nc_addr_t *addr, uint8_t seq, uint16_t cluster,
             r->fly_gen != nc.generation || cluster != ((r->flags & NC_FLY_LEVEL) ? 8 : 6) ||
             cmd != ((r->flags & NC_FLY_LEVEL) ? 4 : (r->fly_on ? 1 : 0))) continue;
         nc.last_zcl = status;
+        nc.last_zcl_command = (cluster == 8 ? 0x80 : 0) | cmd;
         if (status) {
-            r->state = TX_FAILED; r->flags &= ~NC_PENDING;
+            r->flags |= NC_REJECTED;
+            if (r->state != TX_FLY) { r->state = TX_FAILED; r->flags &= ~NC_PENDING; }
             if (!r->fly_on) r->flags |= NC_OFF_UNKNOWN;
         }
         return;
@@ -167,7 +172,7 @@ void nc_tx_service(void) {
             nc_put16(frame + 4, t); n = 6;
         }
         r->fly_gen = nc.generation; r->fly_on = nc.on; r->zcl = frame[1];
-        r->flags = (r->flags & ~NC_FLY_LEVEL) | (level ? NC_FLY_LEVEL : 0);
+        r->flags = (r->flags & ~(NC_FLY_LEVEL | NC_REJECTED)) | (level ? NC_FLY_LEVEL : 0);
         status = nc_port_send(&r->addr, level ? 8 : 6, frame, n, !r->addr.group, &aps);
         if (status) unsuccessful(r, status);
         else { r->aps = aps; r->state = TX_FLY; r->due = now + 30000u; flying++; }

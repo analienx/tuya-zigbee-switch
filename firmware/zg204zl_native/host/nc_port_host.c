@@ -62,8 +62,8 @@ int nc_port_occupied(void) { return occupied; }
 uint16_t nc_port_lux_target(void) { return lux_target; }
 int nc_port_dark(void) { lux_reads++; return dark; }
 uint16_t nc_port_battery(void) { return battery; }
-int nc_port_nv_read(uint8_t *raw) { if (!nv_present || read_failure) return 0; memcpy(raw, nv, 12); return 1; }
-int nc_port_nv_write(const uint8_t *raw) { nv_writes++; if (nv_failure) return 0; memcpy(nv, raw, 12); nv_present = 1; return 1; }
+int nc_port_nv_read(uint8_t raw[12]) { if (!nv_present || read_failure) return 0; memcpy(raw, nv, 12); return 1; }
+int nc_port_nv_write(const uint8_t raw[12]) { nv_writes++; if (nv_failure) return 0; memcpy(nv, raw, 12); nv_present = 1; return 1; }
 int nc_port_binding(unsigned i, nc_binding_t *b) { *b = bindings[i]; return b->caps != 0; }
 uint8_t nc_port_sequence(void) { return seq++; }
 uint8_t nc_port_send(const nc_addr_t *a, uint16_t cluster, const uint8_t *f,

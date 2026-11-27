@@ -106,19 +106,11 @@ void nc_rx(void *message) {
     apsdeDataInd_t *m = message;
     nc_addr_t source;
     if (m->indInfo.cluster_id == NC_CLUSTER) nc_diagnostics();
-    if (m->indInfo.cluster_id == 10 ||
-        ((m->indInfo.cluster_id == 6 || m->indInfo.cluster_id == 8) &&
-         m->asduLen >= 3 && !(m->asdu[0] & 3) && m->asdu[2] == 0x0b)) {
-        if (m->asduLen >= 3 && !(m->asdu[0] & 0xe7) && (m->asdu[0] & 8) &&
-            m->indInfo.profile_id == HA_PROFILE_ID && UNICAST_MSG(m)) {
-            if (m->indInfo.cluster_id == 10 && m->asdu[2] == 1 &&
-                m->indInfo.src_short_addr == 0 && m->indInfo.src_ep == 1)
-                nc_time_response(m->asdu[1], m->asdu + 3, m->asduLen - 3);
-            else if (m->indInfo.cluster_id != 10 && m->asduLen == 5) {
-                from_short(&source, m->indInfo.src_short_addr, m->indInfo.src_ep);
-                nc_rejection(&source, m->asdu[1], m->indInfo.cluster_id, m->asdu[3], m->asdu[4]);
-            }
-        }
+    from_short(&source, m->indInfo.src_short_addr, m->indInfo.src_ep);
+    if (nc_receive(m->indInfo.src_short_addr, m->indInfo.src_ep,
+                   m->indInfo.profile_id, UNICAST_MSG(m),
+                   m->indInfo.security_status & SECURITY_IN_NWKLAYER,
+                   &source, m->indInfo.cluster_id, m->asdu, m->asduLen)) {
         /* Consume before the SDK's unbounded Read Response parser. */
         ev_buf_free(message); return;
     }
@@ -129,6 +121,7 @@ static status_t configure(zclIncoming_t *m) {
     if (m->hdr.cmd != 0 || m->hdr.frmCtrl.bf.dir || m->hdr.manufCode != NC_MANUFACTURER)
         return ZCL_STA_UNSUP_MANU_CLUSTER_COMMAND;
     if (!UNICAST_MSG(m->msg) || m->msg->indInfo.src_short_addr != 0 ||
+        m->msg->indInfo.profile_id != HA_PROFILE_ID ||
         !(m->msg->indInfo.security_status & SECURITY_IN_NWKLAYER)) return NC_NOT_AUTHORIZED;
     return nc_configure(m->pData, m->dataLen);
 }
