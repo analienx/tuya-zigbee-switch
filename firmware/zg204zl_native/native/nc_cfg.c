@@ -10,8 +10,7 @@ uint8_t nc_cfg_parse(const uint8_t *p, unsigned n, nc_cfg_t *out) {
     c.fade_in = nc_le16(p + 8); c.fade_out = nc_le16(p + 10);
     if (!c.level || c.level > 254 || c.start > 1439 || c.end > 1439 ||
         ((c.flags & NC_TIME) && c.start == c.end) ||
-        c.fade_in > 1200 || c.fade_out > 1200 ||
-        ((c.flags & NC_LUX) && nc_port_lux_target() == 0xffff)) return NC_INVALID_VALUE;
+        c.fade_in > 1200 || c.fade_out > 1200) return NC_INVALID_VALUE;
     *out = c;
     return NC_OK;
 }
@@ -40,6 +39,7 @@ uint8_t nc_configure(const uint8_t *p, unsigned n) {
     nc_cfg_t candidate;
     uint8_t readback[12], status = nc_cfg_parse(p, n, &candidate);
     if (status) return status;
+    if ((candidate.flags & NC_LUX) && nc_port_lux_target() == 0xffff) return NC_INVALID_VALUE;
     if (nc.cfg_present && !memcmp(p, nc.cfg_attr + 1, 12)) return NC_OK;
     if (nc_port_battery() < 2200) return NC_FAILURE;
     if (!nc_port_nv_write(p) || !nc_port_nv_read(readback) || memcmp(p, readback, 12))

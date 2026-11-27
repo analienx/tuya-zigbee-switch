@@ -68,6 +68,9 @@ def sources(root):
                                texts[name].index('void cmdOnOff_set'))
     end = texts[name].index('#endif', start) + len('#endif')
     texts[name] = texts[name][:start] + '\t\tnc_master(status);' + texts[name][end:]
+    replace(name, '\tif(clusterId == ZCL_CLUSTER_GEN_ON_OFF) {\n\t\tzcl_onoffConfig_save(0);',
+            '\tif(clusterId == ZCL_CLUSTER_GEN_ON_OFF) {\n\t\tzcl_onoffConfig_save(0);\n'
+            '\t\tnc_master(g_zcl_onOffAttrs.onOff);')
     name = 'src/app_onoff.h'
     for old in ('void remoteCmdOnOff(u8 srcEp, u8 cmd);\n', 'void taskRetryOnOff(void);\n'):
         replace(name, old, '')
