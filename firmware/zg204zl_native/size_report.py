@@ -12,7 +12,9 @@ def report(image, map_path):
     text = map_path.read_text(errors="replace")
     # Telink's GNU ld fork inserts this banner between a section and its
     # object filename. Exclude discarded sections before collecting bytes.
-    text = text.split("Linker script and memory map", 1)[-1]
+    _, marker, text = text.partition("Linker script and memory map")
+    if not marker:
+        raise ValueError("Missing linker-map start marker")
     text = text.replace(" ok now generated...\n", " ")
     for line in text.splitlines():
         stripped = line.strip()

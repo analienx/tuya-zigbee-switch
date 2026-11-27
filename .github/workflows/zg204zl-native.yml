@@ -40,6 +40,7 @@ jobs:
           ZG204ZL_SOURCE: ${{ github.workspace }}/upstream
         run: |
           test "$(git -C control rev-parse HEAD)" = "$CANDIDATE"
+          python -m unittest discover -s control/firmware/zg204zl_native -p 'test_size_report.py' -v
           python -m unittest discover -s control/firmware/zg204zl_reliability -p 'test_*.py' -v
           python control/firmware/zg204zl_reliability/apply.py --source upstream --variant v0148
       - name: Install pinned compiler and SDK
@@ -90,4 +91,69 @@ jobs:
         with:
           name: native-size-${{ github.event.pull_request.head.sha || github.sha }}
           path: evidence/
+          if-no-files-found: error
+
+  native-host:
+    needs: size-budget
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Compile and exercise the actual native modules
+        run: python -m unittest discover -s firmware/zg204zl_native -p 'test_*.py' -v
+
+  native-candidate:
+    needs: [size-budget, native-host]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CANDIDATE: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: control
+      - uses: actions/checkout@v4
+        with:
+          repository: pvvx/ZigbeeTLc
+          ref: c249d8a7caddb5012d06aba580d4a53d1957f9c1
+          path: upstream
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply immutable native-control overlay
+        run: |
+          test "$(git -C control rev-parse HEAD)" = "$CANDIDATE"
+          mkdir -p native-evidence
+          python control/firmware/zg204zl_native/apply_native.py --source upstream > native-evidence/source-overlay.json
+      - name: Install pinned compiler and SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends make unzip bzip2 libc6-i386 lib32z1
+          make -C upstream install
+      - name: Compile native candidate and enforce flash reserve
+        run: |
+          make -C upstream -f makefile \
+            -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/sdk-size.mk" \
+            -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/app-size.mk" \
+            -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/compact-protocol.mk" \
+            -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/native-size.mk" \
+            -j2 PROJECT_NAME=ZG204ZL POJECT_DEF="-DBOARD=BOARD_ZG204ZL" \
+            VERSION_BIN=_v0149 ZNAME="Sonoff:ZG-204ZL-z" \
+            LNK_FLAGS="--gc-sections -nostartfiles -Map=build/ZG204ZL.map" > native-evidence/build.log 2>&1 || { tail -100 native-evidence/build.log; exit 1; }
+          cp upstream/bin/*v0149.bin upstream/bin/*01493001* native-evidence/
+          cp upstream/build/ZG204ZL.{elf,map,lst} native-evidence/
+          python control/firmware/zg204zl_native/size_report.py \
+            --image native-evidence/ZG204ZL_v0149.bin --map native-evidence/ZG204ZL.map \
+            --output native-evidence/size.json
+          python control/firmware/zg204zl_native/verify_native.py --directory native-evidence --source-commit "$CANDIDATE"
+      - name: Upload unqualified developer evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-v0149-UNQUALIFIED-${{ github.event.pull_request.head.sha || github.sha }}
+          path: native-evidence/
           if-no-files-found: error
