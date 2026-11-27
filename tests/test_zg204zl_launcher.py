@@ -42,6 +42,7 @@ def bench(tmp_path, monkeypatch, request):
         output.write_bytes(data)
         tool.atomic_json(output.with_name(output.name + '.json'), {
             'status': 'READ_SINGLE', 'port': port, 'reads': [{'sha256': launcher.digest(data)}],
+            'address': 0, 'bytes': launcher.FLASH_BYTES,
             'haltChecks': [{'cpuControls': [5, 5], 'divider': 54}],
         })
     def write(reader, snapshot, port, folder, report):
@@ -144,6 +145,72 @@ def test_extended_stock_exception_rejects_other_headers(version, size, mfg):
     before[24:28] = size.to_bytes(4, 'little')
     with pytest.raises(RuntimeError, match='declared size.*Inspect before writing'):
         launcher.require_candidate_layout(before)
+
+
+@pytest.fixture
+def saved_stop(bench, monkeypatch):
+    with monkeypatch.context() as patcher:
+        def stop(_):
+            raise RuntimeError('layout stop before write')
+        patcher.setattr(launcher, 'require_candidate_layout', stop)
+        with pytest.raises(RuntimeError, match='layout stop'):
+            launcher.run('COM3', 300, 'v0148', launcher.IMAGE)
+    events, before, *_ = bench
+    original = launcher.swire._read_flash
+
+    def read(port, output, **kwargs):
+        assert kwargs['halt'] is False and kwargs['reads'] == 1
+        if kwargs.get('size') == 8:
+            assert kwargs['address'] == 0x76000
+            events.append('identity')
+            output.write_bytes(before[0x76000:0x76008])
+        else:
+            original(port, output, **kwargs)
+
+    monkeypatch.setattr(launcher.swire, '_read_flash', read)
+    return next(launcher.RUNS.glob('*/summary.json'))
+
+
+@pytest.mark.parametrize('bench', ['v0148'], indirect=True)
+def test_saved_backup_resumes_write_and_verifies_once(bench, saved_stop):
+    events, *_ = bench
+    backup = (saved_stop.parent / 'before.bin').read_bytes()
+    launcher.write_saved('COM3')
+    assert events == ['backup', 'identity', 'write', 'readback']
+    assert (saved_stop.parent / 'before.bin').read_bytes() == backup
+    state = launcher.swire.read_json(saved_stop)
+    assert state['phase'] == 'VERIFIED' and state['resumedFromBackup']
+    assert state['backupReadCount'] == 1 and state['verificationReadCount'] == 1
+    with pytest.raises(RuntimeError, match='No complete pre-write stop'):
+        launcher.write_saved('COM3')
+
+
+@pytest.mark.parametrize('bench', ['v0148'], indirect=True)
+@pytest.mark.parametrize('fault', ['backup', 'receipt', 'target', 'running_cpu'])
+def test_saved_backup_rejects_changed_evidence_or_target(bench, saved_stop, monkeypatch, fault):
+    events, *_ = bench
+    folder = saved_stop.parent
+    if fault == 'backup':
+        (folder / 'before.bin').write_bytes(b'wrong')
+    elif fault == 'receipt':
+        path = folder / 'before.bin.json'
+        receipt = launcher.swire.read_json(path)
+        receipt['port'] = 'COM9'
+        launcher.swire.atomic_json(path, receipt)
+    elif fault == 'target':
+        original = launcher.swire._read_flash
+        def other(port, output, **kwargs):
+            original(port, output, **kwargs)
+            output.write_bytes(b'other-id')
+        monkeypatch.setattr(launcher.swire, '_read_flash', other)
+    else:
+        def running(*_):
+            raise RuntimeError('CPU is no longer stopped')
+        monkeypatch.setattr(launcher, 'confirm_stopped', running)
+    with pytest.raises(RuntimeError):
+        launcher.write_saved('COM3')
+    assert 'write' not in events and 'readback' not in events
+    assert not launcher.swire.read_json(saved_stop)['writeAttempted']
 
 
 @pytest.mark.parametrize('offset', [8, launcher.IMAGE_BYTES, launcher.ERASE_END, 0x7FFFF])

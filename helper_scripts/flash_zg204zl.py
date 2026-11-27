@@ -167,7 +167,7 @@ def confirm_stopped(port, divider):
             raise RuntimeError('CPU is no longer stopped; no reset or flash read attempted.')
 
 
-def readback(port, output, reader, backup_receipt, report):
+def readback(port, output, reader, backup_receipt, report, *, address=0, size=FLASH_BYTES):
     """Use the backup's qualified divider instead of a marginal auto-scan."""
     checks = backup_receipt.get('haltChecks', [])
     if not checks or checks[-1].get('cpuControls') != [5, 5]:
@@ -182,7 +182,7 @@ def readback(port, output, reader, backup_receipt, report):
         # Only rf is permitted; no -t, -r or write/erase command is added.
         command = [*command[:2], '-c', str(clock_mhz), *command[2:]]
         result = swire.run_reader_with_progress(command, log_path=output.with_name(output.name + '.clock.log'),
-                                                size=FLASH_BYTES, label='Verify read', out=report)
+                                                size=size, label='Verify read', out=report)
         # Upstream may silently fall back to another clock after -c fails.
         # Keep that as failed evidence rather than claiming this timing worked.
         log = output.with_name(output.name + '.clock.log').read_text(encoding='utf-8', errors='replace')
@@ -190,7 +190,87 @@ def readback(port, output, reader, backup_receipt, report):
         if result.returncode == 0 and expected not in log:
             raise RuntimeError('Pinned reader did not confirm the saved timing; inspect its clock log.')
         return result
-    return swire._read_flash(port, output, reader=reader, halt=False, reads=1, runner=runner, out=report)
+    return swire._read_flash(port, output, address=address, size=size, reader=reader,
+                             halt=False, reads=1, runner=runner, out=report)
+
+
+def write_saved(port):
+    """Continue the last complete backup whose operation stopped before writing."""
+    state_path = swire.STATE_ROOT / 'zg204zl' / (swire.port_key(port) + '.json')
+    with swire.PortGuard(port):
+        state = swire.read_json(state_path)
+        if (state.get('device') != 'ZG-204ZL' or state.get('port') != port
+                or state.get('writeAttempted') is not False
+                or state.get('phase') != 'FAILED' or state.get('failedPhase') != 'BACKUP'):
+            raise RuntimeError('No complete pre-write stop is available for this port.')
+        folder = swire.private_output(state['folder'])
+        if swire.read_json(folder / 'summary.json') != state:
+            raise RuntimeError('Saved operation records disagree; inspect before writing.')
+        authority = swire.authority_path(port)
+        if authority.exists() and swire.read_json(authority)['phase'] not in swire.HALT_READ_PHASES:
+            raise RuntimeError('An existing recovery owns this port.')
+        firmware = firmware_profiles().get(state.get('imageVersion'))
+        if firmware is None or firmware.sha256 != state.get('imageSha256'):
+            raise RuntimeError('Saved firmware pin is unsupported.')
+        snapshot = folder / firmware.filename
+        image, before = snapshot.read_bytes(), (folder / 'before.bin').read_bytes()
+        receipt = swire.read_json(folder / 'before.bin.json')
+        if (len(image) != firmware.size or len(image) > ERASE_END or digest(image) != firmware.sha256
+                or len(before) != FLASH_BYTES or digest(before) != state.get('backupSha256')
+                or receipt.get('status') != 'READ_SINGLE' or receipt.get('port') != port
+                or receipt.get('address') != 0 or receipt.get('bytes') != FLASH_BYTES
+                or [r.get('sha256') for r in receipt.get('reads', [])] != [digest(before)]):
+            raise RuntimeError('Saved firmware, full backup or receipt changed; inspect before writing.')
+        require_candidate_layout(before)
+        identity = before[0x76000:0x76008]
+        if identity in (b'\xff' * 8, b'\0' * 8):
+            raise RuntimeError('Saved device identity is blank; inspect before writing.')
+
+        def report(message):
+            print(message, file=sys.stderr, flush=True)
+            with (folder / 'progress.log').open('a', encoding='utf-8') as stream:
+                stream.write(datetime.datetime.now().isoformat(timespec='seconds') + ' ' + message + '\n')
+
+        def save(phase):
+            state['phase'] = phase
+            swire.atomic_json(folder / 'summary.json', state)
+            swire.atomic_json(state_path, state)
+
+        reader = Path(swire.ensure_reader(out=report)['reader'])
+        report('Reusing the saved complete backup. Keep the same sensor powered and attached.')
+        check = folder / ('identity-' + uuid.uuid4().hex[:6] + '.bin')
+        # Eight identity bytes check the attached target without another backup.
+        # readback also requires the saved divider and a stopped CPU.
+        readback(port, check, reader, receipt, report, address=0x76000, size=8)
+        if check.read_bytes() != identity:
+            raise RuntimeError('Attached sensor differs from the saved backup; write cancelled.')
+        try:
+            report('[1/3] Writing firmware using the saved backup.')
+            state['writeAttempted'] = True
+            state['resumedFromBackup'] = True
+            save('WRITING')
+            writer(reader, snapshot, port, folder, report)
+            report('[2/3] Reading back ONCE (512 KiB), keeping the CPU stopped.')
+            save('READBACK')
+            readback(port, folder / 'after.bin', reader, receipt, report)
+            report('[3/3] Comparing firmware, erased tail and ALL preserved bytes.')
+            save('COMPARISON')
+            after = (folder / 'after.bin').read_bytes()
+            verify(before, after, image)
+            state.update(afterSha256=digest(after), preservationVerified=True, bootVerified=False)
+            state.pop('lastError', None)
+            state.pop('failedPhase', None)
+            save('VERIFIED')
+            report('SUCCESS: firmware and preserved data verified. Power-cycle the sensor to boot.')
+        except BaseException as error:
+            state.update(failedPhase=state['phase'], lastError=str(error))
+            save('FAILED')
+            report('STOPPED. Write may have changed flash. Inspect before another write.')
+            if state['failedPhase'] == 'READBACK' and isinstance(error, Exception):
+                raise RuntimeError('Write was sent, but verification read failed. Resume with --verify-only.') from error
+            raise
+        finally:
+            report('Backup, receipt and logs: ' + str(folder))
 
 
 def verify_only(port):
@@ -341,13 +421,19 @@ def main():
     parser.add_argument('--version', choices=firmware_profiles(), help='choose a pinned image (default v0140)')
     parser.add_argument('--image', type=Path, help='use a local native file matching the selected firmware pin')
     parser.add_argument('--verify-only', action='store_true', help='read and verify the last write on this port, WITHOUT rewriting/resetting')
+    parser.add_argument('--write-saved', action='store_true',
+                        help='resume the last complete backup stopped before writing; then verify once')
     args = parser.parse_args()
     if not 1 <= args.seconds <= 900 or not re.fullmatch(r'COM\d+', args.port, re.I):
         parser.error('use a COM port and --seconds 1..900')
     if args.verify_only and (args.version is not None or args.image is not None):
         parser.error('--verify-only uses the saved image. Omit --version and --image.')
+    if args.write_saved and (args.verify_only or args.version is not None or args.image is not None):
+        parser.error('--write-saved uses the saved operation. Omit --verify-only, --version and --image.')
     try:
-        if args.verify_only:
+        if args.write_saved:
+            write_saved(args.port.upper())
+        elif args.verify_only:
             verify_only(args.port.upper())
         else:
             run(args.port.upper(), args.seconds, args.version or 'v0140', args.image)

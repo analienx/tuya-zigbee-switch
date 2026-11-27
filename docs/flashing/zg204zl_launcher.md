@@ -63,6 +63,19 @@ they are not substitutes for SWS. +VBAT is the battery input, not the regulated
 
 ## Read, write and verify
 
+If the complete backup was saved and the operation stopped before writing,
+keep the same sensor powered and attached, then resume with:
+
+```bat
+C:\Workspace\tools\telink-swire\flash-zg204zl.cmd COM3 --write-saved
+```
+
+This uses the last saved operation on that port. It checks the backup and
+firmware hashes, confirms the CPU is still stopped and matches eight identity
+bytes from the attached target. It then writes and performs one full verifying
+read. The original full backup is reused. A changed or restarted target requires
+inspection. A previously attempted write uses the existing --verify-only path.
+
 The owner explicitly selected ONE full pre-write backup and ONE full post-write
 read on 2026-11-19. This is a dedicated sensor procedure; it does not change the
 BSEED verified-session double-read policy. A single backup does not prove read
