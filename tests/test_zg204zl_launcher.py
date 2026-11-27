@@ -108,6 +108,43 @@ def test_candidate_refuses_unsupported_or_alternate_boot_layout(bench, version, 
     assert events == ['backup']
     assert not launcher.swire.read_json(next(launcher.RUNS.glob('*/summary.json')))['writeAttempted']
 
+@pytest.mark.parametrize('bench', ['v0148'], indirect=True)
+def test_extended_stock_conversion_preserves_original_tail(bench, monkeypatch):
+    events, before, _, image = bench
+    stock = bytearray(before)
+    stock[2:6] = (0x20013001).to_bytes(4, 'little')
+    stock[24:28] = (0x200E4).to_bytes(4, 'little')
+    # Distinct data above the new erase area must survive the full operation.
+    stock[launcher.ERASE_END:launcher.ERASE_END + 228] = bytes(range(228))
+    expected = image + b'\xff' * (launcher.ERASE_END - len(image)) + bytes(stock[launcher.ERASE_END:])
+    original = launcher.swire._read_flash
+
+    def read(port, output, **kwargs):
+        original(port, output, **kwargs)
+        output.write_bytes(bytes(stock) if kwargs['halt'] else expected)
+
+    monkeypatch.setattr(launcher.swire, '_read_flash', read)
+    launcher.run('COM3', 300, 'v0148', launcher.IMAGE)
+    assert events == ['backup', 'write', 'readback']
+    summary = launcher.swire.read_json(next(launcher.RUNS.glob('*/summary.json')))
+    assert summary['phase'] == 'VERIFIED' and summary['preservationVerified']
+
+
+@pytest.mark.parametrize('version,size,mfg', [
+    (0x20013001, 0x200E5, 0x1286),
+    (0x20023001, 0x200E4, 0x1286),
+    (0x20013001, 0x200E4, 0x1141),
+])
+def test_extended_stock_exception_rejects_other_headers(version, size, mfg):
+    before = bytearray(b'\xff' * launcher.FLASH_BYTES)
+    before[2:6] = version.to_bytes(4, 'little')
+    before[6:12] = b'\x5d\x02KNLT'
+    before[18:20] = mfg.to_bytes(2, 'little')
+    before[20:22] = (0x0203 if mfg == 0x1286 else 0x0232).to_bytes(2, 'little')
+    before[24:28] = size.to_bytes(4, 'little')
+    with pytest.raises(RuntimeError, match='declared size.*Inspect before writing'):
+        launcher.require_candidate_layout(before)
+
 
 @pytest.mark.parametrize('offset', [8, launcher.IMAGE_BYTES, launcher.ERASE_END, 0x7FFFF])
 def test_compare_rejects_each_changed_region(bench, offset):

@@ -89,10 +89,20 @@ def load_firmware(firmware, image_path):
 def require_candidate_layout(before):
     # The documented stock and ZigbeeTLc images both begin at zero on this board.
     identity = (int.from_bytes(before[18:20], 'little'), int.from_bytes(before[20:22], 'little'))
+    version = int.from_bytes(before[2:6], 'little')
     size = int.from_bytes(before[24:28], 'little')
+    # This stock revision declares 228 bytes beyond our new image's erase area.
+    # The replacement is smaller, and verification preserves that old tail with
+    # every other byte above ERASE_END. This does not enlarge the writer's range.
+    extended_stock = (identity == (0x1286, 0x0203)
+                      and (version, size) == (0x20013001, 0x200E4))
+    supported_size = 4096 <= size <= ERASE_END or extended_stock
     if (before[6:12] != b'\x5d\x02KNLT' or identity not in {(0x1286, 0x0203), (0x1141, 0x0232)}
-            or not 4096 <= size <= ERASE_END):
-        raise RuntimeError('Backup does not show a supported ZG-204ZL application at zero. Inspect before writing.')
+            or not supported_size):
+        raise RuntimeError(
+            'Backup does not show a supported ZG-204ZL application at zero '
+            f'(identity 0x{identity[0]:04X}/0x{identity[1]:04X}, '
+            f'version 0x{version:08X}, declared size {size:,} bytes). Inspect before writing.')
     # The ZigbeeTLc boot path can copy an active OTA image from 0x20000.
     # Refuse either alternate boot area rather than trying to disable it.
     for offset in (0x20000, 0x40000):

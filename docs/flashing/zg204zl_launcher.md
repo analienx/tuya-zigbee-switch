@@ -81,6 +81,12 @@ up to five minutes for USB/target entry, then:
 4. Compares the exact image, erased tail, and all bytes at 0x20000..0x7FFFF
    against that sensor's fresh backup. Any mismatch stops the operation.
 
+Stock identity 0x1286/0x0203, version 0x20013001, declares 131300 bytes.
+The launcher recognizes this revision even though it extends 228 bytes above
+0x20000. Conversion preserves that old tail at 0x20000..0x200E3, along with
+all other bytes above the new application's erase area. Unsupported headers
+report their identity, version and declared size for inspection.
+
 Keep the same target/power/contacts attached throughout. It does not select a
 slot using the BSEED dual-slot strategy and does not clear any other flash range.
 It leaves the CPU stopped after success. Perform a controlled sensor power cycle
