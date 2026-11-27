@@ -18,9 +18,8 @@ class Native(unittest.TestCase):
         cls.addClassCleanup(cls.tmp.cleanup)
         lib = Path(cls.tmp.name) / 'native.so'
         subprocess.run(['cc', '-shared', '-fPIC', '-std=c99', '-Os', '-Wall', '-Wextra', '-Werror',
-                        '-I', str(ROOT / 'native'),
-                        *[str(p) for p in sorted((ROOT / 'native').glob('*.c')) if p.name != 'nc_port_tlsr.c'],
-                        str(ROOT / 'host/nc_port_host.c'), '-o', str(lib)], check=True)
+                        '-DNC_HOST', '-I', str(ROOT / 'native'),
+                        str(ROOT / 'native/nc_all.c'), '-o', str(lib)], check=True)
         cls.fw = C.CDLL(str(lib))
         cls.fw.nc_configure.argtypes = [C.c_void_p, C.c_uint]
         cls.fw.nc_time_response.argtypes = [C.c_uint8, C.c_void_p, C.c_uint]

@@ -82,7 +82,8 @@ def sources(root):
             'typedef char nc_cluster_capacity[(sizeof(g_sensorDeviceClusterList) / '
             'sizeof(g_sensorDeviceClusterList[0]) <= ZCL_CLUSTER_NUM_MAX) ? 1 : -1];\n'
             'const u8 SENSOR_DEVICE_CB_CLUSTER_NUM =')
-    objects = ''.join('$(OUT_PATH)$(SRC_DIR)/' + p.stem + '.o \\\n' for p in sorted((HERE / 'native').glob('*.c')))
+    objects = ''.join('$(OUT_PATH)$(SRC_DIR)/' + p.stem + '.o \\\n'
+                      for p in sorted((HERE / 'native').glob('*.c')) if p.name != 'nc_all.c')
     replace('make_z/src.mk', 'OBJS += \\\n', 'OBJS += \\\n' + objects)
     output = {k: v.encode() for k, v in texts.items()}
     for path in (HERE / 'native').iterdir():

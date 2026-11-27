@@ -141,6 +141,7 @@ jobs:
             -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/app-size.mk" \
             -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/compact-protocol.mk" \
             -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/native-size.mk" \
+            -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/unity.mk" \
             -j2 PROJECT_NAME=ZG204ZL POJECT_DEF="-DBOARD=BOARD_ZG204ZL" \
             VERSION_BIN=_v0149 ZNAME="Sonoff:ZG-204ZL-z" \
             LNK_FLAGS="--gc-sections -nostartfiles -Map=build/ZG204ZL.map" > native-evidence/build.log 2>&1 || { tail -100 native-evidence/build.log; exit 1; }
