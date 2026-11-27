@@ -9,7 +9,12 @@ def report(image, map_path):
     totals = {}
     # GNU ld prints a section/address/size/object line, sometimes wrapped.
     pending = ""
-    for line in map_path.read_text(errors="replace").splitlines():
+    text = map_path.read_text(errors="replace")
+    # Telink's GNU ld fork inserts this banner between a section and its
+    # object filename. Exclude discarded sections before collecting bytes.
+    text = text.split("Linker script and memory map", 1)[-1]
+    text = text.replace(" ok now generated...\n", " ")
+    for line in text.splitlines():
         stripped = line.strip()
         if re.match(r"^\.(?:text|rodata|data|ram_code|vectors)(?:\.|\s|$)", stripped):
             pending = stripped
