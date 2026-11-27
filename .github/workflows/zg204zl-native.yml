@@ -1,0 +1,91 @@
+name: ZG-204ZL native binding (#164)
+
+on:
+  push:
+    branches: [codex/zg204zl-native-control-164]
+    paths:
+      - firmware/zg204zl_native/**
+      - .github/workflows/zg204zl-native.yml
+  pull_request:
+    paths:
+      - firmware/zg204zl_native/**
+      - .github/workflows/zg204zl-native.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  size-budget:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CANDIDATE: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: control
+      - uses: actions/checkout@v4
+        with:
+          repository: pvvx/ZigbeeTLc
+          ref: c249d8a7caddb5012d06aba580d4a53d1957f9c1
+          path: upstream
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Exact source, existing recovery tests and baseline overlay
+        env:
+          ZG204ZL_SOURCE: ${{ github.workspace }}/upstream
+        run: |
+          test "$(git -C control rev-parse HEAD)" = "$CANDIDATE"
+          python -m unittest discover -s control/firmware/zg204zl_reliability -p 'test_*.py' -v
+          python control/firmware/zg204zl_reliability/apply.py --source upstream --variant v0148
+      - name: Install pinned compiler and SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends make unzip bzip2 libc6-i386 lib32z1
+          make -C upstream install
+      - name: Source-preserved baseline and selective-size builds
+        shell: bash
+        run: |
+          mkdir -p evidence
+          for profile in baseline selective-size; do
+            make -C upstream clean
+            extra=()
+            if [ "$profile" = selective-size ]; then extra=(-f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/sdk-size.mk"); fi
+            make -C upstream -f makefile "${extra[@]}" -j2 PROJECT_NAME=ZG204ZL \
+              POJECT_DEF="-DBOARD=BOARD_ZG204ZL" VERSION_BIN=_v0148 ZNAME="Sonoff:ZG-204ZL-z" \
+              LNK_FLAGS="--gc-sections -nostartfiles -Map=build/ZG204ZL.map" > "evidence/$profile-build.log" 2>&1 || { tail -100 "evidence/$profile-build.log"; exit 1; }
+            mkdir -p "evidence/$profile"
+            cp upstream/build/ZG204ZL.{elf,map,lst} "evidence/$profile/"
+            python control/firmware/zg204zl_native/size_report.py \
+              --image upstream/bin/ZG204ZL_v0148.bin --map upstream/build/ZG204ZL.map \
+              --output "evidence/$profile/size.json"
+            python control/firmware/zg204zl_reliability/verify_image.py \
+              --source-commit "$CANDIDATE" --variant v0148 --bin upstream/bin/ZG204ZL_v0148.bin \
+              --ota upstream/bin/1141-0232-01483001-ZG204ZL.zigbee \
+              --manifest "evidence/$profile/manifest.json"
+          done
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          base = json.loads(Path('evidence/baseline/size.json').read_text())
+          small = json.loads(Path('evidence/selective-size/size.json').read_text())
+          delta = {'candidate': __import__('os').environ['CANDIDATE'],
+                   'baseline_bytes': base['native_bytes'], 'selective_bytes': small['native_bytes'],
+                   'saved_bytes': base['native_bytes'] - small['native_bytes'],
+                   'free_bytes': small['free_bytes'], 'minimum_free_bytes': 3072,
+                   'objects': {k: small['objects'].get(k, 0) - v for k, v in base['objects'].items()}}
+          Path('evidence/size-gate.json').write_text(json.dumps(delta, indent=2) + '\n')
+          print(json.dumps({k:v for k,v in delta.items() if k != 'objects'}))
+          assert small['free_bytes'] >= 3072, 'M0 fails: less than 3 KiB free; do not proceed with full feature'
+          PY
+      - name: Upload analysis evidence; never a deployable image
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-size-${{ github.event.pull_request.head.sha || github.sha }}
+          path: evidence/
+          if-no-files-found: error
