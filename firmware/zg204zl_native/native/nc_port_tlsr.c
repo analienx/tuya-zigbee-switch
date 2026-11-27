@@ -4,7 +4,7 @@
 #include "sensor_lx.h"
 #include "zcl_illuminance_level_sensing.h"
 #include "battery.h"
-#include "nwk/includes/nwk_addr_map.h"
+#include "nwk_addr_map.h"
 
 extern u32 rtcMs;
 static ev_timer_event_t *native_timer;

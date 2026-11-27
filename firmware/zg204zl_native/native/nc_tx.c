@@ -129,7 +129,6 @@ void nc_tx_kick(void) {
     if (!nc.on || nc_port_now() - nc.born < 60000u) return;
     for (i = 0; i < NC_MAX_DST; i++) if (nc.dst[i].state == TX_FAILED && !nc.dst[i].addr.group) {
         nc.born = nc_port_now(); nc.fade_end = nc.born + (uint32_t)nc.fade_in * 100u;
-        nc.generation++;
         for (i = 0; i < NC_MAX_DST; i++) if (nc.dst[i].state == TX_FAILED && !nc.dst[i].addr.group) {
             nc.dst[i].state = TX_READY; nc.dst[i].tries = 0; nc.dst[i].flags |= NC_PENDING;
             nc.dst[i].due = nc.born;
@@ -182,9 +181,11 @@ void nc_tx_service(void) {
 uint32_t nc_tx_delay(void) {
     unsigned i;
     uint32_t delay = 0, now = nc_port_now();
+    int available = nc_tx_inflight() + nc.clock.pending < 2 && nc_port_joined();
     for (i = 0; i < NC_MAX_DST; i++) {
         nc_dst_t *r = &nc.dst[i];
         uint32_t d;
+        if (r->state == TX_READY && (r->flags & NC_PENDING) && eligible(r) && available) return 1;
         if (r->state != TX_FLY && !(r->state == TX_WAIT && (r->flags & NC_PENDING))) continue;
         d = nc_due(now, r->due) ? 1 : r->due - now;
         if (!delay || d < delay) delay = d;

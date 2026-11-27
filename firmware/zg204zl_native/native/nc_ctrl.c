@@ -18,7 +18,11 @@ static uint8_t admit(void) {
 
 void nc_motion(void) {
     uint32_t now = nc_port_now();
-    if (!nc_port_master()) { nc_master(0); nc.reason = NC_MASTER_OFF; return; }
+    if (!nc_port_master()) {
+        if (nc.phase != NC_IDLE) nc_master(0);
+        if (nc_tx_off_unknown()) nc.reoff = 1;
+        nc.pending_motion = 0; nc.reason = NC_MASTER_OFF; return;
+    }
     if (nc.phase == NC_ACTIVE) { nc_tx_kick(); return; }
     if (nc.phase == NC_RELEASING && !nc_due(now, nc.grace)) {
         nc.phase = NC_ACTIVE; nc.reason = NC_RESUMED;
