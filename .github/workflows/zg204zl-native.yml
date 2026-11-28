@@ -116,7 +116,7 @@ jobs:
         run: python -m unittest discover -s firmware/zg204zl_native -p 'test_*.py' -v
 
   native-candidate:
-    needs: [size-budget, native-host]
+    needs: size-budget
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:

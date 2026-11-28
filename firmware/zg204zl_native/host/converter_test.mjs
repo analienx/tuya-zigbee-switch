@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {Zcl} from 'zigbee-herdsman';
-import definition from '../../../../zigbee2mqtt/converters/zg204zl_native.mjs';
+import definition from '../../../zigbee2mqtt/converters/zg204zl_native.mjs';
 
 const vectors = JSON.parse(fs.readFileSync(new URL('../vectors.json', import.meta.url)));
 const setter = definition.toZigbee.find(c => c.key.includes('native_lighting'));
