@@ -36,3 +36,15 @@ Linker script and memory map
             path.write_text(" .text 0x0000 0x100 unused.o\n")
             with self.assertRaisesRegex(ValueError, "start marker"):
                 report(path, path)
+
+    def test_counts_target_gcc_common_symbol_for_native_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'target.map'
+            path.write_text('''Linker script and memory map
+ .text.nc_motion 0x1000 0x100 ok now generated...
+./build/src/nc_all.o
+ COMMON 0x845284 0x1a0 ok now generated...
+./build/src/nc_all.o
+        0x845284 nc
+''')
+            self.assertEqual(report(path, path)['new_ram_budgeted_bytes'], 432)

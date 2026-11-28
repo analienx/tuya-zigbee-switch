@@ -83,7 +83,7 @@ def sources(root):
             '    {NC_CLUSTER, NC_MANUFACTURER, 2, nc_attrs, nc_cluster_register, NULL},')
     replace('src/app_EpCfg.c', 'const u8 SENSOR_DEVICE_CB_CLUSTER_NUM =',
             'typedef char nc_cluster_capacity[(sizeof(g_sensorDeviceClusterList) / '
-            'sizeof(g_sensorDeviceClusterList[0]) <= ZCL_CLUSTER_NUM_MAX) ? 1 : -1];\n'
+            'sizeof(g_sensorDeviceClusterList[0]) + 1 <= ZCL_CLUSTER_NUM_MAX) ? 1 : -1];\n'
             'const u8 SENSOR_DEVICE_CB_CLUSTER_NUM =')
     objects = ''.join('$(OUT_PATH)$(SRC_DIR)/' + p.stem + '.o \\\n'
                       for p in sorted((HERE / 'native').glob('*.c')) if p.name != 'nc_all.c')

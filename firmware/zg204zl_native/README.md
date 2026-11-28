@@ -17,7 +17,7 @@ needs a periodic Time response from the coordinator.
 - Retains v0148 TX power, discovery scans, recovery, battery handling and PM.
   `USE_NV_APP` is unchanged. The new NV item is appended, not renumbered.
 - Native image must fit **130,816 bytes** (`0x20000` minus a 256-byte reserve).
-  New persistent RAM is statically limited to 512 bytes including glue reserve.
+  New RAM state is statically limited to 512 bytes including glue reserve.
 
 ## Build and review
 

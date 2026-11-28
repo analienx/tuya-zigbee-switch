@@ -33,11 +33,17 @@ def report(image, map_path):
     result = {"native_bytes": length, "free_bytes": 0x20000 - length,
               "objects": dict(sorted(totals.items(), key=lambda item: -item[1]))}
     state = re.search(r"\.bss\.nc\s+0x[0-9a-fA-F]+\s+0x([0-9a-fA-F]+)\s", text)
+    if not state:
+        # GCC 4.5 uses COMMON for tentative definitions even with data-sections.
+        state = re.search(r"\bCOMMON\s+0x[0-9a-fA-F]+\s+0x([0-9a-fA-F]+)\s+"
+                          r"\S*nc_all\.o\s+0x[0-9a-fA-F]+\s+nc\b", text)
     if state:
         result['native_state_bytes'] = int(state.group(1), 16)
         # Four-byte pointers/scalars for owned timer, allocation throttle and RTC;
         # allow a fourth word, matching the compile-time budget in nc.h.
         result['new_ram_budgeted_bytes'] = result['native_state_bytes'] + 16
+    elif any(obj.endswith('/nc_all.o') for obj in totals):
+        raise ValueError('Native object present but RAM symbol missing from map')
     return result
 
 
