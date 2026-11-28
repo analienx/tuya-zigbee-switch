@@ -59,6 +59,9 @@ jobs:
           - profile: v0151-suspend
             tag: v0151
             filever: '01513001'
+          - profile: v0152-flash-wake-first
+            tag: v0152
+            filever: '01523001'
     env:
       CANDIDATE: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:

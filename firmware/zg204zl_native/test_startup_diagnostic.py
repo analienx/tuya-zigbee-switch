@@ -18,6 +18,8 @@ class StartupDiagnostic(unittest.TestCase):
             path = root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
+        startup = root / diagnostic.STARTUP_PATH
+        startup.write_bytes((source / diagnostic.STARTUP_PATH).read_bytes())
         with zipfile.ZipFile(source / 'tools/SDK_z.zip') as archive:
             path = root / 'SDK_z/proj/drivers/drv_pm.c'
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -59,3 +61,21 @@ class StartupDiagnostic(unittest.TestCase):
             (root / 'src/version_cfg.h').write_bytes(output['src/version_cfg.h'])
             with self.assertRaisesRegex(ValueError, 'anchor changed'):
                 diagnostic.sources(root, 'v0150-noidle')
+
+    def test_flash_wake_precedes_cache_invalidation_and_keeps_retention(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.copy(root)
+            name = diagnostic.STARTUP_PATH
+            result = diagnostic.sources(root, 'v0152-flash-wake-first')
+            self.assertEqual(set(result), {name, 'src/version_cfg.h'})
+            self.assertIn(b'0x52', result['src/version_cfg.h'])
+            old = (root / name).read_bytes().decode()
+            new = result[name].decode()
+            self.assertLess(new.index('FLASH_WAKEUP_BEGIN:'), new.index('FLASH_WAKEUP_SETTLE:'))
+            self.assertLess(new.index('FLASH_WAKEUP_SETTLE:'), new.index('ZERO_TAG_BEGIN:'))
+            self.assertLess(new.index('SET_IC:'), new.index('RANA_REG_BEGIN:'))
+            self.assertEqual(new[new.index('RANA_REG_BEGIN:'):], old[old.index('RANA_REG_BEGIN:'):])
+            self.assertIn('\ttstorerb    r1,[r0,#1]\n\ttmov\tr2,#128', new)
+            with self.assertRaisesRegex(ValueError, 'blob mismatch'):
+                diagnostic.wake_flash_first(result[name])
