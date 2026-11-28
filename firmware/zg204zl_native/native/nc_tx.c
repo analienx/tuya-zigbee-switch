@@ -218,7 +218,8 @@ uint32_t nc_tx_delay(void) {
         nc_dst_t *r = &nc.dst[i];
         uint32_t d;
         if (r->state == TX_READY && (r->flags & NC_PENDING) && eligible(r) && available) return 1;
-        if (r->state != TX_FLY && !(r->state == TX_WAIT && (r->flags & NC_PENDING))) continue;
+        if (r->state != TX_FLY && !(r->state == TX_WAIT && available &&
+            eligible(r) && (r->flags & NC_PENDING))) continue;
         d = nc_due(now, r->due) ? 1 : r->due - now;
         if (!delay || d < delay) delay = d;
     }

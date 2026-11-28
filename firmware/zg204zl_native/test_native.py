@@ -194,6 +194,27 @@ class Native(unittest.TestCase):
         self.assertEqual(self.fw.host_count(), 3)
         self.assertEqual(self.fw.host_inflight(), 2)
 
+    def test_due_retry_does_not_spin_while_other_destinations_fill_slots(self):
+        self.config()
+        for i in range(3): self.fw.host_bind(i, 100+i, 1, 2, 0)
+        self.event('nc_motion')
+        self.ack(0, 0xa7)  # target 2 now occupies the freed slot
+        self.advance(2000)  # target 0 is due, both slots still occupied
+        self.assertGreater(self.fw.host_delay(), 1)
+        self.assertEqual(self.fw.host_count(), 3)
+
+    def test_aps_counter_wrap_does_not_accept_other_peer_or_endpoint(self):
+        self.config(); self.fw.host_counter(255)
+        self.fw.host_bind(0, 123, 1, 2, 0)
+        self.event('nc_motion')
+        self.fw.host_other_endpoint_ack(0); self.fw.host_other_address_ack(0)
+        self.assertEqual(self.fw.host_inflight(), 1)
+        self.ack(0); self.event('nc_absence')
+        self.fw.host_wrong_ack(1)
+        self.assertEqual(self.fw.host_inflight(), 1)
+        self.ack(1)
+        self.assertEqual(self.fw.host_inflight(), 0)
+
     def test_legacy_unknown_threshold_migrates_to_lux_disabled(self):
         self.fw.host_lux_target(65535); self.fw.nc_init()
         self.fw.host_bind(0, 123, 1, 1, 0); self.fw.host_dark(0)
