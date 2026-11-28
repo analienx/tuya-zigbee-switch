@@ -1,6 +1,7 @@
 #ifndef NC_H
 #define NC_H
 #include <stdint.h>
+#include <stddef.h>
 #include <string.h>
 
 #define NC_CLUSTER 0xfc70
@@ -37,16 +38,17 @@ typedef struct {
 typedef struct { uint8_t id[8], ep, group; } nc_addr_t;
 typedef struct { nc_addr_t addr; uint8_t caps; } nc_binding_t;
 typedef struct {
-    nc_addr_t addr;
-    uint8_t caps, state, flags, aps, zcl, fly_on, tries;
-    uint16_t fly_gen;
     uint32_t due;
-} nc_dst_t;
+    uint16_t fly_gen;
+    uint8_t caps, state;
+    nc_addr_t addr;
+    uint8_t flags, aps, zcl, fly_on, tries, padding;
+} __attribute__((aligned(4))) nc_dst_t;
 typedef struct {
     uint32_t utc, at, valid_until, refresh, ds, de, deadline;
     int32_t tz, shift;
     uint8_t valid, pending, seq, failures;
-} nc_clock_t;
+} __attribute__((aligned(4))) nc_clock_t;
 typedef struct {
     nc_cfg_t cfg;
     nc_dst_t dst[NC_MAX_DST];
@@ -57,9 +59,10 @@ typedef struct {
     uint8_t level, cycle_native, on, wanted, want_level, want_native;
     uint8_t last_aps, last_zcl, last_zcl_command, stale_on, unicast_count, group_count;
     uint8_t cfg_attr[13], diag_attr[13];
-} nc_state_t;
+} __attribute__((aligned(4))) nc_state_t;
 extern nc_state_t nc;
 typedef char nc_config_is_12_bytes[(sizeof(nc_cfg_t) == 12) ? 1 : -1];
+typedef char nc_timer_alignment[(offsetof(nc_dst_t, due) % 4 == 0 && sizeof(nc_dst_t) % 4 == 0) ? 1 : -1];
 typedef char nc_runtime_budget[(sizeof(nc_state_t) + 16 <= 512) ? 1 : -1];
 
 static inline uint16_t nc_le16(const uint8_t *p) {
