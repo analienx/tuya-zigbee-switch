@@ -101,7 +101,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install exact deployed Zigbee libraries without device drivers
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund zigbee-herdsman@10.10.0 zigbee-herdsman-converters@26.115.1
+      - name: Real herdsman Time frames and converter protocol
+        run: |
+          node firmware/zg204zl_native/host/herdsman_vectors.mjs "$RUNNER_TEMP/herdsman-time.json"
+          node firmware/zg204zl_native/host/converter_test.mjs
       - name: Compile and exercise the actual native modules
+        env:
+          HERDSMAN_TIME_VECTORS: ${{ runner.temp }}/herdsman-time.json
         run: python -m unittest discover -s firmware/zg204zl_native -p 'test_*.py' -v
 
   native-candidate:

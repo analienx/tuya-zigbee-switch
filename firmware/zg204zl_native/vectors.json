@@ -1,0 +1,9 @@
+{
+  "configurations": [
+    {"hex":"010098003804a4010f001e00","ui":{"time_enabled":false,"lux_enabled":false,"start":"18:00","end":"07:00","brightness_percent":60,"fade_in":1.5,"fade_out":3}},
+    {"hex":"010398003804a4010f001e00","ui":{"time_enabled":true,"lux_enabled":true,"start":"18:00","end":"07:00","brightness_percent":60,"fade_in":1.5,"fade_out":3}},
+    {"hex":"0102fe0000000000b004b004","ui":{"time_enabled":false,"lux_enabled":true,"start":"00:00","end":"00:00","brightness_percent":100,"fade_in":120,"fade_out":120}},
+    {"hex":"0101010000009f0500000000","ui":{"time_enabled":true,"lux_enabled":false,"start":"00:00","end":"23:59","brightness_percent":0.4,"fade_in":0,"fade_out":0}}
+  ],
+  "frames": {"on":"110004980f00","off":"110104001e00","legacy_on":"010001"}
+}

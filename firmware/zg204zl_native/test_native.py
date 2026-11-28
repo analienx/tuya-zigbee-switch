@@ -1,6 +1,7 @@
 """Hosted tests compile the same native modules copied into the TC32 image."""
 import ctypes as C
 import datetime as dt
+import json
 import os
 import struct
 import subprocess
@@ -272,6 +273,36 @@ class Native(unittest.TestCase):
         self.receive_clock(request=1); self.fw.nc_service()
         self.assertEqual(self.fw.host_count(), 2)
         self.assertEqual(self.fw.host_phase(), 0)
+
+    def test_shared_config_wire_vectors(self):
+        for vector in json.loads((ROOT / 'vectors.json').read_text())['configurations']:
+            self.fw.host_reset()
+            raw = bytes.fromhex(vector['hex'])
+            self.assertEqual(self.fw.nc_configure(raw, len(raw)), 0)
+            actual = C.create_string_buffer(12)
+            self.fw.host_config(actual)
+            self.assertEqual(actual.raw, raw)
+
+    def test_real_herdsman_frames_dst_and_cache_expiry(self):
+        fixture = os.environ.get('HERDSMAN_TIME_VECTORS')
+        if not fixture:
+            self.fail('Hosted test requires real herdsman vectors, not hand-authored substitutes')
+        for vector in json.loads(Path(fixture).read_text()):
+            with self.subTest(iso=vector['iso']):
+                self.fw.host_reset(); self.config(flags=1); self.fw.nc_service()
+                raw = bytes.fromhex(vector['hex'])
+                self.fw.nc_receive(0, 1, 0x104, 1, 1, None, 10, raw, len(raw))
+                self.assertEqual(self.fw.nc_local_minute(), vector['localMinute'])
+
+    def test_saved_lux_condition_does_not_turn_into_legacy_bypass(self):
+        self.config(flags=2)
+        self.fw.host_lux_target(65535)
+        self.fw.nc_init()
+        self.fw.host_bind(0, 123, 1, 3, 0)
+        self.event('nc_motion')
+        self.assertEqual(self.fw.host_count(), 0)
+        self.assertEqual(self.fw.host_reason(), 4)
+        self.assertTrue(self.diag()[7] & 1)
 
 
 if __name__ == '__main__':
