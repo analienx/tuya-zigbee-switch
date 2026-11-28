@@ -366,6 +366,68 @@ class Native(unittest.TestCase):
             self.receive_clock(payload)
             self.assertEqual(self.fw.nc_local_minute(), -1)
 
+    def test_all_four_time_lux_modes_and_window_edges(self):
+        # UTC time in this fixture is 19:00 local. Time endpoints are half-open.
+        for flags in range(4):
+            for dark in (0, 1):
+                for inside in (False, True):
+                    with self.subTest(flags=flags, dark=dark, inside=inside):
+                        self.fw.host_reset()
+                        self.config(flags=flags, start=1140 if inside else 0,
+                                    end=1200 if inside else 1140)
+                        self.fw.host_bind(0, 123, 1, 2, 0)
+                        if flags & 1:
+                            self.fw.nc_service()
+                            self.receive_clock(self.clock_payload(utc=820605600))
+                        count = self.fw.host_count()
+                        self.fw.host_dark(dark); self.event('nc_motion')
+                        admitted = (not flags & 1 or inside) and (not flags & 2 or dark)
+                        self.assertEqual(self.fw.host_count() - count, int(admitted))
+
+    def test_seeded_decisions_match_independent_model(self):
+        import random
+        from host.model import Controller
+        events = ('motion', 'motion', 'absence', 'advance', 'bright', 'dark',
+                  'enable', 'disable', 'config')
+        for seed in range(20):
+            rng = random.Random(seed)
+            self.fw.host_reset(); self.config()
+            self.fw.host_bind(0, 123, 1, 2, 0)
+            model = Controller(); now = cursor = 0
+            for step in range(1000):
+                event = rng.choice(events)
+                with self.subTest(seed=seed, step=step, event=event):
+                    if event == 'advance':
+                        ms = rng.randrange(20000); now += ms
+                        self.fw.host_advance(ms)
+                    elif event in ('bright', 'dark'):
+                        model.dark = event == 'dark'; self.fw.host_dark(model.dark)
+                    elif event == 'config':
+                        model.config = (bool(rng.getrandbits(1)), rng.randrange(1, 255),
+                                        rng.randrange(1201), rng.randrange(1201))
+                        lux, level, fade_in, fade_out = model.config
+                        self.assertEqual(self.config(flags=2*lux, level=level,
+                                                     fade_in=fade_in, fade_out=fade_out), 0)
+                    expected = model.decide(event, now)
+                    if event in ('enable', 'disable'):
+                        self.fw.host_master(event == 'enable')
+                    elif event == 'motion': self.fw.nc_motion()
+                    elif event == 'absence': self.fw.nc_absence()
+                    self.fw.nc_service()
+                    self.assertEqual(self.fw.host_generation(), model.generation)
+                    self.assertEqual(self.fw.host_phase(), model.phase)
+                    count = self.fw.host_count()
+                    self.assertEqual(count - cursor, int(expected is not None))
+                    if expected is not None:
+                        frame = self.frame(cursor)
+                        self.assertEqual(frame[2], 4)
+                        self.assertEqual(frame[3], model.snapshot[1] if expected else 0)
+                        self.assertEqual(int.from_bytes(frame[4:], 'little'),
+                                         model.snapshot[2 if expected else 3])
+                        self.ack(cursor)
+                    self.assertLessEqual(self.fw.host_inflight(), 2)
+                    cursor = count
+
 
 if __name__ == '__main__':
     unittest.main()

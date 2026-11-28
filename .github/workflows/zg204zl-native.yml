@@ -43,6 +43,7 @@ jobs:
         run: |
           test "$(git -C control rev-parse HEAD)" = "$CANDIDATE"
           python -m unittest discover -s control/firmware/zg204zl_native -p 'test_size_report.py' -v
+          python -m unittest discover -s control/firmware/zg204zl_native -p 'test_native_overlay.py' -v
           python -m unittest discover -s control/firmware/zg204zl_reliability -p 'test_*.py' -v
           python control/firmware/zg204zl_reliability/apply.py --source upstream --variant v0148
       - name: Install pinned compiler and SDK

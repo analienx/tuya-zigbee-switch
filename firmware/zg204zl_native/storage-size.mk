@@ -5,4 +5,3 @@ $(OUT_PATH)/proj/common/utility.o: GCC_FLAGS += -Os -fno-inline-small-functions
 $(OUT_PATH)/proj/common/mempool.o: GCC_FLAGS += -Os -fno-inline-small-functions
 $(OUT_PATH)/proj/os/ev_buffer.o: GCC_FLAGS += -Os -fno-inline-small-functions
 $(OUT_PATH)/src/app_ui.o: GCC_FLAGS += -Os -fno-inline-small-functions
-$(OUT_PATH)/src/zlx2lx.o: GCC_FLAGS += -Os -fno-inline-small-functions
