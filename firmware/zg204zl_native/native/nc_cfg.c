@@ -63,6 +63,7 @@ void nc_diagnostics(void) {
     p[3] = nc_local_minute() >= 0;
     nc_put16(p + 4, age > 65535 ? 65535 : (uint16_t)age);
     p[6] = nc.last_aps; p[7] = nc.last_zcl;
-    p[8] = nc.cfg_present | (nc_tx_off_unknown() ? 2 : 0) | (nc.stale_on ? 4 : 0);
+    p[8] = nc.cfg_present | (nc_tx_off_unknown() ? 2 : 0) | (nc.stale_on ? 4 : 0) |
+           (nc_tx_blocked() ? 8 : 0);
     p[9] = onoff; p[10] = level; p[11] = nc.group_count; p[12] = nc.last_zcl_command;
 }

@@ -82,6 +82,7 @@ function diagnostics(raw) {
         reason: reasons[b[1] >> 2] ?? 'unknown', clock_valid: !!b[2],
         clock_age_minutes: b.readUInt16LE(3), last_aps_status: b[5], last_zcl_status: b[6],
         configured: !!(b[7] & 1), off_unconfirmed: !!(b[7] & 2), stale_on_dropped: !!(b[7] & 4),
+        transport_blocked: !!(b[7] & 8),
         onoff_destinations: b[8], level_destinations: b[9], group_destinations: b[10],
         last_zcl_cluster: b[11] & 0x80 ? 8 : 6, last_zcl_command: b[11] & 0x7f};
 }

@@ -19,6 +19,7 @@ class Native(unittest.TestCase):
         cls.addClassCleanup(cls.tmp.cleanup)
         lib = Path(cls.tmp.name) / 'native.so'
         subprocess.run(['cc', '-shared', '-fPIC', '-std=c99', '-Os', '-Wall', '-Wextra', '-Werror',
+                        '-fsanitize=undefined', '-fno-sanitize-recover=all',
                         '-DNC_HOST', '-I', str(ROOT / 'native'),
                         str(ROOT / 'native/nc_all.c'), '-o', str(lib)], check=True)
         cls.fw = C.CDLL(str(lib))
@@ -303,6 +304,67 @@ class Native(unittest.TestCase):
         self.assertEqual(self.fw.host_count(), 0)
         self.assertEqual(self.fw.host_reason(), 4)
         self.assertTrue(self.diag()[7] & 1)
+
+    def test_missing_confirm_quarantines_until_actual_stack_completion(self):
+        self.config(); self.fw.host_bind(0, 123, 1, 2, 0)
+        self.event('nc_motion'); self.ack(0); self.event('nc_absence')
+        self.advance(30000)
+        self.assertTrue(self.diag()[7] & 8)
+        self.event('nc_motion'); self.advance(120000)
+        self.assertEqual(self.fw.host_count(), 2)  # old OFF can still be retrying
+        self.assertEqual(self.fw.host_inflight(), 1)
+        self.ack(1)  # genuine old completion releases it; newer ON already expired
+        self.assertEqual(self.fw.host_count(), 2)
+        self.assertFalse(self.diag()[7] & 8)
+
+    def test_full_binding_table_replacement_is_seen_in_one_scan(self):
+        self.config()
+        for i in range(12): self.fw.host_bind(i, 100+i, 1, 2, 0)
+        self.event('nc_motion')
+        for i in range(12): self.ack(i)
+        self.assertEqual(self.fw.host_count(), 12)
+        for i in range(12): self.fw.host_bind(i, 200+i, 1, 2, 0)
+        self.fw.nc_service()
+        self.assertEqual(self.fw.host_count(), 14)
+
+    def test_group_off_all_first_hops_failed_rearms_at_next_absence(self):
+        self.config(flags=2); self.fw.host_bind(0, 123, 0, 2, 1)
+        self.event('nc_motion'); self.ack(0); self.advance(2000); self.ack(1)
+        self.event('nc_absence'); self.ack(2, 0xa7)
+        self.advance(2000); self.ack(3, 0xa7)
+        self.advance(10000); self.ack(4, 0xa7)
+        self.assertTrue(self.diag()[7] & 2)
+        self.fw.host_dark(0); self.event('nc_motion'); self.event('nc_absence')
+        self.assertEqual(self.fw.host_count(), 6)
+        self.assertEqual(self.frame(5)[3], 0)
+
+    def test_nv_readback_failure_can_persist_but_does_not_commit_ram(self):
+        self.fw.host_read_fail(1)
+        self.assertEqual(self.config(), 0xc0)
+        self.assertFalse(self.diag()[7] & 1)
+        self.fw.host_read_fail(0); self.fw.nc_init()
+        self.assertTrue(self.diag()[7] & 1)  # caller must inspect; NV may have changed
+
+    def test_cycle_snapshot_and_next_cycle_new_settings(self):
+        self.config(); self.fw.host_bind(0, 123, 1, 2, 0)
+        self.event('nc_motion'); self.ack(0)
+        self.config(level=254, fade_out=10)
+        self.event('nc_absence'); self.ack(1)
+        self.assertEqual(int.from_bytes(self.frame(1)[4:], 'little'), 30)
+        self.advance(1000); self.event('nc_motion'); self.ack(2)
+        self.assertEqual(self.frame(2)[3], 152)
+        self.event('nc_absence'); self.ack(3)
+        self.advance(5000); self.event('nc_motion')
+        self.assertEqual(self.frame(4)[3], 254)
+
+    def test_fuzz_time_envelope_and_records_with_undefined_behavior_checks(self):
+        import random
+        rng = random.Random(164)
+        for _ in range(1500):
+            self.fw.host_reset(); self.config(flags=1); self.fw.nc_service()
+            payload = rng.randbytes(rng.randrange(100))
+            self.receive_clock(payload)
+            self.assertEqual(self.fw.nc_local_minute(), -1)
 
 
 if __name__ == '__main__':

@@ -8,11 +8,18 @@ static int eligible(const nc_dst_t *r) {
     return (r->caps & NC_ONOFF) || (nc.want_native && (r->caps & NC_LEVEL));
 }
 
+static int flying(const nc_dst_t *r) {
+    return r->state == TX_FLY || r->state == TX_BLOCKED;
+}
+
 void nc_tx_scan(void) {
-    unsigned i, j;
+    unsigned pass, i, j;
     nc_binding_t b;
     nc.unicast_count = nc.group_count = 0;
     for (i = 0; i < NC_MAX_DST; i++) nc.dst[i].caps &= NC_OCCUPIED;
+    /* Match retained rows first. Free removed rows before allocating replacements,
+     * so a full table can be replaced in one scan without losing new bindings. */
+    for (pass = 0; pass < 2; pass++) {
     for (i = 0; i < NC_MAX_DST; i++) {
         nc_dst_t *r = 0;
         if (!nc_port_binding(i, &b)) continue;
@@ -20,7 +27,7 @@ void nc_tx_scan(void) {
             if ((nc.dst[j].caps & NC_OCCUPIED) && same(&nc.dst[j].addr, &b.addr)) {
                 r = &nc.dst[j]; break;
             }
-        if (!r) for (j = 0; j < NC_MAX_DST; j++) if (!nc.dst[j].caps) {
+        if (!r && pass) for (j = 0; j < NC_MAX_DST; j++) if (!nc.dst[j].caps) {
             r = &nc.dst[j]; memset(r, 0, sizeof(*r)); r->addr = b.addr;
             r->caps = NC_OCCUPIED; r->state = TX_READY;
             if (nc.wanted) r->flags = NC_PENDING;
@@ -28,10 +35,15 @@ void nc_tx_scan(void) {
         }
         if (r) r->caps |= b.caps;
     }
+    if (!pass) for (i = 0; i < NC_MAX_DST; i++) {
+        nc_dst_t *r = &nc.dst[i];
+        if (!(r->caps & 3) && !flying(r)) memset(r, 0, sizeof(*r));
+    }
+    }
     for (i = 0; i < NC_MAX_DST; i++) {
         nc_dst_t *r = &nc.dst[i];
         if (!(r->caps & 3)) {
-            if (r->state != TX_FLY) memset(r, 0, sizeof(*r));
+            if (!flying(r)) memset(r, 0, sizeof(*r));
             else r->flags &= NC_FLY_LEVEL | NC_FLY_REPEAT;
         } else if (r->addr.group) nc.group_count++;
         else nc.unicast_count++;
@@ -50,14 +62,20 @@ void nc_tx_want(int on, uint8_t level, uint16_t fade, int native) {
         r->flags = (r->flags & (NC_OFF_UNKNOWN | NC_FLY_LEVEL | NC_FLY_REPEAT | NC_REJECTED)) | NC_PENDING;
         if (!on && !r->addr.group) r->flags |= NC_OFF_UNKNOWN;
         if (native && r->addr.group && (r->caps & NC_LEVEL)) r->flags |= NC_REPEAT;
-        if (r->state != TX_FLY) { r->state = TX_READY; r->tries = 0; r->due = nc.born; }
+        if (!flying(r)) { r->state = TX_READY; r->tries = 0; r->due = nc.born; }
     }
 }
 
 unsigned nc_tx_inflight(void) {
     unsigned i, n = 0;
-    for (i = 0; i < NC_MAX_DST; i++) n += nc.dst[i].state == TX_FLY;
+    for (i = 0; i < NC_MAX_DST; i++) n += flying(&nc.dst[i]);
     return n;
+}
+
+int nc_tx_blocked(void) {
+    unsigned i;
+    for (i = 0; i < NC_MAX_DST; i++) if (nc.dst[i].state == TX_BLOCKED) return 1;
+    return 0;
 }
 
 int nc_tx_off_unknown(void) {
@@ -84,7 +102,7 @@ void nc_confirm(const nc_addr_t *addr, uint8_t aps, uint16_t cluster, uint8_t st
     unsigned i;
     for (i = 0; i < NC_MAX_DST; i++) {
         nc_dst_t *r = &nc.dst[i];
-        if (r->state != TX_FLY || r->aps != aps || !same(&r->addr, addr) ||
+        if (!flying(r) || r->aps != aps || !same(&r->addr, addr) ||
             cluster != ((r->flags & NC_FLY_LEVEL) ? 8 : 6)) continue;
         if (status) { unsuccessful(r, status); return; }
         nc.last_aps = 0;
@@ -117,7 +135,7 @@ void nc_rejection(const nc_addr_t *addr, uint8_t seq, uint16_t cluster,
         nc.last_zcl_command = (cluster == 8 ? 0x80 : 0) | cmd;
         if (status) {
             r->flags |= NC_REJECTED;
-            if (r->state != TX_FLY) { r->state = TX_FAILED; r->flags &= ~NC_PENDING; }
+            if (!flying(r)) { r->state = TX_FAILED; r->flags &= ~NC_PENDING; }
             if (!r->fly_on) r->flags |= NC_OFF_UNKNOWN;
         }
         return;
@@ -138,18 +156,20 @@ void nc_tx_kick(void) {
 }
 
 void nc_tx_service(void) {
-    unsigned i, flying = nc_tx_inflight() + nc.clock.pending;
+    unsigned i, in_flight = nc_tx_inflight() + nc.clock.pending;
     uint32_t now = nc_port_now();
     for (i = 0; i < NC_MAX_DST; i++) {
         nc_dst_t *r = &nc.dst[i];
         uint8_t frame[6], n = 3, status, aps = 0;
         int level;
         int32_t remaining;
-        if (r->state == TX_FLY) {
-            /* SDK completion retires retries. A missing completion is kept
-             * serialized for 30 s before failing this intent. Hardware must
-             * qualify that bound against the pinned SDK's maximum lifetime. */
-            if (nc_due(now, r->due)) { unsuccessful(r, 0xf1); flying--; }
+        if (flying(r)) {
+            /* A wall-clock deadline cannot cancel retries inside the binary
+             * stack. Quarantine the slot; only its real completion retires it. */
+            if (r->state == TX_FLY && nc_due(now, r->due)) {
+                r->state = TX_BLOCKED; nc.last_aps = 0xf1;
+                if (!r->fly_on) r->flags |= NC_OFF_UNKNOWN;
+            }
             continue;
         }
         if (!(r->flags & NC_PENDING) || !eligible(r) || r->state == TX_FAILED) continue;
@@ -158,7 +178,7 @@ void nc_tx_service(void) {
             if (nc.on) nc.stale_on = 1;
             continue;
         }
-        if (flying >= 2 || !nc_port_joined() ||
+        if (in_flight >= 2 || !nc_port_joined() ||
             (r->state == TX_WAIT && !nc_due(now, r->due))) continue;
         level = nc.want_native && (r->caps & NC_LEVEL);
         frame[0] = level ? 0x11 : 0x01; frame[1] = nc_port_sequence();
@@ -174,7 +194,7 @@ void nc_tx_service(void) {
         r->flags = (r->flags & ~(NC_FLY_LEVEL | NC_REJECTED)) | (level ? NC_FLY_LEVEL : 0);
         status = nc_port_send(&r->addr, level ? 8 : 6, frame, n, !r->addr.group, &aps);
         if (status) unsuccessful(r, status);
-        else { r->aps = aps; r->state = TX_FLY; r->due = now + 30000u; flying++; }
+        else { r->aps = aps; r->state = TX_FLY; r->due = now + 30000u; in_flight++; }
     }
 }
 

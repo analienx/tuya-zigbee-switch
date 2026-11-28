@@ -7,6 +7,7 @@
 #include "nwk_addr_map.h"
 
 extern u32 rtcMs;
+typedef char nc_binding_capacity[(APS_BINDING_TABLE_NUM <= NC_MAX_DST) ? 1 : -1];
 static ev_timer_event_t *native_timer;
 static uint32_t last_timer_attempt = 0xffffffffu;
 

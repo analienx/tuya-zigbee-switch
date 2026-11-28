@@ -29,7 +29,7 @@
 enum { NC_IDLE, NC_ACTIVE, NC_RELEASING };
 enum { NC_ADMIT, NC_MASTER_OFF, NC_TIME_UNKNOWN, NC_TIME_OUTSIDE,
        NC_LUX_NO_THRESHOLD, NC_LUX_BRIGHT, NC_RESUMED, NC_NO_BINDING };
-enum { TX_DONE, TX_READY, TX_FLY, TX_WAIT, TX_FAILED };
+enum { TX_DONE, TX_READY, TX_FLY, TX_WAIT, TX_FAILED, TX_BLOCKED };
 typedef struct {
     uint8_t version, flags, level, reserved;
     uint16_t start, end, fade_in, fade_out;
@@ -102,6 +102,7 @@ void nc_tx_want(int on, uint8_t level, uint16_t fade, int native);
 void nc_tx_kick(void);
 int nc_tx_off_unknown(void);
 unsigned nc_tx_inflight(void);
+int nc_tx_blocked(void);
 void nc_tx_service(void);
 uint32_t nc_tx_delay(void);
 void nc_confirm(const nc_addr_t *addr, uint8_t aps, uint16_t cluster,

@@ -54,12 +54,13 @@ jobs:
         shell: bash
         run: |
           mkdir -p evidence
-          for profile in baseline selective-size protocol-app-size compact-protocol; do
+          for profile in baseline selective-size protocol-app-size compact-protocol compact-storage; do
             make -C upstream clean
             extra=()
             if [ "$profile" != baseline ]; then extra=(-f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/sdk-size.mk"); fi
-            if [ "$profile" = protocol-app-size ] || [ "$profile" = compact-protocol ]; then extra+=(-f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/app-size.mk"); fi
-            if [ "$profile" = compact-protocol ]; then extra+=(-f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/compact-protocol.mk"); fi
+            if [ "$profile" = protocol-app-size ] || [ "$profile" = compact-protocol ] || [ "$profile" = compact-storage ]; then extra+=(-f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/app-size.mk"); fi
+            if [ "$profile" = compact-protocol ] || [ "$profile" = compact-storage ]; then extra+=(-f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/compact-protocol.mk"); fi
+            if [ "$profile" = compact-storage ]; then extra+=(-f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/storage-size.mk"); fi
             make -C upstream -f makefile "${extra[@]}" -j2 PROJECT_NAME=ZG204ZL \
               POJECT_DEF="-DBOARD=BOARD_ZG204ZL" VERSION_BIN=_v0148 ZNAME="Sonoff:ZG-204ZL-z" \
               LNK_FLAGS="--gc-sections -nostartfiles -Map=build/ZG204ZL.map" > "evidence/$profile-build.log" 2>&1 || { tail -100 "evidence/$profile-build.log"; exit 1; }
@@ -77,7 +78,7 @@ jobs:
           import json
           from pathlib import Path
           base = json.loads(Path('evidence/baseline/size.json').read_text())
-          small = json.loads(Path('evidence/compact-protocol/size.json').read_text())
+          small = json.loads(Path('evidence/compact-storage/size.json').read_text())
           delta = {'candidate': __import__('os').environ['CANDIDATE'],
                    'baseline_bytes': base['native_bytes'], 'selective_bytes': small['native_bytes'],
                    'saved_bytes': base['native_bytes'] - small['native_bytes'],
@@ -153,6 +154,7 @@ jobs:
             -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/sdk-size.mk" \
             -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/app-size.mk" \
             -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/compact-protocol.mk" \
+            -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/storage-size.mk" \
             -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/native-size.mk" \
             -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/unity.mk" \
             -j2 PROJECT_NAME=ZG204ZL POJECT_DEF="-DBOARD=BOARD_ZG204ZL" \
