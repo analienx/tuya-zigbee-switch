@@ -1,7 +1,6 @@
 #ifndef NC_H
 #define NC_H
 #include <stdint.h>
-#include <stddef.h>
 #include <string.h>
 
 #define NC_CLUSTER 0xfc70
@@ -62,7 +61,7 @@ typedef struct {
 } __attribute__((aligned(4))) nc_state_t;
 extern nc_state_t nc;
 typedef char nc_config_is_12_bytes[(sizeof(nc_cfg_t) == 12) ? 1 : -1];
-typedef char nc_timer_alignment[(offsetof(nc_dst_t, due) % 4 == 0 && sizeof(nc_dst_t) % 4 == 0) ? 1 : -1];
+typedef char nc_timer_alignment[(__builtin_offsetof(nc_dst_t, due) % 4 == 0 && sizeof(nc_dst_t) % 4 == 0) ? 1 : -1];
 typedef char nc_runtime_budget[(sizeof(nc_state_t) + 16 <= 512) ? 1 : -1];
 
 static inline uint16_t nc_le16(const uint8_t *p) {

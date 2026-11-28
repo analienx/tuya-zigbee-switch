@@ -5,10 +5,12 @@ on:
     branches: [codex/zg204zl-native-control-164]
     paths:
       - firmware/zg204zl_native/**
+      - zigbee2mqtt/converters/zg204zl_native.mjs
       - .github/workflows/zg204zl-native.yml
   pull_request:
     paths:
       - firmware/zg204zl_native/**
+      - zigbee2mqtt/converters/zg204zl_native.mjs
       - .github/workflows/zg204zl-native.yml
   workflow_dispatch:
 

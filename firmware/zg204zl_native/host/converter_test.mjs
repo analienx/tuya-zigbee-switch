@@ -26,7 +26,8 @@ for (const vector of vectors.configurations) {
     current = base; frames = []; rejectReadback = false;
     const result = await setter.convertSet(entity, 'native_lighting', vector.ui, {device});
     assert.equal(frames[0].subarray(5).toString('hex'), vector.hex);
-    assert.deepEqual(result.state.native_lighting, vector.ui);
+    assert.deepEqual(result.state.native_lighting, {...vector.ui,
+        brightness_percent: Math.round(Buffer.from(vector.hex, 'hex')[2] * 1000 / 254) / 10});
 }
 current = base; frames = []; rejectReadback = false;
 await setter.convertSet(entity, 'native_lighting', {time_enabled: true}, {device});
