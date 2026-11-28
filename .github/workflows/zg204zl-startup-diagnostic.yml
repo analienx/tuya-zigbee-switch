@@ -68,9 +68,9 @@ jobs:
           - profile: v0154-boot-stages
             tag: v0154
             filever: '01543001'
-          - profile: v0155-safe-switches
-            tag: v0155
-            filever: '01553001'
+          - profile: v0156-safe-switches
+            tag: v0156
+            filever: '01563001'
     env:
       CANDIDATE: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
@@ -100,7 +100,7 @@ jobs:
       - name: Compile bounded bench diagnostic
         run: |
           extra_flags=()
-          if [[ '${{ matrix.tag }}' == v0155 ]]; then
+          if [[ '${{ matrix.tag }}' == v0156 ]]; then
             extra_flags=(-f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/safe-switches.mk")
           fi
           make -C upstream -f makefile \

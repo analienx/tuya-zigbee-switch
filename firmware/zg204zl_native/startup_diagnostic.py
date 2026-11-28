@@ -12,7 +12,7 @@ PROFILES = {
     'v0152-flash-wake-first': ('v0152', 0x01523001, 'wake_flash_before_cache_reset'),
     'v0153-idle-suspend': ('v0153', 0x01533001, 'all_idle_sleep_uses_suspend'),
     'v0154-boot-stages': ('v0154', 0x01543001, 'mark_startup_and_skip_idle_sleep'),
-    'v0155-safe-switches': ('v0155', 0x01553001, 'disable_broken_tc32_jump_tables'),
+    'v0156-safe-switches': ('v0156', 0x01563001, 'disable_broken_tc32_jump_tables'),
 }
 PM_SOURCE_SHA256 = '33a49aad1a0c71e947f6a339f04996f84ce6ec122001592f8dbf14000178ab38'
 STARTUP_BLOB = 'f2b62391e1e6247ecdd64d34e86e1fd1808cc898'
