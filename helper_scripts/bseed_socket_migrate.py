@@ -226,11 +226,15 @@ def build_profile(site, live, route, candidate, *, image, sha256, native_image=N
         for key in ('pm_router_matrix_evidence', 'pm_settings_baseline'):
             if device.get(key) or site.get(key):
                 p[key] = device.get(key) or site.get(key)
-    if not role_change and device.get('parallel_ota_max', 1) != 1:
-        p.update(parallel_ota_max=device['parallel_ota_max'],
+    if device.get('parallel_ota_max', 1) != 1:
+        from bseed_network_campaign_lock import MULTI_SLOT_MIN_DELAY_MS
+        slots = device['parallel_ota_max']
+        p.update(parallel_ota_max=slots,
                  concurrent_ota_ieees=device.get('concurrent_ota_ieees', []),
-                 response_delay_ms=device.get('response_delay_ms', p['response_delay_ms']),
+                 response_delay_ms=device.get('response_delay_ms', MULTI_SLOT_MIN_DELAY_MS.get(slots, 1800)),
                  source_rejoin_strategy='none', allow_join_all_fallback=False)
+        if role_change:
+            p['parallel_role_transition'] = True
         from bseed_network_campaign_lock import require_profile_authority
         require_profile_authority(p)
     require_preserve_state_for_flash(p)
@@ -687,7 +691,7 @@ def planned_target(site, args):
 
 
 def parallel_waves(targets):
-    """Group adjacent opted-in, same-role campaigns while keeping the requested order."""
+    """Group adjacent opted-in campaigns with independently admitted firmware routes."""
     from bseed_ota_autopilot import validate_group, validate_policy
 
     wave = []
@@ -726,6 +730,22 @@ def check_parallel_topology(site, wave):
                 if neighbor.get('relationship') == 1 and child in peers - {ieee}:
                     return f'{profile["device"]} lists another member as its child'
     return None
+
+
+def check_role_transfer_topology(profile):
+    """Check all potential peers again immediately before a role transfer."""
+    peers = {str(ieee).lower() for ieee in profile.get('concurrent_ota_ieees', [])}
+    rows = {d['ieee_address'].lower(): d for d in inventory(profile)}
+    own = profile['ieee'].lower()
+    if not peers | {own} <= rows.keys():
+        raise Refused('Cannot verify every mixed-role peer in live inventory')
+    wave = [(None, None, profile, False)]
+    for ieee in sorted(peers):
+        row = rows[ieee]
+        wave.append((None, None, {'ieee': ieee, 'device': row['friendly_name'],
+                                  'preflash_role': row['type']}, False))
+    if reason := check_parallel_topology(profile, wave):
+        raise Refused('Mixed-role topology conflict: ' + reason)
 
 
 def cmd_mixed_queue(site, args):

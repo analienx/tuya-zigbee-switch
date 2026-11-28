@@ -631,12 +631,20 @@ def verified_router_pm_candidate(profile):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', required=True, help='Private JSON profile outside git')
-    parser.add_argument('--mode', choices=['prepare', 'preflight', 'link-gate', 'qualify', 'check', 'flash', 'transition', 'rejoin', 'metadata', 'reconcile-installed', 'reconcile-source', 'abandon-source', 'provision-pm', 'audit-pm', 'postflash', 'reinterview', 'snapshot-state', 'restore-state', 'status'], required=True)
+    parser.add_argument('--mode', choices=['prepare', 'preflight', 'link-gate', 'qualify', 'check', 'flash', 'transition', 'transition-transfer', 'transition-finalize', 'rejoin', 'metadata', 'reconcile-installed', 'reconcile-source', 'abandon-source', 'provision-pm', 'audit-pm', 'postflash', 'reinterview', 'snapshot-state', 'restore-state', 'status'], required=True)
     parser.add_argument('--confirm-ieee', help='Required for flash, transition, rejoin, metadata, reconciliation, abandonment, provision-pm and restore-state; must match profile IEEE exactly')
     parser.add_argument('--confirm-sha256', help='Abandon-source only: exact failed candidate SHA-256')
     parser.add_argument('--confirm-load-unplugged', action='store_true', help='Flash/transition: operator just physically verified no appliance attached; required for non-PM and PM physical-proof route')
     args = parser.parse_args()
     profile = load_profile(args.profile)
+    transfer_only = args.mode == 'transition-transfer'
+    finalize_only = args.mode == 'transition-finalize'
+    if transfer_only or finalize_only:
+        if not profile.get('parallel_role_transition'):
+            raise SystemExit('Split transition modes require an opted-in mixed role profile')
+        from bseed_network_campaign_lock import require_profile_authority
+        require_profile_authority(profile)
+        args.mode = 'transition' if transfer_only else 'rejoin'
     if args.confirm_sha256 and args.mode != 'abandon-source':
         raise SystemExit('--confirm-sha256 is only valid for --mode abandon-source')
     physical_pm = profile.get('require_pm') is True and profile.get('pm_preflash_load_proof') == 'physically_unloaded'
@@ -822,6 +830,9 @@ def main():
             if profile['postflash_role'] == 'EndDevice':
                 provision_cmd(profile, args.confirm_ieee, work / 'pm_prevalidated.json')
         if args.mode == 'transition':
+            if transfer_only:
+                from bseed_socket_migrate import check_role_transfer_topology
+                check_role_transfer_topology(profile)
             if profile.get('non_pm') is True:
                 from bseed_nonpm_recovery_gate import verify_transition_recovery
                 # Shape first (no device write before the gate's other checks pass).
@@ -842,40 +853,45 @@ def main():
             flashed = subprocess.call(runner_args(profile, 'flash', confirm_unloaded=args.confirm_load_unplugged,
                                                   relay_off_record=relay_record))
             if flashed: raise SystemExit(flashed)  # Primitive never retries; supervised resume must reconcile first.
-        join_evidence = work / ('rejoin_' + uuid.uuid4().hex + '.json')
-        joined = subprocess.call(rejoin_cmd(profile, args.confirm_ieee, join_evidence))
-        if joined: raise SystemExit(joined)
-        from bseed_stock_client_loaded_canary import restore_pinned_on_after_rejoin
-        # A reboot may clear an ON relay even without any command from us.
-        # Exact source/target role and firmware have been verified by rejoin.
-        restore_pinned_on_after_rejoin(profile, "after_rejoin")
-        from bseed_relay_postflash_restore import restore_preserved_on
-        restore_preserved_on(profile, "after_rejoin")
-        metadata_evidence = work / ('metadata_' + uuid.uuid4().hex + '.json')
-        refreshed = subprocess.call(metadata_cmd(profile, args.confirm_ieee, metadata_evidence))
-        if refreshed: raise SystemExit(refreshed)
-        import bseed_relay_auto_off
-        if bseed_relay_auto_off.enabled(profile):
-            bseed_relay_auto_off.reassert_off_after_rejoin(profile)
-        if profile.get('require_pm'):
-            from bseed_pm_telemetry_guard import release
-            release(profile, metadata_evidence)
-        restored = restore_device_state(profile, args.confirm_ieee)
-        if restored: raise SystemExit(restored)
-        restore_pinned_on_after_rejoin(profile, "after_state_restore")
-        restore_preserved_on(profile, "after_state_restore")
-        if profile.get('require_pm'):
-            if profile['postflash_role'] == 'EndDevice':
-                pm_evidence = work / ('pm_provision_' + uuid.uuid4().hex + '.json')
-                provisioned = subprocess.call(provision_cmd(profile, args.confirm_ieee, pm_evidence))
-                if provisioned: raise SystemExit(provisioned)
-        if args.mode == 'transition':
-            post_evidence = work / ('postflash_' + uuid.uuid4().hex + '.json')
-            status = subprocess.call(postflash_cmd(profile, post_evidence))
-            if status == 0:
-                accept_candidate(profile)
-            raise SystemExit(status)
-        return
+            if transfer_only:
+                print('ROLE_TRANSFER_COMPLETE_RECOVERY_PENDING', profile['ieee'], flush=True)
+                return
+        from bseed_network_campaign_lock import role_recovery_window
+        with role_recovery_window(profile):
+            join_evidence = work / ('rejoin_' + uuid.uuid4().hex + '.json')
+            joined = subprocess.call(rejoin_cmd(profile, args.confirm_ieee, join_evidence))
+            if joined: raise SystemExit(joined)
+            from bseed_stock_client_loaded_canary import restore_pinned_on_after_rejoin
+            # A reboot may clear an ON relay even without any command from us.
+            # Exact source/target role and firmware have been verified by rejoin.
+            restore_pinned_on_after_rejoin(profile, "after_rejoin")
+            from bseed_relay_postflash_restore import restore_preserved_on
+            restore_preserved_on(profile, "after_rejoin")
+            metadata_evidence = work / ('metadata_' + uuid.uuid4().hex + '.json')
+            refreshed = subprocess.call(metadata_cmd(profile, args.confirm_ieee, metadata_evidence))
+            if refreshed: raise SystemExit(refreshed)
+            import bseed_relay_auto_off
+            if bseed_relay_auto_off.enabled(profile):
+                bseed_relay_auto_off.reassert_off_after_rejoin(profile)
+            if profile.get('require_pm'):
+                from bseed_pm_telemetry_guard import release
+                release(profile, metadata_evidence)
+            restored = restore_device_state(profile, args.confirm_ieee)
+            if restored: raise SystemExit(restored)
+            restore_pinned_on_after_rejoin(profile, "after_state_restore")
+            restore_preserved_on(profile, "after_state_restore")
+            if profile.get('require_pm'):
+                if profile['postflash_role'] == 'EndDevice':
+                    pm_evidence = work / ('pm_provision_' + uuid.uuid4().hex + '.json')
+                    provisioned = subprocess.call(provision_cmd(profile, args.confirm_ieee, pm_evidence))
+                    if provisioned: raise SystemExit(provisioned)
+            if args.mode == 'transition' or finalize_only:
+                post_evidence = work / ('postflash_' + uuid.uuid4().hex + '.json')
+                status = subprocess.call(postflash_cmd(profile, post_evidence))
+                if status == 0:
+                    accept_candidate(profile)
+                raise SystemExit(status)
+            return
     if args.mode == 'flash':
         if args.confirm_ieee != profile['ieee']:
             raise SystemExit('Flash refused: supply --confirm-ieee with the exact target IEEE')
