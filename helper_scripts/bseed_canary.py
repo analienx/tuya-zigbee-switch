@@ -497,20 +497,19 @@ def build_profile(site, name, artifacts, registry=None, live=None):
                 device['recovery_evidence'], 'recovery_evidence'))
     overrides = device.get('overrides', {})
     profile.update(overrides)
-    # Historical tests/profiles remain readable; loaded OTA opts in at site.
-    if site.get('relay_state_policy') == 'preserve':
-        if profile.get('auto_relay_off') is True:
-            raise CanaryError('Preserve-state OTA forbids auto_relay_off; create a new campaign profile')
-        profile['auto_relay_off'] = False
-        profile['relay_state_policy'] = 'preserve'
-        if board == 'pm':
-            profile.setdefault('relay_get_key', 'state_relay')
-        profile.setdefault('max_reported_watts', 100.0)
-        from bseed_relay_state_policy import validate as validate_relay_preserve
-        try:
-            validate_relay_preserve(profile)
-        except ValueError as error:
-            raise CanaryError(str(error)) from error
+    # Global BSEED owner policy: NO automatic OFF, preserve ON/OFF as found.
+    # Metering is diagnostic regardless of the amount of power being drawn.
+    if profile.get('auto_relay_off') is True:
+        raise CanaryError('Automatic relay-OFF prohibited for BSEED migrations')
+    profile['auto_relay_off'] = False
+    profile['relay_state_policy'] = 'preserve'
+    profile['operator_connected_load_risk_accepted'] = True
+    profile.setdefault('relay_get_key', 'state_relay')
+    from bseed_relay_state_policy import validate as validate_relay_preserve
+    try:
+        validate_relay_preserve(profile)
+    except ValueError as error:
+        raise CanaryError(str(error)) from error
     profile_path = workdir / 'profile.json'
     write_once(profile_path, (json.dumps(profile, indent=2, sort_keys=True) + '\n').encode('utf8'))
     return profile_path, profile
@@ -606,8 +605,8 @@ def require_flash_confirmation(profile, confirm_ieee, confirm_unloaded):
     if confirm_ieee != profile['ieee']:
         raise CanaryError('Flash refused: --confirm-ieee must equal %s exactly' % profile['ieee'])
     physical = profile['non_pm'] or profile.get('pm_preflash_load_proof') == 'physically_unloaded'
-    if physical and not (confirm_unloaded or profile.get('auto_relay_off') is True):
-        raise CanaryError('Flash refused: require fresh --confirm-load-unplugged or verified automatic relay OFF')
+    from bseed_operator_load_policy import require_preserve_state_for_flash
+    require_preserve_state_for_flash(profile)
     if not physical and confirm_unloaded:
         raise CanaryError('--confirm-load-unplugged applies only to physical-proof boards')
 

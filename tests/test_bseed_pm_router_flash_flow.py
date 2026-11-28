@@ -18,6 +18,14 @@ from bseed_pm_telemetry_guard import OPTION
 from test_bseed_ota_campaign import _router_candidate_profile
 
 
+@pytest.fixture(autouse=True)
+def no_live_postflash_relay_probe(monkeypatch):
+    monkeypatch.setattr('bseed_relay_postflash_restore.restore_preserved_on',
+                        lambda *args, **kwargs: None)
+    monkeypatch.setattr('bseed_relay_state_policy.verify_after_flash',
+                        lambda *args, **kwargs: None)
+
+
 def fake_bridge_for(profile):
     class Bridge:
         state = 'online'
@@ -90,8 +98,9 @@ def test_validated_router_flash_never_runs_client_provision(tmp_path,monkeypatch
     commands=[x.args[0] for x in call.call_args_list]
     assert [Path(x[2]).name for x in commands]==[
         'bseed_targeted_z2m_ota.py','bseed_z2m_postota_reinterview.py',
-        'bseed_z2m_postflash_verify.py','bseed_pm_role_audit.py']
+        'bseed_z2m_postflash_verify.py']
     assert '--require-pm' in commands[2] and '--apply' not in str(commands)
+    assert '--pm-audit-seconds' in commands[2]
     assert '--relay-get-key' in commands[0] and 'state_relay' in commands[0]
     assert 'bseed_pm_provision.py' not in str(commands)
     archive = list(Path(cfg['workdir']).glob('PM_TELEMETRY_RELEASED_*.json'))

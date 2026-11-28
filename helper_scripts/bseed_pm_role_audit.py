@@ -94,15 +94,63 @@ def assess_samples(samples, attrs, role):
             'raw_zcl_report_proven':False}
 
 
+def audit_configuration(a, inventory, info, node, evidence):
+    """Audit persisted settings using the caller's live inventory and ZDO result."""
+    device = select_target(inventory, a.ieee, a.device, a.expect_role, a.expect_build)
+    if (device.get('model_id') != 'TS011F-BS-PM' or
+            (device.get('definition') or {}).get('model') != 'TS011F_plug_1_2'):
+        raise ValueError('Unexpected PM board/converter model')
+    coordinator = (info or {}).get('coordinator', {}).get('ieee_address')
+    if not coordinator:
+        raise ValueError('Coordinator identity absent')
+    if (node or {}).get('role') != a.expect_role:
+        raise ValueError('Live ZDO role mismatch')
+    db = read_db(a.ssh_host, a.ssh_user, a.ssh_key, a.database, a.ieee)
+    evidence['cached_pm'] = pm_snapshot(db)
+    attrs = check_persisted(db, a.ieee, a.expect_build, a.expect_role, coordinator)
+    evidence['missing_reporting'] = [row[1] for row in missing_reports(device)]
+    evidence['settings_snapshot'] = settings_snapshot(db)
+    if a.baseline:
+        old = json.loads(Path(a.baseline).read_text(encoding='utf8'))
+        if isinstance(old, dict) and 'settings_snapshot' in old:
+            if old.get('ieee') != a.ieee:
+                raise ValueError('Settings baseline belongs to another IEEE')
+            old = old['settings_snapshot']
+        evidence['settings_drift'] = settings_drift(old, evidence['settings_snapshot'])
+        if evidence['settings_drift']:
+            raise ValueError('Settings drift relative to private baseline')
+    else:
+        evidence['settings_persistence'] = 'no preflash baseline: not verified'
+    return attrs
+
+
+def audit_samples(samples, attrs, role, errors, evidence):
+    evidence['mqtt'] = assess_samples(samples, attrs, role)
+    if evidence['missing_reporting']:
+        raise ValueError('Out-of-policy PM reporting: ' + ','.join(evidence['missing_reporting']))
+    if errors:
+        raise ValueError('Target-related Zigbee2MQTT errors during window')
+    evidence['result'] = 'read_only_audit_candidate'
+
+
+def add_ssh_arguments(parser):
+    parser.add_argument('--ssh-host')
+    parser.add_argument('--ssh-key')
+    parser.add_argument('--ssh-user', default='root')
+    parser.add_argument('--database', default='/config/zigbee2mqtt/database.db')
+    parser.add_argument('--baseline', help='Private prior settings-snapshot JSON for persistence comparison')
+
+
 def arguments():
     p=argparse.ArgumentParser(description=__doc__)
     for key in ('device','ieee','expect-role','expect-build','mqtt-config','broker',
-                'ssh-host','ssh-key','output'):p.add_argument('--'+key,required=True)
-    p.add_argument('--ssh-user',default='root')
-    p.add_argument('--database',default='/config/zigbee2mqtt/database.db')
+                'output'):p.add_argument('--'+key,required=True)
+    add_ssh_arguments(p)
     p.add_argument('--observe-seconds',type=int,default=85)
-    p.add_argument('--baseline',help='Private prior settings-snapshot JSON for persistence comparison')
-    return p.parse_args()
+    args = p.parse_args()
+    if not args.ssh_host or not args.ssh_key:
+        p.error('--ssh-host and --ssh-key are required')
+    return args
 
 
 def main():
@@ -123,27 +171,8 @@ def main():
         bridge.start();started=True
         if bridge.state!='online':raise ValueError('Z2M bridge not online')
         device=select_target(bridge.inventory,a.ieee,a.device,a.expect_role,a.expect_build)
-        if (device.get('model_id')!='TS011F-BS-PM' or
-            (device.get('definition') or {}).get('model')!='TS011F_plug_1_2'):
-            raise ValueError('Unexpected PM board/converter model')
-        coordinator=bridge.info.get('coordinator',{}).get('ieee_address')
-        if not coordinator:raise ValueError('Coordinator identity absent')
         node=read_node_descriptor(a.mqtt_config,a.broker,a.ieee,device['network_address'])
-        if node.get('role')!=a.expect_role:raise ValueError('Live ZDO role mismatch')
-        db=read_db(a.ssh_host,a.ssh_user,a.ssh_key,a.database,a.ieee)
-        evidence['cached_pm']=pm_snapshot(db)
-        attrs=check_persisted(db,a.ieee,a.expect_build,a.expect_role,coordinator)
-        evidence['missing_reporting']=[r[1] for r in missing_reports(device)]
-        evidence['settings_snapshot']=settings_snapshot(db)
-        if a.baseline:
-            old=json.loads(Path(a.baseline).read_text(encoding='utf8'))
-            if isinstance(old,dict) and 'settings_snapshot' in old:
-                if old.get('ieee') != a.ieee:
-                    raise ValueError('Settings baseline belongs to another IEEE')
-                old=old['settings_snapshot']
-            evidence['settings_drift']=settings_drift(old,evidence['settings_snapshot'])
-            if evidence['settings_drift']:raise ValueError('Settings drift relative to private baseline')
-        else:evidence['settings_persistence']='no preflash baseline: not verified'
+        attrs = audit_configuration(a, bridge.inventory, bridge.info, node, evidence)
         end=time.monotonic()+a.observe_seconds
         # An idle socket reports only on change: two active reads guarantee
         # fresh samples; passive messages during the window still count.
@@ -151,11 +180,7 @@ def main():
         while time.monotonic()<end:
             if bridge.errors:break
             time.sleep(min(.5,max(0,end-time.monotonic())))
-        evidence['mqtt']=assess_samples(bridge.states,attrs,a.expect_role)
-        if evidence['missing_reporting']:
-            raise ValueError('Out-of-policy PM reporting: '+','.join(evidence['missing_reporting']))
-        if bridge.errors:raise ValueError('Target-related Zigbee2MQTT errors during window')
-        evidence['result']='read_only_audit_candidate'
+        audit_samples(bridge.states, attrs, a.expect_role, bridge.errors, evidence)
     except Exception as error:evidence['issues'].append(type(error).__name__+': '+str(error)[:260])
     finally:
         if started:bridge.stop()

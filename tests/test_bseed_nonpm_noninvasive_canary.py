@@ -18,7 +18,7 @@ def canary():
 
 def test_only_pinned_unloaded_canary_may_run_without_physical_readback():
     p=canary()
-    with pytest.raises(ValueError,match='Physical load'):verify_recovery(p)
+    with pytest.raises(ValueError,match='preserve-state owner risk|Physical load'):verify_recovery(p)
     d=verify_recovery(p,confirm_unloaded=True)
     assert d['recovery_available'] is False
 
@@ -59,7 +59,7 @@ def test_authorized_c7_to_c9_remains_exact_target_source_hash_and_role():
     p.update(preflash_build='1.1.3-bseedc7', postflash_build='1.1.3-bseedc9',
              sha256='e52701b83ea7528ed0e9b26cb9e4da0679d125c259c8141e62207c6460738fff')
     assert verify_recovery(p,confirm_unloaded=True)['recovery_available'] is False
-    with pytest.raises(ValueError,match='Physical load'):
+    with pytest.raises(ValueError,match='preserve-state owner risk|Physical load'):
         verify_recovery(p)
     for key,value in {'preflash_build':'1.1.3-bseedc6', 'sha256':'0'*64,
                       'postflash_build':'1.1.3-bseedc10', 'postflash_role':'Router',

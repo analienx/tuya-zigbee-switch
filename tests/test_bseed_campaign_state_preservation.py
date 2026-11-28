@@ -14,6 +14,10 @@ import bseed_ota_campaign as campaign
 @pytest.fixture(autouse=True)
 def no_telemetry_release(monkeypatch):
     monkeypatch.setattr('bseed_pm_telemetry_guard.release', lambda *args: None)
+    monkeypatch.setattr('bseed_relay_postflash_restore.restore_preserved_on',
+                        lambda *args, **kwargs: None)
+    monkeypatch.setattr('bseed_relay_state_policy.verify_after_flash',
+                        lambda *args, **kwargs: None)
 
 
 def base_profile(tmp_path, **changes):
@@ -27,6 +31,8 @@ def base_profile(tmp_path, **changes):
            'url': 'http://example.invalid/image.ota', 'mqtt_config': str(tmp_path / 'mqtt.yaml'),
            'broker': '127.0.0.1', 'workdir': str(tmp_path / 'campaign'), 'manufacturer_code': 4417,
            'image_type': 54179, 'file_version': '0xffffffff', 'expect_relay': 'ON',
+           'auto_relay_off':False,'relay_state_policy':'preserve',
+           'relay_get_key':'state','operator_connected_load_risk_accepted':True,
            'index_url': 'http://example.invalid/index.json',
            'index_output': str(tmp_path / 'index.json'), 'template_index': str(template),
            'postflash_role': 'EndDevice', 'postflash_build': 'expected-client',

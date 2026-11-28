@@ -20,6 +20,7 @@ def profile(**overrides):
         non_pm=False,
         pm_preflash_load_proof="meter",
         max_reported_watts=100.0,
+        operator_connected_load_risk_accepted=True,
         device="FixtureSocket",
         ieee="0xa4c138aed67ea773",
     )
@@ -35,19 +36,23 @@ def test_both_existing_relay_states_allowed(state):
 @pytest.mark.parametrize("bad", [
     {"auto_relay_off": True},
     {"auto_relay_off": None},
+    {"operator_connected_load_risk_accepted": False},
     {"expect_relay": "UNKNOWN"},
     {"relay_get_key": "relay"},
-    {"max_reported_watts": 101},
-    {"max_reported_watts": -1},
-    {"max_reported_watts": float("nan")},
-    {"max_reported_watts": True},
-    {"pm_preflash_load_proof": "physically_unloaded"},
-    {"require_pm": False},
-    {"preflash_role": "EndDevice"},
 ])
 def test_fail_closed_if_policy_unverifiable(bad):
     with pytest.raises(ValueError):
         p.validate(profile(**bad))
+
+
+@pytest.mark.parametrize("watts", [None, -1, 0, 101, 5000, float("nan"), float("inf"), True])
+def test_reported_power_never_prevents_relay_preservation(watts):
+    assert p.validate(profile(max_reported_watts=watts)) is True
+
+
+def test_same_and_cross_role_support_nonpm_without_load_proof():
+    assert p.validate(profile(require_pm=False, non_pm=True,
+                              preflash_role="EndDevice", postflash_role="Router")) is True
 
 
 def test_state_check_never_sends_relay_command():

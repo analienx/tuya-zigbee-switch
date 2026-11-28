@@ -71,7 +71,10 @@ def multi_slot(profile: dict[str, Any]) -> bool:
 def validate_policy(profile: dict[str, Any]) -> list[str]:
     """Refuse unsafe profiles; return advisories for slow-but-legal ones."""
     if profile["preflash_role"] != profile["postflash_role"]:
-        raise ValueError("Autopilot is same-role only; role changes use resume-transition")
+        if profile.get("parallel_role_transition") is not True:
+            raise ValueError("Autopilot is same-role only unless split mixed-role transfers are enabled")
+        from bseed_network_campaign_lock import require_profile_authority
+        require_profile_authority(profile)
     if multi_slot(profile):
         if profile.get("source_rejoin_strategy") != "none":
             raise ValueError("Multi-slot OTA requires source_rejoin_strategy=none (no live rejoin)")
@@ -248,9 +251,9 @@ class Autopilot:
         self.profile = sup.campaign.load_profile(profile_path)
         if confirm_ieee != self.profile["ieee"]:
             raise ValueError("Exact IEEE confirmation mismatch")
-        if ((self.profile.get("non_pm") is True or
-             self.profile.get("pm_preflash_load_proof") == "physically_unloaded") and not confirm_unloaded):
-            raise ValueError("load-unplugged confirmation required for this campaign")
+        from bseed_operator_load_policy import require_preserve_state_for_flash
+        require_preserve_state_for_flash(self.profile)
+        # No wattage/unplugged attestation is required for preserve-state OTA.
         self.advisories = validate_policy(self.profile)
         self.work = Path(self.profile["workdir"])
         stamp = dt.datetime.now().strftime("%Y%m%dT%H%M%S")
@@ -280,6 +283,9 @@ class Autopilot:
             confirm_unloaded=self.confirm_unloaded if confirm else False), self.log)
 
     def finish_postflash(self) -> dict[str, Any]:
+        if self.profile.get("parallel_role_transition") is True:
+            return self.persist("transfer_complete",
+                                reason="role recovery is serialized by run-many")
         for _ in range(self.postflash_retries):
             self.run_campaign("postflash", confirm=True)
             if self.phase() in INSTALLED:
@@ -353,7 +359,8 @@ class Autopilot:
             self.attempts.append(attempt)
             self.persist("flashing", attempt=attempt["number"])
             before = ota_logs(self.work)
-            attempt["flash_exit"] = self.run_campaign("flash", confirm=True)
+            mode = "transition-transfer" if self.profile.get("parallel_role_transition") else "flash"
+            attempt["flash_exit"] = self.run_campaign(mode, confirm=True)
             new_logs = ota_logs(self.work) - before
             if not any(sup.ota_attempt_progress(path, self.profile) is not None for path in new_logs):
                 # Nothing was sent (refused at admission, e.g. a peer between
@@ -407,6 +414,15 @@ def run_many(profile_paths: list[Path], confirm_ieees: list[str], *, extra: list
     if [p["ieee"] for p in profiles] != list(confirm_ieees):
         raise ValueError("--confirm-ieee must list each profile's exact IEEE, in the same order")
     validate_group(profiles)
+    if any(p.get("parallel_role_transition") for p in profiles):
+        from bseed_socket_migrate import check_parallel_topology
+        for p in profiles:
+            validate_policy(p)
+        if len({(p["network_id"], str(Path(p["network_lock_dir"]).resolve())) for p in profiles}) != 1:
+            raise ValueError("Mixed-role group must share one coordinator authority")
+        wave = [(None, path.parent, p, False) for path, p in zip(profile_paths, profiles)]
+        if reason := check_parallel_topology(profiles[0], wave):
+            raise ValueError("Mixed-role topology conflict: " + reason)
     pids = []
     stamp = dt.datetime.now().strftime("%Y%m%dT%H%M%S")
     for index, (path, profile) in enumerate(zip(profile_paths, profiles)):
@@ -419,6 +435,23 @@ def run_many(profile_paths: list[Path], confirm_ieees: list[str], *, extra: list
         print("LAUNCHED", profile["device"], "pid", pids[-1], "log", log, flush=True)
     while any(alive(pid) for pid in pids):
         sleep(poll_seconds)
+    # All transfer workers have stopped; recover one target at a time. Prefer
+    # establishing Routers before converting Routers into Clients.
+    for path, profile in sorted(zip(profile_paths, profiles),
+                                key=lambda item: item[1]["postflash_role"] != "Router"):
+        if not profile.get("parallel_role_transition"):
+            continue
+        work = Path(profile["workdir"])
+        record = sup.read_json(work / STATE_FILE) or {}
+        if record.get("state") != "transfer_complete":
+            continue
+        log = work / f"role_finalize_{stamp}.log"
+        rc = sup.run_logged(sup.campaign_cmd(path, "transition-finalize",
+                            confirm_ieee=profile["ieee"]), log)
+        phase = (sup.read_json(work / "ACTIVE_LOCK.json") or {}).get("phase")
+        record.update(state="installed" if rc == 0 and phase in INSTALLED else "postflash_unconfirmed",
+                      phase=phase, updated_at=sup.now(), role_finalize_exit=rc, role_finalize_log=str(log))
+        sup.write_json_atomic(work / STATE_FILE, record)
     results = []
     for profile in profiles:
         record = sup.read_json(Path(profile["workdir"]) / STATE_FILE) or {}

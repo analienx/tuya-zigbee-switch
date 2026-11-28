@@ -225,6 +225,12 @@ def require_profile_authority(profile):
     slots = profile.get('parallel_ota_max', 1)
     if type(slots) is not int or slots not in (1, 2, *MULTI_SLOTS):
         raise ValueError('parallel_ota_max must be an integer from 1 to %d' % MAX_SLOTS)
+    mixed = profile.get('parallel_role_transition', False)
+    if type(mixed) is not bool:
+        raise ValueError('parallel_role_transition must be boolean')
+    if mixed and (slots not in MULTI_SLOTS or
+                  profile.get('preflash_role') == profile.get('postflash_role')):
+        raise ValueError('Mixed role transfers require a per-IEEE 3+ slot pool and a role change')
     if slots == 1:
         return base
     ieee = str(profile.get('ieee') or '').lower()
@@ -232,9 +238,9 @@ def require_profile_authority(profile):
         raise ValueError('Two-slot campaign must pin the device IEEE')
     (_validate_three_peers(ieee, profile.get('concurrent_ota_ieees') or [])
      if slots in MULTI_SLOTS else _validate_dual_peers(ieee, profile.get('concurrent_ota_ieees')))
-    if profile.get('preflash_role') != profile.get('postflash_role'):
+    if profile.get('preflash_role') != profile.get('postflash_role') and not mixed:
         raise ValueError('Two-slot pilot permits only same-role updates')
-    if profile.get('force_test_transition') is True:
+    if profile.get('force_test_transition') is True and not mixed:
         raise ValueError('Two-slot pilot refuses FORCE/role transitions')
     if profile.get('source_rejoin_strategy') != 'none':
         raise ValueError('Two-slot pilot refuses any source-rejoin automation')
@@ -249,6 +255,55 @@ def require_profile_authority(profile):
     if type(delay) is not int or delay < minimum:
         raise ValueError('%d-slot OTA requires >=%dms per-device response pacing' % (slots, minimum))
     return dual_slot_path(base, ieee)
+
+
+def recovery_path(base):
+    return Path(base).with_suffix('.role-recovery-lock')
+
+
+@contextlib.contextmanager
+def role_recovery_window(profile):
+    """Serialize rejoin with other recovery and exclude active OTA transports.
+
+    Preserve every per-device lease and its evidence. An unresolved transport
+    (including a stale ota_running record) is not treated as completed.
+    """
+    if not profile.get('parallel_role_transition'):
+        yield
+        return
+    own = require_profile_authority(profile)
+    base, _ = _lease_group(own)
+    marker = recovery_path(base)
+    allowed = {'ota_transfer_ok_postflash_unverified', 'postflash_candidate',
+               ACCEPTED_PHASE, RECONCILED_PHASE, SOFTWARE_VERIFIED_PHASE}
+    with _coordinator_mutex(base):
+        work = Path(profile['workdir']) / 'ACTIVE_LOCK.json'
+        record = json.loads(work.read_text(encoding='utf8'))
+        lease = read_lock(own)
+        if not lease or (
+                record.get('device'), record.get('ieee'), record.get('sha256'),
+                record.get('phase'), Path(record.get('network_lock') or '').resolve(),
+                record.get('token')) != (
+                profile['device'], profile['ieee'], profile['sha256'],
+                'ota_transfer_ok_postflash_unverified', own.resolve(), lease.get('token')):
+            raise RuntimeError('Role recovery requires the exact successful transfer')
+        if (lease.get('ieee'), lease.get('image_sha256'), lease.get('phase')) != (
+                profile['ieee'], profile['sha256'], 'ota_transfer_ok_postflash_unverified'):
+            raise RuntimeError('Role recovery requires matching authoritative lease')
+        owners = _active_slots(base)
+        if read_lock(base) is not None:
+            owners.append(read_lock(base))
+        if any(owner.get('phase') not in allowed for owner in owners):
+            raise RuntimeError('Role recovery waits for all peer transfers to stop')
+        try:
+            marker.mkdir()
+        except FileExistsError:
+            raise RuntimeError('Another role recovery owns the coordinator') from None
+    try:
+        yield
+    finally:
+        with _coordinator_mutex(base):
+            marker.rmdir()
 
 
 def read_lock(path):
@@ -382,6 +437,8 @@ def acquire(path, *, network_id, token, device, ieee, image_sha256,
                 raise ValueError('Three-slot owner must pin its work lock')
             record['work_lock_path'] = str(Path(work_lock_path).resolve())
     with _coordinator_mutex(base):
+        if recovery_path(base).exists():
+            raise RuntimeError('Coordinator role recovery is in progress')
         slots = _active_slots(base)
         if triple:
             _validate_three_slot_admission(
