@@ -87,7 +87,8 @@ jobs:
                    'objects': {k: small['objects'].get(k, 0) - v for k, v in base['objects'].items()}}
           Path('evidence/size-gate.json').write_text(json.dumps(delta, indent=2) + '\n')
           print(json.dumps({k:v for k,v in delta.items() if k != 'objects'}))
-          assert small['free_bytes'] >= 3072, 'M0 fails: less than 3 KiB free; do not proceed with full feature'
+          if small['free_bytes'] < 3072:
+              raise SystemExit('M0 fails: less than 3 KiB free; do not proceed with full feature')
           PY
       - name: Upload analysis evidence; never a deployable image
         if: always()
@@ -178,10 +179,12 @@ jobs:
           import json, os
           from pathlib import Path
           gate = json.loads(Path('baseline-evidence/size-gate.json').read_text())
-          assert gate['candidate'] == os.environ['CANDIDATE']
+          if gate['candidate'] != os.environ['CANDIDATE']:
+              raise SystemExit('Baseline artifact is not from this exact candidate')
           before = json.loads(Path('baseline-evidence/compact-storage/size.json').read_text())
           after = json.loads(Path('native-evidence/size.json').read_text())
-          assert after['new_ram_budgeted_bytes'] <= 512
+          if after['new_ram_budgeted_bytes'] > 512:
+              raise SystemExit('Native RAM state exceeds the 512-byte budget')
           delta = {k: after['objects'].get(k, 0) - before['objects'].get(k, 0)
                    for k in sorted(before['objects'].keys() | after['objects'].keys())}
           result = {'candidate': os.environ['CANDIDATE'],
