@@ -13,5 +13,5 @@ $(OUT_PATH)/zigbee/ota/ota.o: GCC_FLAGS += -fno-jump-tables
 $(OUT_PATH)/proj/os/ev_timer.o: GCC_FLAGS += -Os -fno-inline-small-functions -fno-jump-tables
 $(OUT_PATH)/proj/os/ev_poll.o: GCC_FLAGS += -Os -fno-inline-small-functions -fno-jump-tables
 $(OUT_PATH)/proj/common/string.o: GCC_FLAGS += -Os -fno-inline-small-functions -fno-jump-tables
-$(OUT_PATH)/src/zlx2lx.o: GCC_FLAGS += -Os -fno-inline-small-functions -fno-jump-tables
+$(OUT_PATH)/proj/common/list.o: GCC_FLAGS += -Os -fno-inline-small-functions -fno-jump-tables
 $(OUT_PATH)/zigbee/aps/aps_group.o: GCC_FLAGS += -Os -fno-inline-small-functions -fno-jump-tables
