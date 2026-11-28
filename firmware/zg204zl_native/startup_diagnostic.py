@@ -68,8 +68,8 @@ def mark_startup(raw_main, app):
                         'int flash_main(void)\n{\n\tzg_boot_stage = 1;\n')
     for call, stage in [('os_init(isRetention);', 2), ('tl_zbTaskProcedure();', 9)]:
         main = replace_once(main, call, f'{call}\n\tzg_boot_stage = {stage};')
-    main = replace_once(main, '#else // USE_BLE\n\tuser_init(isRetention);',
-                        '#else // USE_BLE\n\tuser_init(isRetention);\n\tzg_boot_stage = 6;')
+    main = replace_once(main, '#else // USE_BLE\n\n\tuser_init(isRetention);',
+                        '#else // USE_BLE\n\n\tuser_init(isRetention);\n\tzg_boot_stage = 6;')
     main = replace_once(main, 'ev_main();', 'zg_boot_stage = 7;\n\t\tev_main();\n\t\tzg_boot_stage = 8;')
     app = replace_once(app, '#include "nc_port_tlsr.h"\n',
                        '#include "nc_port_tlsr.h"\nextern volatile u8 zg_boot_stage;\n')
