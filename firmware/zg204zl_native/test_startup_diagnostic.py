@@ -1,5 +1,6 @@
 """Hosted source controls for single-variable sleep diagnostics."""
 import os
+import re
 import tempfile
 import unittest
 import zipfile
@@ -20,6 +21,7 @@ class StartupDiagnostic(unittest.TestCase):
             path.write_bytes(data)
         startup = root / diagnostic.STARTUP_PATH
         startup.write_bytes((source / diagnostic.STARTUP_PATH).read_bytes())
+        (root / diagnostic.MAIN_PATH).write_bytes((source / diagnostic.MAIN_PATH).read_bytes())
         with zipfile.ZipFile(source / 'tools/SDK_z.zip') as archive:
             path = root / 'SDK_z/proj/drivers/drv_pm.c'
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -94,3 +96,15 @@ class StartupDiagnostic(unittest.TestCase):
             self.assertIn('\ttstorerb    r1,[r0,#1]\n\ttmov\tr2,#128', new)
             with self.assertRaisesRegex(ValueError, 'blob mismatch'):
                 diagnostic.wake_flash_first(result[name])
+
+    def test_boot_stages_preserve_noidle_and_cover_startup_and_first_application_pass(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.copy(root)
+            result = diagnostic.sources(root, 'v0154-boot-stages')
+            self.assertEqual(set(result), {diagnostic.MAIN_PATH, 'src/app_main.c', 'src/version_cfg.h'})
+            self.assertIn(b'0x54', result['src/version_cfg.h'])
+            source = result[diagnostic.MAIN_PATH] + result['src/app_main.c']
+            self.assertEqual(sorted(int(stage) for stage in re.findall(rb'zg_boot_stage = (\d+);', source)),
+                             sorted(diagnostic.STAGES))
+            self.assertNotIn(b'drv_pm_lowPowerEnter();', result['src/app_main.c'])
