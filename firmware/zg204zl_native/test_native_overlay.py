@@ -60,9 +60,9 @@ class Overlay(unittest.TestCase):
             if name.endswith('/ota.c'):
                 # Every function before the dispatch remains byte-for-byte identical
                 # except the two explicit init/query role checks above.
-                start = original.index('static status_t ota_imageNotifyHandler(')
+                start = original.rindex('static status_t ota_imageNotifyHandler(')
                 end = original.index('status_t zcl_otaCb(')
-                self.assertEqual(original[start:end], modified[modified.index(
+                self.assertEqual(original[start:end], modified[modified.rindex(
                     'static status_t ota_imageNotifyHandler('):modified.index('status_t zcl_otaCb(')])
                 server_cases = 'switch (cmdId) {\n            case ZCL_CMD_OTA_IMAGE_NOTIFY:'
                 self.assertIn(server_cases, modified)

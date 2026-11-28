@@ -354,6 +354,18 @@ class Native(unittest.TestCase):
         self.assertEqual(self.fw.host_count(), 6)
         self.assertEqual(self.frame(5)[3], 0)
 
+    def test_failed_unicast_off_does_not_reoff_successful_group(self):
+        self.config(flags=2)
+        self.fw.host_bind(0, 123, 1, 2, 0); self.fw.host_bind(1, 321, 0, 2, 1)
+        self.event('nc_motion'); self.ack(0); self.ack(1)
+        self.advance(2000); self.ack(2)
+        self.event('nc_absence'); self.ack(3, 0xa7); self.ack(4)
+        self.advance(2000); self.ack(5, 0xa7); self.ack(6)
+        self.advance(10000); self.ack(7, 0xa7)
+        self.fw.host_dark(0); self.event('nc_motion'); self.event('nc_absence')
+        self.assertEqual(self.fw.host_count(), 9)
+        self.assertEqual(self.fw.host_ack_option(8), 1)  # unicast only
+
     def test_nv_readback_failure_can_persist_but_does_not_commit_ram(self):
         self.fw.host_read_fail(1)
         self.assertEqual(self.config(), 0xc0)

@@ -47,7 +47,7 @@ void nc_absence(void) {
         nc.grace = nc_port_now() + (uint32_t)nc.fade_out * 100u + 2000u;
         nc_tx_want(0, 0, nc.fade_out, nc.cycle_native);
     } else if (nc.reoff) {
-        nc.reoff = 0; nc_tx_want(0, 0, nc.fade_out, nc.cycle_native);
+        nc.reoff = 0; nc_tx_reoff();
     }
     nc.pending_motion = 0;
 }

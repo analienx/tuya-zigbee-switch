@@ -50,7 +50,7 @@ void nc_tx_scan(void) {
     }
 }
 
-void nc_tx_want(int on, uint8_t level, uint16_t fade, int native) {
+static void want(int on, uint8_t level, uint16_t fade, int native, int unresolved_only) {
     unsigned i;
     nc_tx_scan();
     nc.wanted = 1; nc.on = !!on; nc.want_level = level; nc.want_native = !!native;
@@ -59,11 +59,22 @@ void nc_tx_want(int on, uint8_t level, uint16_t fade, int native) {
     for (i = 0; i < NC_MAX_DST; i++) {
         nc_dst_t *r = &nc.dst[i];
         if (!(r->caps & 3)) continue;
+        if (unresolved_only && !(r->flags & NC_OFF_UNKNOWN)) {
+            r->flags &= ~(NC_PENDING | NC_REPEAT); continue;
+        }
         r->flags = (r->flags & (NC_OFF_UNKNOWN | NC_FLY_LEVEL | NC_FLY_REPEAT | NC_REJECTED)) | NC_PENDING;
         if (!on && !r->addr.group) r->flags |= NC_OFF_UNKNOWN;
         if (native && r->addr.group && (r->caps & NC_LEVEL)) r->flags |= NC_REPEAT;
         if (!flying(r)) { r->state = TX_READY; r->tries = 0; r->due = nc.born; }
     }
+}
+
+void nc_tx_want(int on, uint8_t level, uint16_t fade, int native) {
+    want(on, level, fade, native, 0);
+}
+
+void nc_tx_reoff(void) {
+    want(0, 0, nc.fade_out, nc.cycle_native, 1);
 }
 
 unsigned nc_tx_inflight(void) {

@@ -99,6 +99,7 @@ void nc_clock_ready(void);
 void nc_service(void);
 void nc_tx_scan(void);
 void nc_tx_want(int on, uint8_t level, uint16_t fade, int native);
+void nc_tx_reoff(void);
 void nc_tx_kick(void);
 int nc_tx_off_unknown(void);
 unsigned nc_tx_inflight(void);
