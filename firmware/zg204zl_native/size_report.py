@@ -30,8 +30,15 @@ def report(image, map_path):
             totals[obj] = totals.get(obj, 0) + int(match.group(1), 16)
             pending = ""
     length = image.stat().st_size
-    return {"native_bytes": length, "free_bytes": 0x20000 - length,
-            "objects": dict(sorted(totals.items(), key=lambda item: -item[1]))}
+    result = {"native_bytes": length, "free_bytes": 0x20000 - length,
+              "objects": dict(sorted(totals.items(), key=lambda item: -item[1]))}
+    state = re.search(r"\.bss\.nc\s+0x[0-9a-fA-F]+\s+0x([0-9a-fA-F]+)\s", text)
+    if state:
+        result['native_state_bytes'] = int(state.group(1), 16)
+        # Four-byte pointers/scalars for owned timer, allocation throttle and RTC;
+        # allow a fourth word, matching the compile-time budget in nc.h.
+        result['new_ram_budgeted_bytes'] = result['native_state_bytes'] + 16
+    return result
 
 
 if __name__ == "__main__":

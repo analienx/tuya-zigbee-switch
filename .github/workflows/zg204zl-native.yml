@@ -139,6 +139,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-size-${{ github.event.pull_request.head.sha || github.sha }}
+          path: baseline-evidence
       - name: Apply immutable native-control overlay
         run: |
           test "$(git -C control rev-parse HEAD)" = "$CANDIDATE"
@@ -168,6 +172,26 @@ jobs:
             --image native-evidence/ZG204ZL_v0149.bin --map native-evidence/ZG204ZL.map \
             --output native-evidence/size.json
           python control/firmware/zg204zl_native/verify_native.py --directory native-evidence --source-commit "$CANDIDATE"
+      - name: Record feature cost against the exact baseline
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          gate = json.loads(Path('baseline-evidence/size-gate.json').read_text())
+          assert gate['candidate'] == os.environ['CANDIDATE']
+          before = json.loads(Path('baseline-evidence/compact-storage/size.json').read_text())
+          after = json.loads(Path('native-evidence/size.json').read_text())
+          assert after['new_ram_budgeted_bytes'] <= 512
+          delta = {k: after['objects'].get(k, 0) - before['objects'].get(k, 0)
+                   for k in sorted(before['objects'].keys() | after['objects'].keys())}
+          result = {'candidate': os.environ['CANDIDATE'],
+                    'baseline_bytes': before['native_bytes'], 'native_bytes': after['native_bytes'],
+                    'net_feature_bytes': after['native_bytes'] - before['native_bytes'],
+                    'free_bytes': after['free_bytes'], 'new_ram_budgeted_bytes': after['new_ram_budgeted_bytes'],
+                    'objects': delta}
+          Path('native-evidence/feature-cost.json').write_text(json.dumps(result, indent=2) + '\n')
+          print(json.dumps({k:v for k,v in result.items() if k != 'objects'}))
+          PY
       - name: Upload unqualified developer evidence
         if: always()
         uses: actions/upload-artifact@v4

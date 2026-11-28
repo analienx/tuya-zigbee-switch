@@ -21,10 +21,12 @@ Linker script and memory map
 ./build/nc_tx.o
  .rodata        0x00001020 0x8 ./build/nc_tx.o
  .bss          0x00842100 0x100 ./build/nc_tx.o
+ .bss.nc       0x00842200 0x1a4 ./build/nc_all.o
  .text         0x00001028 0x10 ./SDK_z/lib.a(frame.o)
 """)
             result = report(image, map_path)
             self.assertEqual(result["native_bytes"], 500)
+            self.assertEqual(result['new_ram_budgeted_bytes'], 436)
             self.assertEqual(result["objects"], {
                 "./build/nc_tx.o": 40, "./SDK_z/lib.a(frame.o)": 16})
 
