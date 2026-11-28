@@ -151,6 +151,7 @@ jobs:
           make -C upstream install
       - name: Compile native candidate and enforce flash reserve
         run: |
+          python control/firmware/zg204zl_native/specialize_ota.py --source upstream > native-evidence/ota-client-specialization.json
           make -C upstream -f makefile \
             -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/sdk-size.mk" \
             -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/app-size.mk" \

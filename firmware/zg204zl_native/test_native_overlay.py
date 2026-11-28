@@ -2,9 +2,11 @@
 import os
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 import apply_native as overlay
+import specialize_ota
 
 
 @unittest.skipUnless(os.environ.get('ZG204ZL_SOURCE'), 'Upstream present in hosted source job')
@@ -46,3 +48,28 @@ class Overlay(unittest.TestCase):
             self.assertLess(pir.index('app_rejoinOnMotion();'), pir.index('nc_motion();'))
             self.assertIn(b'nc_rx, nc_aps_confirm', output['src/app_main.c'])
             self.assertIn(b'nc_cluster_capacity', output['src/app_EpCfg.c'])
+
+    def test_client_only_sdk_retains_client_receive_and_download_implementations(self):
+        source = Path(os.environ['ZG204ZL_SOURCE'])
+        with zipfile.ZipFile(source / 'tools/SDK_z.zip') as archive:
+            raw = {name: archive.read(name) for name in specialize_ota.PINS}
+        output = specialize_ota.sources(raw)
+        for name in raw:
+            original = raw[name].decode().replace('\r', '')
+            modified = output[name].decode()
+            if name.endswith('/ota.c'):
+                # Every function before the dispatch remains byte-for-byte identical
+                # except the two explicit init/query role checks above.
+                start = original.index('static status_t ota_imageNotifyHandler(')
+                end = original.index('status_t zcl_otaCb(')
+                self.assertEqual(original[start:end], modified[modified.index(
+                    'static status_t ota_imageNotifyHandler('):modified.index('status_t zcl_otaCb(')])
+                server_cases = 'switch (cmdId) {\n            case ZCL_CMD_OTA_IMAGE_NOTIFY:'
+                self.assertIn(server_cases, modified)
+            else:
+                start = original.index('_CODE_ZCL_ static status_t zcl_ota_serverCmdHandler(')
+                end = original.index('_CODE_ZCL_ static status_t zcl_ota_cmdHandler(', start)
+                self.assertEqual(original[start:end], modified[start:end])
+            tampered = dict(raw); tampered[name] += b'\n'
+            with self.assertRaisesRegex(ValueError, 'SDK hash mismatch'):
+                specialize_ota.sources(tampered)

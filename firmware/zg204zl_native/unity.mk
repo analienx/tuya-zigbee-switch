@@ -3,4 +3,4 @@ OBJS := $(filter-out $(addsuffix .o,$(addprefix $(OUT_PATH)$(SRC_DIR)/,$(NC_PART
 OBJS += $(OUT_PATH)$(SRC_DIR)/nc_all.o
 OBJ_LIST := $(OBJS) $(USER_OBJS)
 $(ELF_FILE): $(OUT_PATH)$(SRC_DIR)/nc_all.o
-$(OUT_PATH)$(SRC_DIR)/nc_all.o: GCC_FLAGS += -Os -finline-small-functions
+$(OUT_PATH)$(SRC_DIR)/nc_all.o: GCC_FLAGS += -Os -fno-inline-small-functions
