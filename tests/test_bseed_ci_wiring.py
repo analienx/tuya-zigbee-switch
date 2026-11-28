@@ -17,6 +17,8 @@ EXTERNAL_CHECKOUTS = {
         'c249d8a7caddb5012d06aba580d4a53d1957f9c1',
     ('zg204zl-native.yml', 'pvvx/ZigbeeTLc'):
         'c249d8a7caddb5012d06aba580d4a53d1957f9c1',
+    ('zg204zl-startup-diagnostic.yml', 'pvvx/ZigbeeTLc'):
+        'c249d8a7caddb5012d06aba580d4a53d1957f9c1',
 }
 
 # build.yml is the legacy dispatch-only SiLabs lane and is exempt from the

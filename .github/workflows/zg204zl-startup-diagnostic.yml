@@ -1,0 +1,109 @@
+name: ZG-204ZL startup diagnostics (#164)
+
+on:
+  push:
+    branches: [codex/zg204zl-startup-fix-164]
+    paths:
+      - firmware/zg204zl_native/**
+      - .github/workflows/zg204zl-startup-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: control
+      - uses: actions/checkout@v4
+        with:
+          repository: pvvx/ZigbeeTLc
+          ref: c249d8a7caddb5012d06aba580d4a53d1957f9c1
+          path: upstream
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Exact source, actual C modules and real Zigbee frames
+        working-directory: control
+        env:
+          CANDIDATE: ${{ github.event.pull_request.head.sha || github.sha }}
+          ZG204ZL_SOURCE: ${{ github.workspace }}/upstream
+          HERDSMAN_TIME_VECTORS: ${{ runner.temp }}/herdsman-time.json
+        run: |
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund zigbee-herdsman@10.10.0 zigbee-herdsman-converters@26.115.1
+          node firmware/zg204zl_native/host/herdsman_vectors.mjs "$HERDSMAN_TIME_VECTORS"
+          node firmware/zg204zl_native/host/converter_test.mjs
+          python -m unittest discover -s firmware/zg204zl_native -p 'test_*.py' -v
+
+  bench-image:
+    needs: host
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: v0150-noidle
+            tag: v0150
+            filever: '01503001'
+          - profile: v0151-suspend
+            tag: v0151
+            filever: '01513001'
+    env:
+      CANDIDATE: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: control
+      - uses: actions/checkout@v4
+        with:
+          repository: pvvx/ZigbeeTLc
+          ref: c249d8a7caddb5012d06aba580d4a53d1957f9c1
+          path: upstream
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply pinned source and install pinned SDK/compiler
+        run: |
+          test "$(git -C control rev-parse HEAD)" = "$CANDIDATE"
+          mkdir -p evidence
+          python control/firmware/zg204zl_native/apply_native.py --source upstream > evidence/native-overlay.json
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends make unzip bzip2 libc6-i386 lib32z1
+          make -C upstream install
+          python control/firmware/zg204zl_native/specialize_ota.py --source upstream > evidence/ota-client.json
+          python control/firmware/zg204zl_native/startup_diagnostic.py --source upstream --profile '${{ matrix.profile }}' > evidence/diagnostic-overlay.json
+      - name: Compile bounded bench diagnostic
+        run: |
+          make -C upstream -f makefile \
+            -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/sdk-size.mk" \
+            -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/app-size.mk" \
+            -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/compact-protocol.mk" \
+            -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/storage-size.mk" \
+            -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/native-size.mk" \
+            -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/unity.mk" \
+            -j2 PROJECT_NAME=ZG204ZL POJECT_DEF="-DBOARD=BOARD_ZG204ZL" \
+            VERSION_BIN=_${{ matrix.tag }} ZNAME="Sonoff:ZG-204ZL-z" \
+            LNK_FLAGS="--gc-sections -nostartfiles -Map=build/ZG204ZL.map" > evidence/build.log 2>&1 || { tail -100 evidence/build.log; exit 1; }
+          cp upstream/bin/*${{ matrix.tag }}.bin upstream/bin/*${{ matrix.filever }}* evidence/
+          cp upstream/build/ZG204ZL.{elf,map,lst} evidence/
+          python control/firmware/zg204zl_native/size_report.py --image evidence/ZG204ZL_${{ matrix.tag }}.bin --map evidence/ZG204ZL.map --output evidence/size.json
+          python control/firmware/zg204zl_native/verify_native.py --variant '${{ matrix.tag }}' --directory evidence --source-commit "$CANDIDATE"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zg204zl-BENCH-ONLY-${{ matrix.profile }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: evidence/
+          if-no-files-found: error
