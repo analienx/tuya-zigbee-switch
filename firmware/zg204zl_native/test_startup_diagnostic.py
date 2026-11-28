@@ -62,6 +62,21 @@ class StartupDiagnostic(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'anchor changed'):
                 diagnostic.sources(root, 'v0150-noidle')
 
+    def test_idle_suspend_covers_pad_wake_without_changing_other_sleep_calls(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.copy(root)
+            result = diagnostic.sources(root, 'v0153-idle-suspend')
+            name = 'SDK_z/proj/drivers/drv_pm.c'
+            self.assertEqual(set(result), {name, 'src/version_cfg.h'})
+            baseline = diagnostic.sources(root, 'v0151-suspend')[name].decode()
+            # The first matching conditional is for the other chip branch.
+            before, separator, after = baseline.rpartition(
+                '(wakeupSrc & PM_WAKEUP_SRC_TIMER) ? PM_SLEEP_MODE_SUSPEND : PM_SLEEP_MODE_DEEPSLEEP;')
+            self.assertTrue(separator)
+            self.assertEqual(result[name].decode(), before + 'PM_SLEEP_MODE_SUSPEND;' + after)
+            self.assertIn(b'0x53', result['src/version_cfg.h'])
+
     def test_flash_wake_precedes_cache_invalidation_and_keeps_retention(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

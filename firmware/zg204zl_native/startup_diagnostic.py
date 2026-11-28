@@ -10,6 +10,7 @@ PROFILES = {
     'v0150-noidle': ('v0150', 0x01503001, 'skip_idle_sleep'),
     'v0151-suspend': ('v0151', 0x01513001, 'timer_sleep_uses_suspend'),
     'v0152-flash-wake-first': ('v0152', 0x01523001, 'wake_flash_before_cache_reset'),
+    'v0153-idle-suspend': ('v0153', 0x01533001, 'all_idle_sleep_uses_suspend'),
 }
 PM_SOURCE_SHA256 = '33a49aad1a0c71e947f6a339f04996f84ce6ec122001592f8dbf14000178ab38'
 STARTUP_BLOB = 'f2b62391e1e6247ecdd64d34e86e1fd1808cc898'
@@ -58,16 +59,20 @@ def sources(root, profile):
     if mode == 'skip_idle_sleep':
         output[main_path] = replace_once(app, '\t\t\tdrv_pm_lowPowerEnter();',
                             '\t\t\t/* Bench only: skip idle sleep, retain PM initialization. */').encode()
-    elif mode == 'timer_sleep_uses_suspend':
+    elif mode in ('timer_sleep_uses_suspend', 'all_idle_sleep_uses_suspend'):
         name = 'SDK_z/proj/drivers/drv_pm.c'
         raw = (root / name).read_bytes()
         if hashlib.sha256(raw).hexdigest() != PM_SOURCE_SHA256:
             raise ValueError('PM source hash mismatch')
-        output[name] = replace_once(raw.decode().replace('\r', ''),
+        sleep_mode = 'PM_SLEEP_MODE_SUSPEND'
+        if mode == 'timer_sleep_uses_suspend':
+            sleep_mode = '(wakeupSrc & PM_WAKEUP_SRC_TIMER) ? PM_SLEEP_MODE_SUSPEND : PM_SLEEP_MODE_DEEPSLEEP'
+        output[name] = replace_once(
+            raw.decode().replace('\r', ''),
             'drv_pm_sleep_mode_e sleepMode = (wakeupSrc & PM_WAKEUP_SRC_TIMER) ? '
             'PM_SLEEP_MODE_DEEP_WITH_RETENTION : PM_SLEEP_MODE_DEEPSLEEP;',
-            'drv_pm_sleep_mode_e sleepMode = (wakeupSrc & PM_WAKEUP_SRC_TIMER) ? '
-            'PM_SLEEP_MODE_SUSPEND : PM_SLEEP_MODE_DEEPSLEEP;').encode()
+            f'drv_pm_sleep_mode_e sleepMode = {sleep_mode};',
+        ).encode()
     else:
         output[STARTUP_PATH] = wake_flash_first((root / STARTUP_PATH).read_bytes())
     return output

@@ -62,6 +62,9 @@ jobs:
           - profile: v0152-flash-wake-first
             tag: v0152
             filever: '01523001'
+          - profile: v0153-idle-suspend
+            tag: v0153
+            filever: '01533001'
     env:
       CANDIDATE: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
