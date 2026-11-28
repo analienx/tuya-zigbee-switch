@@ -42,10 +42,10 @@ class StartupDiagnostic(unittest.TestCase):
             result = diagnostic.sources(root, 'v0151-suspend')
             name = 'SDK_z/proj/drivers/drv_pm.c'
             self.assertEqual(set(result), {name, 'src/version_cfg.h'})
-            self.assertEqual(result[name].decode().replace(
-                '? PM_SLEEP_MODE_SUSPEND : PM_SLEEP_MODE_DEEPSLEEP;',
-                '? PM_SLEEP_MODE_DEEP_WITH_RETENTION : PM_SLEEP_MODE_DEEPSLEEP;'),
-                (root / name).read_bytes().decode().replace('\r', ''))
+            expected = (root / name).read_bytes().decode().replace('\r', '').replace(
+                '? PM_SLEEP_MODE_DEEP_WITH_RETENTION : PM_SLEEP_MODE_DEEPSLEEP;',
+                '? PM_SLEEP_MODE_SUSPEND : PM_SLEEP_MODE_DEEPSLEEP;', 1)
+            self.assertEqual(result[name].decode(), expected)
             self.assertIn(b'0x51', result['src/version_cfg.h'])
 
     def test_bad_sdk_and_repeated_application_are_rejected_without_writes(self):
