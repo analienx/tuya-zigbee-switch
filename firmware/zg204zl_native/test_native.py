@@ -24,6 +24,7 @@ class Native(unittest.TestCase):
                         str(ROOT / 'native/nc_all.c'), '-o', str(lib)], check=True)
         cls.fw = C.CDLL(str(lib))
         cls.fw.nc_configure.argtypes = [C.c_void_p, C.c_uint]
+        cls.fw.nc_configure.restype = C.c_uint8
         cls.fw.nc_time_response.argtypes = [C.c_uint8, C.c_void_p, C.c_uint]
         cls.fw.nc_receive.argtypes = [C.c_uint16, C.c_uint8, C.c_uint16, C.c_int, C.c_int,
                                       C.c_void_p, C.c_uint16, C.c_void_p, C.c_uint]
@@ -71,6 +72,7 @@ class Native(unittest.TestCase):
     def receive_clock(self, payload=None, request=0, source=0, ep=1, profile=0x104,
                       unicast=1, secured=1, sequence=None):
         sequence = self.frame(request)[1] if sequence is None else sequence
+        self.fw.host_ack(request, 0)
         wire = bytes([0x18, sequence, 1]) + (payload if payload is not None else self.clock_payload())
         return self.fw.nc_receive(source, ep, profile, unicast, secured, None, 10, wire, len(wire))
 
@@ -270,7 +272,8 @@ class Native(unittest.TestCase):
 
     def test_late_clock_does_not_replay_old_motion(self):
         self.config(flags=1); self.fw.host_bind(0, 123, 1, 2, 0)
-        self.event('nc_motion'); self.advance(4000); self.advance(30000)
+        self.event('nc_motion'); self.fw.host_ack(0, 0)
+        self.advance(4000); self.advance(30000)
         self.receive_clock(request=1); self.fw.nc_service()
         self.assertEqual(self.fw.host_count(), 2)
         self.assertEqual(self.fw.host_phase(), 0)
@@ -316,6 +319,19 @@ class Native(unittest.TestCase):
         self.ack(1)  # genuine old completion releases it; newer ON already expired
         self.assertEqual(self.fw.host_count(), 2)
         self.assertFalse(self.diag()[7] & 8)
+
+    def test_time_timeout_still_owns_stack_slot_until_real_completion(self):
+        self.config(flags=1); self.fw.nc_service()
+        self.assertEqual(self.fw.host_inflight(), 1)
+        self.advance(4000); self.advance(60000)
+        self.assertEqual(self.fw.host_count(), 1)
+        self.assertTrue(self.diag()[7] & 8)
+        self.config(flags=0); self.fw.host_bind(0, 123, 1, 2, 0)
+        self.event('nc_motion')
+        self.assertEqual(self.fw.host_count(), 1)
+        self.ack(0)
+        self.assertEqual(self.fw.host_count(), 2)
+        self.assertEqual(self.frame(1)[3], 152)
 
     def test_full_binding_table_replacement_is_seen_in_one_scan(self):
         self.config()

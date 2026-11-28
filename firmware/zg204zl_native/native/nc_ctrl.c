@@ -78,5 +78,9 @@ void nc_service(void) {
         uint32_t d = nc_due(nc_port_now(), nc.clock.deadline) ? 1 : nc.clock.deadline - nc_port_now();
         if (!delay || d < delay) delay = d;
     }
+    if (nc.clock.sending == 1) {
+        uint32_t d = nc_due(nc_port_now(), nc.clock.tx_deadline) ? 1 : nc.clock.tx_deadline - nc_port_now();
+        if (!delay || d < delay) delay = d;
+    }
     nc_port_arm(delay);
 }

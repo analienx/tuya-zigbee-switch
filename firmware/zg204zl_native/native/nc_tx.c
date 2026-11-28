@@ -75,7 +75,7 @@ unsigned nc_tx_inflight(void) {
 int nc_tx_blocked(void) {
     unsigned i;
     for (i = 0; i < NC_MAX_DST; i++) if (nc.dst[i].state == TX_BLOCKED) return 1;
-    return 0;
+    return nc.clock.sending == 2;
 }
 
 int nc_tx_off_unknown(void) {
@@ -156,7 +156,7 @@ void nc_tx_kick(void) {
 }
 
 void nc_tx_service(void) {
-    unsigned i, in_flight = nc_tx_inflight() + nc.clock.pending;
+    unsigned i, in_flight = nc_tx_inflight();
     uint32_t now = nc_port_now();
     for (i = 0; i < NC_MAX_DST; i++) {
         nc_dst_t *r = &nc.dst[i];
@@ -168,7 +168,8 @@ void nc_tx_service(void) {
              * stack. Quarantine the slot; only its real completion retires it. */
             if (r->state == TX_FLY && nc_due(now, r->due)) {
                 r->state = TX_BLOCKED; nc.last_aps = 0xf1;
-                if (!r->fly_on) r->flags |= NC_OFF_UNKNOWN;
+                if (!r->fly_on && (!r->addr.group || !(r->flags & NC_HOP_OK)))
+                    r->flags |= NC_OFF_UNKNOWN;
             }
             continue;
         }
@@ -178,7 +179,7 @@ void nc_tx_service(void) {
             if (nc.on) nc.stale_on = 1;
             continue;
         }
-        if (in_flight >= 2 || !nc_port_joined() ||
+        if (in_flight >= 2 || nc.clock.pending || nc.clock.sending || !nc_port_joined() ||
             (r->state == TX_WAIT && !nc_due(now, r->due))) continue;
         level = nc.want_native && (r->caps & NC_LEVEL);
         frame[0] = level ? 0x11 : 0x01; frame[1] = nc_port_sequence();
@@ -201,7 +202,7 @@ void nc_tx_service(void) {
 uint32_t nc_tx_delay(void) {
     unsigned i;
     uint32_t delay = 0, now = nc_port_now();
-    int available = nc_tx_inflight() + nc.clock.pending < 2 && nc_port_joined();
+    int available = nc_tx_inflight() < 2 && !nc.clock.pending && !nc.clock.sending && nc_port_joined();
     for (i = 0; i < NC_MAX_DST; i++) {
         nc_dst_t *r = &nc.dst[i];
         uint32_t d;

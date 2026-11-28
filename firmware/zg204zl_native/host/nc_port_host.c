@@ -42,7 +42,7 @@ unsigned host_count(void) { return count; }
 unsigned host_writes(void) { return nv_writes; }
 unsigned host_lux_reads(void) { return lux_reads; }
 unsigned host_fast_polls(void) { return fast_polls; }
-unsigned host_inflight(void) { return nc_tx_inflight() + nc.clock.pending; }
+unsigned host_inflight(void) { return nc_tx_inflight() + !!(nc.clock.pending || nc.clock.sending); }
 unsigned host_generation(void) { return nc.generation; }
 unsigned host_phase(void) { return nc.phase; }
 unsigned host_reason(void) { return nc.reason; }
@@ -50,7 +50,10 @@ unsigned host_size(void) { return sizeof(nc); }
 unsigned host_cluster(unsigned i) { return frames[i].cluster; }
 unsigned host_ack_option(unsigned i) { return frames[i].ack; }
 unsigned host_frame(unsigned i, uint8_t *out) { memcpy(out, frames[i].frame, frames[i].length); return frames[i].length; }
-void host_ack(unsigned i, uint8_t status) { nc_confirm(&frames[i].addr, frames[i].aps, frames[i].cluster, status); }
+void host_ack(unsigned i, uint8_t status) {
+    if (frames[i].cluster == 10) nc_time_confirm(frames[i].aps, status);
+    else nc_confirm(&frames[i].addr, frames[i].aps, frames[i].cluster, status);
+}
 void host_wrong_ack(unsigned i) { nc_confirm(&frames[i].addr, frames[i].aps + 1, frames[i].cluster, 0); }
 void host_reject(unsigned i, uint8_t status) { nc_rejection(&frames[i].addr, frames[i].frame[1], frames[i].cluster, frames[i].frame[2], status); }
 void host_diag(uint8_t *out) { nc_diagnostics(); memcpy(out, nc.diag_attr + 1, 12); }

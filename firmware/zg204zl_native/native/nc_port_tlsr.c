@@ -91,7 +91,18 @@ static void from_short(nc_addr_t *a, u16 short_addr, u8 ep) {
 void nc_aps_confirm(void *arg) {
     apsdeDataConf_t *c = arg;
     nc_addr_t a;
-    if (c->srcEndpoint != SENSOR_DEVICE_ENDPOINT || (c->clusterId != 6 && c->clusterId != 8)) return;
+    if (c->srcEndpoint != SENSOR_DEVICE_ENDPOINT) return;
+    if (c->clusterId == 10) {
+        if (c->dstEndpoint != 1) return;
+        if (c->dstAddrMode == APS_SHORT_DSTADDR_WITHEP && !c->dstAddr.addr_short)
+            nc_time_confirm(c->apsCnt, c->status);
+        else if (c->dstAddrMode == APS_LONG_DSTADDR_WITHEP) {
+            from_short(&a, 0, 1);
+            if (!memcmp(a.id, c->dstAddr.addr_long, 8)) nc_time_confirm(c->apsCnt, c->status);
+        }
+        return;
+    }
+    if (c->clusterId != 6 && c->clusterId != 8) return;
     memset(&a, 0, sizeof(a));
     if (c->dstAddrMode == APS_LONG_DSTADDR_WITHEP) {
         memcpy(a.id, c->dstAddr.addr_long, 8); a.ep = c->dstEndpoint;

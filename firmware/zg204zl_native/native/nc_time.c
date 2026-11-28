@@ -14,21 +14,33 @@ void nc_time_service(void) {
     uint8_t frame[17], aps;
     nc_addr_t coordinator;
     unsigned i;
+    if (nc.clock.sending == 1 && nc_due(nc_port_now(), nc.clock.tx_deadline))
+        nc.clock.sending = 2;
     if (nc.clock.valid && nc_due(nc_port_now(), nc.clock.valid_until)) nc.clock.valid = 0;
     if (!(nc.cfg.flags & NC_TIME)) { nc.clock.pending = 0; return; }
     if (nc.clock.pending) {
         if (nc_due(nc_port_now(), nc.clock.deadline)) failed();
         return;
     }
-    if (!nc_due(nc_port_now(), nc.clock.refresh) || !nc_port_joined() || nc_tx_inflight() >= 2)
+    /* Serialize Time against lighting, including the coordinator's report binding.
+     * A response timeout does not retire an APS request inside the stack. */
+    if (nc.clock.sending || !nc_due(nc_port_now(), nc.clock.refresh) ||
+        !nc_port_joined() || nc_tx_inflight())
         return;
     memset(&coordinator, 0, sizeof(coordinator)); coordinator.ep = 1;
     frame[0] = 0x10; frame[1] = nc_port_sequence(); frame[2] = 0;
     for (i = 0; i < 7; i++) nc_put16(frame + 3 + 2 * i, ids[i]);
     if (nc_port_send(&coordinator, 0x000a, frame, 17, 1, &aps)) { failed(); return; }
-    nc.clock.seq = frame[1]; nc.clock.pending = 1;
+    nc.clock.seq = frame[1]; nc.clock.pending = nc.clock.sending = 1;
+    nc.clock.aps = aps; nc.clock.tx_deadline = nc_port_now() + 30000;
     nc.clock.deadline = nc_port_now() + 3000;
     nc_port_fast_poll();
+}
+
+void nc_time_confirm(uint8_t aps, uint8_t status) {
+    if (!nc.clock.sending || aps != nc.clock.aps) return;
+    nc.clock.sending = 0;
+    if (status && nc.clock.pending) failed();
 }
 
 void nc_time_response(uint8_t seq, const uint8_t *p, unsigned n) {

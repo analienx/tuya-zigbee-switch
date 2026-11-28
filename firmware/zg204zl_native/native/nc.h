@@ -44,9 +44,9 @@ typedef struct {
     uint8_t flags, aps, zcl, fly_on, tries, padding;
 } __attribute__((aligned(4))) nc_dst_t;
 typedef struct {
-    uint32_t utc, at, valid_until, refresh, ds, de, deadline;
+    uint32_t utc, at, valid_until, refresh, ds, de, deadline, tx_deadline;
     int32_t tz, shift;
-    uint8_t valid, pending, seq, failures;
+    uint8_t valid, pending, seq, failures, sending, aps;
 } __attribute__((aligned(4))) nc_clock_t;
 typedef struct {
     nc_cfg_t cfg;
@@ -110,6 +110,7 @@ void nc_confirm(const nc_addr_t *addr, uint8_t aps, uint16_t cluster,
 void nc_rejection(const nc_addr_t *addr, uint8_t seq, uint16_t cluster,
                   uint8_t cmd, uint8_t status);
 void nc_time_service(void);
+void nc_time_confirm(uint8_t aps, uint8_t status);
 int nc_local_minute(void);
 void nc_time_response(uint8_t seq, const uint8_t *payload, unsigned length);
 int nc_receive(uint16_t source, uint8_t endpoint, uint16_t profile, int unicast,
