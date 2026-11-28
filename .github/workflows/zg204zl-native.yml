@@ -1,0 +1,204 @@
+name: ZG-204ZL native binding (#164)
+
+on:
+  push:
+    branches: [codex/zg204zl-native-control-164]
+    paths:
+      - firmware/zg204zl_native/**
+      - zigbee2mqtt/converters/zg204zl_native.mjs
+      - .github/workflows/zg204zl-native.yml
+  pull_request:
+    paths:
+      - firmware/zg204zl_native/**
+      - zigbee2mqtt/converters/zg204zl_native.mjs
+      - .github/workflows/zg204zl-native.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  size-budget:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CANDIDATE: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: control
+      - uses: actions/checkout@v4
+        with:
+          repository: pvvx/ZigbeeTLc
+          ref: c249d8a7caddb5012d06aba580d4a53d1957f9c1
+          path: upstream
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Exact source, existing recovery tests and baseline overlay
+        env:
+          ZG204ZL_SOURCE: ${{ github.workspace }}/upstream
+        run: |
+          test "$(git -C control rev-parse HEAD)" = "$CANDIDATE"
+          python -m unittest discover -s control/firmware/zg204zl_native -p 'test_size_report.py' -v
+          python -m unittest discover -s control/firmware/zg204zl_native -p 'test_native_overlay.py' -v
+          python -m unittest discover -s control/firmware/zg204zl_reliability -p 'test_*.py' -v
+          python control/firmware/zg204zl_reliability/apply.py --source upstream --variant v0148
+      - name: Install pinned compiler and SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends make unzip bzip2 libc6-i386 lib32z1
+          make -C upstream install
+      - name: Source-preserved baseline and selective-size builds
+        shell: bash
+        run: |
+          mkdir -p evidence
+          for profile in baseline selective-size protocol-app-size compact-protocol compact-storage; do
+            make -C upstream clean
+            extra=()
+            if [ "$profile" != baseline ]; then extra=(-f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/sdk-size.mk"); fi
+            if [ "$profile" = protocol-app-size ] || [ "$profile" = compact-protocol ] || [ "$profile" = compact-storage ]; then extra+=(-f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/app-size.mk"); fi
+            if [ "$profile" = compact-protocol ] || [ "$profile" = compact-storage ]; then extra+=(-f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/compact-protocol.mk"); fi
+            if [ "$profile" = compact-storage ]; then extra+=(-f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/storage-size.mk"); fi
+            make -C upstream -f makefile "${extra[@]}" -j2 PROJECT_NAME=ZG204ZL \
+              POJECT_DEF="-DBOARD=BOARD_ZG204ZL" VERSION_BIN=_v0148 ZNAME="Sonoff:ZG-204ZL-z" \
+              LNK_FLAGS="--gc-sections -nostartfiles -Map=build/ZG204ZL.map" > "evidence/$profile-build.log" 2>&1 || { tail -100 "evidence/$profile-build.log"; exit 1; }
+            mkdir -p "evidence/$profile"
+            cp upstream/build/ZG204ZL.{elf,map,lst} "evidence/$profile/"
+            python control/firmware/zg204zl_native/size_report.py \
+              --image upstream/bin/ZG204ZL_v0148.bin --map upstream/build/ZG204ZL.map \
+              --output "evidence/$profile/size.json"
+            python control/firmware/zg204zl_reliability/verify_image.py \
+              --source-commit "$CANDIDATE" --variant v0148 --bin upstream/bin/ZG204ZL_v0148.bin \
+              --ota upstream/bin/1141-0232-01483001-ZG204ZL.zigbee \
+              --manifest "evidence/$profile/manifest.json"
+          done
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          base = json.loads(Path('evidence/baseline/size.json').read_text())
+          small = json.loads(Path('evidence/compact-storage/size.json').read_text())
+          delta = {'candidate': __import__('os').environ['CANDIDATE'],
+                   'baseline_bytes': base['native_bytes'], 'selective_bytes': small['native_bytes'],
+                   'saved_bytes': base['native_bytes'] - small['native_bytes'],
+                   'free_bytes': small['free_bytes'], 'minimum_free_bytes': 3072,
+                   'objects': {k: small['objects'].get(k, 0) - v for k, v in base['objects'].items()}}
+          Path('evidence/size-gate.json').write_text(json.dumps(delta, indent=2) + '\n')
+          print(json.dumps({k:v for k,v in delta.items() if k != 'objects'}))
+          if small['free_bytes'] < 3072:
+              raise SystemExit('M0 fails: less than 3 KiB free; do not proceed with full feature')
+          PY
+      - name: Upload analysis evidence; never a deployable image
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-size-${{ github.event.pull_request.head.sha || github.sha }}
+          path: evidence/
+          if-no-files-found: error
+
+  native-host:
+    needs: size-budget
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install exact deployed Zigbee libraries without device drivers
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund zigbee-herdsman@10.10.0 zigbee-herdsman-converters@26.115.1
+      - name: Real herdsman Time frames and converter protocol
+        run: |
+          node firmware/zg204zl_native/host/herdsman_vectors.mjs "$RUNNER_TEMP/herdsman-time.json"
+          node firmware/zg204zl_native/host/converter_test.mjs
+      - name: Compile and exercise the actual native modules
+        env:
+          HERDSMAN_TIME_VECTORS: ${{ runner.temp }}/herdsman-time.json
+        run: python -m unittest discover -s firmware/zg204zl_native -p 'test_*.py' -v
+
+  native-candidate:
+    needs: size-budget
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CANDIDATE: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: control
+      - uses: actions/checkout@v4
+        with:
+          repository: pvvx/ZigbeeTLc
+          ref: c249d8a7caddb5012d06aba580d4a53d1957f9c1
+          path: upstream
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-size-${{ github.event.pull_request.head.sha || github.sha }}
+          path: baseline-evidence
+      - name: Apply immutable native-control overlay
+        run: |
+          test "$(git -C control rev-parse HEAD)" = "$CANDIDATE"
+          mkdir -p native-evidence
+          python control/firmware/zg204zl_native/apply_native.py --source upstream > native-evidence/source-overlay.json
+      - name: Install pinned compiler and SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends make unzip bzip2 libc6-i386 lib32z1
+          make -C upstream install
+      - name: Compile native candidate and enforce flash reserve
+        run: |
+          python control/firmware/zg204zl_native/specialize_ota.py --source upstream > native-evidence/ota-client-specialization.json
+          make -C upstream -f makefile \
+            -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/sdk-size.mk" \
+            -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/app-size.mk" \
+            -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/compact-protocol.mk" \
+            -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/storage-size.mk" \
+            -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/native-size.mk" \
+            -f "$GITHUB_WORKSPACE/control/firmware/zg204zl_native/unity.mk" \
+            -j2 PROJECT_NAME=ZG204ZL POJECT_DEF="-DBOARD=BOARD_ZG204ZL" \
+            VERSION_BIN=_v0149 ZNAME="Sonoff:ZG-204ZL-z" \
+            LNK_FLAGS="--gc-sections -nostartfiles -Map=build/ZG204ZL.map" > native-evidence/build.log 2>&1 || { tail -100 native-evidence/build.log; exit 1; }
+          cp upstream/bin/*v0149.bin upstream/bin/*01493001* native-evidence/
+          cp upstream/build/ZG204ZL.{elf,map,lst} native-evidence/
+          python control/firmware/zg204zl_native/size_report.py \
+            --image native-evidence/ZG204ZL_v0149.bin --map native-evidence/ZG204ZL.map \
+            --output native-evidence/size.json
+          python control/firmware/zg204zl_native/verify_native.py --directory native-evidence --source-commit "$CANDIDATE"
+      - name: Record feature cost against the exact baseline
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          gate = json.loads(Path('baseline-evidence/size-gate.json').read_text())
+          if gate['candidate'] != os.environ['CANDIDATE']:
+              raise SystemExit('Baseline artifact is not from this exact candidate')
+          before = json.loads(Path('baseline-evidence/compact-storage/size.json').read_text())
+          after = json.loads(Path('native-evidence/size.json').read_text())
+          if after['new_ram_budgeted_bytes'] > 512:
+              raise SystemExit('Native RAM state exceeds the 512-byte budget')
+          delta = {k: after['objects'].get(k, 0) - before['objects'].get(k, 0)
+                   for k in sorted(before['objects'].keys() | after['objects'].keys())}
+          result = {'candidate': os.environ['CANDIDATE'],
+                    'baseline_bytes': before['native_bytes'], 'native_bytes': after['native_bytes'],
+                    'net_feature_bytes': after['native_bytes'] - before['native_bytes'],
+                    'free_bytes': after['free_bytes'], 'new_ram_budgeted_bytes': after['new_ram_budgeted_bytes'],
+                    'objects': delta}
+          Path('native-evidence/feature-cost.json').write_text(json.dumps(result, indent=2) + '\n')
+          print(json.dumps({k:v for k,v in result.items() if k != 'objects'}))
+          PY
+      - name: Upload unqualified developer evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-v0149-UNQUALIFIED-${{ github.event.pull_request.head.sha || github.sha }}
+          path: native-evidence/
+          if-no-files-found: error

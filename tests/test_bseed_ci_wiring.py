@@ -15,6 +15,8 @@ HEAD_REF = "${{ github.event.pull_request.head.sha || github.sha }}"
 EXTERNAL_CHECKOUTS = {
     ('zg204zl-reliability-build.yml', 'pvvx/ZigbeeTLc'):
         'c249d8a7caddb5012d06aba580d4a53d1957f9c1',
+    ('zg204zl-native.yml', 'pvvx/ZigbeeTLc'):
+        'c249d8a7caddb5012d06aba580d4a53d1957f9c1',
 }
 
 # build.yml is the legacy dispatch-only SiLabs lane and is exempt from the
