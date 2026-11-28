@@ -1,6 +1,7 @@
 """Validate hosted native-control candidates; never authorizes deployment."""
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -8,6 +9,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'zg204zl_reliabi
 import apply as baseline
 import verify_image
 from startup_diagnostic import PROFILES
+
+
+def verify_switch_dispatch(listing):
+    affected = {
+        'bdb_task', 'zb_bdbCommissioningCb', 'zcl_foundationCmdHandler',
+        'reportableChangeValueChk', 'zcl_ota_cmdHandler', 'ota_imageDataProcess',
+    }
+    seen = set()
+    function = None
+    for line in listing.splitlines():
+        header = re.fullmatch(r'[0-9a-f]+ <([^>]+)>:', line)
+        if header:
+            function = header[1]
+            if function in affected:
+                seen.add(function)
+        if function in affected and re.search(r'\btmov\s+pc,\s*r\d+\b', line):
+            raise ValueError(f'Computed switch dispatch still present in {function}')
+    if seen != affected:
+        raise ValueError(f'Missing compiled switch functions: {sorted(affected - seen)}')
+    return sorted(seen)
 
 if __name__ == '__main__':
     p = argparse.ArgumentParser(description=__doc__)
@@ -27,5 +48,8 @@ if __name__ == '__main__':
     if mode:
         result['benchOnly'] = True
         result['diagnostic'] = mode
+    if mode == 'disable_broken_tc32_jump_tables':
+        result['checkedSwitchFunctions'] = verify_switch_dispatch(
+            (args.directory / 'ZG204ZL.lst').read_text())
     (args.directory / 'manifest.json').write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps(result, indent=2))
